@@ -59,6 +59,30 @@ http://localhost:8000
 docker-compose down
 ```
 
+### Deploy on Render
+
+This repo includes `render.yaml` for a Docker web service with a persistent disk. The disk keeps `projects.db` and uploaded recipe images across deploys/restarts.
+
+1. Push the repo to GitHub.
+2. In Render, create a new Blueprint from this repo.
+3. Set `OPENAI_API_KEY` when Render prompts for it, or leave it blank to use the local planner without LLM calls.
+4. Deploy the service.
+
+The deployed recipe upload page will be:
+
+```text
+https://<your-render-service>.onrender.com/apps/recipes/import?project_id=2&action_id=10
+```
+
+The deploy uses:
+
+```text
+DB_PATH=/data/projects.db
+UPLOADS_DIR=/data/uploads
+```
+
+On first deploy, the app copies the bundled `projects.db` into `/data/projects.db` if the persistent database does not already exist.
+
 **Option 2: Local Python**
 
 1. Install dependencies:

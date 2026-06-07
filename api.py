@@ -31,13 +31,19 @@ app = FastAPI(title="Project Agent API", version="1.0")
 templates_dir = Path(__file__).parent / "templates"
 templates_dir.mkdir(exist_ok=True)
 jinja_env = Environment(loader=FileSystemLoader(str(templates_dir)))
-uploads_dir = Path(__file__).parent / "uploads"
+db_path = Path(os.getenv("DB_PATH", "projects.db"))
+bundled_db_path = Path(__file__).parent / "projects.db"
+if db_path != bundled_db_path and not db_path.exists() and bundled_db_path.exists():
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(bundled_db_path, db_path)
+
+uploads_dir = Path(os.getenv("UPLOADS_DIR", str(Path(__file__).parent / "uploads")))
 recipe_uploads_dir = uploads_dir / "recipe_images"
 recipe_uploads_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
 # Initialize database
-db = Database("projects.db")
+db = Database(str(db_path))
 db.init()
 if db.get_project_count() == 0:
     db.populate_sample_data()
@@ -527,4 +533,4 @@ def delete_blocker_form(project_id: int, blocker_id: int):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))

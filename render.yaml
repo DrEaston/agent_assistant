@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: agent-assistant
+    runtime: docker
+    plan: starter
+    healthCheckPath: /
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: DB_PATH
+        value: /data/projects.db
+      - key: UPLOADS_DIR
+        value: /data/uploads
+      - key: LLM_PROVIDER
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-5.4-mini
+      - key: OPENAI_REVIEW_MODEL
+        value: gpt-5.4
+    disk:
+      name: agent-assistant-data
+      mountPath: /data
+      sizeGB: 1
