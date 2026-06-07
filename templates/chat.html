@@ -7,7 +7,12 @@
 
 <div class="chat-layout">
     <section class="chat-panel">
+        <div class="chat-toolbar">
+            <button id="toggle-history" type="button" class="secondary compact" aria-pressed="false">Show History</button>
+            <span id="history-status">History hidden</span>
+        </div>
         <div id="messages" class="chat-messages">
+            <div id="history-container" class="chat-history-container" hidden></div>
             <div class="chat-message agent">Ready when you are.</div>
         </div>
         <form id="chat-form" class="chat-input">
@@ -42,6 +47,9 @@
 const form = document.getElementById("chat-form");
 const input = document.getElementById("message");
 const messages = document.getElementById("messages");
+const historyContainer = document.getElementById("history-container");
+const toggleHistory = document.getElementById("toggle-history");
+const historyStatus = document.getElementById("history-status");
 const workPacket = document.getElementById("work-packet");
 const runReview = document.getElementById("run-review");
 const applyReview = document.getElementById("apply-review");
@@ -52,6 +60,7 @@ const saveCodexPacket = document.getElementById("save-codex-packet");
 const codexPacket = document.getElementById("codex-packet");
 const history = [];
 let currentReviewId = null;
+let historyLoaded = false;
 
 function addMessage(role, content) {
     const node = document.createElement("div");
@@ -59,6 +68,13 @@ function addMessage(role, content) {
     node.textContent = content;
     messages.appendChild(node);
     messages.scrollTop = messages.scrollHeight;
+}
+
+function addHistoryMessage(parent, role, content) {
+    const node = document.createElement("div");
+    node.className = `chat-message ${role}`;
+    node.textContent = content;
+    parent.appendChild(node);
 }
 
 function renderWorkPacket(packet) {
@@ -139,8 +155,7 @@ async function loadHistory() {
             return;
         }
 
-        messages.innerHTML = "";
-        history.length = 0;
+        historyContainer.innerHTML = "";
         const recentCount = 8;
         const older = persisted.slice(0, Math.max(0, persisted.length - recentCount));
         const recent = persisted.slice(-recentCount);
@@ -154,27 +169,46 @@ async function loadHistory() {
 
             older.forEach((message) => {
                 const role = message.role === "assistant" ? "agent" : "user";
-                const node = document.createElement("div");
-                node.className = `chat-message ${role}`;
-                node.textContent = message.content;
-                archive.appendChild(node);
+                addHistoryMessage(archive, role, message.content);
             });
 
-            messages.appendChild(archive);
+            historyContainer.appendChild(archive);
         }
 
         recent.forEach((message) => {
             const role = message.role === "assistant" ? "agent" : "user";
-            addMessage(role, message.content);
+            addHistoryMessage(historyContainer, role, message.content);
             history.push({
                 role: message.role,
                 content: message.content
             });
         });
+        historyLoaded = true;
+        historyStatus.textContent = `${persisted.length} saved messages loaded`;
     } catch (error) {
         addMessage("agent", `Could not load chat history: ${error}`);
     }
 }
+
+toggleHistory.addEventListener("click", async () => {
+    if (historyContainer.hidden) {
+        if (!historyLoaded) {
+            historyStatus.textContent = "Loading history...";
+            await loadHistory();
+        }
+        historyContainer.hidden = false;
+        toggleHistory.textContent = "Hide History";
+        toggleHistory.setAttribute("aria-pressed", "true");
+        if (!historyLoaded) {
+            historyStatus.textContent = "No saved history";
+        }
+    } else {
+        historyContainer.hidden = true;
+        toggleHistory.textContent = "Show History";
+        toggleHistory.setAttribute("aria-pressed", "false");
+        historyStatus.textContent = historyLoaded ? "History hidden" : "History hidden";
+    }
+});
 
 form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -291,7 +325,6 @@ saveCodexPacket.addEventListener("click", async () => {
     }
 });
 
-loadHistory();
 refreshPacket();
 </script>
 {% endblock %}
