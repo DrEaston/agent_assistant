@@ -8,7 +8,7 @@
 <div class="chat-layout">
     <section class="chat-panel">
         <div id="messages" class="chat-messages">
-            <div class="chat-message agent">What changed since last time?</div>
+            <div class="chat-message agent">Ready when you are.</div>
         </div>
         <form id="chat-form" class="chat-input">
             <textarea id="message" name="message" placeholder="Example: Prioritize agent_assistant. Goal for agent_assistant: add chat-based task tracking." required></textarea>
@@ -84,20 +84,50 @@ function renderReview(review) {
 }
 
 async function refreshPacket() {
-    const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({content: "What should I work on next?", include_context: true, conversation_history: []})
-    });
+    const response = await fetch("/api/work-packet");
     const data = await response.json();
     renderWorkPacket(data.work_packet);
+}
+
+function isAutoWorkPrompt(message) {
+    return message.role === "user" && message.content.trim().toLowerCase() === "what should i work on next?";
+}
+
+function isAutoWorkResponse(message) {
+    const content = message.content.trim().toLowerCase();
+    return message.role === "assistant"
+        && content.includes("work on")
+        && content.includes("recipe display app")
+        && content.includes("work packet");
+}
+
+function withoutAutoWorkPacketNoise(messages) {
+    const filtered = [];
+    let skipNextAutoResponse = false;
+
+    messages.forEach((message) => {
+        if (isAutoWorkPrompt(message)) {
+            skipNextAutoResponse = true;
+            return;
+        }
+
+        if (skipNextAutoResponse && isAutoWorkResponse(message)) {
+            skipNextAutoResponse = false;
+            return;
+        }
+
+        skipNextAutoResponse = false;
+        filtered.push(message);
+    });
+
+    return filtered;
 }
 
 async function loadHistory() {
     try {
         const response = await fetch("/api/chat/history?limit=40");
         const data = await response.json();
-        const persisted = data.messages || [];
+        const persisted = withoutAutoWorkPacketNoise(data.messages || []);
         if (!persisted.length) {
             return;
         }

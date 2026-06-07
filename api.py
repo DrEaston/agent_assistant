@@ -210,6 +210,13 @@ def api_dashboard():
     return agent_service.build_dashboard_context()
 
 
+@app.get("/api/work-packet")
+def api_work_packet():
+    """Get the current work packet without writing to chat history."""
+    context = agent_service.build_dashboard_context()
+    return {"work_packet": agent_service.build_work_packet(context)}
+
+
 # ============================================================================
 # API ROUTES - LLM CHAT
 # ============================================================================
