@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Projects - Project Agent{% endblock %}
+
+{% block content %}
+<h1><span class="emoji">📂</span>Projects</h1>
+
+<form method="post" action="/projects/create">
+    <h3>Create New Project</h3>
+    <div class="form-group">
+        <label for="name">Project Name</label>
+        <input type="text" id="name" name="name" placeholder="e.g., New Feature" required>
+    </div>
+    <div class="form-group">
+        <label for="description">Description</label>
+        <textarea id="description" name="description" placeholder="What is this project trying to accomplish?"></textarea>
+    </div>
+    <div class="form-group">
+        <label for="priority_score">Priority</label>
+        <select id="priority_score" name="priority_score">
+            <option value="1">1 - Low</option>
+            <option value="2">2</option>
+            <option value="3" selected>3 - Normal</option>
+            <option value="4">4</option>
+            <option value="5">5 - Current Focus</option>
+        </select>
+    </div>
+    <button type="submit">Create Project</button>
+</form>
+
+<h2>All Projects</h2>
+{% if projects %}
+    <div class="project-list">
+        {% for project in projects %}
+            <div class="project-card">
+                <h3>{{ project.name }}</h3>
+                {% if project.description %}
+                    <p>{{ project.description }}</p>
+                {% endif %}
+                <p>Priority: <strong>{{ project.priority_score }}/5</strong></p>
+                <p>Status: <strong>{{ project.status }}</strong></p>
+                <p>Created: <small>{{ project.created_at }}</small></p>
+                <a href="/projects/{{ project.id }}">View Details →</a>
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="empty-state">
+        <p>No projects yet. Create one above!</p>
+    </div>
+{% endif %}
+{% endblock %}

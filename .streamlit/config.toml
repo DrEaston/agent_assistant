@@ -1,0 +1,10 @@
+[client]
+showErrorDetails = true
+
+[logger]
+level = "error"
+
+[server]
+headless = true
+port = 8501
+enableXsrfProtection = false

@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+
+{% block title %}{{ project.name }} - Project Agent{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    <a href="/">Dashboard</a> / <a href="/projects">Projects</a> / {{ project.name }}
+</div>
+
+<h1>{{ project.name }}</h1>
+
+{% if project.description %}
+    <p>{{ project.description }}</p>
+{% endif %}
+
+<div class="dashboard-grid compact-metrics">
+    <div class="metric">
+        <div class="metric-value">{{ project.priority_score }}/5</div>
+        <div class="metric-label">Priority</div>
+    </div>
+
+    <div class="metric">
+        <div class="metric-value">{{ actions|length }}</div>
+        <div class="metric-label">Tasks</div>
+    </div>
+
+    <div class="metric">
+        <div class="metric-value">{{ goals|selectattr('completed')|list|length }}/{{ goals|length }}</div>
+        <div class="metric-label">Goals Done</div>
+    </div>
+
+    <div class="metric">
+        <div class="metric-value">{{ blockers|length }}</div>
+        <div class="metric-label">Blockers</div>
+    </div>
+</div>
+
+<div class="project-detail-layout">
+    <main>
+        <section class="detail-section">
+            <div class="section-header">
+                <div>
+                    <h2>Tasks</h2>
+                    <p class="section-subtitle">Recommended next actions, grouped by priority.</p>
+                </div>
+                <details class="inline-create">
+                    <summary>Add Task</summary>
+                    <form method="post" action="/projects/{{ project.id }}/actions/create">
+                        <div class="form-group">
+                            <label for="action">Task</label>
+                            <input type="text" id="action" name="action" placeholder="What should be done?" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="priority">Priority</label>
+                            <select id="priority" name="priority">
+                                <option value="low">Low</option>
+                                <option value="medium" selected>Medium</option>
+                                <option value="high">High</option>
+                            </select>
+                        </div>
+                        <button type="submit">Add Task</button>
+                    </form>
+                </details>
+            </div>
+
+            {% if actions %}
+                <div class="task-list">
+                    {% for action in actions %}
+                        <article class="task-item priority-{{ action.priority }}">
+                            <span class="priority-dot" aria-hidden="true"></span>
+                            <div class="task-copy">
+                                <span class="badge badge-{{ action.priority }}">{{ action.priority|upper }}</span>
+                                <p>{{ action.action }}</p>
+                            </div>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <p>No tasks yet.</p>
+                </div>
+            {% endif %}
+        </section>
+
+        <section class="detail-section">
+            <div class="section-header">
+                <div>
+                    <h2>Weekly Goals</h2>
+                    <p class="section-subtitle">Current goals and completion status.</p>
+                </div>
+                <details class="inline-create">
+                    <summary>Add Goal</summary>
+                    <form method="post" action="/projects/{{ project.id }}/goals/create">
+                        <div class="form-group">
+                            <label for="goal">Goal</label>
+                            <input type="text" id="goal" name="goal" placeholder="What's the goal for this week?" required>
+                        </div>
+                        <button type="submit">Add Goal</button>
+                    </form>
+                </details>
+            </div>
+
+            {% if goals %}
+                <div class="task-list">
+                    {% for goal in goals %}
+                        <article class="goal-row {% if goal.completed %}completed{% endif %}">
+                            <div class="goal-copy">
+                                <input type="checkbox" {% if goal.completed %}checked{% endif %} disabled>
+                                <span>{{ goal.goal }}</span>
+                            </div>
+                            {% if not goal.completed %}
+                                <form method="post" action="/projects/{{ project.id }}/goals/{{ goal.id }}/complete" class="inline-form">
+                                    <button type="submit" class="secondary compact">Done</button>
+                                </form>
+                            {% endif %}
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <p>No weekly goals yet.</p>
+                </div>
+            {% endif %}
+        </section>
+    </main>
+
+    <aside>
+        <section class="detail-section">
+            <div class="section-header">
+                <div>
+                    <h2>Blockers</h2>
+                    <p class="section-subtitle">Things that are slowing progress.</p>
+                </div>
+                <details class="inline-create">
+                    <summary>Add</summary>
+                    <form method="post" action="/projects/{{ project.id }}/blockers/create">
+                        <div class="form-group">
+                            <label for="description">Blocker</label>
+                            <input type="text" id="description" name="description" placeholder="What is blocking progress?" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="severity">Severity</label>
+                            <select id="severity" name="severity">
+                                <option value="low">Low</option>
+                                <option value="medium" selected>Medium</option>
+                                <option value="high">High</option>
+                            </select>
+                        </div>
+                        <button type="submit">Add Blocker</button>
+                    </form>
+                </details>
+            </div>
+
+            {% if blockers %}
+                {% for blocker in blockers %}
+                    <article class="side-item blocker-{{ blocker.severity }}">
+                        <div>
+                            <span class="badge badge-{{ blocker.severity }}">{{ blocker.severity|upper }}</span>
+                            <p>{{ blocker.description }}</p>
+                        </div>
+                        <form method="post" action="/projects/{{ project.id }}/blockers/{{ blocker.id }}/delete" class="inline-form">
+                            <button type="submit" class="danger compact">Remove</button>
+                        </form>
+                    </article>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">
+                    <p>No blockers.</p>
+                </div>
+            {% endif %}
+        </section>
+
+        <section class="detail-section">
+            <div class="section-header">
+                <div>
+                    <h2>Notes</h2>
+                    <p class="section-subtitle">Reference and context.</p>
+                </div>
+                <details class="inline-create">
+                    <summary>Add</summary>
+                    <form method="post" action="/projects/{{ project.id }}/notes/create">
+                        <div class="form-group">
+                            <textarea name="content" placeholder="Add a note..." required></textarea>
+                        </div>
+                        <button type="submit">Add Note</button>
+                    </form>
+                </details>
+            </div>
+
+            {% if notes %}
+                {% for note in notes %}
+                    <article class="note-item">
+                        <p>{{ note.content }}</p>
+                        <small>{{ note.created_at }}</small>
+                    </article>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">
+                    <p>No notes yet.</p>
+                </div>
+            {% endif %}
+        </section>
+    </aside>
+</div>
+{% endblock %}

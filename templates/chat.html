@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+
+{% block title %}Chat - Project Agent{% endblock %}
+
+{% block content %}
+<h1>Project Agent Chat</h1>
+
+<div class="chat-layout">
+    <section class="chat-panel">
+        <div id="messages" class="chat-messages">
+            <div class="chat-message agent">What changed since last time?</div>
+        </div>
+        <form id="chat-form" class="chat-input">
+            <textarea id="message" name="message" placeholder="Example: Prioritize agent_assistant. Goal for agent_assistant: add chat-based task tracking." required></textarea>
+            <button type="submit">Send</button>
+        </form>
+    </section>
+
+    <aside>
+        <h2>Current Work Packet</h2>
+        <div id="work-packet" class="work-packet">Loading...</div>
+
+        <h2>Priority Review</h2>
+        <div class="card">
+            <button id="run-review" type="button">Run Review</button>
+            <button id="apply-review" type="button" class="secondary" disabled>Apply Instructions</button>
+            <p id="review-status" style="margin-top: 1rem; color: #666;">No review loaded.</p>
+        </div>
+        <div id="review-plan" class="work-packet" style="margin-top: 1rem;">No instructions yet.</div>
+
+        <h2>Codex Packet</h2>
+        <div class="card">
+            <button id="generate-codex-packet" type="button">Generate Packet</button>
+            <button id="save-codex-packet" type="button" class="secondary">Save Packet</button>
+            <p style="margin-top: 1rem; color: #666;">Use this when you want Codex to work from the current priority state.</p>
+        </div>
+        <div id="codex-packet" class="work-packet" style="margin-top: 1rem;">No Codex packet yet.</div>
+    </aside>
+</div>
+
+<script>
+const form = document.getElementById("chat-form");
+const input = document.getElementById("message");
+const messages = document.getElementById("messages");
+const workPacket = document.getElementById("work-packet");
+const runReview = document.getElementById("run-review");
+const applyReview = document.getElementById("apply-review");
+const reviewStatus = document.getElementById("review-status");
+const reviewPlan = document.getElementById("review-plan");
+const generateCodexPacket = document.getElementById("generate-codex-packet");
+const saveCodexPacket = document.getElementById("save-codex-packet");
+const codexPacket = document.getElementById("codex-packet");
+const history = [];
+let currentReviewId = null;
+
+function addMessage(role, content) {
+    const node = document.createElement("div");
+    node.className = `chat-message ${role}`;
+    node.textContent = content;
+    messages.appendChild(node);
+    messages.scrollTop = messages.scrollHeight;
+}
+
+function renderWorkPacket(packet) {
+    workPacket.textContent = packet && packet.context_for_coding_agent
+        ? packet.context_for_coding_agent
+        : "No work packet yet.";
+}
+
+function renderReview(review) {
+    currentReviewId = review.id;
+    applyReview.disabled = false;
+    reviewStatus.textContent = `Review ${review.id} from ${review.model}`;
+    const instructions = review.instructions || [];
+    reviewPlan.textContent = [
+        review.summary,
+        "",
+        ...instructions.map((item, index) => {
+            const payload = item.payload || {};
+            const target = payload.action || payload.goal || payload.note || payload.description || "";
+            return `${index + 1}. ${item.operation} - ${item.project_name || payload.project}: ${target || JSON.stringify(payload)}`;
+        })
+    ].join("\n");
+}
+
+async function refreshPacket() {
+    const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({content: "What should I work on next?", include_context: true, conversation_history: []})
+    });
+    const data = await response.json();
+    renderWorkPacket(data.work_packet);
+}
+
+async function loadHistory() {
+    try {
+        const response = await fetch("/api/chat/history?limit=40");
+        const data = await response.json();
+        const persisted = data.messages || [];
+        if (!persisted.length) {
+            return;
+        }
+
+        messages.innerHTML = "";
+        history.length = 0;
+        persisted.forEach((message) => {
+            const role = message.role === "assistant" ? "agent" : "user";
+            addMessage(role, message.content);
+            history.push({
+                role: message.role,
+                content: message.content
+            });
+        });
+    } catch (error) {
+        addMessage("agent", `Could not load chat history: ${error}`);
+    }
+}
+
+form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const content = input.value.trim();
+    if (!content) {
+        return;
+    }
+
+    addMessage("user", content);
+    history.push({role: "user", content});
+    input.value = "";
+    input.disabled = true;
+
+    try {
+        const response = await fetch("/api/chat", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({content, include_context: true, conversation_history: history.slice(-8)})
+        });
+        const data = await response.json();
+        const answer = data.response || data.detail || "I could not produce a response.";
+        addMessage("agent", answer);
+        history.push({role: "assistant", content: answer});
+        renderWorkPacket(data.work_packet);
+    } catch (error) {
+        addMessage("agent", `Chat request failed: ${error}`);
+    } finally {
+        input.disabled = false;
+        input.focus();
+    }
+});
+
+runReview.addEventListener("click", async () => {
+    runReview.disabled = true;
+    reviewStatus.textContent = "Running review...";
+
+    try {
+        const response = await fetch("/api/priority-review", {method: "POST"});
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.detail || "Review failed");
+        }
+        renderReview(data);
+        addMessage("agent", `Priority review created with ${data.instructions.length} instruction(s).`);
+    } catch (error) {
+        reviewStatus.textContent = `Review failed: ${error}`;
+    } finally {
+        runReview.disabled = false;
+    }
+});
+
+applyReview.addEventListener("click", async () => {
+    if (!currentReviewId) {
+        return;
+    }
+
+    applyReview.disabled = true;
+    reviewStatus.textContent = "Applying instructions...";
+
+    try {
+        const response = await fetch(`/api/priority-review/${currentReviewId}/apply`, {method: "POST"});
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.detail || "Apply failed");
+        }
+        const applied = data.results.filter((item) => item.status === "applied").length;
+        reviewStatus.textContent = `Applied ${applied} instruction(s).`;
+        renderWorkPacket(data.dashboard.work_packet || data.dashboard.next_action);
+        addMessage("agent", data.results.map((item) => `${item.status}: ${item.result}`).join("\n"));
+        await refreshPacket();
+    } catch (error) {
+        reviewStatus.textContent = `Apply failed: ${error}`;
+        applyReview.disabled = false;
+    }
+});
+
+generateCodexPacket.addEventListener("click", async () => {
+    generateCodexPacket.disabled = true;
+    codexPacket.textContent = "Generating packet...";
+
+    try {
+        const suffix = currentReviewId ? `?review_id=${currentReviewId}` : "";
+        const response = await fetch(`/api/codex-work-packet${suffix}`);
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.detail || "Packet generation failed");
+        }
+        codexPacket.textContent = data.markdown;
+        addMessage("agent", "Codex work packet generated from the current priority state.");
+    } catch (error) {
+        codexPacket.textContent = `Packet generation failed: ${error}`;
+    } finally {
+        generateCodexPacket.disabled = false;
+    }
+});
+
+saveCodexPacket.addEventListener("click", async () => {
+    saveCodexPacket.disabled = true;
+    codexPacket.textContent = "Saving packet...";
+
+    try {
+        const suffix = currentReviewId ? `?review_id=${currentReviewId}` : "";
+        const response = await fetch(`/api/codex-work-packet/save${suffix}`, {method: "POST"});
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.detail || "Packet save failed");
+        }
+        codexPacket.textContent = `${data.markdown}\n\nSaved to: ${data.path}`;
+        addMessage("agent", `Codex work packet saved to ${data.path}`);
+    } catch (error) {
+        codexPacket.textContent = `Packet save failed: ${error}`;
+    } finally {
+        saveCodexPacket.disabled = false;
+    }
+});
+
+loadHistory();
+refreshPacket();
+</script>
+{% endblock %}

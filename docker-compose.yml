@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  project-agent:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./projects.db:/app/projects.db
+    environment:
+      - PYTHONUNBUFFERED=1
+    container_name: project-agent-web

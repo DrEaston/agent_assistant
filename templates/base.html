@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Project Agent{% endblock %}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        nav {
+            background: #2c3e50;
+            color: white;
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        nav a {
+            color: white;
+            text-decoration: none;
+            margin-right: 2rem;
+            font-weight: 500;
+        }
+        
+        nav a:hover {
+            color: #3498db;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        h1, h2, h3 {
+            margin: 1.5rem 0 1rem;
+            color: #2c3e50;
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 0.5rem;
+        }
+        
+        h2 {
+            font-size: 1.5rem;
+            margin-top: 2rem;
+        }
+        
+        h3 {
+            font-size: 1.2rem;
+        }
+        
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .card h3 {
+            margin-top: 0;
+            color: #3498db;
+        }
+        
+        .card a {
+            color: #3498db;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .card a:hover {
+            text-decoration: underline;
+        }
+        
+        .metric {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 1rem;
+        }
+        
+        .metric-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #3498db;
+        }
+        
+        .metric-label {
+            color: #666;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .action, .blocker, .goal {
+            background: white;
+            padding: 1rem;
+            margin: 0.5rem 0;
+            border-left: 4px solid #ccc;
+            border-radius: 4px;
+        }
+        
+        .action-high, .blocker-high {
+            border-left-color: #e74c3c;
+            background: #fdeaea;
+        }
+        
+        .action-medium, .blocker-medium {
+            border-left-color: #f39c12;
+            background: #fef5e7;
+        }
+        
+        .action-low, .blocker-low {
+            border-left-color: #27ae60;
+            background: #eafaf1;
+        }
+        
+        .goal {
+            border-left-color: #3498db;
+        }
+        
+        .goal.completed {
+            opacity: 0.6;
+            text-decoration: line-through;
+        }
+        
+        form {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin: 1.5rem 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        form h3 {
+            margin-top: 0;
+        }
+        
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #2c3e50;
+        }
+        
+        input, textarea, select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 1rem;
+        }
+        
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+        }
+        
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+        
+        button {
+            background: #3498db;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        
+        button:hover {
+            background: #2980b9;
+        }
+        
+        button.secondary {
+            background: #95a5a6;
+        }
+        
+        button.secondary:hover {
+            background: #7f8c8d;
+        }
+        
+        button.danger {
+            background: #e74c3c;
+        }
+        
+        button.danger:hover {
+            background: #c0392b;
+        }
+        
+        .project-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+        
+        .project-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-top: 4px solid #3498db;
+        }
+        
+        .project-card h3 {
+            margin-top: 0;
+        }
+        
+        .project-card a {
+            color: #3498db;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .project-card a:hover {
+            text-decoration: underline;
+        }
+        
+        .breadcrumb {
+            margin: 1rem 0;
+            font-size: 0.9rem;
+        }
+        
+        .breadcrumb a {
+            color: #3498db;
+            text-decoration: none;
+        }
+        
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 2rem;
+            color: #999;
+        }
+        
+        .empty-state p {
+            margin: 1rem 0;
+        }
+        
+        .emoji {
+            font-size: 1.2em;
+            margin-right: 0.5rem;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            margin: 0.25rem;
+        }
+        
+        .badge-high {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        .badge-medium {
+            background: #f39c12;
+            color: white;
+        }
+        
+        .badge-low {
+            background: #27ae60;
+            color: white;
+        }
+        
+        .actions-row {
+            margin-top: 1rem;
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .compact-metrics {
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        }
+
+        .project-detail-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+            gap: 1.5rem;
+            align-items: start;
+        }
+
+        .detail-section {
+            background: white;
+            border-radius: 8px;
+            padding: 1.25rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: start;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .section-header h2 {
+            margin: 0;
+        }
+
+        .section-subtitle {
+            color: #667;
+            margin-top: 0.25rem;
+            font-size: 0.95rem;
+        }
+
+        .inline-create {
+            position: relative;
+            flex: 0 0 auto;
+        }
+
+        .inline-create summary {
+            background: #3498db;
+            color: white;
+            padding: 0.55rem 0.9rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            list-style: none;
+        }
+
+        .inline-create summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .inline-create form {
+            position: absolute;
+            right: 0;
+            top: calc(100% + 0.5rem);
+            width: min(360px, 86vw);
+            z-index: 3;
+            margin: 0;
+        }
+
+        .task-list {
+            display: grid;
+            gap: 0.75rem;
+        }
+
+        .task-item {
+            display: grid;
+            grid-template-columns: 0.65rem minmax(0, 1fr);
+            gap: 0.85rem;
+            align-items: start;
+            padding: 0.95rem 1rem;
+            border: 1px solid #e8e8e8;
+            border-radius: 8px;
+            background: #fff;
+        }
+
+        .priority-dot {
+            width: 0.65rem;
+            height: 0.65rem;
+            border-radius: 50%;
+            margin-top: 0.65rem;
+            background: #27ae60;
+        }
+
+        .priority-high .priority-dot {
+            background: #e74c3c;
+        }
+
+        .priority-medium .priority-dot {
+            background: #f39c12;
+        }
+
+        .task-copy p,
+        .side-item p,
+        .note-item p {
+            margin: 0.35rem 0 0;
+        }
+
+        .goal-row,
+        .side-item,
+        .note-item {
+            background: #fff;
+            border: 1px solid #e8e8e8;
+            border-radius: 8px;
+            padding: 0.9rem 1rem;
+        }
+
+        .goal-row,
+        .side-item {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .goal-copy {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            min-width: 0;
+        }
+
+        .goal-row.completed {
+            opacity: 0.62;
+            text-decoration: line-through;
+        }
+
+        .note-item + .note-item,
+        .side-item + .side-item {
+            margin-top: 0.75rem;
+        }
+
+        .note-item small {
+            display: block;
+            color: #888;
+            margin-top: 0.5rem;
+        }
+
+        .inline-form {
+            background: none;
+            box-shadow: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        button.compact {
+            padding: 0.45rem 0.75rem;
+            font-size: 0.9rem;
+        }
+
+        .chat-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+            gap: 1.5rem;
+            align-items: start;
+        }
+
+        .chat-panel {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            min-height: 560px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 1rem;
+            overflow-y: auto;
+        }
+
+        .chat-message {
+            padding: 0.8rem 1rem;
+            border-radius: 8px;
+            margin-bottom: 0.8rem;
+            white-space: pre-wrap;
+        }
+
+        .chat-message.user {
+            background: #e8f4fd;
+            margin-left: 12%;
+        }
+
+        .chat-message.agent {
+            background: #f7f7f7;
+            margin-right: 12%;
+        }
+
+        .chat-input {
+            border-top: 1px solid #eee;
+            padding: 1rem;
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 0.75rem;
+        }
+
+        .work-packet {
+            background: #1f2933;
+            color: #f5f7fa;
+            padding: 1rem;
+            border-radius: 8px;
+            white-space: pre-wrap;
+            font-family: Consolas, 'Courier New', monospace;
+            font-size: 0.92rem;
+        }
+
+        @media (max-width: 850px) {
+            .project-detail-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .section-header {
+                flex-direction: column;
+            }
+
+            .inline-create,
+            .inline-create summary {
+                width: 100%;
+            }
+
+            .inline-create form {
+                position: static;
+                width: 100%;
+                margin-top: 0.75rem;
+            }
+
+            .chat-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .chat-input {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="/" style="font-size: 1.2rem; font-weight: bold;">📊 Project Agent</a>
+        <a href="/">Dashboard</a>
+        <a href="/chat">Chat</a>
+        <a href="/projects">Projects</a>
+    </nav>
+    
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>
