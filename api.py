@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, Request, Form, HTTPException, File, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from database import Database
 from pathlib import Path
@@ -105,6 +105,46 @@ def dict_from_row(row):
 def dicts_from_rows(rows):
     """Convert list of sqlite3.Row to list of dicts."""
     return [dict(r) for r in rows]
+
+def is_auto_work_prompt(message):
+    """Detect old synthetic chat prompts created by the chat page itself."""
+    return (
+        message.get("role") == "user"
+        and message.get("content", "").strip().lower() == "what should i work on next?"
+    )
+
+def is_auto_work_response(message):
+    """Detect old synthetic work-packet responses paired with auto prompts."""
+    content = message.get("content", "").strip().lower()
+    return (
+        message.get("role") == "assistant"
+        and "work on" in content
+        and "recipe display app" in content
+        and (
+            "work packet" in content
+            or "recommended next action" in content
+            or "crisp work packet" in content
+        )
+    )
+
+def filter_auto_chat_noise(messages):
+    """Hide generated work-packet refresh chatter from chat history."""
+    filtered = []
+    skip_next_auto_response = False
+
+    for message in messages:
+        if is_auto_work_prompt(message):
+            skip_next_auto_response = True
+            continue
+
+        if skip_next_auto_response and is_auto_work_response(message):
+            skip_next_auto_response = False
+            continue
+
+        skip_next_auto_response = False
+        filtered.append(message)
+
+    return filtered
 
 def normalize_step_text(text):
     """Normalize step text for lightweight duplicate detection."""
@@ -248,7 +288,14 @@ def api_chat(message: ChatMessage):
 @app.get("/api/chat/history")
 def api_chat_history(limit: int = 50):
     """Get recent persisted chat messages."""
-    return {"messages": dicts_from_rows(db.get_chat_messages(limit))}
+    try:
+        rows = dicts_from_rows(db.get_chat_messages(limit))
+        return {"messages": filter_auto_chat_noise(rows)}
+    except Exception as exc:
+        return JSONResponse(
+            status_code=500,
+            content={"messages": [], "error": f"Could not load chat history: {exc}"},
+        )
 
 
 @app.post("/api/priority-review")
