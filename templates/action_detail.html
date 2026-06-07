@@ -57,38 +57,50 @@
                 </details>
             </div>
 
-            {% if steps %}
+            {% set open_steps = steps|selectattr('status', 'equalto', 'open')|list %}
+            {% set done_steps = steps|selectattr('status', 'equalto', 'done')|list %}
+
+            {% if open_steps %}
+                <h3 class="step-section-title">Open Steps</h3>
                 <div class="task-list">
-                    {% for step in steps %}
-                        <article class="step-row {% if step.status == 'done' %}completed{% endif %}">
-                            {% if step.status != 'done' %}
-                                <input
-                                    type="checkbox"
-                                    class="codex-step-select"
-                                    name="step_ids"
-                                    value="{{ step.id }}"
-                                    form="codex-plan-form"
-                                    checked
-                                    aria-label="Include step in Codex plan"
-                                >
-                            {% else %}
-                                <span class="codex-step-spacer" aria-hidden="true"></span>
-                            {% endif %}
+                    {% for step in open_steps %}
+                        <article class="step-row">
+                            <input
+                                type="checkbox"
+                                class="codex-step-select"
+                                name="step_ids"
+                                value="{{ step.id }}"
+                                form="codex-plan-form"
+                                checked
+                                aria-label="Include step in Codex plan"
+                            >
                             <div class="step-copy">
-                                <input type="checkbox" {% if step.status == 'done' %}checked{% endif %} disabled>
                                 <span>{{ step.step }}</span>
                             </div>
-                            {% if step.status != 'done' %}
-                                <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/steps/{{ step.id }}/complete" class="inline-form">
-                                    <button type="submit" class="secondary compact">Done</button>
-                                </form>
-                            {% endif %}
+                            <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/steps/{{ step.id }}/complete" class="inline-form">
+                                <button type="submit" class="secondary compact">Done</button>
+                            </form>
                         </article>
                     {% endfor %}
                 </div>
             {% else %}
                 <div class="empty-state">
-                    <p>No steps yet.</p>
+                    <p>No open steps.</p>
+                </div>
+            {% endif %}
+
+            {% if done_steps %}
+                <div class="done-steps">
+                    <h3 class="step-section-title">Done Steps</h3>
+                    <div class="task-list">
+                        {% for step in done_steps %}
+                            <article class="step-row completed">
+                                <div class="step-copy">
+                                    <span>{{ step.step }}</span>
+                                </div>
+                            </article>
+                        {% endfor %}
+                    </div>
                 </div>
             {% endif %}
         </section>
