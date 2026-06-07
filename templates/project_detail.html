@@ -65,10 +65,15 @@
 
             {% set open_actions = actions|selectattr('status', 'equalto', 'open')|list %}
             {% set completed_actions = actions|selectattr('status', 'equalto', 'done')|list %}
+            {% set visible_open_actions = open_actions[:4] %}
+            {% set hidden_open_actions = open_actions[4:] %}
 
             {% if open_actions %}
+                <p class="section-subtitle task-count-note">
+                    Showing {{ visible_open_actions|length }} of {{ open_actions|length }} open tasks.
+                </p>
                 <div class="task-list">
-                    {% for action in open_actions %}
+                    {% for action in visible_open_actions %}
                         <article class="task-item priority-{{ action.priority }}">
                             <span class="priority-dot" aria-hidden="true"></span>
                             <div class="task-copy">
@@ -81,6 +86,25 @@
                         </article>
                     {% endfor %}
                 </div>
+                {% if hidden_open_actions %}
+                    <details class="more-tasks">
+                        <summary>More Open Tasks ({{ hidden_open_actions|length }})</summary>
+                        <div class="task-list">
+                            {% for action in hidden_open_actions %}
+                                <article class="task-item priority-{{ action.priority }}">
+                                    <span class="priority-dot" aria-hidden="true"></span>
+                                    <div class="task-copy">
+                                        <span class="badge badge-{{ action.priority }}">{{ action.priority|upper }}</span>
+                                        <p><a href="/projects/{{ project.id }}/actions/{{ action.id }}">{{ action.action }}</a></p>
+                                    </div>
+                                    <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/complete" class="inline-form">
+                                        <button type="submit" class="secondary compact">Done</button>
+                                    </form>
+                                </article>
+                            {% endfor %}
+                        </div>
+                    </details>
+                {% endif %}
             {% else %}
                 <div class="empty-state">
                     <p>No tasks yet.</p>
