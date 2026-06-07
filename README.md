@@ -59,54 +59,26 @@ http://localhost:8000
 docker-compose down
 ```
 
-### Deploy on Fly.io
+### Local Wi-Fi Access
 
-This repo includes `fly.toml` for a Docker web service with a persistent Fly Volume. The volume keeps `projects.db` and uploaded recipe images across deploys/restarts.
+Use this when you want to open the planner or recipe upload page from a phone or another device on the same Wi-Fi network.
 
-1. Install the Fly CLI:
+1. Start the app on your laptop:
 ```powershell
-powershell -Command "iwr https://fly.io/install.ps1 -useb | iex"
+.\run_lan.ps1
 ```
 
-2. Sign in:
-```powershell
-fly auth login
-```
+2. Leave the terminal window open.
 
-3. Create the app if it does not exist yet:
-```powershell
-fly apps create agent-assistant-dreaston
-```
+3. On your phone, open the `Phone / other Wi-Fi device` URL printed by the script.
 
-4. Create the persistent volume:
-```powershell
-fly volumes create agent_assistant_data --size 1 --region lax
-```
-
-5. Set the OpenAI key if you want the chat/review features available on the hosted app:
-```powershell
-fly secrets set OPENAI_API_KEY=your_key_here
-```
-
-6. Deploy:
-```powershell
-fly deploy
-```
-
-The deployed recipe upload page will be:
+The recipe upload page is:
 
 ```text
-https://agent-assistant-dreaston.fly.dev/apps/recipes/import?project_id=2&action_id=10
+http://<your-laptop-ip>:8000/apps/recipes/import?project_id=2&action_id=10
 ```
 
-The deploy uses:
-
-```text
-DB_PATH=/data/projects.db
-UPLOADS_DIR=/data/uploads
-```
-
-On first deploy, the app copies the bundled `projects.db` into `/data/projects.db` if the persistent database does not already exist.
+If the phone cannot connect, make sure both devices are on the same Wi-Fi network and allow Python/Uvicorn through Windows Firewall when prompted.
 
 **Option 2: Local Python**
 

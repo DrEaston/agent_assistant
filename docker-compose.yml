@@ -7,6 +7,7 @@ services:
       - "8000:8000"
     volumes:
       - ./projects.db:/app/projects.db
+      - ./uploads:/app/uploads
     environment:
       - PYTHONUNBUFFERED=1
     container_name: project-agent-web
