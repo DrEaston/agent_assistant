@@ -57,8 +57,8 @@
             {% if steps %}
                 <div class="task-list">
                     {% for step in steps %}
-                        <article class="goal-row {% if step.status == 'done' %}completed{% endif %}">
-                            <div class="goal-copy">
+                        <article class="step-row {% if step.status == 'done' %}completed{% endif %}">
+                            <div class="step-copy">
                                 <input type="checkbox" {% if step.status == 'done' %}checked{% endif %} disabled>
                                 <span>{{ step.step }}</span>
                             </div>
