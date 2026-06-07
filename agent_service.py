@@ -58,7 +58,10 @@ class AgentService:
             updates.append(update)
 
         project = self._find_project_in_text(text)
-        if not project and self._sounds_like_priority_statement(lower):
+        if not project and (
+            self._sounds_like_priority_statement(lower)
+            or self._sounds_like_completion(lower)
+        ):
             project = self.build_dashboard_context().get("recommended_project")
 
         if project:
@@ -66,9 +69,14 @@ class AgentService:
             if priority_update:
                 updates.append(priority_update)
 
-            completion_update = self._maybe_complete_action(project, text, lower)
-            if completion_update:
-                updates.append(completion_update)
+            step_update = self._maybe_complete_step(project, text, lower)
+            if step_update:
+                updates.append(step_update)
+
+            if not step_update:
+                completion_update = self._maybe_complete_action(project, text, lower)
+                if completion_update:
+                    updates.append(completion_update)
 
             for update in self._maybe_add_priority_from_text(project, text, lower):
                 updates.append(update)
@@ -241,16 +249,7 @@ class AgentService:
         return None
 
     def _maybe_complete_action(self, project, text, lower):
-        if not any(
-            phrase in lower
-            for phrase in [
-                "finished",
-                "complete",
-                "completed",
-                "done",
-                "mark",
-            ]
-        ):
+        if not self._sounds_like_completion(lower):
             return None
 
         if any(phrase in lower for phrase in ["not done", "not complete", "isn't done", "is not done"]):
@@ -266,6 +265,38 @@ class AgentService:
             "type": "action_completed",
             "project": project["name"],
             "action": action["action"],
+        }
+
+    def _maybe_complete_step(self, project, text, lower):
+        if not self._sounds_like_completion(lower):
+            return None
+
+        if any(phrase in lower for phrase in ["not done", "not complete", "isn't done", "is not done"]):
+            return None
+
+        target = self._completion_target_text(text)
+        candidate = self._find_step_in_text(target or text, project["id"])
+        if not candidate:
+            completed_candidate = self._find_step_in_text(target or text, project["id"], statuses={"done"})
+            if completed_candidate:
+                return {
+                    "type": "step_already_completed",
+                    "project": project["name"],
+                    "action": completed_candidate["action"]["action"],
+                    "step": completed_candidate["step"]["step"],
+                }
+            return None
+
+        self.db.mark_task_step_complete(candidate["step"]["id"])
+        self.db.add_note(
+            project["id"],
+            f"Completed step: {candidate['step']['step']} ({candidate['action']['action']})",
+        )
+        return {
+            "type": "step_completed",
+            "project": project["name"],
+            "action": candidate["action"]["action"],
+            "step": candidate["step"]["step"],
         }
 
     def _maybe_add_project_items(self, project, text):
@@ -571,6 +602,24 @@ class AgentService:
         row = self.db.get_project_by_name(name)
         return dict(row) if row else None
 
+    def _find_step_in_text(self, text, project_id, statuses=None):
+        statuses = statuses or {"open"}
+        actions = self._open_actions_for_project(project_id)
+        candidates = []
+        for action in actions:
+            for row in self.db.get_task_steps(action["id"]):
+                step = dict(row)
+                if step["status"] not in statuses:
+                    continue
+                score = self._text_match_score(text, step["step"])
+                candidates.append({"action": action, "step": step, "score": score})
+
+        if not candidates:
+            return None
+
+        best = max(candidates, key=lambda candidate: candidate["score"])
+        return best if best["score"] >= 0.46 else None
+
     def _actions_for_project(self, project_id):
         actions = []
         project = dict(self.db.get_project_by_id(project_id))
@@ -611,6 +660,90 @@ class AgentService:
             )
 
         return max(projects, key=score)
+
+    @staticmethod
+    def _sounds_like_completion(lower):
+        return any(
+            phrase in lower
+            for phrase in [
+                "finished",
+                "complete",
+                "completed",
+                "done",
+                "mark",
+                "deployed",
+                "uploaded",
+                "set up",
+            ]
+        )
+
+    @staticmethod
+    def _completion_target_text(text):
+        target = text.strip()
+        target = re.sub(
+            r"^(?:ok\s+)?(?:i|we)\s+(?:just\s+|had\s+|have\s+|already\s+)?"
+            r"(?:finished|completed|complete|did|deployed|uploaded|set up)\s+",
+            "",
+            target,
+            flags=re.IGNORECASE,
+        )
+        target = re.sub(r"^(?:mark|set)\s+", "", target, flags=re.IGNORECASE)
+        target = re.sub(r"\s+(?:as\s+)?(?:done|complete|completed)$", "", target, flags=re.IGNORECASE)
+        return target.strip(" .,:;-")
+
+    @staticmethod
+    def _text_match_score(query, candidate):
+        query_lower = query.lower()
+        candidate_lower = candidate.lower()
+        if candidate_lower in query_lower or query_lower in candidate_lower:
+            return 1.0
+
+        query_tokens = AgentService._meaningful_tokens(query_lower)
+        candidate_tokens = AgentService._meaningful_tokens(candidate_lower)
+        if not query_tokens or not candidate_tokens:
+            return SequenceMatcher(None, candidate_lower, query_lower).ratio()
+
+        overlap = query_tokens & candidate_tokens
+        overlap_score = len(overlap) / max(len(query_tokens), 1)
+        sequence_score = SequenceMatcher(None, candidate_lower, query_lower).ratio()
+
+        bonus = 0
+        related_groups = [
+            {"deploy", "deployed", "deploying", "host", "hosting", "wifi", "phone", "mobile", "lan"},
+            {"upload", "uploaded", "import", "image", "images", "photo", "photos", "recipe", "recipes"},
+            {"ocr", "text", "extract", "convert"},
+        ]
+        for group in related_groups:
+            if query_tokens & group and candidate_tokens & group:
+                bonus += 0.12
+
+        return min(1.0, (overlap_score * 0.65) + (sequence_score * 0.35) + bonus)
+
+    @staticmethod
+    def _meaningful_tokens(text):
+        words = set(re.findall(r"[a-z0-9]+", text.lower()))
+        stopwords = {
+            "a",
+            "an",
+            "and",
+            "app",
+            "as",
+            "for",
+            "from",
+            "had",
+            "have",
+            "i",
+            "it",
+            "of",
+            "on",
+            "page",
+            "the",
+            "this",
+            "to",
+            "we",
+            "with",
+        }
+        return words - stopwords
 
     def _choose_next_action(self, project, actions):
         if not project:
@@ -655,6 +788,16 @@ class AgentService:
                     )
                 elif update["type"] == "action_completed":
                     lines.append(f"- Completed action for {update['project']}: {update['action']}")
+                elif update["type"] == "step_completed":
+                    lines.append(
+                        f"- Completed step for {update['project']}: {update['step']} "
+                        f"({update['action']})"
+                    )
+                elif update["type"] == "step_already_completed":
+                    lines.append(
+                        f"- That step was already marked done for {update['project']}: "
+                        f"{update['step']} ({update['action']})"
+                    )
                 elif update["type"] == "project_created":
                     lines.append(f"- Created project: {update['project']}.")
                 elif update["type"].endswith("_added"):
