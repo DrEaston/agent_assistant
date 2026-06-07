@@ -624,6 +624,12 @@ def complete_task_step_form(project_id: int, action_id: int, step_id: int):
     db.mark_task_step_complete(step_id)
     return RedirectResponse(url=f"/projects/{project_id}/actions/{action_id}", status_code=303)
 
+@app.post("/projects/{project_id}/actions/{action_id}/steps/{step_id}/reopen")
+def reopen_task_step_form(project_id: int, action_id: int, step_id: int):
+    """Reopen a completed task checklist step."""
+    db.reopen_task_step(step_id)
+    return RedirectResponse(url=f"/projects/{project_id}/actions/{action_id}", status_code=303)
+
 @app.post("/projects/{project_id}/actions/{action_id}/steps/review")
 def create_step_review_form(project_id: int, action_id: int):
     """Create a previewable cleanup proposal for a task's open steps."""

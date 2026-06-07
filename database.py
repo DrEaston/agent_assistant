@@ -557,6 +557,21 @@ class Database:
         self.conn.commit()
         self.close()
 
+    def reopen_recommended_action(self, action_id):
+        """Reopen a completed recommended action."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE recommended_actions
+            SET status = 'open', completed_at = ''
+            WHERE id = ?
+            """,
+            (action_id,),
+        )
+        self.conn.commit()
+        self.close()
+
     def find_recommended_action(self, project_id, action):
         """Find an action by exact text."""
         self.connect()
@@ -601,13 +616,30 @@ class Database:
             "INSERT INTO task_steps (action_id, step, sort_order) VALUES (?, ?, ?)",
             (action_id, step, sort_order),
         )
+        cursor.execute(
+            """
+            UPDATE recommended_actions
+            SET status = 'open', completed_at = ''
+            WHERE id = ?
+            """,
+            (action_id,),
+        )
         self.conn.commit()
         self.close()
 
     def mark_task_step_complete(self, step_id):
-        """Mark a checklist step as done."""
+        """Mark a checklist step as done and complete the parent task if all steps are done."""
         self.connect()
         cursor = self.conn.cursor()
+        row = cursor.execute(
+            "SELECT action_id FROM task_steps WHERE id = ?",
+            (step_id,),
+        ).fetchone()
+        if not row:
+            self.close()
+            return
+
+        action_id = row["action_id"]
         cursor.execute(
             """
             UPDATE task_steps
@@ -615,6 +647,56 @@ class Database:
             WHERE id = ?
             """,
             (step_id,),
+        )
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM task_steps
+            WHERE action_id = ? AND status = 'open'
+            """,
+            (action_id,),
+        )
+        open_count = cursor.fetchone()["count"]
+        if open_count == 0:
+            cursor.execute(
+                """
+                UPDATE recommended_actions
+                SET status = 'done', completed_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (action_id,),
+            )
+        self.conn.commit()
+        self.close()
+
+    def reopen_task_step(self, step_id):
+        """Reopen a done checklist step and reopen its parent task."""
+        self.connect()
+        cursor = self.conn.cursor()
+        row = cursor.execute(
+            "SELECT action_id FROM task_steps WHERE id = ?",
+            (step_id,),
+        ).fetchone()
+        if not row:
+            self.close()
+            return
+
+        action_id = row["action_id"]
+        cursor.execute(
+            """
+            UPDATE task_steps
+            SET status = 'open', completed_at = ''
+            WHERE id = ?
+            """,
+            (step_id,),
+        )
+        cursor.execute(
+            """
+            UPDATE recommended_actions
+            SET status = 'open', completed_at = ''
+            WHERE id = ?
+            """,
+            (action_id,),
         )
         self.conn.commit()
         self.close()

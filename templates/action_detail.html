@@ -98,6 +98,9 @@
                                 <div class="step-copy">
                                     <span>{{ step.step }}</span>
                                 </div>
+                                <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/steps/{{ step.id }}/reopen" class="inline-form">
+                                    <button type="submit" class="secondary compact">Undo</button>
+                                </form>
                             </article>
                         {% endfor %}
                     </div>
