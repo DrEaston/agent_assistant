@@ -88,6 +88,34 @@ class Database:
         """)
 
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS task_steps (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action_id INTEGER NOT NULL,
+                step TEXT NOT NULL,
+                status TEXT DEFAULT 'open',
+                sort_order INTEGER DEFAULT 100,
+                completed_at TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (action_id) REFERENCES recommended_actions(id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS recipe_images (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                action_id INTEGER NOT NULL,
+                filename TEXT NOT NULL,
+                original_filename TEXT NOT NULL,
+                content_type TEXT DEFAULT '',
+                status TEXT DEFAULT 'uploaded',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY (action_id) REFERENCES recommended_actions(id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS priority_reviews (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 summary TEXT NOT NULL,
@@ -130,6 +158,7 @@ class Database:
         self._ensure_column(cursor, "recommended_actions", "completed_at", "TEXT DEFAULT ''")
         self._repair_sample_data_links(cursor)
         self._deprioritize_overlong_actions(cursor)
+        self._ensure_recipe_import_steps(cursor)
 
         self.conn.commit()
         self.close()
@@ -179,6 +208,43 @@ class Database:
             WHERE length(action) > 180 AND priority != 'low'
             """
         )
+
+    def _ensure_recipe_import_steps(self, cursor):
+        """Seed useful subtasks for the first recipe image import task."""
+        cursor.execute(
+            """
+            SELECT recommended_actions.id
+            FROM recommended_actions
+            JOIN projects ON projects.id = recommended_actions.project_id
+            WHERE projects.name = ?
+              AND recommended_actions.action = ?
+            """,
+            ("Recipe display app", "Import the first batch of recipe images"),
+        )
+        action = cursor.fetchone()
+        if not action:
+            return
+
+        action_id = action["id"]
+        cursor.execute("SELECT COUNT(*) AS count FROM task_steps WHERE action_id = ?", (action_id,))
+        if cursor.fetchone()["count"]:
+            return
+
+        steps = [
+            "Create a mobile-friendly recipe image upload page",
+            "Add image upload handling and storage",
+            "Save uploaded image metadata in the database",
+            "Show uploaded images in an import queue",
+            "Mark uploaded images ready for OCR",
+        ]
+        for index, step in enumerate(steps, 1):
+            cursor.execute(
+                """
+                INSERT INTO task_steps (action_id, step, sort_order)
+                VALUES (?, ?, ?)
+                """,
+                (action_id, step, index * 10),
+            )
 
     def populate_sample_data(self):
         """Populate database with sample projects."""
@@ -432,6 +498,15 @@ class Database:
         self.conn.commit()
         self.close()
 
+    def get_recommended_action(self, action_id):
+        """Get a recommended action by id."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM recommended_actions WHERE id = ?", (action_id,))
+        action = cursor.fetchone()
+        self.close()
+        return action
+
     def update_recommended_action_priority(self, action_id, priority):
         """Update a recommended action's priority."""
         self.connect()
@@ -480,6 +555,83 @@ class Database:
         row = cursor.fetchone()
         self.close()
         return row
+
+    def get_task_steps(self, action_id):
+        """Get all checklist steps for a task."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM task_steps
+            WHERE action_id = ?
+            ORDER BY
+                CASE status WHEN 'open' THEN 1 WHEN 'done' THEN 2 ELSE 3 END,
+                sort_order ASC,
+                id ASC
+            """,
+            (action_id,),
+        )
+        steps = cursor.fetchall()
+        self.close()
+        return steps
+
+    def add_task_step(self, action_id, step):
+        """Add a checklist step to a task."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) + 10 AS next_order FROM task_steps WHERE action_id = ?",
+            (action_id,),
+        )
+        sort_order = cursor.fetchone()["next_order"]
+        cursor.execute(
+            "INSERT INTO task_steps (action_id, step, sort_order) VALUES (?, ?, ?)",
+            (action_id, step, sort_order),
+        )
+        self.conn.commit()
+        self.close()
+
+    def mark_task_step_complete(self, step_id):
+        """Mark a checklist step as done."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE task_steps
+            SET status = 'done', completed_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (step_id,),
+        )
+        self.conn.commit()
+        self.close()
+
+    def get_recipe_images(self, action_id):
+        """Get uploaded recipe images for a task."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT * FROM recipe_images WHERE action_id = ? ORDER BY id DESC",
+            (action_id,),
+        )
+        images = cursor.fetchall()
+        self.close()
+        return images
+
+    def add_recipe_image(self, project_id, action_id, filename, original_filename, content_type=""):
+        """Record an uploaded recipe image."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO recipe_images
+                (project_id, action_id, filename, original_filename, content_type)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (project_id, action_id, filename, original_filename, content_type),
+        )
+        self.conn.commit()
+        self.close()
 
     def get_weekly_goals(self, project_id):
         """Get weekly goals for a project."""

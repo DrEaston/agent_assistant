@@ -3,3 +3,4 @@ codex_work_packet.md
 __pycache__/
 *.pyc
 .venv/
+uploads/

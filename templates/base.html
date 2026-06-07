@@ -323,6 +323,13 @@
             align-items: start;
         }
 
+        .task-detail-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 2fr) minmax(260px, 0.8fr);
+            gap: 1.5rem;
+            align-items: start;
+        }
+
         .detail-section {
             background: white;
             border-radius: 8px;
@@ -426,6 +433,16 @@
             margin: 0.35rem 0 0;
         }
 
+        .task-copy a {
+            color: #2c3e50;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .task-copy a:hover {
+            color: #3498db;
+        }
+
         .goal-row,
         .side-item,
         .note-item {
@@ -482,6 +499,55 @@
             box-shadow: none;
             padding: 0;
             margin: 0;
+        }
+
+        .plain-form {
+            background: none;
+            box-shadow: none;
+            padding: 0;
+            margin: 1rem 0 0;
+        }
+
+        .upload-form {
+            box-shadow: none;
+            border: 1px solid #e8e8e8;
+            margin: 0 0 1rem;
+        }
+
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+            gap: 1rem;
+        }
+
+        .image-tile {
+            border: 1px solid #e8e8e8;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #fff;
+        }
+
+        .image-tile img {
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            object-fit: cover;
+            display: block;
+            background: #f2f2f2;
+        }
+
+        .image-tile div {
+            padding: 0.75rem;
+        }
+
+        .image-tile strong,
+        .image-tile small {
+            display: block;
+            overflow-wrap: anywhere;
+        }
+
+        .image-tile small {
+            color: #777;
+            margin-top: 0.25rem;
         }
 
         button.compact {
@@ -547,6 +613,7 @@
         }
 
         @media (max-width: 850px) {
+            .task-detail-layout,
             .project-detail-layout {
                 grid-template-columns: 1fr;
             }

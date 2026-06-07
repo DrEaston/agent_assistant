@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}{{ action.action }} - Project Agent{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    <a href="/">Dashboard</a> / <a href="/projects">Projects</a> / <a href="/projects/{{ project.id }}">{{ project.name }}</a> / {{ action.action }}
+</div>
+
+<h1>{{ action.action }}</h1>
+
+<div class="dashboard-grid compact-metrics">
+    <div class="metric">
+        <div class="metric-value">{{ action.priority|upper }}</div>
+        <div class="metric-label">Priority</div>
+    </div>
+
+    <div class="metric">
+        <div class="metric-value">{{ action.status|upper }}</div>
+        <div class="metric-label">Status</div>
+    </div>
+
+    <div class="metric">
+        <div class="metric-value">{{ steps|selectattr('status', 'equalto', 'done')|list|length }}/{{ steps|length }}</div>
+        <div class="metric-label">Steps Done</div>
+    </div>
+
+    <div class="metric">
+        <div class="metric-value">{{ recipe_images|length }}</div>
+        <div class="metric-label">Images</div>
+    </div>
+</div>
+
+<div class="task-detail-layout">
+    <main>
+        <section class="detail-section">
+            <div class="section-header">
+                <div>
+                    <h2>Steps</h2>
+                    <p class="section-subtitle">Break this task into smaller things you can finish.</p>
+                </div>
+                <details class="inline-create">
+                    <summary>Add Step</summary>
+                    <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/steps/create">
+                        <div class="form-group">
+                            <label for="step">Step</label>
+                            <input type="text" id="step" name="step" placeholder="What needs to happen?" required>
+                        </div>
+                        <button type="submit">Add Step</button>
+                    </form>
+                </details>
+            </div>
+
+            {% if steps %}
+                <div class="task-list">
+                    {% for step in steps %}
+                        <article class="goal-row {% if step.status == 'done' %}completed{% endif %}">
+                            <div class="goal-copy">
+                                <input type="checkbox" {% if step.status == 'done' %}checked{% endif %} disabled>
+                                <span>{{ step.step }}</span>
+                            </div>
+                            {% if step.status != 'done' %}
+                                <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/steps/{{ step.id }}/complete" class="inline-form">
+                                    <button type="submit" class="secondary compact">Done</button>
+                                </form>
+                            {% endif %}
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <p>No steps yet.</p>
+                </div>
+            {% endif %}
+        </section>
+
+        <section class="detail-section">
+            <div class="section-header">
+                <div>
+                    <h2>Recipe Images</h2>
+                    <p class="section-subtitle">Upload photos from your phone into the import queue.</p>
+                </div>
+            </div>
+
+            <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/recipe-images/upload" enctype="multipart/form-data" class="upload-form">
+                <div class="form-group">
+                    <label for="files">Images</label>
+                    <input type="file" id="files" name="files" accept="image/*" multiple required>
+                </div>
+                <button type="submit">Upload Images</button>
+            </form>
+
+            {% if recipe_images %}
+                <div class="image-grid">
+                    {% for image in recipe_images %}
+                        <article class="image-tile">
+                            <img src="/uploads/{{ image.filename }}" alt="{{ image.original_filename }}">
+                            <div>
+                                <strong>{{ image.original_filename }}</strong>
+                                <small>{{ image.status|upper }} · {{ image.created_at }}</small>
+                            </div>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <p>No recipe images uploaded yet.</p>
+                </div>
+            {% endif %}
+        </section>
+    </main>
+
+    <aside>
+        <section class="detail-section">
+            <h2>Task</h2>
+            <p>{{ action.action }}</p>
+            <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/complete" class="plain-form">
+                <button type="submit" class="secondary">Mark Task Done</button>
+            </form>
+        </section>
+    </aside>
+</div>
+{% endblock %}

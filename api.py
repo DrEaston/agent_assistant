@@ -9,12 +9,15 @@ from dotenv import load_dotenv
 # Load environment variables from .env
 load_dotenv()
 
-from fastapi import FastAPI, Request, Form, HTTPException
+from fastapi import FastAPI, Request, Form, HTTPException, File, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from database import Database
 from pathlib import Path
 from pydantic import BaseModel
 import json
+import shutil
+import uuid
 from jinja2 import Environment, FileSystemLoader
 from llm_service import LLMService
 from agent_service import AgentService
@@ -28,6 +31,10 @@ app = FastAPI(title="Project Agent API", version="1.0")
 templates_dir = Path(__file__).parent / "templates"
 templates_dir.mkdir(exist_ok=True)
 jinja_env = Environment(loader=FileSystemLoader(str(templates_dir)))
+uploads_dir = Path(__file__).parent / "uploads"
+recipe_uploads_dir = uploads_dir / "recipe_images"
+recipe_uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
 # Initialize database
 db = Database("projects.db")
@@ -368,6 +375,26 @@ def project_detail(request: Request, project_id: int):
     return HTMLResponse(html)
 
 
+@app.get("/projects/{project_id}/actions/{action_id}")
+def action_detail(request: Request, project_id: int, action_id: int):
+    """Task detail page with checklist and recipe image import queue."""
+    project = dict_from_row(db.get_project_by_id(project_id))
+    action = dict_from_row(db.get_recommended_action(action_id))
+    if not project or not action or action["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    context = {
+        "request": request,
+        "project": project,
+        "action": action,
+        "steps": dicts_from_rows(db.get_task_steps(action_id)),
+        "recipe_images": dicts_from_rows(db.get_recipe_images(action_id)),
+    }
+    template = jinja_env.get_template("action_detail.html")
+    html = template.render(context)
+    return HTMLResponse(html)
+
+
 # ============================================================================
 # FORM SUBMISSION ROUTES (Post-Redirect-Get Pattern)
 # ============================================================================
@@ -397,6 +424,52 @@ def complete_action_form(project_id: int, action_id: int):
     """Mark action complete via form."""
     db.mark_recommended_action_complete(action_id)
     return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
+
+@app.post("/projects/{project_id}/actions/{action_id}/steps/create")
+def add_task_step_form(project_id: int, action_id: int, step: str = Form(...)):
+    """Add a checklist step to a task."""
+    db.add_task_step(action_id, step)
+    return RedirectResponse(url=f"/projects/{project_id}/actions/{action_id}", status_code=303)
+
+@app.post("/projects/{project_id}/actions/{action_id}/steps/{step_id}/complete")
+def complete_task_step_form(project_id: int, action_id: int, step_id: int):
+    """Mark a task checklist step complete."""
+    db.mark_task_step_complete(step_id)
+    return RedirectResponse(url=f"/projects/{project_id}/actions/{action_id}", status_code=303)
+
+@app.post("/projects/{project_id}/actions/{action_id}/recipe-images/upload")
+async def upload_recipe_images_form(
+    project_id: int,
+    action_id: int,
+    files: List[UploadFile] = File(...),
+):
+    """Upload recipe image files for an import task."""
+    action = dict_from_row(db.get_recommended_action(action_id))
+    if not action or action["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    for upload in files:
+        if not upload.filename:
+            continue
+        if upload.content_type and not upload.content_type.startswith("image/"):
+            continue
+
+        original_name = Path(upload.filename).name
+        extension = Path(original_name).suffix.lower()
+        stored_name = f"{uuid.uuid4().hex}{extension}"
+        destination = recipe_uploads_dir / stored_name
+        with destination.open("wb") as handle:
+            shutil.copyfileobj(upload.file, handle)
+
+        db.add_recipe_image(
+            project_id,
+            action_id,
+            f"recipe_images/{stored_name}",
+            original_name,
+            upload.content_type or "",
+        )
+
+    return RedirectResponse(url=f"/projects/{project_id}/actions/{action_id}", status_code=303)
 
 @app.post("/projects/{project_id}/blockers/add")
 @app.post("/projects/{project_id}/blockers/create")
