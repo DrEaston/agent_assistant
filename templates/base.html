@@ -478,13 +478,23 @@
 
         .step-row {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
+            grid-template-columns: 1rem minmax(0, 1fr) auto;
             gap: 1rem;
             align-items: start;
             background: #fff;
             border: 1px solid #e8e8e8;
             border-radius: 8px;
             padding: 0.9rem 1rem;
+        }
+
+        .codex-step-select {
+            width: 1rem;
+            height: 1rem;
+            margin: 0.25rem 0 0;
+        }
+
+        .codex-step-spacer {
+            width: 1rem;
         }
 
         .step-copy {
@@ -608,6 +618,16 @@
             margin-top: 0.5rem;
         }
 
+        .success-panel {
+            border-left: 4px solid #27ae60;
+        }
+
+        .success-panel p {
+            margin-top: 0.35rem;
+            color: #667;
+            overflow-wrap: anywhere;
+        }
+
         .upload-form {
             box-shadow: none;
             border: 1px solid #e8e8e8;
@@ -723,7 +743,11 @@
             }
 
             .step-row {
-                grid-template-columns: 1fr;
+                grid-template-columns: 1rem minmax(0, 1fr);
+            }
+
+            .step-row .inline-form {
+                grid-column: 2;
             }
 
             .section-header {

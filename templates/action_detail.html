@@ -39,6 +39,9 @@
                     <h2>Steps</h2>
                     <p class="section-subtitle">Break this task into smaller things you can finish.</p>
                 </div>
+                <form id="codex-plan-form" method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/codex-plan" class="inline-form">
+                    <button type="submit" class="compact">Create Codex Plan</button>
+                </form>
                 <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/steps/review" class="inline-form">
                     <button type="submit" class="secondary compact">Review Steps</button>
                 </form>
@@ -58,6 +61,19 @@
                 <div class="task-list">
                     {% for step in steps %}
                         <article class="step-row {% if step.status == 'done' %}completed{% endif %}">
+                            {% if step.status != 'done' %}
+                                <input
+                                    type="checkbox"
+                                    class="codex-step-select"
+                                    name="step_ids"
+                                    value="{{ step.id }}"
+                                    form="codex-plan-form"
+                                    checked
+                                    aria-label="Include step in Codex plan"
+                                >
+                            {% else %}
+                                <span class="codex-step-spacer" aria-hidden="true"></span>
+                            {% endif %}
                             <div class="step-copy">
                                 <input type="checkbox" {% if step.status == 'done' %}checked{% endif %} disabled>
                                 <span>{{ step.step }}</span>

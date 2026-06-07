@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Codex Plan - Project Agent{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    <a href="/">Dashboard</a> / <a href="/projects">Projects</a> / <a href="/projects/{{ project.id }}">{{ project.name }}</a> / <a href="/projects/{{ project.id }}/actions/{{ action.id }}">{{ action.action }}</a> / Codex Plan
+</div>
+
+<h1>Codex Plan</h1>
+
+{% if saved_path %}
+    <div class="detail-section success-panel">
+        <strong>Saved</strong>
+        <p>{{ saved_path }}</p>
+    </div>
+{% endif %}
+
+<section class="detail-section">
+    <div class="section-header">
+        <div>
+            <h2>Selected Steps</h2>
+            <p class="section-subtitle">These steps are included in the work packet.</p>
+        </div>
+        <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/codex-plan/save" class="inline-form">
+            {% for step_id in selected_step_ids %}
+                <input type="hidden" name="step_ids" value="{{ step_id }}">
+            {% endfor %}
+            <button type="submit">Save Work Packet</button>
+        </form>
+    </div>
+
+    {% if selected_steps %}
+        <ol class="review-list">
+            {% for step in selected_steps %}
+                <li>{{ step.step }}</li>
+            {% endfor %}
+        </ol>
+    {% else %}
+        <div class="empty-state">
+            <p>No steps selected.</p>
+        </div>
+    {% endif %}
+</section>
+
+<section class="detail-section">
+    <div class="section-header">
+        <div>
+            <h2>Work Packet</h2>
+            <p class="section-subtitle">Preview the Markdown before handing it to Codex.</p>
+        </div>
+    </div>
+    <pre class="work-packet">{{ markdown }}</pre>
+</section>
+{% endblock %}

@@ -149,6 +149,56 @@ def build_step_review(action, steps):
         "reasons": reasons,
     }
 
+def build_action_codex_plan(project, action, selected_steps, blockers, notes, recipe_import_url):
+    """Format a task-level work packet for Codex from selected checklist steps."""
+    step_lines = "\n".join(
+        f"{index}. {step['step']}"
+        for index, step in enumerate(selected_steps, 1)
+    ) or "No specific steps selected. Clarify the next implementable step before editing code."
+
+    blocker_lines = "\n".join(f"- {blocker['description']} ({blocker['severity']})" for blocker in blockers) or "- None recorded"
+    note_lines = "\n".join(f"- {note['content']}" for note in notes[:5]) or "- None recorded"
+
+    recipe_context = ""
+    if "recipe" in project["name"].lower() or "recipe" in action["action"].lower():
+        recipe_context = f"""
+Recipe app boundary:
+- Planner task pages own task status, checklists, and Codex planning.
+- Recipe app pages own image upload/import workflow.
+- Recipe import page: {recipe_import_url}
+"""
+
+    return f"""# Codex Work Packet
+
+## Project
+{project['name']}
+
+## Task
+{action['action']}
+
+## Objective
+Implement or advance the selected task steps below. Keep the work scoped to this task unless a shared helper is clearly required.
+
+## Selected Steps
+{step_lines}
+
+## Current Status
+- Task priority: {action['priority']}
+- Task status: {action['status']}
+
+## Blockers
+{blocker_lines}
+
+## Recent Project Notes
+{note_lines}
+{recipe_context}
+## Implementation Guidance
+- Preserve the existing FastAPI + Jinja structure.
+- Keep planner concerns separate from embedded app surfaces.
+- Update the database layer through `database.py` rather than ad hoc SQL in route handlers.
+- Run a focused verification after changes and report anything not tested.
+"""
+
 
 # ============================================================================
 # API ROUTES - DASHBOARD
@@ -471,6 +521,48 @@ def step_review_detail(request: Request, project_id: int, action_id: int, review
     return HTMLResponse(html)
 
 
+@app.post("/projects/{project_id}/actions/{action_id}/codex-plan")
+def codex_plan_preview(
+    request: Request,
+    project_id: int,
+    action_id: int,
+    step_ids: Optional[List[int]] = Form(None),
+):
+    """Preview a Codex work packet for selected task steps."""
+    project = dict_from_row(db.get_project_by_id(project_id))
+    action = dict_from_row(db.get_recommended_action(action_id))
+    if not project or not action or action["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    all_steps = dicts_from_rows(db.get_task_steps(action_id))
+    selected_ids = set(step_ids or [])
+    selected_steps = [
+        step for step in all_steps
+        if step["status"] == "open" and (not selected_ids or step["id"] in selected_ids)
+    ]
+    recipe_import_url = f"/apps/recipes/import?project_id={project_id}&action_id={action_id}"
+    markdown = build_action_codex_plan(
+        project,
+        action,
+        selected_steps,
+        dicts_from_rows(db.get_blockers(project_id)),
+        dicts_from_rows(db.get_notes(project_id)),
+        recipe_import_url,
+    )
+    context = {
+        "request": request,
+        "project": project,
+        "action": action,
+        "selected_steps": selected_steps,
+        "selected_step_ids": [step["id"] for step in selected_steps],
+        "markdown": markdown,
+        "saved_path": "",
+    }
+    template = jinja_env.get_template("codex_plan.html")
+    html = template.render(context)
+    return HTMLResponse(html)
+
+
 @app.get("/apps/recipes/import")
 def recipe_import_page(request: Request, project_id: int, action_id: int):
     """Recipe app import surface for uploading recipe images."""
@@ -560,6 +652,49 @@ def apply_step_review_form(project_id: int, action_id: int, review_id: int):
     if not applied:
         raise HTTPException(status_code=400, detail="Step review has already been applied or is unavailable")
     return RedirectResponse(url=f"/projects/{project_id}/actions/{action_id}", status_code=303)
+
+@app.post("/projects/{project_id}/actions/{action_id}/codex-plan/save")
+def save_codex_plan_form(
+    request: Request,
+    project_id: int,
+    action_id: int,
+    step_ids: Optional[List[int]] = Form(None),
+):
+    """Save a task-level Codex work packet to codex_work_packet.md."""
+    project = dict_from_row(db.get_project_by_id(project_id))
+    action = dict_from_row(db.get_recommended_action(action_id))
+    if not project or not action or action["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    all_steps = dicts_from_rows(db.get_task_steps(action_id))
+    selected_ids = set(step_ids or [])
+    selected_steps = [
+        step for step in all_steps
+        if step["status"] == "open" and (not selected_ids or step["id"] in selected_ids)
+    ]
+    recipe_import_url = f"/apps/recipes/import?project_id={project_id}&action_id={action_id}"
+    markdown = build_action_codex_plan(
+        project,
+        action,
+        selected_steps,
+        dicts_from_rows(db.get_blockers(project_id)),
+        dicts_from_rows(db.get_notes(project_id)),
+        recipe_import_url,
+    )
+    output_path = Path("codex_work_packet.md").resolve()
+    output_path.write_text(markdown + "\n", encoding="utf-8")
+    context = {
+        "request": request,
+        "project": project,
+        "action": action,
+        "selected_steps": selected_steps,
+        "selected_step_ids": [step["id"] for step in selected_steps],
+        "markdown": markdown,
+        "saved_path": str(output_path),
+    }
+    template = jinja_env.get_template("codex_plan.html")
+    html = template.render(context)
+    return HTMLResponse(html)
 
 @app.post("/apps/recipes/import/upload")
 async def upload_recipe_images_form(
