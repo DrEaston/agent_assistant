@@ -13,7 +13,7 @@
         </div>
 
         <div class="focus-task">
-            <p class="section-subtitle">Focus Task</p>
+            <p class="priority-label">Priority Task</p>
             <h2><a href="/projects/{{ next_action.project_id }}/actions/{{ next_action.id }}">{{ next_action.action }}</a></h2>
             {% if next_action.steps_total %}
                 <div class="focus-progress-row">
@@ -38,7 +38,7 @@
         {% endif %}
     {% elif recommended_project %}
         <div class="focus-task">
-            <p class="section-subtitle">Focus Project</p>
+            <p class="priority-label">Priority Project</p>
             <h2>{{ recommended_project.name }}</h2>
             <p>No open task is defined for this project.</p>
         </div>

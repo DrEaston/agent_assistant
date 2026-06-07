@@ -126,37 +126,56 @@
             border-radius: 4px;
         }
         
-        .action-high, .blocker-high {
+        .action-high {
+            border-left-color: #c0268a;
+            background: #fff7fd;
+        }
+        
+        .blocker-high {
             border-left-color: #e74c3c;
             background: #fdeaea;
         }
-        
+
         .action-medium, .blocker-medium {
             border-left-color: #f39c12;
             background: #fef5e7;
         }
         
-        .action-low, .blocker-low {
+        .action-low {
+            border-left-color: #0891b2;
+            background: #effcff;
+        }
+
+        .blocker-low {
             border-left-color: #27ae60;
             background: #eafaf1;
         }
 
         .focus-panel {
-            background: white;
+            background: #fff7fd;
             border-radius: 8px;
             padding: 1.5rem;
             margin: 1.5rem 0;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            border-top: 4px solid #3498db;
+            border: 1px solid #f2c7e8;
+            border-top: 5px solid #c0268a;
         }
 
         .focus-meta {
             display: flex;
             justify-content: space-between;
             gap: 1rem;
-            color: #667;
+            color: #7a285f;
             font-size: 0.95rem;
             margin-bottom: 1rem;
+        }
+
+        .priority-label {
+            color: #9d1f72;
+            font-weight: 800;
+            letter-spacing: 0.02em;
+            margin: 0 0 0.25rem;
+            text-transform: uppercase;
         }
 
         .focus-task h2 {
@@ -170,7 +189,7 @@
         }
 
         .focus-task a:hover {
-            color: #3498db;
+            color: #c0268a;
         }
 
         .focus-progress-row {
@@ -253,8 +272,16 @@
 
         .task-progress-fill {
             height: 100%;
-            background: #0891b2;
+            background: #c0268a;
             border-radius: inherit;
+        }
+
+        .action-medium .task-progress-fill {
+            background: #f39c12;
+        }
+
+        .action-low .task-progress-fill {
+            background: #0891b2;
         }
 
         .dashboard-step-list {
