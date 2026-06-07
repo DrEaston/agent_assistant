@@ -26,8 +26,8 @@
     </div>
 
     <div class="metric">
-        <div class="metric-value">{{ recipe_images|length }}</div>
-        <div class="metric-label">Images</div>
+        <div class="metric-value">{{ recipe_image_count }}</div>
+        <div class="metric-label">Recipe Images</div>
     </div>
 </div>
 
@@ -74,39 +74,12 @@
             {% endif %}
         </section>
 
-        <section class="detail-section">
-            <div class="section-header">
-                <div>
-                    <h2>Recipe Images</h2>
-                    <p class="section-subtitle">Upload photos from your phone into the import queue.</p>
-                </div>
+        <section class="detail-section app-handoff">
+            <div>
+                <h2>Recipe Import</h2>
+                <p class="section-subtitle">Open the recipe app surface to upload photos and manage the import queue.</p>
             </div>
-
-            <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/recipe-images/upload" enctype="multipart/form-data" class="upload-form">
-                <div class="form-group">
-                    <label for="files">Images</label>
-                    <input type="file" id="files" name="files" accept="image/*" multiple required>
-                </div>
-                <button type="submit">Upload Images</button>
-            </form>
-
-            {% if recipe_images %}
-                <div class="image-grid">
-                    {% for image in recipe_images %}
-                        <article class="image-tile">
-                            <img src="/uploads/{{ image.filename }}" alt="{{ image.original_filename }}">
-                            <div>
-                                <strong>{{ image.original_filename }}</strong>
-                                <small>{{ image.status|upper }} · {{ image.created_at }}</small>
-                            </div>
-                        </article>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <div class="empty-state">
-                    <p>No recipe images uploaded yet.</p>
-                </div>
-            {% endif %}
+            <a class="button-link" href="{{ recipe_import_url }}">Open Recipe Import</a>
         </section>
     </main>
 

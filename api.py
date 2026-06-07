@@ -377,7 +377,7 @@ def project_detail(request: Request, project_id: int):
 
 @app.get("/projects/{project_id}/actions/{action_id}")
 def action_detail(request: Request, project_id: int, action_id: int):
-    """Task detail page with checklist and recipe image import queue."""
+    """Task detail page with checklist and links to app-specific work surfaces."""
     project = dict_from_row(db.get_project_by_id(project_id))
     action = dict_from_row(db.get_recommended_action(action_id))
     if not project or not action or action["project_id"] != project_id:
@@ -388,9 +388,29 @@ def action_detail(request: Request, project_id: int, action_id: int):
         "project": project,
         "action": action,
         "steps": dicts_from_rows(db.get_task_steps(action_id)),
-        "recipe_images": dicts_from_rows(db.get_recipe_images(action_id)),
+        "recipe_image_count": len(db.get_recipe_images(action_id)),
+        "recipe_import_url": f"/apps/recipes/import?project_id={project_id}&action_id={action_id}",
     }
     template = jinja_env.get_template("action_detail.html")
+    html = template.render(context)
+    return HTMLResponse(html)
+
+
+@app.get("/apps/recipes/import")
+def recipe_import_page(request: Request, project_id: int, action_id: int):
+    """Recipe app import surface for uploading recipe images."""
+    project = dict_from_row(db.get_project_by_id(project_id))
+    action = dict_from_row(db.get_recommended_action(action_id))
+    if not project or not action or action["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="Recipe import task not found")
+
+    context = {
+        "request": request,
+        "project": project,
+        "action": action,
+        "recipe_images": dicts_from_rows(db.get_recipe_images(action_id)),
+    }
+    template = jinja_env.get_template("recipe_import.html")
     html = template.render(context)
     return HTMLResponse(html)
 
@@ -437,13 +457,13 @@ def complete_task_step_form(project_id: int, action_id: int, step_id: int):
     db.mark_task_step_complete(step_id)
     return RedirectResponse(url=f"/projects/{project_id}/actions/{action_id}", status_code=303)
 
-@app.post("/projects/{project_id}/actions/{action_id}/recipe-images/upload")
+@app.post("/apps/recipes/import/upload")
 async def upload_recipe_images_form(
-    project_id: int,
-    action_id: int,
+    project_id: int = Form(...),
+    action_id: int = Form(...),
     files: List[UploadFile] = File(...),
 ):
-    """Upload recipe image files for an import task."""
+    """Upload recipe image files to the recipe app import queue."""
     action = dict_from_row(db.get_recommended_action(action_id))
     if not action or action["project_id"] != project_id:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -469,7 +489,10 @@ async def upload_recipe_images_form(
             upload.content_type or "",
         )
 
-    return RedirectResponse(url=f"/projects/{project_id}/actions/{action_id}", status_code=303)
+    return RedirectResponse(
+        url=f"/apps/recipes/import?project_id={project_id}&action_id={action_id}",
+        status_code=303,
+    )
 
 @app.post("/projects/{project_id}/blockers/add")
 @app.post("/projects/{project_id}/blockers/create")

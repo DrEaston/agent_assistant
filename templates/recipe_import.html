@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Recipe Import - Project Agent{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    <a href="/">Dashboard</a> / <a href="/projects/{{ project.id }}">{{ project.name }}</a> / <a href="/projects/{{ project.id }}/actions/{{ action.id }}">{{ action.action }}</a> / Recipe Import
+</div>
+
+<h1>Recipe Import</h1>
+
+<div class="app-shell">
+    <section class="detail-section">
+        <div class="section-header">
+            <div>
+                <h2>Upload Images</h2>
+                <p class="section-subtitle">Add recipe photos from your phone into the import queue.</p>
+            </div>
+        </div>
+
+        <form method="post" action="/apps/recipes/import/upload" enctype="multipart/form-data" class="upload-form">
+            <input type="hidden" name="project_id" value="{{ project.id }}">
+            <input type="hidden" name="action_id" value="{{ action.id }}">
+            <div class="form-group">
+                <label for="files">Images</label>
+                <input type="file" id="files" name="files" accept="image/*" multiple required>
+            </div>
+            <button type="submit">Upload Images</button>
+        </form>
+    </section>
+
+    <section class="detail-section">
+        <div class="section-header">
+            <div>
+                <h2>Import Queue</h2>
+                <p class="section-subtitle">Uploaded images stay here until OCR is ready.</p>
+            </div>
+        </div>
+
+        {% if recipe_images %}
+            <div class="image-grid">
+                {% for image in recipe_images %}
+                    <article class="image-tile">
+                        <img src="/uploads/{{ image.filename }}" alt="{{ image.original_filename }}">
+                        <div>
+                            <strong>{{ image.original_filename }}</strong>
+                            <small>{{ image.status|upper }} - {{ image.created_at }}</small>
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <p>No recipe images uploaded yet.</p>
+            </div>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}
