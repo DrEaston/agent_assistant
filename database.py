@@ -627,6 +627,17 @@ class Database:
         self.conn.commit()
         self.close()
 
+    def update_task_step_text(self, step_id, step):
+        """Update the wording for a checklist step."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE task_steps SET step = ? WHERE id = ?",
+            (step, step_id),
+        )
+        self.conn.commit()
+        self.close()
+
     def mark_task_step_complete(self, step_id):
         """Mark a checklist step as done and complete the parent task if all steps are done."""
         self.connect()

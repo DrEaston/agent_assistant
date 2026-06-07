@@ -158,15 +158,15 @@ def build_step_review(action, steps):
 
     if "recipe image" in action_text or "recipe images" in action_text:
         proposed_steps = [
-            "Deploy the planner and recipe import app to Fly.io with a persistent volume",
-            "Configure hosted DB_PATH and UPLOADS_DIR on the Fly volume",
-            "Open the public Recipe Import page from a phone",
+            "Deploy the planner and recipe import app locally over Wi-Fi for phone access",
+            "Keep local projects.db and uploads/ available for Wi-Fi-hosted phone uploads",
+            "Open the local Wi-Fi Recipe Import page from a phone",
             "Upload the first batch of recipe images",
             "Confirm uploaded images appear in the import queue with metadata",
             "Mark uploaded images ready for OCR",
         ]
         reasons = [
-            "Moves deployment and storage setup before phone testing.",
+            "Reflects the current local Wi-Fi hosting decision.",
             "Separates app deployment from the actual image upload workflow.",
             "Merges overlapping upload/storage/metadata/queue steps into clearer milestones.",
             "Keeps OCR readiness after images are uploaded and visible.",

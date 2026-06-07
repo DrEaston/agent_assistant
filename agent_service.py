@@ -31,9 +31,13 @@ class AgentService:
         fallback = self._fallback_response(user_message, updates, work_packet)
         response = fallback
 
-        needs_clarification = any(update["type"] == "project_clarification_needed" for update in updates)
+        local_response_types = {
+            "project_clarification_needed",
+            "recipe_hosting_plan_updated",
+        }
+        use_local_response = any(update["type"] in local_response_types for update in updates)
 
-        if self.llm_service and not needs_clarification:
+        if self.llm_service and not use_local_response:
             try:
                 prompt = self._build_llm_prompt(user_message, updates, work_packet)
                 response = self.llm_service.chat(prompt, fresh_context, conversation_history)
@@ -66,11 +70,16 @@ class AgentService:
         if not project and (
             self._sounds_like_priority_statement(lower)
             or self._sounds_like_completion(lower)
+            or self._sounds_like_hosting_correction(lower)
         ):
             project = self.build_dashboard_context().get("recommended_project")
             used_context_project = project is not None
 
         if project:
+            hosting_update = self._maybe_update_recipe_hosting_plan(project, text, lower)
+            if hosting_update:
+                updates.append(hosting_update)
+
             priority_update = self._maybe_update_priority(project, lower)
             if priority_update:
                 updates.append(priority_update)
@@ -95,6 +104,13 @@ class AgentService:
             updates.append(self._project_clarification_update())
 
         return updates
+
+    @staticmethod
+    def _sounds_like_hosting_correction(lower):
+        return (
+            ("fly" in lower or "fly.io" in lower)
+            and any(word in lower for word in ["wifi", "wi-fi", "local", "locally", "hosting", "deployment", "deploy"])
+        )
 
     @staticmethod
     def _sounds_like_priority_statement(lower):
@@ -329,6 +345,66 @@ class AgentService:
 
         return updates
 
+    def _maybe_update_recipe_hosting_plan(self, project, text, lower):
+        if "recipe" not in project["name"].lower() or not self._sounds_like_hosting_correction(lower):
+            return None
+
+        action = self.db.find_recommended_action(project["id"], "Import the first batch of recipe images")
+        if not action:
+            return None
+
+        replacements = {
+            "Deploy the planner and recipe import app to Fly.io with a persistent volume":
+                "Deploy the planner and recipe import app locally over Wi-Fi for phone access",
+            "Configure hosted DB_PATH and UPLOADS_DIR on the Fly volume":
+                "Keep local projects.db and uploads/ available for Wi-Fi-hosted phone uploads",
+            "Open the public Recipe Import page from a phone":
+                "Open the local Wi-Fi Recipe Import page from a phone",
+        }
+
+        renamed_steps = []
+        for row in self.db.get_task_steps(action["id"]):
+            step = dict(row)
+            new_text = replacements.get(step["step"])
+            if not new_text:
+                continue
+            self.db.update_task_step_text(step["id"], new_text)
+            renamed_steps.append({"from": step["step"], "to": new_text, "status": step["status"]})
+
+        follow_up = "Revisit Fly.io or another hosted deployment for remote phone access"
+        existing_follow_up = self.db.find_recommended_action(project["id"], follow_up)
+        if existing_follow_up:
+            self.db.update_recommended_action_priority(existing_follow_up["id"], "low")
+            follow_up_added = False
+        else:
+            self.db.add_recommended_action(project["id"], follow_up, "low")
+            follow_up_added = True
+
+        if renamed_steps or follow_up_added:
+            self.db.add_note(
+                project["id"],
+                "Corrected recipe hosting plan: current deployment is local Wi-Fi; Fly.io is a low-priority future option.",
+            )
+            return {
+                "type": "recipe_hosting_plan_updated",
+                "project": project["name"],
+                "renamed_steps": renamed_steps,
+                "follow_up": follow_up,
+                "follow_up_added": follow_up_added,
+            }
+
+        if existing_follow_up:
+            return {
+                "type": "recipe_hosting_plan_updated",
+                "project": project["name"],
+                "renamed_steps": [],
+                "follow_up": follow_up,
+                "follow_up_added": False,
+                "already_current": True,
+            }
+
+        return None
+
     def _project_clarification_update(self):
         projects = [dict(row) for row in self.db.get_all_projects()]
         return {
@@ -358,6 +434,11 @@ class AgentService:
             "deployed",
             "uploaded",
             "set up",
+            "fly",
+            "fly.io",
+            "wifi",
+            "wi-fi",
+            "local hosting",
         ]
 
         if not any(phrase in lower for phrase in mutation_phrases):
@@ -848,6 +929,15 @@ class AgentService:
                 elif update["type"] == "project_clarification_needed":
                     projects = ", ".join(update["projects"])
                     lines.append(f"- Which project should I edit? Available projects: {projects}")
+                elif update["type"] == "recipe_hosting_plan_updated":
+                    if update.get("already_current"):
+                        lines.append(f"- Hosting wording for {update['project']} is already set to local Wi-Fi.")
+                    else:
+                        lines.append(
+                            f"- Updated hosting wording for {update['project']}: "
+                            f"{len(update['renamed_steps'])} step(s) now say local Wi-Fi instead of Fly.io."
+                        )
+                    lines.append(f"- Low-priority follow-up: {update['follow_up']}")
                 elif update["type"] == "project_created":
                     lines.append(f"- Created project: {update['project']}.")
                 elif update["type"].endswith("_added"):
