@@ -74,13 +74,34 @@
 <h2><span class="emoji">⚡</span>Recommended Next Actions</h2>
 {% if actions %}
     {% for action in actions %}
-        <div class="action action-{{ action.priority }}">
-            <span class="badge badge-{{ action.priority }}">{{ action.priority|upper }}</span>
-            <strong>
-                {% set project = projects|selectattr('id', 'equalto', action.project_id)|first %}
-                [{{ project.name }}]
-            </strong>
-            {{ action.action }}
+        <div class="action action-{{ action.priority }} dashboard-action">
+            <div class="dashboard-action-header">
+                <div>
+                    <span class="badge badge-{{ action.priority }}">{{ action.priority|upper }}</span>
+                    <strong>
+                        {% set project = projects|selectattr('id', 'equalto', action.project_id)|first %}
+                        [{{ project.name }}]
+                    </strong>
+                    <a href="/projects/{{ action.project_id }}/actions/{{ action.id }}">{{ action.action }}</a>
+                </div>
+                {% if action.steps_total %}
+                    <span class="progress-count">{{ action.steps_done }}/{{ action.steps_total }} steps</span>
+                {% endif %}
+            </div>
+
+            {% if action.steps_total %}
+                <div class="task-progress" aria-label="{{ action.steps_done }} of {{ action.steps_total }} steps complete">
+                    <div class="task-progress-fill" style="width: {{ action.progress_percent }}%;"></div>
+                </div>
+            {% endif %}
+
+            {% if action.top_open_steps %}
+                <ol class="dashboard-step-list">
+                    {% for step in action.top_open_steps %}
+                        <li>{{ step.step }}</li>
+                    {% endfor %}
+                </ol>
+            {% endif %}
         </div>
     {% endfor %}
 {% else %}

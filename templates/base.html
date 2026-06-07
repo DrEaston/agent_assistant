@@ -140,6 +140,60 @@
             border-left-color: #27ae60;
             background: #eafaf1;
         }
+
+        .dashboard-action {
+            display: grid;
+            gap: 0.65rem;
+        }
+
+        .dashboard-action-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: start;
+        }
+
+        .dashboard-action-header a {
+            color: #2c3e50;
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .dashboard-action-header a:hover {
+            color: #3498db;
+        }
+
+        .progress-count {
+            color: #667;
+            font-size: 0.9rem;
+            white-space: nowrap;
+            margin-top: 0.25rem;
+        }
+
+        .task-progress {
+            height: 0.45rem;
+            background: rgba(255,255,255,0.8);
+            border: 1px solid rgba(0,0,0,0.08);
+            border-radius: 999px;
+            overflow: hidden;
+        }
+
+        .task-progress-fill {
+            height: 100%;
+            background: #0891b2;
+            border-radius: inherit;
+        }
+
+        .dashboard-step-list {
+            margin: 0;
+            padding-left: 1.25rem;
+            color: #52616f;
+            font-size: 0.95rem;
+        }
+
+        .dashboard-step-list li + li {
+            margin-top: 0.25rem;
+        }
         
         .goal {
             border-left-color: #3498db;

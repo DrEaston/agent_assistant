@@ -109,6 +109,7 @@ class AgentService:
             for action in actions:
                 action["project_name"] = project["name"]
                 action["project_priority_score"] = project.get("priority_score", 3)
+                self._attach_step_summary(action)
                 all_actions.append(action)
 
             for blocker in blockers:
@@ -140,6 +141,18 @@ class AgentService:
                 "total_goals": len(all_goals),
             },
         }
+
+    def _attach_step_summary(self, action):
+        steps = [dict(row) for row in self.db.get_task_steps(action["id"])]
+        active_steps = [step for step in steps if step["status"] in ["open", "done"]]
+        done_steps = [step for step in active_steps if step["status"] == "done"]
+        open_steps = [step for step in active_steps if step["status"] == "open"]
+        total = len(active_steps)
+
+        action["steps_total"] = total
+        action["steps_done"] = len(done_steps)
+        action["progress_percent"] = round((len(done_steps) / total) * 100) if total else 0
+        action["top_open_steps"] = open_steps[:2]
 
     def build_work_packet(self, context):
         project = context.get("recommended_project")
