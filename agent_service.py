@@ -125,13 +125,30 @@ class AgentService:
 
         recommended_project = self._choose_focus_project(projects, all_actions, all_blockers)
         next_action = self._choose_next_action(recommended_project, all_actions)
+        other_actions = [
+            action for action in all_actions
+            if not next_action or action["id"] != next_action["id"]
+        ]
+        other_project_actions = [
+            action for action in other_actions
+            if not recommended_project or action["project_id"] != recommended_project["id"]
+        ]
+        if len(other_project_actions) < 3:
+            seen_projects = {action["project_id"] for action in other_project_actions}
+            for action in other_actions:
+                if action["project_id"] in seen_projects:
+                    continue
+                other_project_actions.append(action)
+                seen_projects.add(action["project_id"])
+                if len(other_project_actions) >= 3:
+                    break
 
         return {
             "projects": projects,
             "recommended_project": recommended_project,
             "next_action": next_action,
             "blockers": all_blockers,
-            "actions": all_actions[:8],
+            "actions": other_project_actions[:3],
             "goals": all_goals,
             "stats": {
                 "total_projects": len(projects),

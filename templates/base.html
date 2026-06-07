@@ -141,6 +141,79 @@
             background: #eafaf1;
         }
 
+        .focus-panel {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin: 1.5rem 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-top: 4px solid #3498db;
+        }
+
+        .focus-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            color: #667;
+            font-size: 0.95rem;
+            margin-bottom: 1rem;
+        }
+
+        .focus-task h2 {
+            margin: 0.25rem 0 1rem;
+            font-size: 1.65rem;
+        }
+
+        .focus-task a {
+            color: #2c3e50;
+            text-decoration: none;
+        }
+
+        .focus-task a:hover {
+            color: #3498db;
+        }
+
+        .focus-progress-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            color: #52616f;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .focus-progress {
+            height: 0.65rem;
+        }
+
+        .focus-next-steps {
+            margin-top: 1.25rem;
+            padding-top: 1rem;
+            border-top: 1px solid #eee;
+        }
+
+        .focus-next-steps h3 {
+            margin: 0 0 0.5rem;
+            font-size: 1rem;
+        }
+
+        .focus-next-steps ol {
+            margin: 0;
+            padding-left: 1.25rem;
+            color: #52616f;
+        }
+
+        .focus-next-steps li + li {
+            margin-top: 0.35rem;
+        }
+
+        .dashboard-two-column {
+            display: grid;
+            grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.8fr);
+            gap: 1.5rem;
+            align-items: start;
+        }
+
         .dashboard-action {
             display: grid;
             gap: 0.65rem;
@@ -193,6 +266,31 @@
 
         .dashboard-step-list li + li {
             margin-top: 0.25rem;
+        }
+
+        .compact-action {
+            padding: 0.85rem 1rem;
+        }
+
+        .quiet-list {
+            display: grid;
+            gap: 0.5rem;
+        }
+
+        .quiet-list a {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            background: white;
+            border: 1px solid #e8e8e8;
+            border-radius: 8px;
+            padding: 0.85rem 1rem;
+            color: #2c3e50;
+            text-decoration: none;
+        }
+
+        .quiet-list a:hover {
+            border-color: #3498db;
         }
         
         .goal {
@@ -794,6 +892,15 @@
             .task-detail-layout,
             .project-detail-layout {
                 grid-template-columns: 1fr;
+            }
+
+            .dashboard-two-column {
+                grid-template-columns: 1fr;
+            }
+
+            .focus-meta,
+            .focus-progress-row {
+                flex-direction: column;
             }
 
             .review-grid {
