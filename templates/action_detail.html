@@ -39,6 +39,9 @@
                     <h2>Steps</h2>
                     <p class="section-subtitle">Break this task into smaller things you can finish.</p>
                 </div>
+                <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/steps/review" class="inline-form">
+                    <button type="submit" class="secondary compact">Review Steps</button>
+                </form>
                 <details class="inline-create">
                     <summary>Add Step</summary>
                     <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/steps/create">

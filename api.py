@@ -106,6 +106,49 @@ def dicts_from_rows(rows):
     """Convert list of sqlite3.Row to list of dicts."""
     return [dict(r) for r in rows]
 
+def normalize_step_text(text):
+    """Normalize step text for lightweight duplicate detection."""
+    return " ".join(text.lower().strip(" .,:;-").split())
+
+def build_step_review(action, steps):
+    """Build a conservative, previewable cleanup proposal for task steps."""
+    open_steps = [step for step in steps if step["status"] == "open"]
+    current_steps = [step["step"] for step in open_steps]
+    action_text = action["action"].lower()
+
+    if "recipe image" in action_text or "recipe images" in action_text:
+        proposed_steps = [
+            "Deploy the planner and recipe import app to Fly.io with a persistent volume",
+            "Configure hosted DB_PATH and UPLOADS_DIR on the Fly volume",
+            "Open the public Recipe Import page from a phone",
+            "Upload the first batch of recipe images",
+            "Confirm uploaded images appear in the import queue with metadata",
+            "Mark uploaded images ready for OCR",
+        ]
+        reasons = [
+            "Moves deployment and storage setup before phone testing.",
+            "Separates app deployment from the actual image upload workflow.",
+            "Merges overlapping upload/storage/metadata/queue steps into clearer milestones.",
+            "Keeps OCR readiness after images are uploaded and visible.",
+        ]
+    else:
+        proposed_steps = []
+        seen = set()
+        for step in current_steps:
+            normalized = normalize_step_text(step)
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                proposed_steps.append(step.strip())
+        reasons = ["Removed exact duplicate open steps."] if len(proposed_steps) != len(current_steps) else [
+            "No obvious cleanup found; proposed order preserves the current open steps."
+        ]
+
+    return {
+        "current_steps": current_steps,
+        "proposed_steps": proposed_steps,
+        "reasons": reasons,
+    }
+
 
 # ============================================================================
 # API ROUTES - DASHBOARD
@@ -402,6 +445,32 @@ def action_detail(request: Request, project_id: int, action_id: int):
     return HTMLResponse(html)
 
 
+@app.get("/projects/{project_id}/actions/{action_id}/steps/reviews/{review_id}")
+def step_review_detail(request: Request, project_id: int, action_id: int, review_id: int):
+    """Preview a proposed step cleanup before applying it."""
+    project = dict_from_row(db.get_project_by_id(project_id))
+    action = dict_from_row(db.get_recommended_action(action_id))
+    review = dict_from_row(db.get_task_step_review(review_id))
+    if not project or not action or not review:
+        raise HTTPException(status_code=404, detail="Step review not found")
+    if action["project_id"] != project_id or review["action_id"] != action_id:
+        raise HTTPException(status_code=404, detail="Step review not found")
+
+    payload = json.loads(review["payload"])
+    context = {
+        "request": request,
+        "project": project,
+        "action": action,
+        "review": review,
+        "current_steps": payload.get("current_steps", []),
+        "proposed_steps": payload.get("proposed_steps", []),
+        "reasons": payload.get("reasons", []),
+    }
+    template = jinja_env.get_template("step_review.html")
+    html = template.render(context)
+    return HTMLResponse(html)
+
+
 @app.get("/apps/recipes/import")
 def recipe_import_page(request: Request, project_id: int, action_id: int):
     """Recipe app import surface for uploading recipe images."""
@@ -461,6 +530,35 @@ def add_task_step_form(project_id: int, action_id: int, step: str = Form(...)):
 def complete_task_step_form(project_id: int, action_id: int, step_id: int):
     """Mark a task checklist step complete."""
     db.mark_task_step_complete(step_id)
+    return RedirectResponse(url=f"/projects/{project_id}/actions/{action_id}", status_code=303)
+
+@app.post("/projects/{project_id}/actions/{action_id}/steps/review")
+def create_step_review_form(project_id: int, action_id: int):
+    """Create a previewable cleanup proposal for a task's open steps."""
+    action = dict_from_row(db.get_recommended_action(action_id))
+    if not action or action["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    steps = dicts_from_rows(db.get_task_steps(action_id))
+    payload = build_step_review(action, steps)
+    summary = "Suggested cleanup for task steps"
+    review_id = db.create_task_step_review(action_id, summary, payload)
+    return RedirectResponse(
+        url=f"/projects/{project_id}/actions/{action_id}/steps/reviews/{review_id}",
+        status_code=303,
+    )
+
+@app.post("/projects/{project_id}/actions/{action_id}/steps/reviews/{review_id}/apply")
+def apply_step_review_form(project_id: int, action_id: int, review_id: int):
+    """Apply a pending task step cleanup proposal."""
+    action = dict_from_row(db.get_recommended_action(action_id))
+    review = dict_from_row(db.get_task_step_review(review_id))
+    if not action or not review or action["project_id"] != project_id or review["action_id"] != action_id:
+        raise HTTPException(status_code=404, detail="Step review not found")
+
+    applied = db.apply_task_step_review(review_id)
+    if not applied:
+        raise HTTPException(status_code=400, detail="Step review has already been applied or is unavailable")
     return RedirectResponse(url=f"/projects/{project_id}/actions/{action_id}", status_code=303)
 
 @app.post("/apps/recipes/import/upload")

@@ -116,6 +116,19 @@ class Database:
         """)
 
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS task_step_reviews (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action_id INTEGER NOT NULL,
+                summary TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                status TEXT DEFAULT 'pending',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                applied_at TEXT DEFAULT '',
+                FOREIGN KEY (action_id) REFERENCES recommended_actions(id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS priority_reviews (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 summary TEXT NOT NULL,
@@ -563,7 +576,7 @@ class Database:
         cursor.execute(
             """
             SELECT * FROM task_steps
-            WHERE action_id = ?
+            WHERE action_id = ? AND status != 'archived'
             ORDER BY
                 CASE status WHEN 'open' THEN 1 WHEN 'done' THEN 2 ELSE 3 END,
                 sort_order ASC,
@@ -605,6 +618,79 @@ class Database:
         )
         self.conn.commit()
         self.close()
+
+    def create_task_step_review(self, action_id, summary, payload):
+        """Store a pending step cleanup review."""
+        import json
+
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO task_step_reviews (action_id, summary, payload)
+            VALUES (?, ?, ?)
+            """,
+            (action_id, summary, json.dumps(payload)),
+        )
+        self.conn.commit()
+        review_id = cursor.lastrowid
+        self.close()
+        return review_id
+
+    def get_task_step_review(self, review_id):
+        """Get a stored task step cleanup review."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM task_step_reviews WHERE id = ?", (review_id,))
+        review = cursor.fetchone()
+        self.close()
+        return review
+
+    def apply_task_step_review(self, review_id):
+        """Apply a task step cleanup review by replacing open steps."""
+        import json
+
+        self.connect()
+        cursor = self.conn.cursor()
+        review = cursor.execute(
+            "SELECT * FROM task_step_reviews WHERE id = ?",
+            (review_id,),
+        ).fetchone()
+        if not review or review["status"] != "pending":
+            self.close()
+            return False
+
+        payload = json.loads(review["payload"])
+        action_id = review["action_id"]
+        cursor.execute(
+            """
+            UPDATE task_steps
+            SET status = 'archived'
+            WHERE action_id = ? AND status = 'open'
+            """,
+            (action_id,),
+        )
+
+        for index, step in enumerate(payload.get("proposed_steps", []), 1):
+            cursor.execute(
+                """
+                INSERT INTO task_steps (action_id, step, sort_order)
+                VALUES (?, ?, ?)
+                """,
+                (action_id, step, index * 10),
+            )
+
+        cursor.execute(
+            """
+            UPDATE task_step_reviews
+            SET status = 'applied', applied_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (review_id,),
+        )
+        self.conn.commit()
+        self.close()
+        return True
 
     def get_recipe_images(self, action_id):
         """Get uploaded recipe images for a task."""

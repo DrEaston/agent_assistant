@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Review Steps - Project Agent{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    <a href="/">Dashboard</a> / <a href="/projects">Projects</a> / <a href="/projects/{{ project.id }}">{{ project.name }}</a> / <a href="/projects/{{ project.id }}/actions/{{ action.id }}">{{ action.action }}</a> / Step Review
+</div>
+
+<h1>Review Steps</h1>
+
+<section class="detail-section">
+    <div class="section-header">
+        <div>
+            <h2>{{ review.summary }}</h2>
+            <p class="section-subtitle">Preview the cleanup before changing the task checklist.</p>
+        </div>
+    </div>
+
+    {% if reasons %}
+        <div class="review-notes">
+            {% for reason in reasons %}
+                <p>{{ reason }}</p>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    <div class="review-grid">
+        <div>
+            <h3>Current Open Steps</h3>
+            {% if current_steps %}
+                <ol class="review-list">
+                    {% for step in current_steps %}
+                        <li>{{ step }}</li>
+                    {% endfor %}
+                </ol>
+            {% else %}
+                <div class="empty-state">
+                    <p>No open steps to review.</p>
+                </div>
+            {% endif %}
+        </div>
+
+        <div>
+            <h3>Proposed Steps</h3>
+            {% if proposed_steps %}
+                <ol class="review-list">
+                    {% for step in proposed_steps %}
+                        <li>{{ step }}</li>
+                    {% endfor %}
+                </ol>
+            {% else %}
+                <div class="empty-state">
+                    <p>No proposed steps.</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="actions-row">
+        <a class="button-link secondary-link" href="/projects/{{ project.id }}/actions/{{ action.id }}">Cancel</a>
+        {% if review.status == 'pending' and proposed_steps %}
+            <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/steps/reviews/{{ review.id }}/apply" class="inline-form">
+                <button type="submit">Apply Cleanup</button>
+            </form>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}

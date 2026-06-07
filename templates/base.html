@@ -527,11 +527,48 @@
             background: #2980b9;
         }
 
+        .secondary-link {
+            background: #95a5a6;
+        }
+
+        .secondary-link:hover {
+            background: #7f8c8d;
+        }
+
         .app-handoff {
             display: flex;
             justify-content: space-between;
             gap: 1rem;
             align-items: center;
+        }
+
+        .review-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1.5rem;
+            margin: 1rem 0;
+        }
+
+        .review-list {
+            background: #fff;
+            border: 1px solid #e8e8e8;
+            border-radius: 8px;
+            padding: 1rem 1rem 1rem 2.25rem;
+        }
+
+        .review-list li + li {
+            margin-top: 0.75rem;
+        }
+
+        .review-notes {
+            background: #f7fbff;
+            border: 1px solid #d9ecfb;
+            border-radius: 8px;
+            padding: 1rem;
+        }
+
+        .review-notes p + p {
+            margin-top: 0.5rem;
         }
 
         .upload-form {
@@ -641,6 +678,10 @@
         @media (max-width: 850px) {
             .task-detail-layout,
             .project-detail-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .review-grid {
                 grid-template-columns: 1fr;
             }
 
