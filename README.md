@@ -59,19 +59,44 @@ http://localhost:8000
 docker-compose down
 ```
 
-### Deploy on Render
+### Deploy on Fly.io
 
-This repo includes `render.yaml` for a Docker web service with a persistent disk. The disk keeps `projects.db` and uploaded recipe images across deploys/restarts.
+This repo includes `fly.toml` for a Docker web service with a persistent Fly Volume. The volume keeps `projects.db` and uploaded recipe images across deploys/restarts.
 
-1. Push the repo to GitHub.
-2. In Render, create a new Blueprint from this repo.
-3. Set `OPENAI_API_KEY` when Render prompts for it, or leave it blank to use the local planner without LLM calls.
-4. Deploy the service.
+1. Install the Fly CLI:
+```powershell
+powershell -Command "iwr https://fly.io/install.ps1 -useb | iex"
+```
+
+2. Sign in:
+```powershell
+fly auth login
+```
+
+3. Create the app if it does not exist yet:
+```powershell
+fly apps create agent-assistant-dreaston
+```
+
+4. Create the persistent volume:
+```powershell
+fly volumes create agent_assistant_data --size 1 --region lax
+```
+
+5. Set the OpenAI key if you want the chat/review features available on the hosted app:
+```powershell
+fly secrets set OPENAI_API_KEY=your_key_here
+```
+
+6. Deploy:
+```powershell
+fly deploy
+```
 
 The deployed recipe upload page will be:
 
 ```text
-https://<your-render-service>.onrender.com/apps/recipes/import?project_id=2&action_id=10
+https://agent-assistant-dreaston.fly.dev/apps/recipes/import?project_id=2&action_id=10
 ```
 
 The deploy uses:
