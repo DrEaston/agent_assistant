@@ -126,6 +126,8 @@ class Database:
         self._ensure_column(cursor, "projects", "priority_score", "INTEGER DEFAULT 3")
         self._ensure_column(cursor, "projects", "focus_reason", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "recommended_actions", "sort_order", "INTEGER DEFAULT 100")
+        self._ensure_column(cursor, "recommended_actions", "status", "TEXT DEFAULT 'open'")
+        self._ensure_column(cursor, "recommended_actions", "completed_at", "TEXT DEFAULT ''")
         self._repair_sample_data_links(cursor)
         self._deprioritize_overlong_actions(cursor)
 
@@ -374,6 +376,36 @@ class Database:
             SELECT * FROM recommended_actions
             WHERE project_id = ?
             ORDER BY
+                CASE status
+                    WHEN 'open' THEN 1
+                    WHEN 'done' THEN 2
+                    WHEN 'archived' THEN 3
+                    ELSE 4
+                END,
+                CASE priority
+                    WHEN 'high' THEN 1
+                    WHEN 'medium' THEN 2
+                    WHEN 'low' THEN 3
+                    ELSE 4
+                END,
+                sort_order ASC,
+                id DESC
+            """,
+            (project_id,),
+        )
+        actions = cursor.fetchall()
+        self.close()
+        return actions
+
+    def get_open_recommended_actions(self, project_id):
+        """Get open recommended actions for a project."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM recommended_actions
+            WHERE project_id = ? AND status = 'open'
+            ORDER BY
                 CASE priority
                     WHEN 'high' THEN 1
                     WHEN 'medium' THEN 2
@@ -418,6 +450,21 @@ class Database:
         cursor.execute(
             "UPDATE recommended_actions SET sort_order = ? WHERE id = ?",
             (sort_order, action_id),
+        )
+        self.conn.commit()
+        self.close()
+
+    def mark_recommended_action_complete(self, action_id):
+        """Mark a recommended action as done."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE recommended_actions
+            SET status = 'done', completed_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (action_id,),
         )
         self.conn.commit()
         self.close()

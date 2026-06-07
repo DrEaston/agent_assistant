@@ -66,6 +66,10 @@ class AgentService:
             if priority_update:
                 updates.append(priority_update)
 
+            completion_update = self._maybe_complete_action(project, text, lower)
+            if completion_update:
+                updates.append(completion_update)
+
             for update in self._maybe_add_priority_from_text(project, text, lower):
                 updates.append(update)
 
@@ -98,7 +102,7 @@ class AgentService:
         all_goals = []
 
         for project in projects:
-            actions = [dict(row) for row in self.db.get_recommended_actions(project["id"])]
+            actions = [dict(row) for row in self.db.get_open_recommended_actions(project["id"])]
             blockers = [dict(row) for row in self.db.get_blockers(project["id"])]
             goals = [dict(row) for row in self.db.get_weekly_goals(project["id"])]
 
@@ -205,6 +209,34 @@ class AgentService:
             return {"type": "priority_updated", "project": project["name"], "priority_score": 1}
 
         return None
+
+    def _maybe_complete_action(self, project, text, lower):
+        if not any(
+            phrase in lower
+            for phrase in [
+                "finished",
+                "complete",
+                "completed",
+                "done",
+                "mark",
+            ]
+        ):
+            return None
+
+        if any(phrase in lower for phrase in ["not done", "not complete", "isn't done", "is not done"]):
+            return None
+
+        action = self._find_action_in_text(text, self._open_actions_for_project(project["id"]))
+        if not action:
+            return None
+
+        self.db.mark_recommended_action_complete(action["id"])
+        self.db.add_note(project["id"], f"Completed task: {action['action']}")
+        return {
+            "type": "action_completed",
+            "project": project["name"],
+            "action": action["action"],
+        }
 
     def _maybe_add_project_items(self, project, text):
         patterns = [
@@ -518,6 +550,15 @@ class AgentService:
             actions.append(action)
         return actions
 
+    def _open_actions_for_project(self, project_id):
+        actions = []
+        project = dict(self.db.get_project_by_id(project_id))
+        for row in self.db.get_open_recommended_actions(project_id):
+            action = dict(row)
+            action["project_name"] = project["name"]
+            actions.append(action)
+        return actions
+
     def _choose_focus_project(self, projects, actions, blockers):
         if not projects:
             return None
@@ -582,6 +623,8 @@ class AgentService:
                     lines.append(
                         f"- Added {update['priority']}-priority action for {update['project']}: {update['action']}"
                     )
+                elif update["type"] == "action_completed":
+                    lines.append(f"- Completed action for {update['project']}: {update['action']}")
                 elif update["type"] == "project_created":
                     lines.append(f"- Created project: {update['project']}.")
                 elif update["type"].endswith("_added"):

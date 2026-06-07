@@ -245,6 +245,12 @@ def api_add_action(project_id: int, action: ActionIn):
     db.add_recommended_action(project_id, action.title, action.priority)
     return {"status": "success"}
 
+@app.post("/api/projects/{project_id}/actions/{action_id}/complete")
+def api_complete_action(project_id: int, action_id: int):
+    """Mark an action as complete."""
+    db.mark_recommended_action_complete(action_id)
+    return {"status": "success"}
+
 
 # ============================================================================
 # API ROUTES - BLOCKERS
@@ -384,6 +390,12 @@ def add_note_form(project_id: int, content: str = Form(...)):
 def add_action_form(project_id: int, title: str = Form(None), action: str = Form(None), priority: str = Form(...)):
     """Add action via form."""
     db.add_recommended_action(project_id, title or action, priority)
+    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
+
+@app.post("/projects/{project_id}/actions/{action_id}/complete")
+def complete_action_form(project_id: int, action_id: int):
+    """Mark action complete via form."""
+    db.mark_recommended_action_complete(action_id)
     return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
 
 @app.post("/projects/{project_id}/blockers/add")

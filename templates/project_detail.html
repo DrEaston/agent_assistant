@@ -20,8 +20,8 @@
     </div>
 
     <div class="metric">
-        <div class="metric-value">{{ actions|length }}</div>
-        <div class="metric-label">Tasks</div>
+        <div class="metric-value">{{ actions|selectattr('status', 'equalto', 'open')|list|length }}</div>
+        <div class="metric-label">Open Tasks</div>
     </div>
 
     <div class="metric">
@@ -63,15 +63,21 @@
                 </details>
             </div>
 
-            {% if actions %}
+            {% set open_actions = actions|selectattr('status', 'equalto', 'open')|list %}
+            {% set completed_actions = actions|selectattr('status', 'equalto', 'done')|list %}
+
+            {% if open_actions %}
                 <div class="task-list">
-                    {% for action in actions %}
+                    {% for action in open_actions %}
                         <article class="task-item priority-{{ action.priority }}">
                             <span class="priority-dot" aria-hidden="true"></span>
                             <div class="task-copy">
                                 <span class="badge badge-{{ action.priority }}">{{ action.priority|upper }}</span>
                                 <p>{{ action.action }}</p>
                             </div>
+                            <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/complete" class="inline-form">
+                                <button type="submit" class="secondary compact">Done</button>
+                            </form>
                         </article>
                     {% endfor %}
                 </div>
@@ -79,6 +85,26 @@
                 <div class="empty-state">
                     <p>No tasks yet.</p>
                 </div>
+            {% endif %}
+
+            {% if completed_actions %}
+                <details class="completed-tasks">
+                    <summary>Completed Tasks ({{ completed_actions|length }})</summary>
+                    <div class="task-list">
+                        {% for action in completed_actions %}
+                            <article class="task-item completed">
+                                <span class="priority-dot" aria-hidden="true"></span>
+                                <div class="task-copy">
+                                    <span class="badge badge-{{ action.priority }}">{{ action.priority|upper }}</span>
+                                    <p>{{ action.action }}</p>
+                                    {% if action.completed_at %}
+                                        <small>Completed {{ action.completed_at }}</small>
+                                    {% endif %}
+                                </div>
+                            </article>
+                        {% endfor %}
+                    </div>
+                </details>
             {% endif %}
         </section>
 

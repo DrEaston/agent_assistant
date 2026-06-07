@@ -386,13 +386,22 @@
 
         .task-item {
             display: grid;
-            grid-template-columns: 0.65rem minmax(0, 1fr);
+            grid-template-columns: 0.65rem minmax(0, 1fr) auto;
             gap: 0.85rem;
             align-items: start;
             padding: 0.95rem 1rem;
             border: 1px solid #e8e8e8;
             border-radius: 8px;
             background: #fff;
+        }
+
+        .task-item.completed {
+            grid-template-columns: 0.65rem minmax(0, 1fr);
+            opacity: 0.62;
+        }
+
+        .task-item.completed .task-copy p {
+            text-decoration: line-through;
         }
 
         .priority-dot {
@@ -455,6 +464,17 @@
             display: block;
             color: #888;
             margin-top: 0.5rem;
+        }
+
+        .completed-tasks {
+            margin-top: 1rem;
+        }
+
+        .completed-tasks summary {
+            cursor: pointer;
+            color: #667;
+            font-weight: 600;
+            margin-bottom: 0.75rem;
         }
 
         .inline-form {
