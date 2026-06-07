@@ -31,7 +31,9 @@ class AgentService:
         fallback = self._fallback_response(user_message, updates, work_packet)
         response = fallback
 
-        if self.llm_service:
+        needs_clarification = any(update["type"] == "project_clarification_needed" for update in updates)
+
+        if self.llm_service and not needs_clarification:
             try:
                 prompt = self._build_llm_prompt(user_message, updates, work_packet)
                 response = self.llm_service.chat(prompt, fresh_context, conversation_history)
@@ -57,12 +59,16 @@ class AgentService:
         for update in self._maybe_update_action_priorities(text, lower):
             updates.append(update)
 
+        pre_project_update_count = len(updates)
         project = self._find_project_in_text(text)
+        explicit_project = project is not None
+        used_context_project = False
         if not project and (
             self._sounds_like_priority_statement(lower)
             or self._sounds_like_completion(lower)
         ):
             project = self.build_dashboard_context().get("recommended_project")
+            used_context_project = project is not None
 
         if project:
             priority_update = self._maybe_update_priority(project, lower)
@@ -83,6 +89,10 @@ class AgentService:
 
             for update in self._maybe_add_project_items(project, text):
                 updates.append(update)
+
+        project_updates_applied = len(updates) > pre_project_update_count
+        if self._needs_project_clarification(lower, explicit_project, used_context_project, project_updates_applied):
+            updates.append(self._project_clarification_update())
 
         return updates
 
@@ -318,6 +328,42 @@ class AgentService:
                 updates.append({"type": update_type, "project": project["name"], label: content})
 
         return updates
+
+    def _project_clarification_update(self):
+        projects = [dict(row) for row in self.db.get_all_projects()]
+        return {
+            "type": "project_clarification_needed",
+            "projects": [project["name"] for project in projects],
+        }
+
+    @staticmethod
+    def _needs_project_clarification(lower, explicit_project, used_context_project, project_updates_applied):
+        if explicit_project or project_updates_applied:
+            return False
+
+        mutation_phrases = [
+            "add action",
+            "add blocker",
+            "add goal",
+            "add note",
+            "action:",
+            "blocker:",
+            "goal:",
+            "note:",
+            "finished",
+            "complete",
+            "completed",
+            "done",
+            "mark",
+            "deployed",
+            "uploaded",
+            "set up",
+        ]
+
+        if not any(phrase in lower for phrase in mutation_phrases):
+            return False
+
+        return not used_context_project or not project_updates_applied
 
     @staticmethod
     def _looks_like_multi_step_plan(content):
@@ -774,7 +820,8 @@ class AgentService:
     def _fallback_response(user_message, updates, work_packet):
         lines = []
         if updates:
-            lines.append("Updated your project memory.")
+            only_clarification = all(update["type"] == "project_clarification_needed" for update in updates)
+            lines.append("I need one detail before I update anything." if only_clarification else "Updated your project memory.")
             for update in updates:
                 if update["type"] == "priority_updated":
                     lines.append(f"- {update['project']} is now priority {update['priority_score']}/5.")
@@ -798,6 +845,9 @@ class AgentService:
                         f"- That step was already marked done for {update['project']}: "
                         f"{update['step']} ({update['action']})"
                     )
+                elif update["type"] == "project_clarification_needed":
+                    projects = ", ".join(update["projects"])
+                    lines.append(f"- Which project should I edit? Available projects: {projects}")
                 elif update["type"] == "project_created":
                     lines.append(f"- Created project: {update['project']}.")
                 elif update["type"].endswith("_added"):

@@ -104,7 +104,29 @@ async function loadHistory() {
 
         messages.innerHTML = "";
         history.length = 0;
-        persisted.forEach((message) => {
+        const recentCount = 8;
+        const older = persisted.slice(0, Math.max(0, persisted.length - recentCount));
+        const recent = persisted.slice(-recentCount);
+
+        if (older.length) {
+            const archive = document.createElement("details");
+            archive.className = "chat-history-archive";
+            const summary = document.createElement("summary");
+            summary.textContent = `Previous Messages (${older.length})`;
+            archive.appendChild(summary);
+
+            older.forEach((message) => {
+                const role = message.role === "assistant" ? "agent" : "user";
+                const node = document.createElement("div");
+                node.className = `chat-message ${role}`;
+                node.textContent = message.content;
+                archive.appendChild(node);
+            });
+
+            messages.appendChild(archive);
+        }
+
+        recent.forEach((message) => {
             const role = message.role === "assistant" ? "agent" : "user";
             addMessage(role, message.content);
             history.push({
