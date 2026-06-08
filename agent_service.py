@@ -31,11 +31,7 @@ class AgentService:
         fallback = self._fallback_response(user_message, updates, work_packet)
         response = fallback
 
-        local_response_types = {
-            "project_clarification_needed",
-            "recipe_hosting_plan_updated",
-        }
-        use_local_response = any(update["type"] in local_response_types for update in updates)
+        use_local_response = bool(updates)
 
         if self.llm_service and not use_local_response:
             try:
@@ -891,7 +887,8 @@ class AgentService:
         return (
             "The user is chatting with their personal project-priority agent. "
             "Use the project context to answer conversationally. If updates were applied, "
-            "briefly acknowledge them. End with a crisp work packet they can hand to a coding agent.\n\n"
+            "briefly acknowledge them. Do not include a work packet, task list, or what-to-do-next section "
+            "unless the user explicitly asks what to work on next, asks for a plan, or asks for a work packet.\n\n"
             f"User message: {user_message}\n"
             f"Applied updates: {updates or 'none'}\n"
             f"Current work packet: {work_packet}"
@@ -900,6 +897,19 @@ class AgentService:
     @staticmethod
     def _fallback_response(user_message, updates, work_packet):
         lines = []
+        lower = user_message.lower()
+        wants_next_context = any(
+            phrase in lower
+            for phrase in [
+                "what should i work on",
+                "what next",
+                "next action",
+                "work packet",
+                "action plan",
+                "plan for codex",
+            ]
+        )
+
         if updates:
             only_clarification = all(update["type"] == "project_clarification_needed" for update in updates)
             lines.append("I need one detail before I update anything." if only_clarification else "Updated your project memory.")
@@ -942,8 +952,13 @@ class AgentService:
                     lines.append(f"- Created project: {update['project']}.")
                 elif update["type"].endswith("_added"):
                     lines.append(f"- Added {update['type'].replace('_added', '')} for {update['project']}.")
+
+            return "\n".join(lines)
         else:
             lines.append("I checked your project state.")
+
+        if not wants_next_context:
+            return "\n".join(lines)
 
         lines.append("")
         lines.append(f"Focus: {work_packet.get('project') or 'No project selected'}")
