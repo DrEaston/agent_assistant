@@ -28,10 +28,42 @@ Return only JSON with this shape:
   "uncertain": []
 }
 
-Preserve wording when possible. If the card clearly contains multiple side
-dishes, sauces, or components, split those into separate sections. If text is
-unclear, put a short note in "uncertain" rather than inventing missing words.
+Title rules:
+- "title" must be the visible or best inferred recipe name, not a category.
+- Good titles look like "Jammin' Fig Pork Chops with Broccoli and Crispy Potatoes".
+- Bad titles are generic labels like "Main", "Side", "Recipe", "Dinner", or "Dish".
+- If no exact title is visible, infer a concise title from the main ingredients
+  and add an uncertainty note. Do not leave it as "Main".
+
+Section rules:
+- The primary/main section title should usually match the recipe title.
+- If the card contains side dishes, sauces, toppings, or components, split those
+  into separate sections with specific names like "Crispy Potatoes", not "Side".
+- Keep section "type" categorical, but keep section "title" human-readable.
+
+Text rules:
+- Preserve wording when possible.
+- The front image usually contains ingredients.
+- The back image usually contains instructions.
+- If text is unclear, put a short note in "uncertain" rather than inventing
+  exact wording.
 """
+
+GENERIC_RECIPE_TITLES = {
+    "",
+    "main",
+    "side",
+    "sides",
+    "recipe",
+    "recipes",
+    "dish",
+    "dinner",
+    "meal",
+    "entree",
+    "entrée",
+    "component",
+    "unknown",
+}
 
 
 class RecipeOCRService:
@@ -86,6 +118,7 @@ class RecipeOCRService:
             response = client.chat.completions.create(
                 model=self.model,
                 temperature=0,
+                response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": RECIPE_EXTRACTION_PROMPT},
                     {"role": "user", "content": content},
@@ -93,6 +126,7 @@ class RecipeOCRService:
             )
             raw_response = response.choices[0].message.content or ""
             payload = self._parse_json(raw_response)
+            payload = self._normalize_payload(payload)
             return {
                 "status": "extracted",
                 "error": "",
@@ -110,6 +144,50 @@ class RecipeOCRService:
                 "sections_json": "[]",
                 "raw_response": "",
             }
+
+    @staticmethod
+    def _normalize_payload(payload):
+        """Polish common extraction issues without inventing recipe text."""
+        title = str(payload.get("title") or "").strip()
+        normalized_title = RecipeOCRService._normalize_title_key(title)
+        sections = payload.get("sections") or []
+
+        if normalized_title in GENERIC_RECIPE_TITLES:
+            title = RecipeOCRService._title_from_sections(sections) or title
+
+        for section in sections:
+            section_title = str(section.get("title") or "").strip()
+            if RecipeOCRService._normalize_title_key(section_title) in GENERIC_RECIPE_TITLES:
+                section_type = str(section.get("type") or "").strip().lower()
+                if section_type == "main" and RecipeOCRService._normalize_title_key(title) not in GENERIC_RECIPE_TITLES:
+                    section["title"] = title
+                else:
+                    section["title"] = RecipeOCRService._fallback_section_title(section, section_type)
+
+        payload["title"] = title
+        payload["sections"] = sections
+        return payload
+
+    @staticmethod
+    def _title_from_sections(sections):
+        for section in sections:
+            title = str(section.get("title") or "").strip()
+            if RecipeOCRService._normalize_title_key(title) not in GENERIC_RECIPE_TITLES:
+                return title
+        return ""
+
+    @staticmethod
+    def _fallback_section_title(section, section_type):
+        ingredients = section.get("ingredients") or []
+        if ingredients:
+            first_ingredient = str(ingredients[0]).strip()
+            if first_ingredient:
+                return f"{section_type.title() if section_type else 'Recipe'} with {first_ingredient.split(',')[0]}"
+        return section_type.title() if section_type and section_type not in GENERIC_RECIPE_TITLES else "Untitled recipe section"
+
+    @staticmethod
+    def _normalize_title_key(title):
+        return " ".join(title.lower().replace(":", "").strip().split())
 
     @staticmethod
     def _build_prompt(group):
