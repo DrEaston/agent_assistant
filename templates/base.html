@@ -933,6 +933,38 @@
             border-style: dashed;
         }
 
+        .image-assignment-form {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+            gap: 0.5rem;
+            align-items: end;
+            margin-top: 0.75rem;
+        }
+
+        .image-assignment-form label {
+            display: grid;
+            gap: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #666;
+        }
+
+        .image-assignment-form select {
+            width: 100%;
+            min-width: 0;
+            padding: 0.45rem;
+            border: 1px solid #d8d8d8;
+            border-radius: 6px;
+            background: #fff;
+            font: inherit;
+        }
+
+        .small-button {
+            padding: 0.5rem 0.7rem;
+            min-height: 2.35rem;
+            white-space: nowrap;
+        }
+
         .image-tile img {
             width: 100%;
             aspect-ratio: 4 / 3;
@@ -1112,6 +1144,10 @@
             }
 
             .recipe-pair-images {
+                grid-template-columns: 1fr;
+            }
+
+            .image-assignment-form {
                 grid-template-columns: 1fr;
             }
         }

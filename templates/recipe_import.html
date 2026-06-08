@@ -14,7 +14,7 @@
         <div class="section-header">
             <div>
                 <h2>Upload Images</h2>
-                <p class="section-subtitle">Upload front/back recipe photos in order. Every two images become one recipe pair.</p>
+                <p class="section-subtitle">Upload front/back recipe photos in order. If a recipe uses another format, mark extra pages after upload.</p>
             </div>
         </div>
 
@@ -43,27 +43,51 @@
                     <article class="recipe-pair">
                         <div class="recipe-pair-header">
                             <strong>{{ group.label or "Recipe pair" }}</strong>
-                            <small>{{ group.status|upper }} - {{ group.created_at }}</small>
+                            <small>{{ group.layout|replace("_", " ")|upper }} - {{ group.status|upper }}</small>
                         </div>
                         <div class="recipe-pair-images">
-                            {% for side in ["front", "back"] %}
-                                {% set side_images = group.images|selectattr("side", "equalto", side)|list %}
-                                {% if side_images %}
-                                    {% set image = side_images[0] %}
-                                    <div class="image-tile">
-                                        <span class="side-label">{{ side|upper }}</span>
-                                        <img src="/uploads/{{ image.filename }}" alt="{{ image.original_filename }}">
-                                        <div>
-                                            <strong>{{ image.original_filename }}</strong>
-                                            <small>{{ image.status|upper }}</small>
-                                        </div>
+                            {% set used_sides = group.images|map(attribute="side")|list %}
+                            {% for image in group.images %}
+                                <div class="image-tile">
+                                    <span class="side-label">{{ (image.side or "extra")|replace("_", " ")|upper }}</span>
+                                    <img src="/uploads/{{ image.filename }}" alt="{{ image.original_filename }}">
+                                    <div>
+                                        <strong>{{ image.original_filename }}</strong>
+                                        <small>{{ image.status|upper }}</small>
+                                        <form method="post" action="/apps/recipes/import/images/{{ image.id }}/assign" class="image-assignment-form">
+                                            <input type="hidden" name="project_id" value="{{ project.id }}">
+                                            <input type="hidden" name="action_id" value="{{ action.id }}">
+                                            <label>
+                                                Pair
+                                                <select name="group_id">
+                                                    {% for option_group in recipe_image_groups|reverse %}
+                                                        <option value="{{ option_group.id }}" {% if option_group.id == group.id %}selected{% endif %}>
+                                                            {{ option_group.label or ("Recipe pair " ~ loop.index) }}
+                                                        </option>
+                                                    {% endfor %}
+                                                </select>
+                                            </label>
+                                            <label>
+                                                Role
+                                                <select name="side">
+                                                    {% for role in recipe_image_roles %}
+                                                        <option value="{{ role.value }}" {% if role.value == image.side %}selected{% endif %}>{{ role.label }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </label>
+                                            <button type="submit" class="secondary-button small-button">Update</button>
+                                        </form>
                                     </div>
-                                {% else %}
+                                </div>
+                            {% endfor %}
+
+                            {% for side in ["front", "back"] %}
+                                {% if side not in used_sides %}
                                     <div class="image-tile missing-side">
                                         <span class="side-label">{{ side|upper }}</span>
                                         <div>
                                             <strong>Missing {{ side }}</strong>
-                                            <small>Upload another image to complete this pair.</small>
+                                            <small>Upload another image or relabel an existing page.</small>
                                         </div>
                                     </div>
                                 {% endif %}

@@ -630,6 +630,11 @@ def recipe_import_page(request: Request, project_id: int, action_id: int):
         "project": project,
         "action": action,
         "recipe_image_groups": db.get_recipe_image_groups(action_id),
+        "recipe_image_roles": [
+            {"value": "front", "label": "Front"},
+            {"value": "back", "label": "Back"},
+            {"value": "extra", "label": "Extra page"},
+        ],
     }
     template = jinja_env.get_template("recipe_import.html")
     html = template.render(context)
@@ -816,6 +821,36 @@ async def upload_recipe_images_form(
         if side == "front":
             open_group_id = image_group_id
 
+    return RedirectResponse(
+        url=f"/apps/recipes/import?project_id={project_id}&action_id={action_id}",
+        status_code=303,
+    )
+
+@app.post("/apps/recipes/import/images/{image_id}/assign")
+def assign_recipe_image_form(
+    image_id: int,
+    project_id: int = Form(...),
+    action_id: int = Form(...),
+    group_id: int = Form(...),
+    side: str = Form(...),
+):
+    """Update an uploaded recipe image's group and role."""
+    action = dict_from_row(db.get_recommended_action(action_id))
+    image = dict_from_row(db.get_recipe_image(image_id))
+    groups = db.get_recipe_image_groups(action_id)
+    group_ids = {group["id"] for group in groups}
+    allowed_roles = {"front", "back", "extra"}
+
+    if not action or action["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if not image or image["project_id"] != project_id or image["action_id"] != action_id:
+        raise HTTPException(status_code=404, detail="Image not found")
+    if group_id not in group_ids:
+        raise HTTPException(status_code=400, detail="Recipe pair not found")
+    if side not in allowed_roles:
+        raise HTTPException(status_code=400, detail="Unsupported image role")
+
+    db.update_recipe_image_assignment(image_id, group_id, side)
     return RedirectResponse(
         url=f"/apps/recipes/import?project_id={project_id}&action_id={action_id}",
         status_code=303,

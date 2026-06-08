@@ -123,6 +123,7 @@ class Database:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NOT NULL,
                 action_id INTEGER NOT NULL,
+                layout TEXT DEFAULT 'front_back',
                 label TEXT DEFAULT '',
                 status TEXT DEFAULT 'uploaded',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -187,6 +188,7 @@ class Database:
         self._ensure_column(cursor, "recommended_actions", "completed_at", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "recipe_images", "group_id", "INTEGER")
         self._ensure_column(cursor, "recipe_images", "side", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "recipe_image_groups", "layout", "TEXT DEFAULT 'front_back'")
         self._repair_sample_data_links(cursor)
         self._deprioritize_overlong_actions(cursor)
         self._ensure_recipe_import_steps(cursor)
@@ -306,8 +308,8 @@ class Database:
                 label = f"Recipe pair {(index // 2) + 1}"
                 cursor.execute(
                     """
-                    INSERT INTO recipe_image_groups (project_id, action_id, label)
-                    VALUES (?, ?, ?)
+                    INSERT INTO recipe_image_groups (project_id, action_id, layout, label)
+                    VALUES (?, ?, 'front_back', ?)
                     """,
                     (scope["project_id"], scope["action_id"], label),
                 )
@@ -862,7 +864,7 @@ class Database:
         return images
 
     def get_recipe_image_groups(self, action_id):
-        """Get recipe image groups with their front/back images."""
+        """Get recipe image groups with their assigned images."""
         self.connect()
         cursor = self.conn.cursor()
         cursor.execute(
@@ -889,16 +891,16 @@ class Database:
         self.close()
         return groups
 
-    def create_recipe_image_group(self, project_id, action_id, label=""):
-        """Create a front/back recipe image group."""
+    def create_recipe_image_group(self, project_id, action_id, label="", layout="front_back"):
+        """Create a recipe image group."""
         self.connect()
         cursor = self.conn.cursor()
         cursor.execute(
             """
-            INSERT INTO recipe_image_groups (project_id, action_id, label)
-            VALUES (?, ?, ?)
+            INSERT INTO recipe_image_groups (project_id, action_id, layout, label)
+            VALUES (?, ?, ?, ?)
             """,
-            (project_id, action_id, label),
+            (project_id, action_id, layout, label),
         )
         self.conn.commit()
         group_id = cursor.lastrowid
@@ -916,6 +918,30 @@ class Database:
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (project_id, action_id, group_id, side, filename, original_filename, content_type),
+        )
+        self.conn.commit()
+        self.close()
+
+    def get_recipe_image(self, image_id):
+        """Get a single uploaded recipe image."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM recipe_images WHERE id = ?", (image_id,))
+        image = cursor.fetchone()
+        self.close()
+        return image
+
+    def update_recipe_image_assignment(self, image_id, group_id, side):
+        """Move an image to a recipe group and update its role."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE recipe_images
+            SET group_id = ?, side = ?
+            WHERE id = ?
+            """,
+            (group_id, side, image_id),
         )
         self.conn.commit()
         self.close()
