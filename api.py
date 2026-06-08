@@ -629,7 +629,7 @@ def recipe_import_page(request: Request, project_id: int, action_id: int):
         "request": request,
         "project": project,
         "action": action,
-        "recipe_images": dicts_from_rows(db.get_recipe_images(action_id)),
+        "recipe_image_groups": db.get_recipe_image_groups(action_id),
     }
     template = jinja_env.get_template("recipe_import.html")
     html = template.render(context)
@@ -767,11 +767,34 @@ async def upload_recipe_images_form(
     if not action or action["project_id"] != project_id:
         raise HTTPException(status_code=404, detail="Task not found")
 
+    groups = db.get_recipe_image_groups(action_id)
+    group_count = len(groups)
+    open_group_id = None
+
+    for group in groups:
+        sides = {image["side"] for image in group["images"]}
+        if "front" in sides and "back" not in sides:
+            open_group_id = group["id"]
+            break
+
     for upload in files:
         if not upload.filename:
             continue
         if upload.content_type and not upload.content_type.startswith("image/"):
             continue
+
+        if open_group_id:
+            image_group_id = open_group_id
+            side = "back"
+            open_group_id = None
+        else:
+            group_count += 1
+            image_group_id = db.create_recipe_image_group(
+                project_id,
+                action_id,
+                f"Recipe pair {group_count}",
+            )
+            side = "front"
 
         original_name = Path(upload.filename).name
         extension = Path(original_name).suffix.lower()
@@ -786,7 +809,12 @@ async def upload_recipe_images_form(
             f"recipe_images/{stored_name}",
             original_name,
             upload.content_type or "",
+            image_group_id,
+            side,
         )
+
+        if side == "front":
+            open_group_id = image_group_id
 
     return RedirectResponse(
         url=f"/apps/recipes/import?project_id={project_id}&action_id={action_id}",

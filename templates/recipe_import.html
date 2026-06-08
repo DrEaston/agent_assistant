@@ -14,7 +14,7 @@
         <div class="section-header">
             <div>
                 <h2>Upload Images</h2>
-                <p class="section-subtitle">Add recipe photos from your phone into the import queue.</p>
+                <p class="section-subtitle">Upload front/back recipe photos in order. Every two images become one recipe pair.</p>
             </div>
         </div>
 
@@ -37,14 +37,37 @@
             </div>
         </div>
 
-        {% if recipe_images %}
-            <div class="image-grid">
-                {% for image in recipe_images %}
-                    <article class="image-tile">
-                        <img src="/uploads/{{ image.filename }}" alt="{{ image.original_filename }}">
-                        <div>
-                            <strong>{{ image.original_filename }}</strong>
-                            <small>{{ image.status|upper }} - {{ image.created_at }}</small>
+        {% if recipe_image_groups %}
+            <div class="recipe-pair-list">
+                {% for group in recipe_image_groups %}
+                    <article class="recipe-pair">
+                        <div class="recipe-pair-header">
+                            <strong>{{ group.label or "Recipe pair" }}</strong>
+                            <small>{{ group.status|upper }} - {{ group.created_at }}</small>
+                        </div>
+                        <div class="recipe-pair-images">
+                            {% for side in ["front", "back"] %}
+                                {% set side_images = group.images|selectattr("side", "equalto", side)|list %}
+                                {% if side_images %}
+                                    {% set image = side_images[0] %}
+                                    <div class="image-tile">
+                                        <span class="side-label">{{ side|upper }}</span>
+                                        <img src="/uploads/{{ image.filename }}" alt="{{ image.original_filename }}">
+                                        <div>
+                                            <strong>{{ image.original_filename }}</strong>
+                                            <small>{{ image.status|upper }}</small>
+                                        </div>
+                                    </div>
+                                {% else %}
+                                    <div class="image-tile missing-side">
+                                        <span class="side-label">{{ side|upper }}</span>
+                                        <div>
+                                            <strong>Missing {{ side }}</strong>
+                                            <small>Upload another image to complete this pair.</small>
+                                        </div>
+                                    </div>
+                                {% endif %}
+                            {% endfor %}
                         </div>
                     </article>
                 {% endfor %}

@@ -105,9 +105,25 @@ class Database:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NOT NULL,
                 action_id INTEGER NOT NULL,
+                group_id INTEGER,
+                side TEXT DEFAULT '',
                 filename TEXT NOT NULL,
                 original_filename TEXT NOT NULL,
                 content_type TEXT DEFAULT '',
+                status TEXT DEFAULT 'uploaded',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY (action_id) REFERENCES recommended_actions(id) ON DELETE CASCADE,
+                FOREIGN KEY (group_id) REFERENCES recipe_image_groups(id) ON DELETE SET NULL
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS recipe_image_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                action_id INTEGER NOT NULL,
+                label TEXT DEFAULT '',
                 status TEXT DEFAULT 'uploaded',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
@@ -169,9 +185,12 @@ class Database:
         self._ensure_column(cursor, "recommended_actions", "sort_order", "INTEGER DEFAULT 100")
         self._ensure_column(cursor, "recommended_actions", "status", "TEXT DEFAULT 'open'")
         self._ensure_column(cursor, "recommended_actions", "completed_at", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "recipe_images", "group_id", "INTEGER")
+        self._ensure_column(cursor, "recipe_images", "side", "TEXT DEFAULT ''")
         self._repair_sample_data_links(cursor)
         self._deprioritize_overlong_actions(cursor)
         self._ensure_recipe_import_steps(cursor)
+        self._ensure_recipe_image_groups(cursor)
 
         self.conn.commit()
         self.close()
@@ -258,6 +277,51 @@ class Database:
                 """,
                 (action_id, step, index * 10),
             )
+
+    def _ensure_recipe_image_groups(self, cursor):
+        """Backfill front/back pair groups for older uploaded recipe images."""
+        cursor.execute(
+            """
+            SELECT DISTINCT project_id, action_id
+            FROM recipe_images
+            WHERE group_id IS NULL
+            """
+        )
+        scopes = cursor.fetchall()
+
+        for scope in scopes:
+            cursor.execute(
+                """
+                SELECT *
+                FROM recipe_images
+                WHERE project_id = ? AND action_id = ? AND group_id IS NULL
+                ORDER BY id ASC
+                """,
+                (scope["project_id"], scope["action_id"]),
+            )
+            images = cursor.fetchall()
+
+            for index in range(0, len(images), 2):
+                pair = images[index:index + 2]
+                label = f"Recipe pair {(index // 2) + 1}"
+                cursor.execute(
+                    """
+                    INSERT INTO recipe_image_groups (project_id, action_id, label)
+                    VALUES (?, ?, ?)
+                    """,
+                    (scope["project_id"], scope["action_id"], label),
+                )
+                group_id = cursor.lastrowid
+
+                for side, image in zip(["front", "back"], pair):
+                    cursor.execute(
+                        """
+                        UPDATE recipe_images
+                        SET group_id = ?, side = ?
+                        WHERE id = ?
+                        """,
+                        (group_id, side, image["id"]),
+                    )
 
     def populate_sample_data(self):
         """Populate database with sample projects."""
@@ -797,17 +861,61 @@ class Database:
         self.close()
         return images
 
-    def add_recipe_image(self, project_id, action_id, filename, original_filename, content_type=""):
+    def get_recipe_image_groups(self, action_id):
+        """Get recipe image groups with their front/back images."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM recipe_image_groups
+            WHERE action_id = ?
+            ORDER BY id DESC
+            """,
+            (action_id,),
+        )
+        groups = []
+        for group in cursor.fetchall():
+            group_data = dict(group)
+            cursor.execute(
+                """
+                SELECT * FROM recipe_images
+                WHERE group_id = ?
+                ORDER BY CASE side WHEN 'front' THEN 1 WHEN 'back' THEN 2 ELSE 3 END, id ASC
+                """,
+                (group["id"],),
+            )
+            group_data["images"] = [dict(row) for row in cursor.fetchall()]
+            groups.append(group_data)
+        self.close()
+        return groups
+
+    def create_recipe_image_group(self, project_id, action_id, label=""):
+        """Create a front/back recipe image group."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO recipe_image_groups (project_id, action_id, label)
+            VALUES (?, ?, ?)
+            """,
+            (project_id, action_id, label),
+        )
+        self.conn.commit()
+        group_id = cursor.lastrowid
+        self.close()
+        return group_id
+
+    def add_recipe_image(self, project_id, action_id, filename, original_filename, content_type="", group_id=None, side=""):
         """Record an uploaded recipe image."""
         self.connect()
         cursor = self.conn.cursor()
         cursor.execute(
             """
             INSERT INTO recipe_images
-                (project_id, action_id, filename, original_filename, content_type)
-            VALUES (?, ?, ?, ?, ?)
+                (project_id, action_id, group_id, side, filename, original_filename, content_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (project_id, action_id, filename, original_filename, content_type),
+            (project_id, action_id, group_id, side, filename, original_filename, content_type),
         )
         self.conn.commit()
         self.close()
