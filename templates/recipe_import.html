@@ -33,8 +33,15 @@
         <div class="section-header">
             <div>
                 <h2>Import Queue</h2>
-                <p class="section-subtitle">Uploaded images stay here until OCR is ready.</p>
+                <p class="section-subtitle">Uploaded images stay here while OCR turns them into structured recipes.</p>
             </div>
+            {% if recipe_image_groups %}
+                <form method="post" action="/apps/recipes/import/extract">
+                    <input type="hidden" name="project_id" value="{{ project.id }}">
+                    <input type="hidden" name="action_id" value="{{ action.id }}">
+                    <button type="submit">Scrape Uploaded Pairs</button>
+                </form>
+            {% endif %}
         </div>
 
         {% if recipe_image_groups %}
@@ -43,7 +50,10 @@
                     <article class="recipe-pair">
                         <div class="recipe-pair-header">
                             <strong>{{ group.label or "Recipe pair" }}</strong>
-                            <small>{{ group.layout|replace("_", " ")|upper }} - {{ group.status|upper }}</small>
+                            <small>
+                                {{ group.layout|replace("_", " ")|upper }} -
+                                {{ (group.extraction_status or group.status)|upper }}
+                            </small>
                         </div>
                         <div class="recipe-pair-images">
                             {% set used_sides = group.images|map(attribute="side")|list %}
@@ -93,6 +103,50 @@
                                 {% endif %}
                             {% endfor %}
                         </div>
+
+                        {% if group.extraction_status %}
+                            <div class="recipe-extraction">
+                                {% if group.extraction_error %}
+                                    <p class="error-text">{{ group.extraction_error }}</p>
+                                {% endif %}
+
+                                {% if group.ingredients_text or group.instructions_text %}
+                                    <div class="recipe-extraction-columns">
+                                        <section>
+                                            <h3>Ingredients</h3>
+                                            <pre>{{ group.ingredients_text }}</pre>
+                                        </section>
+                                        <section>
+                                            <h3>Steps</h3>
+                                            <pre>{{ group.instructions_text }}</pre>
+                                        </section>
+                                    </div>
+                                {% endif %}
+
+                                {% if group.sections %}
+                                    <div class="recipe-section-list">
+                                        {% for section in group.sections %}
+                                            <section class="recipe-section">
+                                                <div>
+                                                    <strong>{{ section.title or "Recipe section" }}</strong>
+                                                    <small>{{ section.type|default("unknown")|upper }}</small>
+                                                </div>
+                                                {% if section.ingredients %}
+                                                    <p>{{ section.ingredients|join("; ") }}</p>
+                                                {% endif %}
+                                                {% if section.instructions %}
+                                                    <ol>
+                                                        {% for instruction in section.instructions %}
+                                                            <li>{{ instruction }}</li>
+                                                        {% endfor %}
+                                                    </ol>
+                                                {% endif %}
+                                            </section>
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        {% endif %}
                     </article>
                 {% endfor %}
             </div>

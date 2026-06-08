@@ -133,6 +133,22 @@ class Database:
         """)
 
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS recipe_extractions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id INTEGER NOT NULL UNIQUE,
+                status TEXT DEFAULT 'pending',
+                ingredients_text TEXT DEFAULT '',
+                instructions_text TEXT DEFAULT '',
+                sections_json TEXT DEFAULT '[]',
+                raw_response TEXT DEFAULT '',
+                error TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (group_id) REFERENCES recipe_image_groups(id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS task_step_reviews (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 action_id INTEGER NOT NULL,
@@ -869,9 +885,18 @@ class Database:
         cursor = self.conn.cursor()
         cursor.execute(
             """
-            SELECT * FROM recipe_image_groups
+            SELECT
+                recipe_image_groups.*,
+                recipe_extractions.status AS extraction_status,
+                recipe_extractions.ingredients_text,
+                recipe_extractions.instructions_text,
+                recipe_extractions.sections_json,
+                recipe_extractions.error AS extraction_error
+            FROM recipe_image_groups
+            LEFT JOIN recipe_extractions
+                ON recipe_extractions.group_id = recipe_image_groups.id
             WHERE action_id = ?
-            ORDER BY id DESC
+            ORDER BY recipe_image_groups.id DESC
             """,
             (action_id,),
         )
@@ -942,6 +967,38 @@ class Database:
             WHERE id = ?
             """,
             (group_id, side, image_id),
+        )
+        self.conn.commit()
+        self.close()
+
+    def upsert_recipe_extraction(
+        self,
+        group_id,
+        status,
+        ingredients_text="",
+        instructions_text="",
+        sections_json="[]",
+        raw_response="",
+        error="",
+    ):
+        """Create or update OCR/extraction output for a recipe image group."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO recipe_extractions
+                (group_id, status, ingredients_text, instructions_text, sections_json, raw_response, error, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(group_id) DO UPDATE SET
+                status = excluded.status,
+                ingredients_text = excluded.ingredients_text,
+                instructions_text = excluded.instructions_text,
+                sections_json = excluded.sections_json,
+                raw_response = excluded.raw_response,
+                error = excluded.error,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (group_id, status, ingredients_text, instructions_text, sections_json, raw_response, error),
         )
         self.conn.commit()
         self.close()

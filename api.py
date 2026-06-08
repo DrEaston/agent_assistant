@@ -22,6 +22,7 @@ from jinja2 import Environment, FileSystemLoader
 from llm_service import LLMService
 from agent_service import AgentService
 from priority_review_service import PriorityReviewService
+from recipe_ocr_service import RecipeOCRService
 from typing import Optional, List
 
 # Initialize FastAPI
@@ -41,6 +42,7 @@ uploads_dir = Path(os.getenv("UPLOADS_DIR", str(Path(__file__).parent / "uploads
 recipe_uploads_dir = uploads_dir / "recipe_images"
 recipe_uploads_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
+recipe_ocr_service = RecipeOCRService(uploads_dir)
 
 # Initialize database
 db = Database(str(db_path))
@@ -105,6 +107,18 @@ def dict_from_row(row):
 def dicts_from_rows(rows):
     """Convert list of sqlite3.Row to list of dicts."""
     return [dict(r) for r in rows]
+
+def prepare_recipe_image_groups(groups):
+    """Parse stored extraction sections for rendering."""
+    prepared = []
+    for group in groups:
+        group_data = dict(group)
+        try:
+            group_data["sections"] = json.loads(group_data.get("sections_json") or "[]")
+        except json.JSONDecodeError:
+            group_data["sections"] = []
+        prepared.append(group_data)
+    return prepared
 
 def is_auto_work_prompt(message):
     """Detect old synthetic chat prompts created by the chat page itself."""
@@ -629,7 +643,7 @@ def recipe_import_page(request: Request, project_id: int, action_id: int):
         "request": request,
         "project": project,
         "action": action,
-        "recipe_image_groups": db.get_recipe_image_groups(action_id),
+        "recipe_image_groups": prepare_recipe_image_groups(db.get_recipe_image_groups(action_id)),
         "recipe_image_roles": [
             {"value": "front", "label": "Front"},
             {"value": "back", "label": "Back"},
@@ -820,6 +834,34 @@ async def upload_recipe_images_form(
 
         if side == "front":
             open_group_id = image_group_id
+
+    return RedirectResponse(
+        url=f"/apps/recipes/import?project_id={project_id}&action_id={action_id}",
+        status_code=303,
+    )
+
+@app.post("/apps/recipes/import/extract")
+def extract_recipe_images_form(
+    project_id: int = Form(...),
+    action_id: int = Form(...),
+):
+    """Run OCR/structured extraction over uploaded recipe image groups."""
+    action = dict_from_row(db.get_recommended_action(action_id))
+    if not action or action["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    groups = db.get_recipe_image_groups(action_id)
+    for group in groups:
+        result = recipe_ocr_service.extract_group(group)
+        db.upsert_recipe_extraction(
+            group["id"],
+            result["status"],
+            result.get("ingredients_text", ""),
+            result.get("instructions_text", ""),
+            result.get("sections_json", "[]"),
+            result.get("raw_response", ""),
+            result.get("error", ""),
+        )
 
     return RedirectResponse(
         url=f"/apps/recipes/import?project_id={project_id}&action_id={action_id}",
