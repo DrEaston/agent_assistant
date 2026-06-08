@@ -120,6 +120,47 @@ def prepare_recipe_image_groups(groups):
         prepared.append(group_data)
     return prepared
 
+def get_recipe_app_context():
+    """Resolve planner-backed recipe app links and import status."""
+    project = db.get_project_by_name("Recipe display app")
+    if not project:
+        return {
+            "project": None,
+            "import_action": None,
+            "import_url": "",
+            "groups": [],
+            "stats": {"total_pairs": 0, "scraped_pairs": 0, "pending_pairs": 0, "sections": 0},
+        }
+
+    import_action = db.find_recommended_action(
+        project["id"],
+        "Import the first batch of recipe images",
+    )
+    if not import_action:
+        return {
+            "project": project,
+            "import_action": None,
+            "import_url": "",
+            "groups": [],
+            "stats": {"total_pairs": 0, "scraped_pairs": 0, "pending_pairs": 0, "sections": 0},
+        }
+
+    groups = prepare_recipe_image_groups(db.get_recipe_image_groups(import_action["id"]))
+    scraped_pairs = sum(1 for group in groups if group.get("extraction_status") == "extracted")
+    sections = sum(len(group.get("sections", [])) for group in groups)
+    return {
+        "project": project,
+        "import_action": import_action,
+        "import_url": f"/apps/recipes/import?project_id={project['id']}&action_id={import_action['id']}",
+        "groups": groups,
+        "stats": {
+            "total_pairs": len(groups),
+            "scraped_pairs": scraped_pairs,
+            "pending_pairs": len(groups) - scraped_pairs,
+            "sections": sections,
+        },
+    }
+
 def is_auto_work_prompt(message):
     """Detect old synthetic chat prompts created by the chat page itself."""
     return (
@@ -482,18 +523,7 @@ def dashboard(request: Request):
     data_json = json.dumps(data, default=str)
     data_clean = json.loads(data_json)
     
-    recipe_import_url = ""
-    recipe_project = db.get_project_by_name("Recipe display app")
-    if recipe_project:
-        recipe_action = db.find_recommended_action(
-            recipe_project["id"],
-            "Import the first batch of recipe images",
-        )
-        if recipe_action:
-            recipe_import_url = (
-                f"/apps/recipes/import?project_id={recipe_project['id']}"
-                f"&action_id={recipe_action['id']}"
-            )
+    recipe_app = get_recipe_app_context()
 
     context = {
         "request": request,
@@ -504,7 +534,8 @@ def dashboard(request: Request):
         "actions": data_clean["actions"],
         "goals": data_clean["goals"],
         "stats": data_clean["stats"],
-        "recipe_import_url": recipe_import_url,
+        "recipe_app_url": "/apps/recipes" if recipe_app["project"] else "",
+        "recipe_app": recipe_app,
     }
     template = jinja_env.get_template("dashboard.html")
     html = template.render(context)
@@ -641,6 +672,26 @@ def codex_plan_preview(
         "saved_path": "",
     }
     template = jinja_env.get_template("codex_plan.html")
+    html = template.render(context)
+    return HTMLResponse(html)
+
+
+@app.get("/apps/recipes")
+def recipe_home_page(request: Request):
+    """Recipe app home page."""
+    recipe_app = get_recipe_app_context()
+    if not recipe_app["project"]:
+        raise HTTPException(status_code=404, detail="Recipe app project not found")
+
+    context = {
+        "request": request,
+        "recipe_app": recipe_app,
+        "project": recipe_app["project"],
+        "import_action": recipe_app["import_action"],
+        "groups": recipe_app["groups"],
+        "stats": recipe_app["stats"],
+    }
+    template = jinja_env.get_template("recipe_home.html")
     html = template.render(context)
     return HTMLResponse(html)
 

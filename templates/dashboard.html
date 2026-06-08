@@ -49,14 +49,17 @@
     {% endif %}
 </section>
 
-{% if recipe_import_url %}
+{% if recipe_app_url %}
     <section class="app-shortcuts">
         <div>
             <p class="priority-label">Apps</p>
-            <h2>Recipe Import</h2>
-            <p>Review uploaded recipe cards, scrape text, and prepare recipes for cleanup.</p>
+            <h2>Recipe App</h2>
+            <p>
+                {{ recipe_app.stats.scraped_pairs }}/{{ recipe_app.stats.total_pairs }}
+                recipe card pairs scraped.
+            </p>
         </div>
-        <a class="button-link" href="{{ recipe_import_url }}">Open Recipe App</a>
+        <a class="button-link" href="{{ recipe_app_url }}">Open Recipe App</a>
     </section>
 {% endif %}
 

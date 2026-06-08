@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Recipe App - Project Agent{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    <a href="/">Dashboard</a> / Recipe App
+</div>
+
+<h1>Recipe App</h1>
+
+<section class="recipe-home-hero">
+    <div>
+        <p class="priority-label">Recipe Library</p>
+        <h2>Build recipes from uploaded cards</h2>
+        <p>Review scraped recipe text, split side dishes into their own entries, and keep importing new cards.</p>
+    </div>
+    {% if recipe_app.import_url %}
+        <a class="button-link" href="{{ recipe_app.import_url }}">Import & Review Cards</a>
+    {% endif %}
+</section>
+
+<div class="dashboard-grid compact-metrics">
+    <div class="metric">
+        <div class="metric-value">{{ stats.total_pairs }}</div>
+        <div class="metric-label">Card Pairs</div>
+    </div>
+    <div class="metric">
+        <div class="metric-value">{{ stats.scraped_pairs }}</div>
+        <div class="metric-label">Scraped</div>
+    </div>
+    <div class="metric">
+        <div class="metric-value">{{ stats.pending_pairs }}</div>
+        <div class="metric-label">Needs Review</div>
+    </div>
+    <div class="metric">
+        <div class="metric-value">{{ stats.sections }}</div>
+        <div class="metric-label">Recipe Sections</div>
+    </div>
+</div>
+
+<section class="detail-section">
+    <div class="section-header">
+        <div>
+            <h2>Scraped Recipes</h2>
+            <p class="section-subtitle">These are extracted sections from recipe cards. Side dishes/components can become separate recipes later.</p>
+        </div>
+    </div>
+
+    {% set shown_sections = namespace(count=0) %}
+    {% if groups %}
+        <div class="recipe-library-list">
+            {% for group in groups %}
+                {% if group.sections %}
+                    {% for section in group.sections %}
+                        {% set shown_sections.count = shown_sections.count + 1 %}
+                        <article class="recipe-library-card">
+                            <div class="recipe-library-card-header">
+                                <div>
+                                    <strong>{{ section.title or group.label or "Recipe section" }}</strong>
+                                    <small>{{ section.type|default("unknown")|upper }} - {{ group.label }}</small>
+                                </div>
+                                <a href="{{ recipe_app.import_url }}#pair-{{ group.id }}">Review Source</a>
+                            </div>
+                            {% if section.ingredients %}
+                                <p>{{ section.ingredients|join("; ") }}</p>
+                            {% elif group.ingredients_text %}
+                                <pre>{{ group.ingredients_text }}</pre>
+                            {% endif %}
+                        </article>
+                    {% endfor %}
+                {% elif group.extraction_status == "extracted" %}
+                    {% set shown_sections.count = shown_sections.count + 1 %}
+                    <article class="recipe-library-card">
+                        <div class="recipe-library-card-header">
+                            <div>
+                                <strong>{{ group.label or "Recipe card" }}</strong>
+                                <small>EXTRACTED</small>
+                            </div>
+                            <a href="{{ recipe_app.import_url }}#pair-{{ group.id }}">Review Source</a>
+                        </div>
+                        {% if group.ingredients_text %}
+                            <pre>{{ group.ingredients_text }}</pre>
+                        {% endif %}
+                    </article>
+                {% endif %}
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    {% if shown_sections.count == 0 %}
+        <div class="empty-state">
+            <p>No scraped recipes are ready yet.</p>
+            {% if recipe_app.import_url %}
+                <a class="button-link" href="{{ recipe_app.import_url }}">Open Import Queue</a>
+            {% endif %}
+        </div>
+    {% endif %}
+</section>
+{% endblock %}

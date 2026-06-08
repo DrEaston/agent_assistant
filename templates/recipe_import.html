@@ -47,7 +47,7 @@
         {% if recipe_image_groups %}
             <div class="recipe-pair-list">
                 {% for group in recipe_image_groups %}
-                    <article class="recipe-pair">
+                    <article class="recipe-pair" id="pair-{{ group.id }}">
                         <div class="recipe-pair-header">
                             <strong>{{ group.label or "Recipe pair" }}</strong>
                             <small>
