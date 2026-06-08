@@ -49,6 +49,17 @@
     {% endif %}
 </section>
 
+{% if recipe_import_url %}
+    <section class="app-shortcuts">
+        <div>
+            <p class="priority-label">Apps</p>
+            <h2>Recipe Import</h2>
+            <p>Review uploaded recipe cards, scrape text, and prepare recipes for cleanup.</p>
+        </div>
+        <a class="button-link" href="{{ recipe_import_url }}">Open Recipe App</a>
+    </section>
+{% endif %}
+
 <div class="dashboard-grid compact-metrics">
     <div class="metric">
         <div class="metric-value">{{ projects|length }}</div>

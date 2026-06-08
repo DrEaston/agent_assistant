@@ -482,6 +482,19 @@ def dashboard(request: Request):
     data_json = json.dumps(data, default=str)
     data_clean = json.loads(data_json)
     
+    recipe_import_url = ""
+    recipe_project = db.get_project_by_name("Recipe display app")
+    if recipe_project:
+        recipe_action = db.find_recommended_action(
+            recipe_project["id"],
+            "Import the first batch of recipe images",
+        )
+        if recipe_action:
+            recipe_import_url = (
+                f"/apps/recipes/import?project_id={recipe_project['id']}"
+                f"&action_id={recipe_action['id']}"
+            )
+
     context = {
         "request": request,
         "projects": data_clean["projects"],
@@ -491,6 +504,7 @@ def dashboard(request: Request):
         "actions": data_clean["actions"],
         "goals": data_clean["goals"],
         "stats": data_clean["stats"],
+        "recipe_import_url": recipe_import_url,
     }
     template = jinja_env.get_template("dashboard.html")
     html = template.render(context)
