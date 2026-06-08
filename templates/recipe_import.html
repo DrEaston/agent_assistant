@@ -36,15 +36,40 @@
                 <p class="section-subtitle">Uploaded images stay here while OCR turns them into structured recipes.</p>
             </div>
             {% if recipe_image_groups %}
-                <form method="post" action="/apps/recipes/import/extract">
+                <form method="post" action="/apps/recipes/import/extract" class="plain-form" id="scrape-form">
                     <input type="hidden" name="project_id" value="{{ project.id }}">
                     <input type="hidden" name="action_id" value="{{ action.id }}">
-                    <button type="submit">Scrape Uploaded Pairs</button>
+                    <button type="submit" {% if extraction_stats.pending == 0 %}disabled{% endif %}>
+                        Scrape Unprocessed Pairs
+                    </button>
                 </form>
             {% endif %}
         </div>
 
         {% if recipe_image_groups %}
+            <div class="extraction-progress-panel" data-processed="{{ extraction_stats.processed }}" data-total="{{ extraction_stats.total }}">
+                <div class="focus-progress-row">
+                    <span id="scrape-status-text">
+                        {{ extraction_stats.processed }}/{{ extraction_stats.total }} pairs processed
+                    </span>
+                    <span>{{ extraction_stats.progress_percent }}%</span>
+                </div>
+                <div class="task-progress focus-progress" aria-label="{{ extraction_stats.processed }} of {{ extraction_stats.total }} pairs processed">
+                    <div class="task-progress-fill" id="scrape-progress-fill" style="width: {{ extraction_stats.progress_percent }}%;"></div>
+                </div>
+                <p class="section-subtitle" id="scrape-helper-text">
+                    {% if extraction_stats.pending == 0 %}
+                        All uploaded pairs have been scraped.
+                    {% elif extraction_stats.processing %}
+                        {{ extraction_stats.processing }} pair{% if extraction_stats.processing != 1 %}s{% endif %} were interrupted while processing and will be retried.
+                    {% elif extraction_stats.errors %}
+                        {{ extraction_stats.errors }} pair{% if extraction_stats.errors != 1 %}s{% endif %} had OCR errors and will be retried.
+                    {% else %}
+                        {{ extraction_stats.pending }} pair{% if extraction_stats.pending != 1 %}s{% endif %} still need OCR.
+                    {% endif %}
+                </p>
+            </div>
+
             <div class="recipe-pair-list">
                 {% for group in recipe_image_groups %}
                     <article class="recipe-pair" id="pair-{{ group.id }}">
@@ -157,4 +182,25 @@
         {% endif %}
     </section>
 </div>
+
+<script>
+    const scrapeForm = document.getElementById("scrape-form");
+    if (scrapeForm) {
+        scrapeForm.addEventListener("submit", () => {
+            const panel = document.querySelector(".extraction-progress-panel");
+            const button = scrapeForm.querySelector("button");
+            const statusText = document.getElementById("scrape-status-text");
+            const helperText = document.getElementById("scrape-helper-text");
+            const fill = document.getElementById("scrape-progress-fill");
+            const processed = panel ? panel.dataset.processed : "0";
+            const total = panel ? panel.dataset.total : "0";
+
+            button.disabled = true;
+            button.textContent = "Scraping...";
+            statusText.textContent = `${processed}/${total} pairs processed - scraping unfinished pairs`;
+            helperText.textContent = "You can refresh later; already processed pairs will be skipped and unfinished pairs can be resumed.";
+            fill.classList.add("progress-fill-active");
+        });
+    }
+</script>
 {% endblock %}

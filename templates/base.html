@@ -398,6 +398,11 @@
         button:hover {
             background: #2980b9;
         }
+
+        button:disabled {
+            cursor: wait;
+            opacity: 0.7;
+        }
         
         button.secondary {
             background: #95a5a6;
@@ -1036,6 +1041,28 @@
         .recipe-pair-list {
             display: grid;
             gap: 1rem;
+        }
+
+        .extraction-progress-panel {
+            border: 1px solid #b7edf4;
+            border-left: 4px solid #0891b2;
+            border-radius: 8px;
+            background: #effcff;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .progress-fill-active {
+            animation: progressPulse 1.1s ease-in-out infinite alternate;
+        }
+
+        @keyframes progressPulse {
+            from {
+                opacity: 0.55;
+            }
+            to {
+                opacity: 1;
+            }
         }
 
         .recipe-pair {

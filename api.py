@@ -132,6 +132,22 @@ def prepare_recipe_complete_meals(meals):
         prepared.append(meal_data)
     return prepared
 
+def build_recipe_extraction_stats(groups):
+    """Summarize OCR progress for uploaded recipe card pairs."""
+    total = len(groups)
+    processed = sum(1 for group in groups if group.get("extraction_status") == "extracted")
+    processing = sum(1 for group in groups if group.get("extraction_status") == "processing")
+    errors = sum(1 for group in groups if group.get("extraction_status") == "error")
+    pending = total - processed
+    return {
+        "total": total,
+        "processed": processed,
+        "pending": pending,
+        "processing": processing,
+        "errors": errors,
+        "progress_percent": round((processed / total) * 100) if total else 0,
+    }
+
 def get_recipe_app_context():
     """Resolve planner-backed recipe app links and import status."""
     db.sync_recipe_complete_meals_from_extractions()
@@ -762,6 +778,7 @@ def recipe_import_page(request: Request, project_id: int, action_id: int):
             {"value": "extra", "label": "Extra page"},
         ],
     }
+    context["extraction_stats"] = build_recipe_extraction_stats(context["recipe_image_groups"])
     template = jinja_env.get_template("recipe_import.html")
     html = template.render(context)
     return HTMLResponse(html)
@@ -979,6 +996,17 @@ def extract_recipe_images_form(
 
     groups = db.get_recipe_image_groups(action_id)
     for group in groups:
+        if group.get("extraction_status") == "extracted":
+            continue
+        db.upsert_recipe_extraction(
+            group["id"],
+            "processing",
+            group.get("ingredients_text", ""),
+            group.get("instructions_text", ""),
+            group.get("sections_json", "[]"),
+            "",
+            "",
+        )
         result = recipe_ocr_service.extract_group(group)
         db.upsert_recipe_extraction(
             group["id"],
