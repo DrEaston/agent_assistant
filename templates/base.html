@@ -918,6 +918,26 @@
             font-family: inherit;
         }
 
+        .recipe-meal-preview {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1rem;
+        }
+
+        .recipe-meal-preview h3 {
+            font-size: 0.95rem;
+            margin: 0 0 0.4rem;
+        }
+
+        .recipe-meal-preview pre {
+            max-height: 14rem;
+            overflow: auto;
+            background: #f8f8f8;
+            border: 1px solid #e8e8e8;
+            border-radius: 6px;
+            padding: 0.75rem;
+        }
+
         .review-grid {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1280,6 +1300,10 @@
             .recipe-library-card-header {
                 align-items: stretch;
                 flex-direction: column;
+            }
+
+            .recipe-meal-preview {
+                grid-template-columns: 1fr;
             }
 
             .review-grid {

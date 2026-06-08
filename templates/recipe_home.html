@@ -12,8 +12,8 @@
 <section class="recipe-home-hero">
     <div>
         <p class="priority-label">Recipe Library</p>
-        <h2>Build recipes from uploaded cards</h2>
-        <p>Review scraped recipe text, split side dishes into their own entries, and keep importing new cards.</p>
+        <h2>Complete meals first, components later</h2>
+        <p>Start with faithful card copies. The next pathway will analyze each meal into mains, sides, sauces, and other reusable parts.</p>
     </div>
     {% if recipe_app.import_url %}
         <a class="button-link" href="{{ recipe_app.import_url }}">Import & Review Cards</a>
@@ -34,66 +34,88 @@
         <div class="metric-label">Needs Review</div>
     </div>
     <div class="metric">
-        <div class="metric-value">{{ stats.sections }}</div>
-        <div class="metric-label">Recipe Sections</div>
+        <div class="metric-value">{{ stats.complete_meals }}</div>
+        <div class="metric-label">Complete Meals</div>
+    </div>
+    <div class="metric">
+        <div class="metric-value">{{ stats.components }}</div>
+        <div class="metric-label">Components</div>
     </div>
 </div>
 
 <section class="detail-section">
     <div class="section-header">
         <div>
-            <h2>Scraped Recipes</h2>
-            <p class="section-subtitle">These are extracted sections from recipe cards. Side dishes/components can become separate recipes later.</p>
+            <h2>Complete Meals</h2>
+            <p class="section-subtitle">Faithful card-level copies. These should preserve the meal as written before any side/main analysis.</p>
         </div>
     </div>
 
-    {% set shown_sections = namespace(count=0) %}
-    {% if groups %}
+    {% if complete_meals %}
         <div class="recipe-library-list">
-            {% for group in groups %}
-                {% if group.sections %}
-                    {% for section in group.sections %}
-                        {% set shown_sections.count = shown_sections.count + 1 %}
-                        <article class="recipe-library-card">
-                            <div class="recipe-library-card-header">
-                                <div>
-                                    <strong>{{ section.title or group.label or "Recipe section" }}</strong>
-                                    <small>{{ section.type|default("unknown")|upper }} - {{ group.label }}</small>
-                                </div>
-                                <a href="{{ recipe_app.import_url }}#pair-{{ group.id }}">Review Source</a>
-                            </div>
-                            {% if section.ingredients %}
-                                <p>{{ section.ingredients|join("; ") }}</p>
-                            {% elif group.ingredients_text %}
-                                <pre>{{ group.ingredients_text }}</pre>
-                            {% endif %}
-                        </article>
-                    {% endfor %}
-                {% elif group.extraction_status == "extracted" %}
-                    {% set shown_sections.count = shown_sections.count + 1 %}
-                    <article class="recipe-library-card">
-                        <div class="recipe-library-card-header">
-                            <div>
-                                <strong>{{ group.label or "Recipe card" }}</strong>
-                                <small>EXTRACTED</small>
-                            </div>
-                            <a href="{{ recipe_app.import_url }}#pair-{{ group.id }}">Review Source</a>
+            {% for meal in complete_meals %}
+                <article class="recipe-library-card">
+                    <div class="recipe-library-card-header">
+                        <div>
+                            <strong>{{ meal.title or meal.source_label or "Complete meal" }}</strong>
+                            <small>COMPLETE MEAL - {{ meal.source_label }}</small>
                         </div>
-                        {% if group.ingredients_text %}
-                            <pre>{{ group.ingredients_text }}</pre>
+                        <a href="{{ recipe_app.import_url }}#pair-{{ meal.source_group_id }}">Review Source</a>
+                    </div>
+                    <div class="recipe-meal-preview">
+                        {% if meal.ingredients_text %}
+                            <section>
+                                <h3>Ingredients</h3>
+                                <pre>{{ meal.ingredients_text }}</pre>
+                            </section>
                         {% endif %}
-                    </article>
-                {% endif %}
+                        {% if meal.instructions_text %}
+                            <section>
+                                <h3>Steps</h3>
+                                <pre>{{ meal.instructions_text }}</pre>
+                            </section>
+                        {% endif %}
+                    </div>
+                </article>
             {% endfor %}
         </div>
-    {% endif %}
-
-    {% if shown_sections.count == 0 %}
+    {% else %}
         <div class="empty-state">
-            <p>No scraped recipes are ready yet.</p>
+            <p>No complete meals are ready yet.</p>
             {% if recipe_app.import_url %}
                 <a class="button-link" href="{{ recipe_app.import_url }}">Open Import Queue</a>
             {% endif %}
+        </div>
+    {% endif %}
+</section>
+
+<section class="detail-section">
+    <div class="section-header">
+        <div>
+            <h2>Meal Components</h2>
+            <p class="section-subtitle">Planned analysis path for sides, mains, sauces, toppings, and reusable recipe parts.</p>
+        </div>
+    </div>
+
+    {% if components %}
+        <div class="recipe-library-list">
+            {% for component in components %}
+                <article class="recipe-library-card">
+                    <div class="recipe-library-card-header">
+                        <div>
+                            <strong>{{ component.title }}</strong>
+                            <small>{{ component.component_type|upper }}{% if component.source_meal_title %} - from {{ component.source_meal_title }}{% endif %}</small>
+                        </div>
+                    </div>
+                    {% if component.ingredients_text %}
+                        <pre>{{ component.ingredients_text }}</pre>
+                    {% endif %}
+                </article>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="empty-state">
+            <p>No meal components have been analyzed yet.</p>
         </div>
     {% endif %}
 </section>

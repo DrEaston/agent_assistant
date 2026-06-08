@@ -122,6 +122,7 @@ def prepare_recipe_image_groups(groups):
 
 def get_recipe_app_context():
     """Resolve planner-backed recipe app links and import status."""
+    db.sync_recipe_complete_meals_from_extractions()
     project = db.get_project_by_name("Recipe display app")
     if not project:
         return {
@@ -129,6 +130,8 @@ def get_recipe_app_context():
             "import_action": None,
             "import_url": "",
             "groups": [],
+            "complete_meals": [],
+            "components": [],
             "stats": {"total_pairs": 0, "scraped_pairs": 0, "pending_pairs": 0, "sections": 0},
         }
 
@@ -142,10 +145,14 @@ def get_recipe_app_context():
             "import_action": None,
             "import_url": "",
             "groups": [],
+            "complete_meals": [],
+            "components": [],
             "stats": {"total_pairs": 0, "scraped_pairs": 0, "pending_pairs": 0, "sections": 0},
         }
 
     groups = prepare_recipe_image_groups(db.get_recipe_image_groups(import_action["id"]))
+    complete_meals = dicts_from_rows(db.get_recipe_complete_meals())
+    components = dicts_from_rows(db.get_recipe_components())
     scraped_pairs = sum(1 for group in groups if group.get("extraction_status") == "extracted")
     sections = sum(len(group.get("sections", [])) for group in groups)
     return {
@@ -153,11 +160,15 @@ def get_recipe_app_context():
         "import_action": import_action,
         "import_url": f"/apps/recipes/import?project_id={project['id']}&action_id={import_action['id']}",
         "groups": groups,
+        "complete_meals": complete_meals,
+        "components": components,
         "stats": {
             "total_pairs": len(groups),
             "scraped_pairs": scraped_pairs,
             "pending_pairs": len(groups) - scraped_pairs,
             "sections": sections,
+            "complete_meals": len(complete_meals),
+            "components": len(components),
         },
     }
 
@@ -689,6 +700,8 @@ def recipe_home_page(request: Request):
         "project": recipe_app["project"],
         "import_action": recipe_app["import_action"],
         "groups": recipe_app["groups"],
+        "complete_meals": recipe_app["complete_meals"],
+        "components": recipe_app["components"],
         "stats": recipe_app["stats"],
     }
     template = jinja_env.get_template("recipe_home.html")

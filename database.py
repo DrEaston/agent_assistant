@@ -3,6 +3,7 @@ Database module for project management.
 Handles SQLite operations for projects, notes, blockers, and goals.
 """
 
+import json
 import sqlite3
 from datetime import datetime
 
@@ -145,6 +146,35 @@ class Database:
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (group_id) REFERENCES recipe_image_groups(id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS recipe_complete_meals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_group_id INTEGER NOT NULL UNIQUE,
+                title TEXT DEFAULT '',
+                ingredients_text TEXT DEFAULT '',
+                instructions_text TEXT DEFAULT '',
+                status TEXT DEFAULT 'draft',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (source_group_id) REFERENCES recipe_image_groups(id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS recipe_components (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_meal_id INTEGER,
+                title TEXT NOT NULL,
+                component_type TEXT DEFAULT 'unknown',
+                ingredients_text TEXT DEFAULT '',
+                instructions_text TEXT DEFAULT '',
+                status TEXT DEFAULT 'draft',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (source_meal_id) REFERENCES recipe_complete_meals(id) ON DELETE SET NULL
             )
         """)
 
@@ -1002,6 +1032,104 @@ class Database:
         )
         self.conn.commit()
         self.close()
+
+    def sync_recipe_complete_meals_from_extractions(self):
+        """Copy extracted card-level recipes into the complete meals pathway."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                recipe_image_groups.id AS group_id,
+                recipe_image_groups.label,
+                recipe_extractions.ingredients_text,
+                recipe_extractions.instructions_text,
+                recipe_extractions.sections_json
+            FROM recipe_image_groups
+            JOIN recipe_extractions
+                ON recipe_extractions.group_id = recipe_image_groups.id
+            WHERE recipe_extractions.status = 'extracted'
+            """
+        )
+        extractions = cursor.fetchall()
+
+        for extraction in extractions:
+            title = self._title_from_sections_json(
+                extraction["sections_json"],
+                extraction["label"] or "Complete meal",
+            )
+            cursor.execute(
+                """
+                INSERT INTO recipe_complete_meals
+                    (source_group_id, title, ingredients_text, instructions_text, updated_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(source_group_id) DO UPDATE SET
+                    title = excluded.title,
+                    ingredients_text = excluded.ingredients_text,
+                    instructions_text = excluded.instructions_text,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    extraction["group_id"],
+                    title,
+                    extraction["ingredients_text"] or "",
+                    extraction["instructions_text"] or "",
+                ),
+            )
+
+        self.conn.commit()
+        self.close()
+
+    @staticmethod
+    def _title_from_sections_json(sections_json, fallback):
+        try:
+            sections = json.loads(sections_json or "[]")
+        except json.JSONDecodeError:
+            sections = []
+
+        for section in sections:
+            title = str(section.get("title") or "").strip()
+            if title:
+                return title
+        return fallback
+
+    def get_recipe_complete_meals(self):
+        """Get faithful complete-meal records copied from recipe cards."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                recipe_complete_meals.*,
+                recipe_image_groups.label AS source_label
+            FROM recipe_complete_meals
+            LEFT JOIN recipe_image_groups
+                ON recipe_image_groups.id = recipe_complete_meals.source_group_id
+            ORDER BY recipe_complete_meals.updated_at DESC, recipe_complete_meals.id DESC
+            """
+        )
+        meals = cursor.fetchall()
+        self.close()
+        return meals
+
+    def get_recipe_components(self):
+        """Get analyzed meal components such as sides, mains, sauces, and toppings."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                recipe_components.*,
+                recipe_complete_meals.title AS source_meal_title
+            FROM recipe_components
+            LEFT JOIN recipe_complete_meals
+                ON recipe_complete_meals.id = recipe_components.source_meal_id
+            ORDER BY recipe_components.updated_at DESC, recipe_components.id DESC
+            """
+        )
+        components = cursor.fetchall()
+        self.close()
+        return components
 
     def get_weekly_goals(self, project_id):
         """Get weekly goals for a project."""
