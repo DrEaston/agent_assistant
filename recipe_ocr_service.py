@@ -65,6 +65,35 @@ GENERIC_RECIPE_TITLES = {
     "unknown",
 }
 
+RECIPE_COMPONENT_PROMPT = """You split complete meal recipes into reusable meal components.
+
+Input will include a complete meal title, full ingredients text, and full steps.
+
+Return only JSON with this shape:
+{
+  "components": [
+    {
+      "title": "",
+      "component_type": "meat|carb|vegetable|sauce|other",
+      "ingredients": [],
+      "instructions": []
+    }
+  ]
+}
+
+Rules:
+- Components can be meat, carb, vegetable, sauce, or other.
+- Extract every distinct component that could stand alone as a side/main/sauce.
+- Keep ingredients needed for that component.
+- Keep only instructions directly related to that component.
+- Do not include unrelated complete-meal assembly instructions unless the
+  component requires them.
+- Use specific titles like "Crispy Potatoes", "Broccoli", "Fig Sauce", or
+  "Pork Chops", not generic titles like "Side" or "Main".
+- If a complete meal has no separable component, return the main prepared item
+  as one component with the best type.
+"""
+
 
 class RecipeOCRService:
     """Use a configured vision model to extract structured recipe text."""
@@ -144,6 +173,67 @@ class RecipeOCRService:
                 "sections_json": "[]",
                 "raw_response": "",
             }
+
+    def analyze_components(self, meal):
+        """Split a complete meal into reusable components."""
+        if not self.available:
+            return {
+                "status": "error",
+                "error": "OPENAI_API_KEY is not configured, so component analysis cannot run yet.",
+                "components": [],
+            }
+
+        try:
+            from openai import OpenAI
+
+            client = OpenAI(api_key=self.api_key)
+            response = client.chat.completions.create(
+                model=self.model,
+                temperature=0,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": RECIPE_COMPONENT_PROMPT},
+                    {"role": "user", "content": self._build_component_prompt(meal)},
+                ],
+            )
+            raw_response = response.choices[0].message.content or ""
+            payload = self._parse_json(raw_response)
+            components = self._normalize_components(payload.get("components", []))
+            return {"status": "analyzed", "error": "", "components": components}
+        except Exception as exc:
+            return {"status": "error", "error": f"Component analysis failed: {exc}", "components": []}
+
+    @staticmethod
+    def _build_component_prompt(meal):
+        return (
+            f"Complete meal title: {meal.get('title') or 'Untitled meal'}\n\n"
+            f"Ingredients:\n{meal.get('ingredients_text') or ''}\n\n"
+            f"Steps:\n{meal.get('instructions_text') or ''}\n"
+        )
+
+    @staticmethod
+    def _normalize_components(components):
+        allowed_types = {"meat", "carb", "vegetable", "sauce", "other"}
+        normalized = []
+        for component in components:
+            title = str(component.get("title") or "").strip()
+            component_type = str(component.get("component_type") or "other").strip().lower()
+            if component_type not in allowed_types:
+                component_type = "other"
+            ingredients = component.get("ingredients") or []
+            instructions = component.get("instructions") or []
+            if not title:
+                title = RecipeOCRService._fallback_section_title(
+                    {"ingredients": ingredients},
+                    component_type,
+                )
+            normalized.append({
+                "title": title,
+                "component_type": component_type,
+                "ingredients_text": "\n".join(str(item).strip() for item in ingredients if str(item).strip()),
+                "instructions_text": "\n".join(str(item).strip() for item in instructions if str(item).strip()),
+            })
+        return normalized
 
     @staticmethod
     def _normalize_payload(payload):

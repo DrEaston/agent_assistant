@@ -767,6 +767,21 @@ def recipe_import_page(request: Request, project_id: int, action_id: int):
     return HTMLResponse(html)
 
 
+@app.post("/apps/recipes/components/analyze")
+def analyze_recipe_components_form():
+    """Analyze ready complete meals into reusable components."""
+    db.sync_recipe_complete_meals_from_extractions()
+    meals = prepare_recipe_complete_meals(db.get_recipe_complete_meals())
+    for meal in meals:
+        if meal.get("status") != "ready":
+            continue
+        result = recipe_ocr_service.analyze_components(meal)
+        if result["status"] == "analyzed":
+            db.replace_recipe_components_for_meal(meal["id"], result["components"])
+
+    return RedirectResponse(url="/apps/recipes", status_code=303)
+
+
 # ============================================================================
 # FORM SUBMISSION ROUTES (Post-Redirect-Get Pattern)
 # ============================================================================

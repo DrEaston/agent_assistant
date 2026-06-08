@@ -108,6 +108,11 @@
             <h2>Meal Components</h2>
             <p class="section-subtitle">Planned analysis path for sides, mains, sauces, toppings, and reusable recipe parts.</p>
         </div>
+        {% if complete_meals %}
+            <form method="post" action="/apps/recipes/components/analyze" class="plain-form">
+                <button type="submit">Scan Complete Meals</button>
+            </form>
+        {% endif %}
     </div>
 
     {% if components %}
@@ -121,7 +126,18 @@
                         </div>
                     </div>
                     {% if component.ingredients_text %}
-                        <pre>{{ component.ingredients_text }}</pre>
+                        <div class="recipe-meal-preview">
+                            <section>
+                                <h3>Ingredients</h3>
+                                <pre>{{ component.ingredients_text }}</pre>
+                            </section>
+                            {% if component.instructions_text %}
+                                <section>
+                                    <h3>Relevant Steps</h3>
+                                    <pre>{{ component.instructions_text }}</pre>
+                                </section>
+                            {% endif %}
+                        </div>
                     {% endif %}
                 </article>
             {% endfor %}

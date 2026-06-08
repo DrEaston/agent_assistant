@@ -1154,6 +1154,38 @@ class Database:
         self.close()
         return meals
 
+    def get_recipe_complete_meal(self, meal_id):
+        """Get one complete meal."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM recipe_complete_meals WHERE id = ?", (meal_id,))
+        meal = cursor.fetchone()
+        self.close()
+        return meal
+
+    def replace_recipe_components_for_meal(self, meal_id, components):
+        """Replace analyzed components for one complete meal."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM recipe_components WHERE source_meal_id = ?", (meal_id,))
+        for component in components:
+            cursor.execute(
+                """
+                INSERT INTO recipe_components
+                    (source_meal_id, title, component_type, ingredients_text, instructions_text, status, updated_at)
+                VALUES (?, ?, ?, ?, ?, 'draft', CURRENT_TIMESTAMP)
+                """,
+                (
+                    meal_id,
+                    component.get("title", ""),
+                    component.get("component_type", "other"),
+                    component.get("ingredients_text", ""),
+                    component.get("instructions_text", ""),
+                ),
+            )
+        self.conn.commit()
+        self.close()
+
     def get_recipe_components(self):
         """Get analyzed meal components such as sides, mains, sauces, and toppings."""
         self.connect()
