@@ -34,12 +34,12 @@
         <div class="metric-label">Needs Review</div>
     </div>
     <div class="metric">
-        <div class="metric-value">{{ stats.complete_meals }}</div>
-        <div class="metric-label">Complete Meals</div>
+        <div class="metric-value">{{ stats.complete_meals_ready }}/{{ stats.complete_meals }}</div>
+        <div class="metric-label">Meals Ready</div>
     </div>
     <div class="metric">
-        <div class="metric-value">{{ stats.components }}</div>
-        <div class="metric-label">Components</div>
+        <div class="metric-value">{{ stats.complete_meals_needing_review }}</div>
+        <div class="metric-label">Meal Warnings</div>
     </div>
 </div>
 
@@ -54,14 +54,27 @@
     {% if complete_meals %}
         <div class="recipe-library-list">
             {% for meal in complete_meals %}
-                <article class="recipe-library-card">
+                <article class="recipe-library-card {% if meal.status != 'ready' %}needs-review{% endif %}">
                     <div class="recipe-library-card-header">
                         <div>
                             <strong>{{ meal.title or meal.source_label or "Complete meal" }}</strong>
-                            <small>COMPLETE MEAL - {{ meal.source_label }}</small>
+                            <small>
+                                COMPLETE MEAL - {{ meal.source_label }}
+                                <span class="meal-status meal-status-{{ meal.status }}">{{ meal.status|replace("_", " ")|upper }}</span>
+                            </small>
                         </div>
                         <a href="{{ recipe_app.import_url }}#pair-{{ meal.source_group_id }}">Review Source</a>
                     </div>
+                    {% if meal.quality_notes %}
+                        <div class="meal-warning-panel">
+                            <strong>Needs attention</strong>
+                            <ul>
+                                {% for note in meal.quality_notes %}
+                                    <li>{{ note }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    {% endif %}
                     <div class="recipe-meal-preview">
                         {% if meal.ingredients_text %}
                             <section>

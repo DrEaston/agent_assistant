@@ -156,7 +156,8 @@ class Database:
                 title TEXT DEFAULT '',
                 ingredients_text TEXT DEFAULT '',
                 instructions_text TEXT DEFAULT '',
-                status TEXT DEFAULT 'draft',
+                status TEXT DEFAULT 'needs_review',
+                quality_notes_json TEXT DEFAULT '[]',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (source_group_id) REFERENCES recipe_image_groups(id) ON DELETE CASCADE
@@ -235,6 +236,7 @@ class Database:
         self._ensure_column(cursor, "recipe_images", "group_id", "INTEGER")
         self._ensure_column(cursor, "recipe_images", "side", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "recipe_image_groups", "layout", "TEXT DEFAULT 'front_back'")
+        self._ensure_column(cursor, "recipe_complete_meals", "quality_notes_json", "TEXT DEFAULT '[]'")
         self._repair_sample_data_links(cursor)
         self._deprioritize_overlong_actions(cursor)
         self._ensure_recipe_import_steps(cursor)
@@ -1042,43 +1044,82 @@ class Database:
             SELECT
                 recipe_image_groups.id AS group_id,
                 recipe_image_groups.label,
+                recipe_extractions.status AS extraction_status,
                 recipe_extractions.ingredients_text,
                 recipe_extractions.instructions_text,
-                recipe_extractions.sections_json
+                recipe_extractions.sections_json,
+                recipe_extractions.error AS extraction_error
             FROM recipe_image_groups
-            JOIN recipe_extractions
+            LEFT JOIN recipe_extractions
                 ON recipe_extractions.group_id = recipe_image_groups.id
-            WHERE recipe_extractions.status = 'extracted'
             """
         )
-        extractions = cursor.fetchall()
+        groups = cursor.fetchall()
 
-        for extraction in extractions:
+        for group in groups:
+            image_roles = self._get_recipe_image_roles(cursor, group["group_id"])
+            quality_notes = self._build_complete_meal_quality_notes(group, image_roles)
+            status = "ready" if not quality_notes else "needs_review"
             title = self._title_from_sections_json(
-                extraction["sections_json"],
-                extraction["label"] or "Complete meal",
+                group["sections_json"],
+                group["label"] or "Complete meal",
             )
             cursor.execute(
                 """
                 INSERT INTO recipe_complete_meals
-                    (source_group_id, title, ingredients_text, instructions_text, updated_at)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    (source_group_id, title, ingredients_text, instructions_text, status, quality_notes_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(source_group_id) DO UPDATE SET
                     title = excluded.title,
                     ingredients_text = excluded.ingredients_text,
                     instructions_text = excluded.instructions_text,
+                    status = excluded.status,
+                    quality_notes_json = excluded.quality_notes_json,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
-                    extraction["group_id"],
+                    group["group_id"],
                     title,
-                    extraction["ingredients_text"] or "",
-                    extraction["instructions_text"] or "",
+                    group["ingredients_text"] or "",
+                    group["instructions_text"] or "",
+                    status,
+                    json.dumps(quality_notes),
                 ),
             )
 
         self.conn.commit()
         self.close()
+
+    @staticmethod
+    def _get_recipe_image_roles(cursor, group_id):
+        cursor.execute(
+            "SELECT side FROM recipe_images WHERE group_id = ?",
+            (group_id,),
+        )
+        return {row["side"] for row in cursor.fetchall()}
+
+    @staticmethod
+    def _build_complete_meal_quality_notes(group, image_roles):
+        notes = []
+        if "front" not in image_roles:
+            notes.append("Add or label a front image for ingredients.")
+        if "back" not in image_roles:
+            notes.append("Add or label a back image for steps.")
+
+        extraction_status = group["extraction_status"]
+        if extraction_status is None:
+            notes.append("Run OCR/scrape for this card pair.")
+        elif extraction_status != "extracted":
+            error = group["extraction_error"] or "OCR did not complete cleanly."
+            notes.append(error)
+
+        ingredients_text = (group["ingredients_text"] or "").strip()
+        instructions_text = (group["instructions_text"] or "").strip()
+        if extraction_status == "extracted" and not ingredients_text:
+            notes.append("Ingredients could not be read clearly from the card.")
+        if extraction_status == "extracted" and not instructions_text:
+            notes.append("Steps could not be read clearly from the card.")
+        return notes
 
     @staticmethod
     def _title_from_sections_json(sections_json, fallback):
@@ -1101,7 +1142,8 @@ class Database:
             """
             SELECT
                 recipe_complete_meals.*,
-                recipe_image_groups.label AS source_label
+                recipe_image_groups.label AS source_label,
+                recipe_image_groups.layout AS source_layout
             FROM recipe_complete_meals
             LEFT JOIN recipe_image_groups
                 ON recipe_image_groups.id = recipe_complete_meals.source_group_id

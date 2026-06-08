@@ -882,6 +882,12 @@
             padding: 1rem;
         }
 
+        .recipe-library-card.needs-review {
+            border-color: #f2c7e8;
+            border-left-color: #c0268a;
+            background: #fff7fd;
+        }
+
         .recipe-library-card-header {
             display: flex;
             justify-content: space-between;
@@ -898,6 +904,44 @@
         .recipe-library-card-header small {
             color: #667;
             margin-top: 0.2rem;
+        }
+
+        .meal-status {
+            display: inline-block;
+            margin-left: 0.35rem;
+            padding: 0.12rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.72rem;
+            font-weight: 800;
+            color: #fff;
+            background: #c0268a;
+        }
+
+        .meal-status-ready {
+            background: #0891b2;
+        }
+
+        .meal-warning-panel {
+            background: #fff;
+            border: 1px solid #f2c7e8;
+            border-radius: 6px;
+            color: #6f1d55;
+            margin: 0.75rem 0;
+            padding: 0.75rem;
+        }
+
+        .meal-warning-panel strong {
+            display: block;
+            margin-bottom: 0.35rem;
+        }
+
+        .meal-warning-panel ul {
+            margin: 0;
+            padding-left: 1.15rem;
+        }
+
+        .meal-warning-panel li + li {
+            margin-top: 0.25rem;
         }
 
         .recipe-library-card-header a {

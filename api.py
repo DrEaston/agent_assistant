@@ -120,6 +120,18 @@ def prepare_recipe_image_groups(groups):
         prepared.append(group_data)
     return prepared
 
+def prepare_recipe_complete_meals(meals):
+    """Parse complete-meal quality notes for rendering."""
+    prepared = []
+    for meal in meals:
+        meal_data = dict(meal)
+        try:
+            meal_data["quality_notes"] = json.loads(meal_data.get("quality_notes_json") or "[]")
+        except json.JSONDecodeError:
+            meal_data["quality_notes"] = ["Quality notes could not be parsed."]
+        prepared.append(meal_data)
+    return prepared
+
 def get_recipe_app_context():
     """Resolve planner-backed recipe app links and import status."""
     db.sync_recipe_complete_meals_from_extractions()
@@ -132,7 +144,16 @@ def get_recipe_app_context():
             "groups": [],
             "complete_meals": [],
             "components": [],
-            "stats": {"total_pairs": 0, "scraped_pairs": 0, "pending_pairs": 0, "sections": 0},
+            "stats": {
+                "total_pairs": 0,
+                "scraped_pairs": 0,
+                "pending_pairs": 0,
+                "sections": 0,
+                "complete_meals": 0,
+                "complete_meals_ready": 0,
+                "complete_meals_needing_review": 0,
+                "components": 0,
+            },
         }
 
     import_action = db.find_recommended_action(
@@ -147,14 +168,25 @@ def get_recipe_app_context():
             "groups": [],
             "complete_meals": [],
             "components": [],
-            "stats": {"total_pairs": 0, "scraped_pairs": 0, "pending_pairs": 0, "sections": 0},
+            "stats": {
+                "total_pairs": 0,
+                "scraped_pairs": 0,
+                "pending_pairs": 0,
+                "sections": 0,
+                "complete_meals": 0,
+                "complete_meals_ready": 0,
+                "complete_meals_needing_review": 0,
+                "components": 0,
+            },
         }
 
     groups = prepare_recipe_image_groups(db.get_recipe_image_groups(import_action["id"]))
-    complete_meals = dicts_from_rows(db.get_recipe_complete_meals())
+    complete_meals = prepare_recipe_complete_meals(db.get_recipe_complete_meals())
     components = dicts_from_rows(db.get_recipe_components())
     scraped_pairs = sum(1 for group in groups if group.get("extraction_status") == "extracted")
     sections = sum(len(group.get("sections", [])) for group in groups)
+    complete_meals_ready = sum(1 for meal in complete_meals if meal.get("status") == "ready")
+    complete_meals_needing_review = len(complete_meals) - complete_meals_ready
     return {
         "project": project,
         "import_action": import_action,
@@ -168,6 +200,8 @@ def get_recipe_app_context():
             "pending_pairs": len(groups) - scraped_pairs,
             "sections": sections,
             "complete_meals": len(complete_meals),
+            "complete_meals_ready": complete_meals_ready,
+            "complete_meals_needing_review": complete_meals_needing_review,
             "components": len(components),
         },
     }
