@@ -100,6 +100,8 @@ SESSION_DAYS = 30
 PBKDF2_ITERATIONS = 210_000
 SESSION_COOKIE_SECURE = bool(os.getenv("K_SERVICE")) or os.getenv("SESSION_COOKIE_SECURE", "").lower() == "true"
 REGISTRATION_CODE = os.getenv("DIETER_REGISTRATION_CODE", "")
+GUEST_EMAIL = os.getenv("DIETER_GUEST_EMAIL", "guest@askdieter.local")
+READ_ONLY_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
 def hash_password(password):
@@ -154,6 +156,11 @@ def create_login_response(user_id, redirect_to="/"):
     return response
 
 
+def safe_internal_redirect_target(value, fallback="/"):
+    """Keep auth redirects on this app."""
+    return value if value and value.startswith("/") and not value.startswith("//") else fallback
+
+
 def clear_login_response(redirect_to="/login"):
     """Clear the login cookie and redirect."""
     response = RedirectResponse(url=redirect_to, status_code=303)
@@ -180,11 +187,43 @@ def redirect_or_unauthorized(request):
     return RedirectResponse(url=f"/login?next={request.url.path}", status_code=303)
 
 
+def is_guest_user(user):
+    """Return True for the shared read-only guest account."""
+    return bool(user and user["role"] == "guest")
+
+
+def guest_read_only_response(request):
+    """Reject writes from guest sessions."""
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"detail": "Guest access is read-only."}, status_code=403)
+    return HTMLResponse(
+        """
+        <section style="font-family: system-ui, sans-serif; max-width: 36rem; margin: 4rem auto; line-height: 1.5;">
+            <h1>Guest access is read-only</h1>
+            <p>You can browse the recipe catalogue as a guest, but saving, editing, planning, and deleting need a full account.</p>
+            <p><a href="/apps/recipes">Back to recipes</a></p>
+        </section>
+        """,
+        status_code=403,
+    )
+
+
+def get_or_create_guest_user_id():
+    """Create the shared guest user on demand and expose the recipe catalogue to it."""
+    user = db.get_user_by_email(GUEST_EMAIL)
+    if user:
+        return user["id"]
+    password = secrets.token_urlsafe(32)
+    guest_id = db.create_user(GUEST_EMAIL, "Guest", hash_password(password), "guest")
+    db.share_recipe_library_with_all_users()
+    return guest_id
+
+
 @app.middleware("http")
 async def load_authenticated_user(request: Request, call_next):
     """Load the logged-in user and require authentication for app routes."""
     path = request.url.path
-    public_prefixes = ("/login", "/register", "/logout", "/favicon.ico", "/apps/planner", "/dashboard")
+    public_prefixes = ("/login", "/guest-login", "/register", "/logout", "/favicon.ico", "/apps/planner", "/dashboard")
     token = request.cookies.get(SESSION_COOKIE_NAME, "")
     user = None
     if token:
@@ -197,6 +236,12 @@ async def load_authenticated_user(request: Request, call_next):
             if db.get_user_count() == 0:
                 return RedirectResponse(url="/register", status_code=303)
             return redirect_or_unauthorized(request)
+        if (
+            is_guest_user(user)
+            and request.method not in READ_ONLY_METHODS
+            and not path.startswith(("/logout", "/guest-login"))
+        ):
+            return guest_read_only_response(request)
         response = await call_next(request)
         return response
     finally:
@@ -3195,8 +3240,15 @@ def login_form(
         return render_auth_page(request, "login", "Email or password was not recognized.")
     if user["status"] != "active":
         return render_auth_page(request, "login", "This account is not active.")
-    safe_next = next if next.startswith("/") and not next.startswith("//") else "/"
+    safe_next = safe_internal_redirect_target(next)
     return create_login_response(user["id"], safe_next)
+
+
+@app.post("/guest-login")
+def guest_login_form(next: str = Form("/apps/recipes")):
+    """Start a read-only guest session."""
+    user_id = get_or_create_guest_user_id()
+    return create_login_response(user_id, safe_internal_redirect_target(next, "/apps/recipes"))
 
 
 @app.get("/register")

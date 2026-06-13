@@ -52,6 +52,14 @@
         <button type="submit">{% if mode == "register" %}Create Account{% else %}Log In{% endif %}</button>
     </form>
 
+    {% if mode == "login" %}
+        <form method="post" action="/guest-login" class="inline-form">
+            <input type="hidden" name="next" value="{{ request.query_params.get('next', '/apps/recipes') }}">
+            <button type="submit" class="secondary">Continue as Guest</button>
+        </form>
+        <p class="section-subtitle">Read-only access to the shared recipe catalogue.</p>
+    {% endif %}
+
     {% if mode == "register" and has_users %}
         <p class="section-subtitle"><a href="/login">Already have an account?</a></p>
     {% elif mode == "login" %}

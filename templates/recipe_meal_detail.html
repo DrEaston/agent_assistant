@@ -3,6 +3,7 @@
 {% block title %}{{ meal.title or "Complete meal" }} - Dieter Kitchen{% endblock %}
 
 {% block content %}
+{% set is_guest = request.state.current_user and request.state.current_user.role == "guest" %}
 <section class="detail-section recipe-detail">
     <div class="section-header">
         <div>
@@ -21,9 +22,11 @@
             </p>
         </div>
         <div class="recipe-detail-actions">
-            <form method="post" action="/apps/recipes/meal-plan/meals/{{ meal.id }}/add" class="inline-form">
-                <button type="submit">Add to Meal Plan</button>
-            </form>
+            {% if not is_guest %}
+                <form method="post" action="/apps/recipes/meal-plan/meals/{{ meal.id }}/add" class="inline-form">
+                    <button type="submit">Add to Meal Plan</button>
+                </form>
+            {% endif %}
             {% if recipe_app.import_url %}
                 <a class="button-link secondary-link" href="{{ recipe_app.import_url }}#pair-{{ meal.source_group_id }}">Review Source</a>
             {% endif %}
@@ -118,24 +121,26 @@
             <p class="muted-text">Add ingredient sections to prepare this bake.</p>
         {% endif %}
 
-        <details class="baking-edit-sections" {% if not ingredient_sections %}open{% endif %}>
-            <summary>Edit Ingredient Sections</summary>
-            <form method="post" action="/apps/recipes/meals/{{ meal.id }}/ingredient-sections/save" class="baking-intake-form">
-                <label>
-                    <span>Dough</span>
-                    <textarea name="dough_ingredients" rows="7" placeholder="500 g bread flour&#10;100 g starter&#10;300 g water">{{ sectioned_ingredient_values.get("dough", "") }}</textarea>
-                </label>
-                <label>
-                    <span>Filling</span>
-                    <textarea name="filling_ingredients" rows="7" placeholder="Brown sugar&#10;Cinnamon&#10;Softened butter">{{ sectioned_ingredient_values.get("filling", "") }}</textarea>
-                </label>
-                <label>
-                    <span>Icing</span>
-                    <textarea name="icing_ingredients" rows="7" placeholder="Powdered sugar&#10;Milk&#10;Vanilla">{{ sectioned_ingredient_values.get("icing", "") }}</textarea>
-                </label>
-                <button type="submit">Save Ingredient Sections</button>
-            </form>
-        </details>
+        {% if not is_guest %}
+            <details class="baking-edit-sections" {% if not ingredient_sections %}open{% endif %}>
+                <summary>Edit Ingredient Sections</summary>
+                <form method="post" action="/apps/recipes/meals/{{ meal.id }}/ingredient-sections/save" class="baking-intake-form">
+                    <label>
+                        <span>Dough</span>
+                        <textarea name="dough_ingredients" rows="7" placeholder="500 g bread flour&#10;100 g starter&#10;300 g water">{{ sectioned_ingredient_values.get("dough", "") }}</textarea>
+                    </label>
+                    <label>
+                        <span>Filling</span>
+                        <textarea name="filling_ingredients" rows="7" placeholder="Brown sugar&#10;Cinnamon&#10;Softened butter">{{ sectioned_ingredient_values.get("filling", "") }}</textarea>
+                    </label>
+                    <label>
+                        <span>Icing</span>
+                        <textarea name="icing_ingredients" rows="7" placeholder="Powdered sugar&#10;Milk&#10;Vanilla">{{ sectioned_ingredient_values.get("icing", "") }}</textarea>
+                    </label>
+                    <button type="submit">Save Ingredient Sections</button>
+                </form>
+            </details>
+        {% endif %}
     </div>
 
     <div class="recipe-meal-preview recipe-detail-grid">
@@ -178,7 +183,7 @@
     {% endif %}
 </section>
 
-{% if request.state.current_user and meal.user_id == request.state.current_user.id %}
+{% if not is_guest and request.state.current_user and meal.user_id == request.state.current_user.id %}
     <section class="detail-section share-meal-panel">
         <div class="section-header">
             <div>

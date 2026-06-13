@@ -4,7 +4,8 @@
 {% block recipe_app_subtitle %}{% if recipe_view == "create_meal" %}Build a meal from flexible recipe parts and send it to the plan.{% else %}Plan meals, build grocery lists, and improve recipes as you cook.{% endif %}{% endblock %}
 
 {% block content %}
-{% if recipe_view != "create_meal" %}
+{% set is_guest = request.state.current_user and request.state.current_user.role == "guest" %}
+{% if recipe_view != "create_meal" and not is_guest %}
 <section class="detail-section meal-plan-section" id="meal-plan">
     <div class="section-header">
         <div>
@@ -110,9 +111,11 @@
                                 {% endif %}
                             </span>
                         </a>
-                        <form method="post" action="/apps/recipes/meal-plan/meals/{{ meal.id }}/add" class="inline-form featured-meal-action">
-                            <button type="submit" class="compact">Add to Plan</button>
-                        </form>
+                        {% if not is_guest %}
+                            <form method="post" action="/apps/recipes/meal-plan/meals/{{ meal.id }}/add" class="inline-form featured-meal-action">
+                                <button type="submit" class="compact">Add to Plan</button>
+                            </form>
+                        {% endif %}
                     </article>
                 {% endfor %}
             </div>
@@ -155,10 +158,12 @@
                             <strong>{{ meal.display_title or meal.source_label or "Complete meal" }}</strong>
                         </a>
                         <span class="recipe-title-meta">
-                            <form method="post" action="/apps/recipes/meals/{{ meal.id }}{% if meal.is_favorite %}/favorite/delete{% else %}/favorite{% endif %}" class="inline-form">
-                                <input type="hidden" name="next" value="{{ request.url.path }}">
-                                <button type="submit" class="secondary compact">{% if meal.is_favorite %}Favorited{% else %}Favorite{% endif %}</button>
-                            </form>
+                            {% if not is_guest %}
+                                <form method="post" action="/apps/recipes/meals/{{ meal.id }}{% if meal.is_favorite %}/favorite/delete{% else %}/favorite{% endif %}" class="inline-form">
+                                    <input type="hidden" name="next" value="{{ request.url.path }}">
+                                    <button type="submit" class="secondary compact">{% if meal.is_favorite %}Favorited{% else %}Favorite{% endif %}</button>
+                                </form>
+                            {% endif %}
                             <span class="meal-status meal-status-ready">{{ meal.catalogue_label }}</span>
                             {% if meal.is_new %}
                                 <span class="meal-status meal-status-ready">NEW</span>
@@ -169,9 +174,11 @@
                             {% if meal.quality_notes %}
                                 <span class="review-count">{{ meal.quality_notes|length }} note{% if meal.quality_notes|length != 1 %}s{% endif %}</span>
                             {% endif %}
-                            <form method="post" action="/apps/recipes/meal-plan/meals/{{ meal.id }}/add" class="inline-form">
-                                <button type="submit" class="compact">Add to Plan</button>
-                            </form>
+                            {% if not is_guest %}
+                                <form method="post" action="/apps/recipes/meal-plan/meals/{{ meal.id }}/add" class="inline-form">
+                                    <button type="submit" class="compact">Add to Plan</button>
+                                </form>
+                            {% endif %}
                         </span>
                     </div>
                 {% endfor %}
@@ -188,6 +195,7 @@
         {% endif %}
 </section>
 
+{% if not is_guest %}
 <section class="detail-section manual-grocery-section">
     {% if grocery_lists %}
         {% set target_grocery_list = grocery_lists[0] %}
@@ -196,6 +204,7 @@
     {% set manual_grocery_open_cell = True %}
     {% include "manual_grocery_form.html" %}
 </section>
+{% endif %}
 {% endif %}
 
 {% if recipe_view == "create_meal" %}
@@ -241,16 +250,18 @@
                 <div class="selected-components" data-selected-components aria-live="polite">
                     <p class="selected-components-empty" data-selected-components-empty>No meal parts selected.</p>
                 </div>
-                <form method="post" action="/apps/recipes/meals/save" class="save-meal-form" data-save-meal-form>
-                    <input type="hidden" name="selected_component_ids" value="[]" data-selected-component-ids>
-                    <input type="text" name="meal_name" placeholder="Name this meal" aria-label="Meal name">
-                    <button type="submit" class="compact">Save Meal</button>
-                </form>
-                <form method="post" action="/apps/recipes/meal-plan/components/add" class="save-meal-form" data-add-component-meal-form>
-                    <input type="hidden" name="selected_component_ids" value="[]" data-selected-component-ids>
-                    <input type="text" name="meal_name" placeholder="Optional meal name" aria-label="Optional meal name">
-                    <button type="submit" class="compact">Add to Meal Plan</button>
-                </form>
+                {% if not is_guest %}
+                    <form method="post" action="/apps/recipes/meals/save" class="save-meal-form" data-save-meal-form>
+                        <input type="hidden" name="selected_component_ids" value="[]" data-selected-component-ids>
+                        <input type="text" name="meal_name" placeholder="Name this meal" aria-label="Meal name">
+                        <button type="submit" class="compact">Save Meal</button>
+                    </form>
+                    <form method="post" action="/apps/recipes/meal-plan/components/add" class="save-meal-form" data-add-component-meal-form>
+                        <input type="hidden" name="selected_component_ids" value="[]" data-selected-component-ids>
+                        <input type="text" name="meal_name" placeholder="Optional meal name" aria-label="Optional meal name">
+                        <button type="submit" class="compact">Add to Meal Plan</button>
+                    </form>
+                {% endif %}
                 <div class="component-picker-actions">
                     <button type="button" class="compact" data-generate-grocery-list>Preview Grocery List</button>
                     <button type="button" class="secondary compact" data-clear-meal-selection>Clear Meal Picks</button>
