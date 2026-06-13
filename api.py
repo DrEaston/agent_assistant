@@ -607,6 +607,21 @@ BAKING_INGREDIENT_SECTION_TERMS = {
     ],
 }
 
+BAKING_INSTRUCTION_SECTION_TERMS = {
+    "dough": [
+        "autolyse", "bulk", "dough", "ferment", "flour", "fold", "knead",
+        "levain", "proof", "rise", "starter", "stretch", "water",
+    ],
+    "filling": [
+        "brown sugar", "cardamom", "cinnamon", "filling", "nutmeg", "roll up",
+        "spread", "sprinkle", "swirl",
+    ],
+    "icing": [
+        "cream cheese", "drizzle", "frost", "frosting", "glaze", "icing",
+        "powdered sugar", "vanilla", "whisk",
+    ],
+}
+
 def normalize_baking_section_heading(line):
     """Return a known baking section key when a line looks like a heading."""
     heading = re.sub(r"^#+\s*", "", line or "").strip()
@@ -670,6 +685,43 @@ def parse_baking_ingredient_sections(ingredients_text):
     if other_items:
         sections.append({"key": "general", "label": "Ingredients", "items": other_items})
     return sections
+
+def parse_baking_instruction_sections(instructions_text):
+    """Split recipe instructions into the baking sections they most likely support."""
+    sections_by_key = {key: [] for key in BAKING_SECTION_LABELS}
+    current_key = None
+    for raw_line in (instructions_text or "").splitlines():
+        line = re.sub(r"^\s*(?:[-*]|\d+[.)])\s*", "", raw_line).strip()
+        if not line:
+            continue
+        heading_key = normalize_baking_section_heading(line)
+        if heading_key:
+            current_key = heading_key
+            continue
+        lowered = line.lower()
+        target_key = current_key
+        scored_keys = []
+        for key, terms in BAKING_INSTRUCTION_SECTION_TERMS.items():
+            score = sum(1 for term in terms if term in lowered)
+            if score:
+                scored_keys.append((score, key))
+        if scored_keys:
+            scored_keys.sort(key=lambda item: (item[0], item[1] != "dough"))
+            target_key = scored_keys[-1][1]
+        if target_key:
+            sections_by_key[target_key].append(line)
+    return sections_by_key
+
+def attach_baking_instructions_to_sections(ingredient_sections, instructions_text):
+    """Add section-specific instruction snippets to ingredient sections for Bake Mode."""
+    instructions_by_key = parse_baking_instruction_sections(instructions_text)
+    return [
+        {
+            **section,
+            "instructions": instructions_by_key.get(section["key"], []),
+        }
+        for section in ingredient_sections
+    ]
 
 def format_baking_ingredient_sections(section_values):
     """Render saved ingredient sections in a predictable edited-recipe format."""
@@ -3362,6 +3414,10 @@ def recipe_meal_detail_page(request: Request, meal_id: int):
 
     meal = prepare_recipe_complete_meals([meal])[0]
     ingredient_sections = parse_baking_ingredient_sections(meal.get("display_ingredients_text") or "")
+    ingredient_sections = attach_baking_instructions_to_sections(
+        ingredient_sections,
+        meal.get("display_instructions_text") or "",
+    )
     change_log = prepare_recipe_change_log(db.get_recipe_change_log("meal", meal_id))
     context = {
         "request": request,
@@ -3433,6 +3489,10 @@ def recipe_component_detail_page(request: Request, component_id: int):
         raise HTTPException(status_code=404, detail="Meal component not found")
     component = prepare_recipe_components([component])[0]
     ingredient_sections = parse_baking_ingredient_sections(component.get("display_ingredients_text") or "")
+    ingredient_sections = attach_baking_instructions_to_sections(
+        ingredient_sections,
+        component.get("display_instructions_text") or "",
+    )
     change_log = prepare_recipe_change_log(db.get_recipe_change_log("component", component_id))
 
     context = {

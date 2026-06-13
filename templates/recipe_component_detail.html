@@ -76,6 +76,7 @@
                     </div>
                 </div>
                 <div class="baking-prep-list" data-baking-stage-list></div>
+                <div class="baking-prep-instructions" data-baking-stage-instructions></div>
                 </div>
             </aside>
         {% else %}
@@ -167,6 +168,7 @@
         const overlay = panel.querySelector("[data-baking-overlay]");
         const title = panel.querySelector("[data-baking-stage-title]");
         const list = panel.querySelector("[data-baking-stage-list]");
+        const instructions = panel.querySelector("[data-baking-stage-instructions]");
         const storagePrefix = `bakingPrep:${mealId}:`;
         let activeSection = null;
 
@@ -190,6 +192,7 @@
             const checked = checkedSetFor(activeSection.key);
             title.textContent = activeSection.label;
             list.innerHTML = "";
+            instructions.innerHTML = "";
             activeSection.items
                 .map((item, index) => ({item, index, id: String(index), checked: checked.has(String(index))}))
                 .sort((left, right) => Number(left.checked) - Number(right.checked) || left.index - right.index)
@@ -214,6 +217,17 @@
                     });
                     list.appendChild(row);
                 });
+            if (activeSection.instructions?.length) {
+                const heading = document.createElement("h3");
+                heading.textContent = `${activeSection.label} steps`;
+                const orderedList = document.createElement("ol");
+                activeSection.instructions.forEach((instruction) => {
+                    const item = document.createElement("li");
+                    item.textContent = instruction;
+                    orderedList.appendChild(item);
+                });
+                instructions.append(heading, orderedList);
+            }
             overlay?.classList.remove("hidden");
         };
 
