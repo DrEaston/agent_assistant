@@ -3205,8 +3205,10 @@
             display: flex;
             inset: 0;
             justify-content: center;
+            overscroll-behavior: contain;
             padding: 1.25rem;
             position: fixed;
+            touch-action: none;
             z-index: 32;
         }
 
@@ -3223,8 +3225,10 @@
             min-height: min(72vh, 46rem);
             max-height: min(88vh, 760px);
             max-width: 980px;
+            overscroll-behavior: contain;
             overflow-y: auto;
             padding: clamp(1rem, 2vw, 1.5rem);
+            touch-action: pan-y;
             width: min(980px, 100%);
         }
 

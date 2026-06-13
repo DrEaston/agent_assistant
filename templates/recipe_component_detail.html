@@ -171,6 +171,38 @@
         const instructions = panel.querySelector("[data-baking-stage-instructions]");
         const storagePrefix = `bakingPrep:${mealId}:`;
         let activeSection = null;
+        let lockedScrollY = 0;
+
+        const lockPageScroll = () => {
+            if (document.body.classList.contains("baking-prep-scroll-locked")) {
+                return;
+            }
+            lockedScrollY = window.scrollY || document.documentElement.scrollTop || 0;
+            document.body.classList.add("baking-prep-scroll-locked");
+            document.body.style.position = "fixed";
+            document.body.style.top = `-${lockedScrollY}px`;
+            document.body.style.left = "0";
+            document.body.style.right = "0";
+            document.body.style.width = "100%";
+        };
+
+        const unlockPageScroll = () => {
+            if (!document.body.classList.contains("baking-prep-scroll-locked")) {
+                return;
+            }
+            document.body.classList.remove("baking-prep-scroll-locked");
+            document.body.style.position = "";
+            document.body.style.top = "";
+            document.body.style.left = "";
+            document.body.style.right = "";
+            document.body.style.width = "";
+            window.scrollTo(0, lockedScrollY);
+        };
+
+        const closeOverlay = () => {
+            overlay?.classList.add("hidden");
+            unlockPageScroll();
+        };
 
         const checkedSetFor = (sectionKey) => {
             try {
@@ -229,6 +261,7 @@
                 instructions.append(heading, orderedList);
             }
             overlay?.classList.remove("hidden");
+            lockPageScroll();
         };
 
         panel.querySelectorAll("[data-baking-section-open]").forEach((button) => {
@@ -236,12 +269,12 @@
         });
 
         panel.querySelector("[data-baking-stage-close]")?.addEventListener("click", () => {
-            overlay?.classList.add("hidden");
+            closeOverlay();
         });
 
         overlay?.addEventListener("click", (event) => {
             if (event.target === overlay) {
-                overlay.classList.add("hidden");
+                closeOverlay();
             }
         });
 
