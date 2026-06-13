@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}{% if mode == "register" %}Create Account{% else %}Log In{% endif %} - Dieter{% endblock %}
+
+{% block content %}
+<section class="detail-section auth-panel">
+    <div class="section-header">
+        <div>
+            <h2>{% if mode == "register" %}Create Account{% else %}Log In{% endif %}</h2>
+            <p class="section-subtitle">
+                {% if mode == "register" and not has_users %}
+                    Create the first account to claim the existing Dieter data.
+                {% elif mode == "register" %}
+                    Create your own Dieter workspace.
+                {% else %}
+                    Open your private planner and recipe workspace.
+                {% endif %}
+            </p>
+        </div>
+    </div>
+
+    {% if error %}
+        <div class="empty-state">
+            <p>{{ error }}</p>
+        </div>
+    {% endif %}
+
+    <form method="post" action="/{{ mode }}">
+        {% if mode == "login" %}
+            <input type="hidden" name="next" value="{{ request.query_params.get('next', '/') }}">
+        {% endif %}
+        <div class="form-group">
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" required autocomplete="email">
+        </div>
+        {% if mode == "register" %}
+            <div class="form-group">
+                <label for="display-name">Display Name</label>
+                <input type="text" id="display-name" name="display_name" autocomplete="name">
+            </div>
+        {% endif %}
+        <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required autocomplete="{% if mode == 'register' %}new-password{% else %}current-password{% endif %}">
+        </div>
+        {% if mode == "register" and requires_registration_code %}
+            <div class="form-group">
+                <label for="registration-code">Registration Code</label>
+                <input type="password" id="registration-code" name="registration_code" required>
+            </div>
+        {% endif %}
+        <button type="submit">{% if mode == "register" %}Create Account{% else %}Log In{% endif %}</button>
+    </form>
+
+    {% if mode == "register" and has_users %}
+        <p class="section-subtitle"><a href="/login">Already have an account?</a></p>
+    {% elif mode == "login" %}
+        <p class="section-subtitle"><a href="/register">Create an account</a></p>
+    {% endif %}
+</section>
+{% endblock %}

@@ -17,6 +17,7 @@ A technical project manager with clean separation between backend API and fronte
 - `api.py` - FastAPI backend with JSON API routes + HTML rendering
 - `database.py` - SQLite database layer
 - `templates/` - Jinja2 HTML templates
+- `docs/new_app_page_process.md` - Standard process for adding a new Dieter app/page
 - `main.py` - CLI entry point (legacy, still works)
 - `dashboard.py` - CLI dashboard display logic
 - `menu.py` - CLI menu navigation
@@ -24,6 +25,21 @@ A technical project manager with clean separation between backend API and fronte
 - `Dockerfile` - Docker image configuration
 - `docker-compose.yml` - Docker Compose configuration
 - `requirements.txt` - Python dependencies
+
+## Development Notes
+
+When adding a new top-level Dieter app/page, follow `docs/new_app_page_process.md`.
+
+## Deployment
+
+For phone access away from home, use the Cloud Run deployment notes in
+`docs/cloud_run_deployment.md`.
+
+Once Google Cloud CLI is authenticated and a project is selected, deploy with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\deploy_cloud_run.ps1 -ProjectId your-project-id
+```
 
 ## How to Run
 

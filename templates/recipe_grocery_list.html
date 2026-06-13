@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block title %}{{ grocery_list.title or "Grocery List" }} - Dieter Kitchen{% endblock %}
+
+{% block content %}
+<section class="detail-section grocery-list-detail">
+    <div class="section-header">
+        <div>
+            <p class="priority-label">Grocery List</p>
+            <h1>{{ grocery_list.title or "Grocery List" }}</h1>
+            <p class="section-subtitle">Created {{ grocery_list.created_at }}</p>
+        </div>
+        <div class="recipe-detail-actions">
+            <a class="button-link secondary-link" href="/apps/recipes#meal-plan">Back to Meal Plan</a>
+            <details class="delete-disclosure">
+                <summary>Delete</summary>
+                <form method="post" action="/apps/recipes/grocery-lists/{{ grocery_list.id }}/delete" class="inline-form">
+                    <button type="submit" class="danger compact">Confirm Delete</button>
+                </form>
+            </details>
+        </div>
+    </div>
+
+    <section class="recipes-to-cook-panel">
+        <div class="grocery-checklist-heading recipes-to-cook-heading">
+            <h2>Recipes To Cook</h2>
+            <span>{{ linked_meal_plan_items|length }}</span>
+        </div>
+        {% if linked_meal_plan_items %}
+            <div class="recipes-to-cook-list">
+                {% for item in linked_meal_plan_items %}
+                    <article class="recipe-to-cook-item">
+                        <div>
+                            <strong>{{ item.title }}</strong>
+                            <small>{{ item.status|title }}{% if item.cooked_at %} - cooked {{ item.cooked_at }}{% endif %}</small>
+                        </div>
+                        {% if item.source_url %}
+                            <a class="button-link secondary-link compact-link" href="{{ item.source_url }}">Open Recipe</a>
+                        {% endif %}
+                        {% if item.status != "cooked" %}
+                            <details class="cook-feedback-disclosure">
+                                <summary>Mark Cooked</summary>
+                                <form
+                                    method="post"
+                                    action="/apps/recipes/grocery-lists/{{ grocery_list.id }}/meal-plan/{{ item.id }}/cooked"
+                                    class="cook-feedback-form"
+                                >
+                                    <label>
+                                        How did it go?
+                                        <textarea
+                                            name="feedback"
+                                            placeholder="Timing, seasoning, substitutions, what worked, or what to change next time."
+                                        ></textarea>
+                                    </label>
+                                    <button type="submit" class="compact">Save Feedback & Mark Cooked</button>
+                                </form>
+                            </details>
+                        {% endif %}
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="muted-text">No meal records were linked to this grocery list.</p>
+        {% endif %}
+    </section>
+
+    {% set target_grocery_list = grocery_list %}
+    {% set manual_grocery_summary = "Add Grocery Item" %}
+    {% include "manual_grocery_form.html" %}
+
+    {% if grocery_list["items"] %}
+        <div class="grocery-checklist">
+            <section>
+                <div class="grocery-checklist-heading">
+                    <h2>Still Need</h2>
+                    <span>{{ needed_grocery_items|length }}</span>
+                </div>
+                {% if needed_grocery_sections %}
+                    <div class="grocery-category-list">
+                        {% for section in needed_grocery_sections %}
+                            <section class="grocery-category grocery-category-{{ section.key }}">
+                                <div class="grocery-category-heading">
+                                    <h3>{{ section.label }}</h3>
+                                    <span>{{ section["items"]|length }}</span>
+                                </div>
+                                <ul class="grocery-consolidated-list">
+                                    {% for item in section["items"] %}
+                                        <li class="grocery-item grocery-item-needed">
+                                            <div class="grocery-item-copy">
+                                                <strong>{{ item.name }}</strong>
+                                                <span>
+                                                    {% if item.quantities %}{{ item.quantities|join(" + ") }}{% endif %}
+                                                    {% if item.notes %}{% if item.quantities %} - {% endif %}{{ item.notes|join("; ") }}{% endif %}
+                                                    {% if item.sources %} Used in {{ item.sources|join(", ") }}.{% endif %}
+                                                </span>
+                                            </div>
+                                            <form
+                                                method="post"
+                                                action="/apps/recipes/grocery-lists/{{ grocery_list.id }}/items/{{ item.item_index }}/status"
+                                                class="inline-form grocery-item-action"
+                                                data-preserve-grocery-scroll
+                                            >
+                                                <input type="hidden" name="status" value="gotten">
+                                                <button type="submit" class="compact">Add to Cart</button>
+                                            </form>
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            </section>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="muted-text">Everything on this list is in the cart.</p>
+                {% endif %}
+            </section>
+
+            {% if gotten_grocery_items %}
+                <section>
+                    <div class="grocery-checklist-heading gotten-heading">
+                        <h2>In Cart</h2>
+                        <span>{{ gotten_grocery_items|length }}</span>
+                    </div>
+                    <ul class="grocery-consolidated-list">
+                        {% for item in gotten_grocery_items %}
+                            <li class="grocery-item grocery-item-gotten">
+                                <div class="grocery-item-copy">
+                                    <strong>{{ item.name }}</strong>
+                                    <span>
+                                        {% if item.quantities %}{{ item.quantities|join(" + ") }}{% endif %}
+                                        {% if item.notes %}{% if item.quantities %} - {% endif %}{{ item.notes|join("; ") }}{% endif %}
+                                        {% if item.sources %} Used in {{ item.sources|join(", ") }}.{% endif %}
+                                    </span>
+                                </div>
+                                <form
+                                    method="post"
+                                    action="/apps/recipes/grocery-lists/{{ grocery_list.id }}/items/{{ item.item_index }}/status"
+                                    class="inline-form grocery-item-action"
+                                    data-preserve-grocery-scroll
+                                >
+                                    <input type="hidden" name="status" value="need">
+                                    <button type="submit" class="secondary compact">Move Back</button>
+                                </form>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </section>
+            {% endif %}
+        </div>
+    {% else %}
+        <p class="muted-text">This grocery list did not have any extracted ingredients.</p>
+    {% endif %}
+</section>
+
+<script>
+    (() => {
+        const storageKey = `groceryScroll:${window.location.pathname}`;
+        const savedScroll = sessionStorage.getItem(storageKey);
+        if (savedScroll !== null) {
+            sessionStorage.removeItem(storageKey);
+            window.requestAnimationFrame(() => {
+                window.scrollTo({top: Number(savedScroll) || 0, behavior: "instant"});
+            });
+        }
+
+        document.querySelectorAll("[data-preserve-grocery-scroll]").forEach((form) => {
+            form.addEventListener("submit", () => {
+                sessionStorage.setItem(storageKey, String(window.scrollY));
+            });
+        });
+
+    })();
+</script>
+{% endblock %}

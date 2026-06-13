@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}Manage Recipes - Dieter{% endblock %}
+
+{% block content %}
+<section class="detail-section manage-recipes-section">
+    <div class="section-header">
+        <div>
+            <h2>Manage Recipes</h2>
+            <p class="section-subtitle">Imports, scans, and library health.</p>
+        </div>
+    </div>
+
+    <div class="dashboard-grid compact-metrics">
+        <div class="metric">
+            <div class="metric-value">{{ stats.total_pairs }}</div>
+            <div class="metric-label">Card Pairs</div>
+        </div>
+        <div class="metric">
+            <div class="metric-value">{{ stats.scraped_pairs }}</div>
+            <div class="metric-label">Scraped</div>
+        </div>
+        <div class="metric">
+            <div class="metric-value">{{ stats.complete_meals_needing_review }}</div>
+            <div class="metric-label">Needs Review</div>
+        </div>
+        <div class="metric">
+            <div class="metric-value">{{ stats.complete_meals_ready }}/{{ stats.complete_meals }}</div>
+            <div class="metric-label">Meals Ready</div>
+        </div>
+        <div class="metric">
+            <div class="metric-value">{{ stats.components }}</div>
+            <div class="metric-label">Components</div>
+        </div>
+    </div>
+</section>
+
+<section class="detail-section">
+    <div class="section-header">
+        <div>
+            <h2>Card Import</h2>
+            <p class="section-subtitle">Upload, pair, and review recipe card images.</p>
+        </div>
+        {% if recipe_app.import_url %}
+            <a class="button-link" href="{{ recipe_app.import_url }}">Import & Review Cards</a>
+        {% endif %}
+    </div>
+</section>
+
+<section class="detail-section">
+    <div class="section-header">
+        <div>
+            <h2>Needs Review</h2>
+            <p class="section-subtitle">Imported meals that are not ready for the public recipe list.</p>
+        </div>
+    </div>
+    {% set review_meals = complete_meals|rejectattr('status', 'equalto', 'ready')|list %}
+    {% if review_meals %}
+        <div class="recipe-title-list">
+            {% for meal in review_meals %}
+                <a class="recipe-title-row needs-review" href="/apps/recipes/meals/{{ meal.id }}">
+                    <span class="recipe-title-copy">
+                        <strong>{{ meal.display_title or meal.source_label or "Complete meal" }}</strong>
+                        {% if meal.quality_notes %}
+                            <small>{{ meal.quality_notes|join("; ") }}</small>
+                        {% endif %}
+                    </span>
+                    <span class="recipe-title-meta">
+                        <span class="meal-status meal-status-{{ meal.status }}">{{ meal.status|replace("_", " ")|upper }}</span>
+                    </span>
+                </a>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="empty-state">
+            <p>No recipes need review.</p>
+        </div>
+    {% endif %}
+</section>
+
+<section class="detail-section">
+    <div class="section-header">
+        <div>
+            <h2>Extraction Tools</h2>
+            <p class="section-subtitle">Refresh components and ingredient amounts after OCR changes.</p>
+        </div>
+        {% if complete_meals %}
+            <div class="recipe-browser-actions">
+                <form method="post" action="/apps/recipes/components/analyze" class="plain-form">
+                    <button type="submit">Scan Complete Meals</button>
+                </form>
+                {% if components %}
+                    <form method="post" action="/apps/recipes/components/amounts/analyze" class="plain-form">
+                        <button type="submit" class="secondary">Estimate Amounts</button>
+                    </form>
+                {% endif %}
+            </div>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}

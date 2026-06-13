@@ -4,29 +4,40 @@ Clean backend with separate frontend consuming /api endpoints.
 """
 
 import os
+import secrets
+import hmac
 from dotenv import load_dotenv
 
 # Load environment variables from .env
 load_dotenv()
 
 from fastapi import FastAPI, Request, Form, HTTPException, File, UploadFile
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from database import Database
+from database import Database, set_current_user_id, reset_current_user_id, get_current_user_id
 from pathlib import Path
 from pydantic import BaseModel
+from datetime import datetime, timedelta
 import json
 import shutil
 import uuid
+import hashlib
+import re
+import threading
+import mimetypes
+from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 from jinja2 import Environment, FileSystemLoader
 from llm_service import LLMService
 from agent_service import AgentService
 from priority_review_service import PriorityReviewService
 from recipe_ocr_service import RecipeOCRService
+from cloud_persistence import CloudStoragePersistence
 from typing import Optional, List
 
 # Initialize FastAPI
 app = FastAPI(title="Project Agent API", version="1.0")
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # Setup templates
 templates_dir = Path(__file__).parent / "templates"
@@ -34,13 +45,28 @@ templates_dir.mkdir(exist_ok=True)
 jinja_env = Environment(loader=FileSystemLoader(str(templates_dir)))
 db_path = Path(os.getenv("DB_PATH", "projects.db"))
 bundled_db_path = Path(__file__).parent / "projects.db"
+uploads_dir = Path(os.getenv("UPLOADS_DIR", str(Path(__file__).parent / "uploads")))
+bundled_uploads_dir = Path(__file__).parent / "uploads"
+recipe_uploads_dir = uploads_dir / "recipe_images"
+recipe_thumbnails_dir = uploads_dir / "recipe_thumbnails"
+cloud_persistence = CloudStoragePersistence.from_env(db_path, uploads_dir)
+
+try:
+    restore_result = cloud_persistence.restore()
+    if restore_result.get("enabled"):
+        print(f"Cloud persistence restore: {restore_result}")
+except Exception as exc:
+    print(f"Warning: Cloud persistence restore failed - {exc}")
+
 if db_path != bundled_db_path and not db_path.exists() and bundled_db_path.exists():
     db_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(bundled_db_path, db_path)
 
-uploads_dir = Path(os.getenv("UPLOADS_DIR", str(Path(__file__).parent / "uploads")))
-recipe_uploads_dir = uploads_dir / "recipe_images"
+if uploads_dir != bundled_uploads_dir and bundled_uploads_dir.exists() and not any(uploads_dir.rglob("*")):
+    cloud_persistence.copy_bundled_uploads_if_needed(bundled_uploads_dir)
+
 recipe_uploads_dir.mkdir(parents=True, exist_ok=True)
+recipe_thumbnails_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 recipe_ocr_service = RecipeOCRService(uploads_dir)
 
@@ -49,6 +75,12 @@ db = Database(str(db_path))
 db.init()
 if db.get_project_count() == 0:
     db.populate_sample_data()
+if cloud_persistence.enabled:
+    db.after_commit = cloud_persistence.backup_database
+    try:
+        cloud_persistence.seed_if_empty()
+    except Exception as exc:
+        print(f"Warning: Cloud persistence seed failed - {exc}")
 
 # Initialize LLM service
 try:
@@ -59,6 +91,116 @@ except ValueError as e:
 
 agent_service = AgentService(db, llm_service)
 priority_review_service = PriorityReviewService(db, agent_service)
+recipe_context_lock = threading.RLock()
+recipe_maintenance_last_run = None
+RECIPE_MAINTENANCE_INTERVAL_SECONDS = 60
+
+SESSION_COOKIE_NAME = "dieter_session"
+SESSION_DAYS = 30
+PBKDF2_ITERATIONS = 210_000
+SESSION_COOKIE_SECURE = bool(os.getenv("K_SERVICE")) or os.getenv("SESSION_COOKIE_SECURE", "").lower() == "true"
+REGISTRATION_CODE = os.getenv("DIETER_REGISTRATION_CODE", "")
+
+
+def hash_password(password):
+    """Hash a password with stdlib PBKDF2."""
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt,
+        PBKDF2_ITERATIONS,
+    )
+    return f"pbkdf2_sha256${PBKDF2_ITERATIONS}${salt.hex()}${digest.hex()}"
+
+
+def verify_password(password, stored_hash):
+    """Verify a PBKDF2 password hash."""
+    try:
+        algorithm, iterations, salt_hex, digest_hex = (stored_hash or "").split("$", 3)
+        if algorithm != "pbkdf2_sha256":
+            return False
+        expected = bytes.fromhex(digest_hex)
+        actual = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            bytes.fromhex(salt_hex),
+            int(iterations),
+        )
+        return hmac.compare_digest(actual, expected)
+    except Exception:
+        return False
+
+
+def hash_session_token(token):
+    """Store only a hash of browser session tokens."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def create_login_response(user_id, redirect_to="/"):
+    """Create a session and redirect the user."""
+    token = secrets.token_urlsafe(32)
+    expires_at = (datetime.utcnow() + timedelta(days=SESSION_DAYS)).isoformat()
+    db.create_session(user_id, hash_session_token(token), expires_at)
+    response = RedirectResponse(url=redirect_to, status_code=303)
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        httponly=True,
+        secure=SESSION_COOKIE_SECURE,
+        samesite="lax",
+        max_age=SESSION_DAYS * 24 * 60 * 60,
+    )
+    return response
+
+
+def clear_login_response(redirect_to="/login"):
+    """Clear the login cookie and redirect."""
+    response = RedirectResponse(url=redirect_to, status_code=303)
+    response.delete_cookie(SESSION_COOKIE_NAME)
+    return response
+
+
+def render_auth_page(request, mode="login", error=""):
+    """Render the shared login/register page."""
+    template = jinja_env.get_template("auth.html")
+    return HTMLResponse(template.render({
+        "request": request,
+        "mode": mode,
+        "error": error,
+        "has_users": db.get_user_count() > 0,
+        "requires_registration_code": bool(REGISTRATION_CODE),
+    }))
+
+
+def redirect_or_unauthorized(request):
+    """Return an auth challenge appropriate to browser or API requests."""
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"detail": "Login required."}, status_code=401)
+    return RedirectResponse(url=f"/login?next={request.url.path}", status_code=303)
+
+
+@app.middleware("http")
+async def load_authenticated_user(request: Request, call_next):
+    """Load the logged-in user and require authentication for app routes."""
+    path = request.url.path
+    public_prefixes = ("/login", "/register", "/logout", "/favicon.ico", "/apps/planner", "/dashboard")
+    token = request.cookies.get(SESSION_COOKIE_NAME, "")
+    user = None
+    if token:
+        user = db.get_session_user(hash_session_token(token), datetime.utcnow().isoformat())
+
+    request.state.current_user = dict(user) if user else None
+    user_token = set_current_user_id(user["id"] if user else None)
+    try:
+        if not user and not path.startswith(public_prefixes):
+            if db.get_user_count() == 0:
+                return RedirectResponse(url="/register", status_code=303)
+            return redirect_or_unauthorized(request)
+        response = await call_next(request)
+        return response
+    finally:
+        reset_current_user_id(user_token)
 
 
 # ============================================================================
@@ -85,6 +227,16 @@ class GoalIn(BaseModel):
     title: str
     target_completion: str = ""
 
+class SchedulerItemIn(BaseModel):
+    title: str
+    context_label: str = ""
+    scheduled_for: str = ""
+    notes: str = ""
+
+class ShareIn(BaseModel):
+    email: str
+    permission: str = "view"
+
 class ChatMessage(BaseModel):
     content: str
     include_context: bool = True
@@ -92,6 +244,17 @@ class ChatMessage(BaseModel):
 
 class ApplyReviewIn(BaseModel):
     review_id: int
+
+class RecipeEditMessage(BaseModel):
+    content: str
+    page_url: str = ""
+    conversation_history: Optional[List[dict]] = None
+
+class DieterActionMessage(BaseModel):
+    content: str
+    page_url: str = ""
+    page_title: str = ""
+    conversation_history: Optional[List[dict]] = None
 
 
 # ============================================================================
@@ -120,6 +283,139 @@ def prepare_recipe_image_groups(groups):
         prepared.append(group_data)
     return prepared
 
+def _recipe_thumbnail_score(image):
+    """Score whether an image has a prominent food/photo region."""
+    sample = image.convert("RGB").resize((96, 96))
+    width, height = sample.size
+    pixels = sample.load()
+    nonwhite = 0
+    saturation_sum = 0
+    variance_sum = 0
+    count = 0
+    for y in range(0, int(height * 0.65)):
+        for x in range(width):
+            red, green, blue = pixels[x, y]
+            max_channel = max(red, green, blue)
+            min_channel = min(red, green, blue)
+            saturation = max_channel - min_channel
+            is_white = red > 225 and green > 220 and blue > 205
+            if not is_white:
+                nonwhite += 1
+            saturation_sum += saturation
+            variance_sum += abs(red - green) + abs(green - blue) + abs(blue - red)
+            count += 1
+    if not count:
+        return 0
+    return (nonwhite / count) * 3 + (saturation_sum / count / 255) + (variance_sum / count / 255)
+
+def _crop_food_photo_region(image):
+    """Crop toward the food-photo area above the ingredient list."""
+    width, height = image.size
+    left = int(width * 0.06)
+    top = int(height * 0.10)
+    right = int(width * 0.94)
+    bottom = int(height * 0.49)
+    if right <= left or bottom <= top:
+        return image
+    return image.crop((left, top, right, bottom))
+
+def build_recipe_thumbnail_url(meal):
+    """Generate or retrieve a cropped recipe thumbnail from candidate card images."""
+    candidates = [
+        candidate for candidate in (meal.get("thumbnail_candidates") or "").split("||")
+        if candidate
+    ]
+    if not candidates and meal.get("thumbnail_filename"):
+        candidates = [meal["thumbnail_filename"]]
+    if not candidates:
+        return ""
+
+    cache_key = hashlib.sha1(("v3|" + "|".join(candidates)).encode("utf-8")).hexdigest()[:16]
+    thumbnail_name = f"recipe_thumb_{meal.get('id', 'meal')}_{cache_key}.jpg"
+    thumbnail_path = recipe_thumbnails_dir / thumbnail_name
+    if thumbnail_path.exists():
+        return f"/uploads/recipe_thumbnails/{thumbnail_name}"
+
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        return f"/uploads/{candidates[0]}"
+
+    best = None
+    for filename in candidates:
+        image_path = uploads_dir / filename
+        if not image_path.exists():
+            continue
+        try:
+            with Image.open(image_path) as opened:
+                image = ImageOps.exif_transpose(opened).convert("RGB")
+                score = _recipe_thumbnail_score(image)
+                if not best or score > best[0]:
+                    best = (score, filename, image.copy())
+        except Exception:
+            continue
+    if not best:
+        return f"/uploads/{candidates[0]}"
+
+    crop = _crop_food_photo_region(best[2])
+    crop.thumbnail((1000, 650))
+    crop.save(thumbnail_path, "JPEG", quality=88, optimize=True)
+    try:
+        cloud_persistence.sync_upload_file(thumbnail_path)
+    except Exception as exc:
+        print(f"Warning: thumbnail cloud sync failed - {exc}")
+    return f"/uploads/recipe_thumbnails/{thumbnail_name}"
+
+def extract_recipe_pdf_preview(pdf_path, output_dir):
+    """Extract a useful recipe photo from a PDF, falling back to a page preview."""
+    try:
+        import fitz
+    except ImportError as exc:
+        raise RuntimeError("PDF import requires PyMuPDF. Install requirements and try again.") from exc
+
+    document = fitz.open(str(pdf_path))
+    try:
+        best = None
+        for page_index in range(len(document)):
+            page = document[page_index]
+            for image_index, image_ref in enumerate(page.get_images(full=True)):
+                xref = image_ref[0]
+                try:
+                    extracted = document.extract_image(xref)
+                except Exception:
+                    continue
+                image_bytes = extracted.get("image")
+                extension = (extracted.get("ext") or "png").lower()
+                width = int(extracted.get("width") or 0)
+                height = int(extracted.get("height") or 0)
+                if not image_bytes or width < 80 or height < 80:
+                    continue
+                score = width * height
+                if not best or score > best["score"]:
+                    best = {
+                        "score": score,
+                        "bytes": image_bytes,
+                        "extension": "jpg" if extension == "jpeg" else extension,
+                        "page": page_index + 1,
+                        "image_index": image_index + 1,
+                    }
+        if best:
+            output_name = f"{uuid.uuid4().hex}.{best['extension']}"
+            output_path = output_dir / output_name
+            output_path.write_bytes(best["bytes"])
+            return output_name, f"PDF photo p{best['page']}"
+
+        if len(document) == 0:
+            return "", ""
+        page = document[0]
+        pixmap = page.get_pixmap(matrix=fitz.Matrix(1.7, 1.7), alpha=False)
+        output_name = f"{uuid.uuid4().hex}.png"
+        output_path = output_dir / output_name
+        pixmap.save(str(output_path))
+        return output_name, "PDF page preview"
+    finally:
+        document.close()
+
 def prepare_recipe_complete_meals(meals):
     """Parse complete-meal quality notes for rendering."""
     prepared = []
@@ -129,8 +425,1615 @@ def prepare_recipe_complete_meals(meals):
             meal_data["quality_notes"] = json.loads(meal_data.get("quality_notes_json") or "[]")
         except json.JSONDecodeError:
             meal_data["quality_notes"] = ["Quality notes could not be parsed."]
+        meal_data["thumbnail_url"] = build_recipe_thumbnail_url(meal_data)
+        title = (meal_data.get("title") or "").strip().lower()
+        meal_data["is_placeholder"] = (
+            meal_data.get("source_kind", "card") == "card"
+            and title.startswith("recipe pair ")
+            and not (meal_data.get("ingredients_text") or "").strip()
+            and not (meal_data.get("instructions_text") or "").strip()
+        )
+        meal_data["display_title"] = meal_data.get("edited_title") or meal_data.get("title") or ""
+        meal_data["display_ingredients_text"] = meal_data.get("edited_ingredients_text") or meal_data.get("ingredients_text") or ""
+        meal_data["display_instructions_text"] = meal_data.get("edited_instructions_text") or meal_data.get("instructions_text") or ""
+        meal_data["has_dieter_edits"] = bool(
+            meal_data.get("edited_title")
+            or meal_data.get("edited_ingredients_text")
+            or meal_data.get("edited_instructions_text")
+        )
         prepared.append(meal_data)
     return prepared
+
+def filter_public_complete_meals(meals):
+    """Show only properly imported meals in the user-facing recipe library."""
+    return [
+        meal for meal in meals
+        if not meal.get("is_placeholder") and meal.get("status") == "ready"
+    ]
+
+def prepare_recipe_components(components):
+    """Parse structured component ingredients for rendering."""
+    prepared = []
+    for component in components:
+        component_data = dict(component)
+        try:
+            structured_ingredients = json.loads(component_data.get("structured_ingredients_json") or "[]")
+        except json.JSONDecodeError:
+            structured_ingredients = []
+        component_data["structured_ingredients"] = structured_ingredients
+        component_data["structured_ingredients_json_attr"] = json.dumps(structured_ingredients)
+        component_data["display_title"] = component_data.get("edited_title") or component_data.get("title") or ""
+        component_data["display_ingredients_text"] = component_data.get("edited_ingredients_text") or component_data.get("ingredients_text") or ""
+        component_data["display_instructions_text"] = component_data.get("edited_instructions_text") or component_data.get("instructions_text") or ""
+        component_data["has_dieter_edits"] = bool(
+            component_data.get("edited_title")
+            or component_data.get("edited_ingredients_text")
+            or component_data.get("edited_instructions_text")
+        )
+        prepared.append(component_data)
+    return prepared
+
+def prepare_recipe_change_log(changes):
+    """Parse stored recipe change-log JSON for rendering/API responses."""
+    prepared = []
+    for change in changes:
+        change_data = dict(change)
+        for source_key, fallback in [
+            ("changed_fields_json", []),
+            ("before_json", {}),
+            ("after_json", {}),
+        ]:
+            target_key = source_key.replace("_json", "")
+            try:
+                change_data[target_key] = json.loads(change_data.get(source_key) or json.dumps(fallback))
+            except json.JSONDecodeError:
+                change_data[target_key] = fallback
+        prepared.append(change_data)
+    return prepared
+
+def prepare_meal_plan_items(items):
+    """Parse stored pending/cooked meal-plan entries."""
+    prepared = []
+    for item in items:
+        item_data = dict(item)
+        try:
+            item_data["component_ids"] = json.loads(item_data.get("component_ids_json") or "[]")
+        except json.JSONDecodeError:
+            item_data["component_ids"] = []
+        item_data["source_url"] = ""
+        if item_data.get("source_kind") == "complete_meal" and item_data.get("source_id"):
+            item_data["source_url"] = f"/apps/recipes/meals/{item_data['source_id']}"
+        prepared.append(item_data)
+    return prepared
+
+def prepare_grocery_lists(lists):
+    """Parse stored grocery-list records for rendering."""
+    prepared = []
+    for grocery_list in lists:
+        list_data = dict(grocery_list)
+        try:
+            list_data["meal_plan_item_ids"] = json.loads(list_data.get("meal_plan_item_ids_json") or "[]")
+        except json.JSONDecodeError:
+            list_data["meal_plan_item_ids"] = []
+        try:
+            list_data["items"] = json.loads(list_data.get("items_json") or "[]")
+        except json.JSONDecodeError:
+            list_data["items"] = []
+        for index, item in enumerate(list_data["items"]):
+            if isinstance(item, dict):
+                item["item_index"] = index
+                item["status"] = item.get("status") or "need"
+        prepared.append(list_data)
+    return prepared
+
+def cookable_meal_plan_items_for_grocery_list(grocery_list, linked_items_by_id=None):
+    """Return linked meal-plan items that represent recipes/meals needing cooking."""
+    if linked_items_by_id is None:
+        linked_items = prepare_meal_plan_items(db.get_recipe_meal_plan_items(None, 250))
+        linked_items_by_id = {item["id"]: item for item in linked_items}
+    cookable = []
+    for item_id in grocery_list.get("meal_plan_item_ids", []):
+        item = linked_items_by_id.get(item_id)
+        if item and item.get("source_kind") != "manual_item":
+            cookable.append(item)
+    return cookable
+
+def annotate_grocery_list_cook_counts(grocery_lists):
+    """Attach recipe-to-cook counts for list summaries."""
+    linked_items = prepare_meal_plan_items(db.get_recipe_meal_plan_items(None, 250))
+    linked_items_by_id = {item["id"]: item for item in linked_items}
+    for grocery_list in grocery_lists:
+        cookable = cookable_meal_plan_items_for_grocery_list(grocery_list, linked_items_by_id)
+        grocery_list["cookable_meal_plan_items"] = cookable
+        grocery_list["recipes_to_cook_count"] = len([item for item in cookable if item.get("status") != "cooked"])
+        grocery_list["recipes_total_count"] = len(cookable)
+    return grocery_lists
+
+def refresh_grocery_list_completion(list_id):
+    """Mark a grocery list done when all linked cookable recipes are cooked."""
+    row = dict_from_row(db.get_recipe_grocery_list(list_id))
+    if not row:
+        return None
+    grocery_list = prepare_grocery_lists([row])[0]
+    cookable = cookable_meal_plan_items_for_grocery_list(grocery_list)
+    if cookable and all(item.get("status") == "cooked" for item in cookable):
+        if grocery_list.get("status") != "done":
+            db.update_recipe_grocery_list_status(list_id, "done")
+            grocery_list["status"] = "done"
+    elif grocery_list.get("status") == "done" and any(item.get("status") != "cooked" for item in cookable):
+        db.update_recipe_grocery_list_status(list_id, "active")
+        grocery_list["status"] = "active"
+    grocery_list["cookable_meal_plan_items"] = cookable
+    grocery_list["recipes_to_cook_count"] = len([item for item in cookable if item.get("status") != "cooked"])
+    grocery_list["recipes_total_count"] = len(cookable)
+    return grocery_list
+
+def split_ingredient_lines(ingredients_text):
+    """Split recipe ingredient text into useful grocery-line candidates."""
+    return [
+        re.sub(r"^[-*]\s*", "", line.strip())
+        for line in (ingredients_text or "").splitlines()
+        if line.strip()
+    ]
+
+def normalize_grocery_name(ingredient):
+    """Normalize an ingredient line enough to combine repeats."""
+    return re.sub(
+        r"[^a-z0-9]+",
+        " ",
+        re.sub(
+            r"\b(cup|cups|tbsp|tablespoons?|tsp|teaspoons?|oz|ounces?|lb|lbs|pounds?|g|grams?|cloves?|small|medium|large|pinch|packet|packets|can|cans)\b",
+            "",
+            re.sub(
+                r"^[\d\s./]+",
+                "",
+                re.sub(
+                    r"\([^)]*\)",
+                    "",
+                    (ingredient or "").lower(),
+                ),
+            ),
+        ),
+    ).strip()
+
+def extract_grocery_quantity(ingredient):
+    """Pull a compact quantity phrase from the start of an ingredient line."""
+    match = re.match(
+        r"^([\d\s./]+(?:cup|cups|tbsp|tablespoons?|tsp|teaspoons?|oz|ounces?|lb|lbs|pounds?|g|grams?|cloves?|pinch|packet|packets|can|cans)?)",
+        ingredient or "",
+        flags=re.IGNORECASE,
+    )
+    return match.group(1).strip() if match else ""
+
+def title_case_grocery_name(ingredient):
+    """Format normalized grocery names for display."""
+    return " ".join(word.capitalize() for word in (ingredient or "").split())
+
+BAD_GROCERY_OPTION_PHRASES = [
+    "calories",
+    "contains",
+    "custom plate option",
+    "if modified meal",
+    "optional modification",
+    "optional modifications",
+    "optional protein",
+    "optional swap",
+    "pantry needed",
+    "what we send",
+    "what you ll need",
+    "what you'll need",
+    "you ll also need",
+    "you'll also need",
+    "pasta cooking water",
+    "reserved pasta cooking water",
+]
+
+GROCERY_OPTION_NAME_FIXES = {
+    "bunch thyme": "thyme",
+    "cr me fra che": "creme fraiche",
+    "frank s hot sauce": "franks hot sauce",
+    "frank s seasoning": "franks seasoning",
+}
+
+def clean_available_grocery_candidate(candidate):
+    """Return a dropdown-safe ingredient name, or blank for OCR/instruction noise."""
+    text = re.sub(r"\([^)]*\)", " ", candidate or "")
+    text = re.sub(r"[\n\r]+", " ", text)
+    text = re.sub(r"\b\d+\b", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    lowered = text.lower()
+    if not lowered:
+        return ""
+    if any(phrase in lowered for phrase in BAD_GROCERY_OPTION_PHRASES):
+        return ""
+    if re.search(r"\bor\b", lowered):
+        return ""
+
+    normalized = normalize_grocery_name(text)
+    if not normalized:
+        return ""
+    normalized = GROCERY_OPTION_NAME_FIXES.get(normalized, normalized)
+    words = normalized.split()
+    if len(words) > 5:
+        return ""
+    return title_case_grocery_name(normalized)
+
+GROCERY_CATEGORY_RULES = [
+    ("meat_seafood", "Meat & Seafood", [
+        "chicken", "pork", "beef", "steak", "sausage", "bacon", "shrimp",
+        "turkey", "salmon", "fish", "tilapia", "cod", "meat", "prosciutto",
+    ]),
+    ("produce", "Produce", [
+        "apple", "avocado", "broccoli", "brussels", "carrot", "celery",
+        "cucumber", "garlic", "ginger", "green bean", "kale", "lemon",
+        "lime", "mushroom", "onion", "pepper", "potato", "scallion",
+        "shallot", "spinach", "sweet potato", "tomato", "zucchini",
+    ]),
+    ("dairy", "Dairy", [
+        "butter", "cheddar", "cheese", "cream", "creme", "feta", "milk",
+        "mozzarella", "parmesan", "sour cream", "yogurt",
+    ]),
+    ("canned_goods", "Canned & Jarred", [
+        "beans", "cannellini", "chickpea", "tomato paste", "diced tomato",
+        "crushed tomato", "jam", "stock concentrate", "concentrate",
+    ]),
+    ("sauces_condiments", "Sauces & Condiments", [
+        "balsamic", "bbq", "dijon", "honey", "hot sauce", "ketchup",
+        "mayo", "mayonnaise", "mustard", "soy sauce", "vinegar", "worcestershire",
+    ]),
+    ("seasonings", "Seasonings", [
+        "black pepper", "chili powder", "cumin", "curry", "garlic powder",
+        "italian seasoning", "oregano", "paprika", "pepper", "salt",
+        "seasoning", "spice", "thyme", "turmeric",
+    ]),
+    ("grains_pasta", "Grains, Pasta & Bread", [
+        "bread", "breadcrumbs", "bun", "ciabatta", "couscous", "flour", "noodle",
+        "panko", "pasta", "rice", "tortilla",
+    ]),
+    ("pantry", "Pantry", [
+        "cornstarch", "oil", "olive oil", "sugar",
+    ]),
+]
+
+def grocery_category_for_item(item):
+    """Assign a grocery item to a store-friendly shopping category."""
+    if item.get("category"):
+        category = item.get("category")
+        for category_key, category_label, _ in GROCERY_CATEGORY_RULES:
+            if category == category_key:
+                return category_key, category_label
+    name = (item.get("name") or "").lower()
+    for category_key, category_label, terms in GROCERY_CATEGORY_RULES:
+        if any(term in name for term in terms):
+            return category_key, category_label
+    return "other", "Other"
+
+def group_grocery_items_by_category(items):
+    """Group grocery items by shopping category while preserving category order."""
+    grouped = {
+        category_key: {
+            "key": category_key,
+            "label": category_label,
+            "items": [],
+        }
+        for category_key, category_label, _ in GROCERY_CATEGORY_RULES
+    }
+    grouped["other"] = {"key": "other", "label": "Other", "items": []}
+
+    for item in items:
+        category_key, category_label = grocery_category_for_item(item)
+        grouped.setdefault(category_key, {"key": category_key, "label": category_label, "items": []})
+        grouped[category_key]["items"].append(item)
+
+    return [
+        section for section in grouped.values()
+        if section["items"]
+    ]
+
+def build_available_grocery_items(complete_meals, components):
+    """Build a searchable ingredient list from imported recipes and components."""
+    available_items = set()
+
+    def add_candidate(candidate):
+        cleaned = clean_available_grocery_candidate(candidate)
+        if cleaned:
+            available_items.add(cleaned)
+
+    for component in components:
+        for ingredient in component.get("structured_ingredients") or []:
+            add_candidate(ingredient.get("name") or ingredient.get("source_text") or "")
+        for line in split_ingredient_lines(component.get("display_ingredients_text") or ""):
+            add_candidate(line)
+
+    for meal in complete_meals:
+        if meal.get("status") != "ready" or meal.get("is_placeholder"):
+            continue
+        for line in split_ingredient_lines(meal.get("display_ingredients_text") or ""):
+            add_candidate(line)
+
+    return sorted(available_items)
+
+def build_available_grocery_options(available_items):
+    """Attach grocery categories to available ingredients for UI filtering."""
+    options = []
+    for item in available_items:
+        category_key, category_label = grocery_category_for_item({"name": item})
+        options.append({
+            "name": item,
+            "category": category_key,
+            "category_label": category_label,
+        })
+    return options
+
+def add_grocery_item(items_by_key, name, quantity="", note="", source="", category=""):
+    """Accumulate grocery item quantities and recipe sources."""
+    key = normalize_grocery_name(name) or (name or "").strip().lower()
+    if not key:
+        return
+    if key not in items_by_key:
+        items_by_key[key] = {
+            "name": title_case_grocery_name(key),
+            "quantities": [],
+            "notes": [],
+            "sources": [],
+        }
+    item = items_by_key[key]
+    if category and not item.get("category"):
+        item["category"] = category
+    if quantity and quantity not in item["quantities"]:
+        item["quantities"].append(quantity)
+    if note and note not in item["notes"]:
+        item["notes"].append(note)
+    if source and source not in item["sources"]:
+        item["sources"].append(source)
+
+def grocery_items_from_component(component, source_title):
+    """Build grocery entries from a component using structured amounts when available."""
+    entries = []
+    structured = component.get("structured_ingredients") or []
+    if structured:
+        for ingredient in structured:
+            quantity = " ".join(
+                value for value in [ingredient.get("amount", ""), ingredient.get("unit", "")]
+                if value
+            ).strip()
+            entries.append({
+                "name": ingredient.get("name") or ingredient.get("source_text") or "",
+                "quantity": quantity,
+                "note": ingredient.get("preparation") or "",
+                "source": source_title,
+            })
+        return entries
+
+    for line in split_ingredient_lines(component.get("display_ingredients_text") or component.get("ingredients_text") or ""):
+        entries.append({
+            "name": normalize_grocery_name(line) or line,
+            "quantity": extract_grocery_quantity(line),
+            "note": "",
+            "source": source_title,
+        })
+    return entries
+
+def build_grocery_items_for_plan(meal_plan_items):
+    """Create a consolidated grocery list from pending meal-plan items."""
+    items_by_key = {}
+    for plan_item in meal_plan_items:
+        if plan_item.get("source_kind") == "manual_item":
+            for manual_item in plan_item.get("component_ids") or []:
+                if not isinstance(manual_item, dict):
+                    continue
+                add_grocery_item(
+                    items_by_key,
+                    manual_item.get("name", ""),
+                    manual_item.get("quantity", ""),
+                    manual_item.get("note", ""),
+                    plan_item.get("title") or "Manual item",
+                    manual_item.get("category", ""),
+                )
+        elif plan_item.get("source_kind") == "complete_meal" and plan_item.get("source_id"):
+            meal = dict_from_row(db.get_recipe_complete_meal(plan_item["source_id"]))
+            if not meal:
+                continue
+            meal = prepare_recipe_complete_meals([meal])[0]
+            source_title = meal.get("display_title") or plan_item.get("title") or "Meal"
+            for line in split_ingredient_lines(meal.get("display_ingredients_text") or ""):
+                add_grocery_item(
+                    items_by_key,
+                    normalize_grocery_name(line) or line,
+                    extract_grocery_quantity(line),
+                    "",
+                    source_title,
+                )
+        else:
+            for component_id in plan_item.get("component_ids") or []:
+                component = dict_from_row(db.get_recipe_component(component_id))
+                if not component:
+                    continue
+                component = prepare_recipe_components([component])[0]
+                source_title = component.get("display_title") or plan_item.get("title") or "Meal part"
+                for entry in grocery_items_from_component(component, source_title):
+                    add_grocery_item(
+                        items_by_key,
+                        entry["name"],
+                        entry["quantity"],
+                        entry["note"],
+                        entry["source"],
+                    )
+    return sorted(items_by_key.values(), key=lambda item: item["name"])
+
+def parse_recipe_app_chat_content(content):
+    """Extract page and user message from the recipe app drawer payload."""
+    if "Recipe app chat request." not in (content or ""):
+        return None
+    page_match = re.search(r"URL:\s*(.+)", content or "")
+    message_match = re.search(r"User message:\s*(.*)", content or "", flags=re.DOTALL)
+    return {
+        "page_url": page_match.group(1).strip() if page_match else "",
+        "user_message": message_match.group(1).strip() if message_match else content.strip(),
+    }
+
+def meaningful_recipe_terms(text):
+    """Pick useful query words for recipe lookup."""
+    stopwords = {
+        "about", "again", "could", "dieter", "does", "have", "make", "recipe",
+        "recipes", "should", "suggest", "there", "use", "what", "which", "with",
+        "your", "mine", "my", "the", "and", "for", "that", "this",
+    }
+    terms = []
+    for term in re.findall(r"[a-zA-Z][a-zA-Z0-9]+", text.lower()):
+        if len(term) < 3 or term in stopwords:
+            continue
+        if term not in terms:
+            terms.append(term)
+    return terms[:8]
+
+def score_recipe_record(record, terms):
+    """Score a meal/component against recipe chat query terms."""
+    searchable = " ".join(
+        str(record.get(key) or "")
+        for key in [
+            "display_title",
+            "title",
+            "component_type",
+            "display_ingredients_text",
+            "display_instructions_text",
+            "ingredients_text",
+            "instructions_text",
+        ]
+    ).lower()
+    return sum(2 if term in (record.get("display_title") or record.get("title") or "").lower() else 1 for term in terms if term in searchable)
+
+def build_recipe_chat_context(user_message, page_url=""):
+    """Build compact recipe-library context for Dieter chat."""
+    recipe_app = get_recipe_app_context()
+    meals = filter_public_complete_meals(recipe_app.get("complete_meals", []))
+    components = recipe_app.get("components", [])
+    terms = meaningful_recipe_terms(user_message)
+
+    scored_meals = [
+        (score_recipe_record(meal, terms), meal)
+        for meal in meals
+    ]
+    scored_components = [
+        (score_recipe_record(component, terms), component)
+        for component in components
+    ]
+    matched_meals = [meal for score, meal in sorted(scored_meals, key=lambda entry: entry[0], reverse=True) if score > 0]
+    matched_components = [component for score, component in sorted(scored_components, key=lambda entry: entry[0], reverse=True) if score > 0]
+
+    if not terms:
+        matched_meals = meals[:12]
+        matched_components = components[:12]
+
+    lines = [
+        f"Current recipe app page: {page_url or 'unknown'}",
+        f"User recipe-library query terms: {', '.join(terms) if terms else 'none'}",
+        "",
+        "Use these records as the user's actual recipe library. If asked 'my recipes', answer from these records only.",
+    ]
+
+    lines.append("\nMatching complete meals:")
+    for meal in matched_meals[:16]:
+        ingredients = " ".join(split_ingredient_lines(meal.get("display_ingredients_text") or ""))[:450]
+        lines.append(f"- id {meal.get('id')}: {meal.get('display_title') or meal.get('title')} | ingredients: {ingredients}")
+    if not matched_meals:
+        lines.append("- No complete meal matches found.")
+
+    lines.append("\nMatching meal components:")
+    for component in matched_components[:20]:
+        ingredients = " ".join(split_ingredient_lines(component.get("display_ingredients_text") or ""))[:350]
+        lines.append(
+            f"- id {component.get('id')}: {component.get('display_title') or component.get('title')} "
+            f"({component.get('component_type')}) | ingredients: {ingredients}"
+        )
+    if not matched_components:
+        lines.append("- No component matches found.")
+
+    lines.append("\nAvailable complete meal titles:")
+    for meal in meals[:40]:
+        lines.append(f"- {meal.get('display_title') or meal.get('title')}")
+
+    return "\n".join(lines)
+
+RECIPE_CHAT_SYSTEM_PROMPT = """You are Dieter, the user's recipe app assistant.
+
+Answer using the provided recipe-library context. When the user asks about "my recipes",
+recommend actual recipes from the context by title. Do not invent unavailable recipes.
+If the context has no match, say that clearly and suggest the closest available match.
+Keep answers brief and practical.
+Use plain text only. Do not use Markdown emphasis such as **bold** or *italics*.
+Simple dash bullets are okay.
+"""
+
+def recipe_chat_response(user_message, page_url="", conversation_history=None):
+    """Answer recipe app questions with recipe-library awareness."""
+    recent_user_context = " ".join(
+        entry.get("content", "")
+        for entry in list(conversation_history or [])[-6:]
+        if entry.get("role") == "user"
+    )
+    lookup_text = f"{recent_user_context} {user_message}".strip()
+    context = build_recipe_chat_context(lookup_text, page_url)
+    prompt = f"[Recipe Library Context]\n{context}\n\nUser message:\n{user_message}"
+    if llm_service:
+        messages = list(conversation_history or [])[-8:]
+        messages.append({"role": "user", "content": prompt})
+        return llm_service.provider.chat(messages, RECIPE_CHAT_SYSTEM_PROMPT)
+
+    return "I can see the recipe app context, but the model is not configured, so I cannot make a recommendation right now."
+
+def group_recipe_components(components):
+    """Group recipe components into stable library sections."""
+    section_labels = [
+        ("meat", "Protein"),
+        ("carb", "Carb"),
+        ("vegetable", "Vegetables"),
+        ("soup", "Soups"),
+        ("sauce", "Sauces"),
+        ("other", "Other"),
+    ]
+    sections = []
+    for component_type, label in section_labels:
+        items = [component for component in components if component.get("component_type") == component_type]
+        if items:
+            sections.append({
+                "type": component_type,
+                "label": label,
+                "components": items,
+            })
+    uncategorized = [
+        component for component in components
+        if component.get("component_type") not in {section_type for section_type, _ in section_labels}
+    ]
+    if uncategorized:
+        sections.append({
+            "type": "other",
+            "label": "Other",
+            "components": uncategorized,
+        })
+    return sections
+
+def build_saved_meal_text_from_components(components):
+    """Create readable complete-meal text from selected components."""
+    ingredients_sections = []
+    instructions_sections = []
+    for component in components:
+        component_type = component.get("component_type", "other").replace("_", " ").title()
+        title = component.get("title") or "Meal part"
+        structured = component.get("structured_ingredients") or []
+        if structured:
+            ingredient_lines = []
+            for ingredient in structured:
+                quantity = " ".join(
+                    value for value in [ingredient.get("amount", ""), ingredient.get("unit", "")]
+                    if value
+                ).strip()
+                prep = f" - {ingredient['preparation']}" if ingredient.get("preparation") else ""
+                ingredient_lines.append(f"{quantity + ' ' if quantity else ''}{ingredient.get('name', '')}{prep}".strip())
+            ingredients_body = "\n".join(line for line in ingredient_lines if line)
+        else:
+            ingredients_body = component.get("ingredients_text") or ""
+        if ingredients_body:
+            ingredients_sections.append(f"{component_type}: {title}\n{ingredients_body}")
+        if component.get("instructions_text"):
+            instructions_sections.append(f"{component_type}: {title}\n{component['instructions_text']}")
+    return "\n\n".join(ingredients_sections), "\n\n".join(instructions_sections)
+
+def parse_recipe_target_from_url(page_url):
+    """Resolve a recipe chat URL into a target kind and id."""
+    match = re.search(r"/apps/recipes/meals/(\d+)", page_url or "")
+    if match:
+        return "meal", int(match.group(1))
+    match = re.search(r"/apps/recipes/components/(\d+)", page_url or "")
+    if match:
+        return "component", int(match.group(1))
+    return None, None
+
+def recipe_record_for_edit(recipe_kind, recipe_id):
+    """Load the current editable recipe record."""
+    if recipe_kind == "meal":
+        record = dict_from_row(db.get_recipe_complete_meal(recipe_id))
+        if not record:
+            return None
+        return prepare_recipe_complete_meals([record])[0]
+    if recipe_kind == "component":
+        record = dict_from_row(db.get_recipe_component(recipe_id))
+        if not record:
+            return None
+        return prepare_recipe_components([record])[0]
+    return None
+
+def extract_json_object(text):
+    """Parse a model response that should be JSON, tolerating extra text."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r"\{.*\}", text or "", flags=re.DOTALL)
+    if not match:
+        raise ValueError("No JSON object found in model response")
+    return json.loads(match.group(0))
+
+def build_recipe_edit_prompt(recipe_kind, recipe, user_message):
+    """Create the user prompt for a structured Dieter recipe edit."""
+    return f"""Recipe kind: {recipe_kind}
+Title:
+{recipe.get('display_title') or recipe.get('title') or ''}
+
+Ingredients:
+{recipe.get('display_ingredients_text') or ''}
+
+Instructions:
+{recipe.get('display_instructions_text') or ''}
+
+User feedback/change request:
+{user_message}
+
+Return only JSON with this exact shape:
+{{
+  "apply_change": true,
+  "summary": "",
+  "title": null,
+  "ingredients_text": null,
+  "instructions_text": null,
+  "changed_fields": [],
+  "assistant_message": ""
+}}
+"""
+
+RECIPE_EDIT_SYSTEM_PROMPT = """You are Dieter, a recipe editing assistant.
+
+You may edit a recipe based on cooking feedback or a requested change.
+Preserve useful existing recipe content. Apply small, practical edits.
+
+Good edits include:
+- Adding or clarifying oven order and timing for complete meals.
+- Adding component-specific timing notes.
+- Adjusting seasoning amounts or adding notes from cooking feedback.
+- Clarifying sequence, doneness cues, rests, sauce reduction, or prep order.
+
+Rules:
+- Return only valid JSON.
+- If the request is only a question and no recipe text should change, set
+  apply_change to false and answer in assistant_message.
+- For fields that should not change, use null.
+- If a field changes, return the full replacement text for that field, not a diff.
+- Keep changed_fields limited to title, ingredients_text, instructions_text.
+- Do not invent unrelated ingredients or steps.
+- Make concise, user-friendly recipe prose.
+"""
+
+def propose_recipe_edit(recipe_kind, recipe, user_message, conversation_history=None):
+    """Use the configured model to propose a structured recipe edit."""
+    if not llm_service:
+        return {
+            "apply_change": False,
+            "summary": "Feedback recorded; Dieter model is not configured.",
+            "title": None,
+            "ingredients_text": None,
+            "instructions_text": None,
+            "changed_fields": [],
+            "assistant_message": "I recorded that feedback, but the model is not configured so I did not change the recipe text.",
+            "model": "",
+        }
+
+    prompt = build_recipe_edit_prompt(recipe_kind, recipe, user_message)
+    messages = list(conversation_history or [])[-6:]
+    messages.append({"role": "user", "content": prompt})
+    raw_response = llm_service.provider.chat(messages, RECIPE_EDIT_SYSTEM_PROMPT)
+    parsed = extract_json_object(raw_response)
+    parsed["model"] = getattr(llm_service.provider, "model", "")
+    return parsed
+
+def apply_recipe_edit(recipe_kind, recipe_id, user_message, proposal):
+    """Apply an allowed recipe edit and record its structured change log."""
+    recipe = recipe_record_for_edit(recipe_kind, recipe_id)
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    allowed_fields = ["title", "ingredients_text", "instructions_text"]
+    before = {
+        "title": recipe.get("display_title") or recipe.get("title") or "",
+        "ingredients_text": recipe.get("display_ingredients_text") or "",
+        "instructions_text": recipe.get("display_instructions_text") or "",
+    }
+    after = dict(before)
+    changed_fields = []
+
+    if proposal.get("apply_change"):
+        for field in allowed_fields:
+            value = proposal.get(field)
+            if isinstance(value, str) and value.strip() and value != before[field]:
+                after[field] = value.strip()
+                changed_fields.append(field)
+
+    if recipe_kind == "meal" and changed_fields:
+        db.update_recipe_complete_meal_edits(
+            recipe_id,
+            title=after["title"] if "title" in changed_fields else None,
+            ingredients_text=after["ingredients_text"] if "ingredients_text" in changed_fields else None,
+            instructions_text=after["instructions_text"] if "instructions_text" in changed_fields else None,
+        )
+    elif recipe_kind == "component" and changed_fields:
+        db.update_recipe_component_edits(
+            recipe_id,
+            title=after["title"] if "title" in changed_fields else None,
+            ingredients_text=after["ingredients_text"] if "ingredients_text" in changed_fields else None,
+            instructions_text=after["instructions_text"] if "instructions_text" in changed_fields else None,
+        )
+
+    summary = proposal.get("summary") or ("Updated recipe." if changed_fields else "Recorded feedback.")
+    change_id = db.add_recipe_change_log(
+        recipe_kind,
+        recipe_id,
+        user_message,
+        summary,
+        changed_fields,
+        before,
+        after,
+        proposal.get("model", ""),
+    )
+    return {
+        "change_id": change_id,
+        "changed_fields": changed_fields,
+        "summary": summary,
+        "assistant_message": proposal.get("assistant_message") or summary,
+        "after": after,
+    }
+
+def parse_planner_target_from_url(page_url):
+    """Resolve a planner URL into the strongest available project/task target."""
+    action_match = re.search(r"/projects/(\d+)/actions/(\d+)", page_url or "")
+    if action_match:
+        return {
+            "target_kind": "task",
+            "project_id": int(action_match.group(1)),
+            "action_id": int(action_match.group(2)),
+        }
+    project_match = re.search(r"/projects/(\d+)", page_url or "")
+    if project_match:
+        return {
+            "target_kind": "project",
+            "project_id": int(project_match.group(1)),
+            "action_id": None,
+        }
+    if page_url == "/" or re.search(r"/apps/assistant|/apps/planner|/dashboard|/apps\b", page_url or ""):
+        dashboard = agent_service.build_dashboard_context()
+        project = dashboard.get("recommended_project")
+        action = dashboard.get("next_action")
+        return {
+            "target_kind": "planner",
+            "project_id": project.get("id") if project else None,
+            "action_id": action.get("id") if action else None,
+        }
+    return {"target_kind": "unknown", "project_id": None, "action_id": None}
+
+def build_planner_edit_context(page_url):
+    """Build compact planner context with IDs for structured edits."""
+    target = parse_planner_target_from_url(page_url)
+    projects = [dict(row) for row in db.get_all_projects()]
+    lines = [
+        f"Current URL: {page_url}",
+        f"Resolved target: {target}",
+        "",
+        "Open scheduler/agenda items:",
+    ]
+    for item in db.get_scheduler_items(status="open", limit=20):
+        item = dict(item)
+        timing = item.get("scheduled_for") or "unscheduled"
+        context_label = item.get("context_label") or "general"
+        notes = f" notes={item.get('notes', '')}" if item.get("notes") else ""
+        lines.append(
+            f"- Scheduler id={item['id']} context={context_label} when={timing}: {item.get('title', '')}{notes}"
+        )
+    lines.extend([
+        "",
+        "Projects and editable planner records:",
+    ])
+    for project in projects:
+        lines.append(
+            f"- Project id={project['id']} name={project['name']} "
+            f"priority={project.get('priority_score', 3)} status={project.get('status', 'active')}"
+        )
+        if project.get("description"):
+            lines.append(f"  description: {project['description']}")
+        actions = [dict(row) for row in db.get_recommended_actions(project["id"])]
+        for action in actions[:12]:
+            lines.append(
+                f"  - Task id={action['id']} priority={action.get('priority', 'medium')} "
+                f"status={action.get('status', 'open')}: {action.get('action', '')}"
+            )
+            steps = [dict(row) for row in db.get_task_steps(action["id"])]
+            for step in steps[:12]:
+                lines.append(
+                    f"    - Step id={step['id']} status={step.get('status', 'open')}: {step.get('step', '')}"
+                )
+        blockers = [dict(row) for row in db.get_blockers(project["id"])]
+        for blocker in blockers[:8]:
+            lines.append(
+                f"  - Blocker id={blocker['id']} severity={blocker.get('severity', 'medium')}: "
+                f"{blocker.get('description', '')}"
+            )
+        goals = [dict(row) for row in db.get_weekly_goals(project["id"])]
+        for goal in goals[:8]:
+            status = "done" if goal.get("completed") else "open"
+            lines.append(f"  - Goal id={goal['id']} status={status}: {goal.get('goal', '')}")
+    return target, "\n".join(lines)
+
+PLANNER_EDIT_SYSTEM_PROMPT = """You are Dieter, a structured planner editing assistant.
+
+You may update the user's local planner only when the request is clear enough.
+Use the current URL target when the user says "this task", "this project", or "mark it done".
+If the target or requested edit is unclear, do not apply changes; ask one concise clarification question.
+
+Return only valid JSON with this shape:
+{
+  "apply_change": true,
+  "summary": "",
+  "operations": [],
+  "assistant_message": ""
+}
+
+Allowed operation shapes:
+- {"op":"add_project","name":"","description":"","priority_score":3}
+- {"op":"update_project","project_id":1,"name":null,"description":null,"priority_score":null,"focus_reason":null,"status":null}
+- {"op":"add_note","project_id":1,"content":""}
+- {"op":"add_task","project_id":1,"action":"","priority":"medium"}
+- {"op":"update_task","action_id":1,"action":null,"priority":null}
+- {"op":"complete_task","action_id":1}
+- {"op":"reopen_task","action_id":1}
+- {"op":"add_step","action_id":1,"step":""}
+- {"op":"update_step","step_id":1,"step":""}
+- {"op":"complete_step","step_id":1}
+- {"op":"reopen_step","step_id":1}
+- {"op":"add_blocker","project_id":1,"description":"","severity":"medium"}
+- {"op":"delete_blocker","blocker_id":1}
+- {"op":"add_goal","project_id":1,"goal":""}
+- {"op":"complete_goal","goal_id":1}
+- {"op":"add_scheduler_item","title":"","context_label":"","scheduled_for":"","notes":"","project_id":null,"action_id":null}
+- {"op":"update_scheduler_item","scheduler_item_id":1,"title":null,"context_label":null,"scheduled_for":null,"notes":null,"status":null}
+- {"op":"complete_scheduler_item","scheduler_item_id":1}
+- {"op":"reopen_scheduler_item","scheduler_item_id":1}
+
+Rules:
+- Return only JSON.
+- Do not invent IDs; use IDs from context.
+- If adding records, use the current project/task target when appropriate.
+- Use scheduler items for contextual reminders, agenda questions, appointments, errands, and "next time I talk to/go to/call..." requests.
+- If the user asks to add bullets/details to an existing scheduler context, use update_scheduler_item for that existing item. Do not create a second item with the same title/context.
+- For scheduler scheduled_for, use YYYY-MM-DD when the user gives a clear date; otherwise use an empty string.
+- For scheduler context_label, use short labels like Mechanic, Doctor, Grocery, Insurance, Home, or Call.
+- For scheduler additions, do not invent or expand notes. Save only details the user explicitly gave.
+- For scheduler additions, keep notes as short bullets or an empty string. Never save "Original request:" text.
+- For scheduler note updates, never repeat the user's whole instruction. Keep or merge concise bullets only.
+- For scheduler note updates with one topic plus details, use one parent bullet and indented child bullets, for example "- Good stereo guy\n  - Name: Sam\n  - Phone: 555-1234"; do not flatten those details into separate top-level bullets.
+- For scheduler additions, make assistant_message explicit: say what was saved, the date/context if known, where it was saved, and whether the user should add missing time/location details.
+- If an appointment/reminder lacks an exact time or location, still save it, but mention missing details in assistant_message only, not in scheduler notes.
+- For non-scheduler changes, keep assistant_message short and say what changed.
+- Use priority values only: high, medium, low.
+- Use severity values only: high, medium, low.
+- Use project status values only: active, paused, done, archived.
+- Use scheduler status values only: open, done, archived.
+"""
+
+def infer_scheduler_context_label(text):
+    """Infer a short agenda context from common reminder wording."""
+    text_lower = (text or "").lower()
+    context_map = [
+        ("mechanic", "Mechanic"),
+        ("doctor", "Doctor"),
+        ("dentist", "Dentist"),
+        ("grocery", "Grocery"),
+        ("store", "Store"),
+        ("insurance", "Insurance"),
+        ("call", "Call"),
+        ("appointment", "Appointment"),
+    ]
+    for needle, label in context_map:
+        if needle in text_lower:
+            return label
+    return "General"
+
+def local_scheduler_proposal(user_message, target):
+    """Build a conservative scheduler edit when no model is configured."""
+    text = (user_message or "").strip()
+    if not text:
+        return None
+    scheduler_cues = [
+        "remind me",
+        "remember",
+        "next time",
+        "ask my",
+        "ask the",
+        "appointment",
+        "agenda",
+        "schedule",
+    ]
+    if not any(cue in text.lower() for cue in scheduler_cues):
+        return None
+    return {
+        "apply_change": True,
+        "summary": "Added scheduler item.",
+        "operations": [{
+            "op": "add_scheduler_item",
+            "title": text,
+            "context_label": infer_scheduler_context_label(text),
+            "scheduled_for": "",
+            "notes": "",
+            "project_id": target.get("project_id"),
+            "action_id": target.get("action_id"),
+        }],
+        "assistant_message": "I added that to your Scheduler.",
+        "model": "local-scheduler",
+        "target": target,
+    }
+
+def extract_scheduler_agenda_items(text):
+    """Extract agenda bullets from ask-about scheduler wording."""
+    original = (text or "").strip()
+    if not original:
+        return []
+
+    agenda_text = ""
+    patterns = [
+        r"\bask(?:\s+(?:my|the|them|him|her|mechanic|doctor|dentist|shop|garage))?\s+about\s*:?\s*(.+)",
+        r"\bthings\s+to\s+ask(?:\s+(?:my|the|mechanic|doctor|dentist|shop|garage))?\s*:?\s*(.+)",
+        r"\bagenda\s*:?\s*(.+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, original, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            agenda_text = match.group(1)
+            break
+
+    if not agenda_text:
+        return []
+
+    agenda_text = re.sub(r"\b(today|tomorrow|next week)\b", "", agenda_text, flags=re.IGNORECASE)
+    agenda_text = re.sub(r"\bon\s+\d{4}-\d{2}-\d{2}\b", "", agenda_text, flags=re.IGNORECASE)
+    agenda_text = re.sub(r"\s+", " ", agenda_text).strip(" .")
+    if not agenda_text:
+        return []
+
+    raw_items = re.split(r"\s*(?:,|;|\n|\band\b)\s*", agenda_text)
+    items = []
+    for raw_item in raw_items:
+        item = re.sub(r"^[-*]\s*", "", raw_item).strip(" .")
+        item = re.sub(r"^(ask\s+about|about)\s+", "", item, flags=re.IGNORECASE).strip(" .")
+        if item and item.lower() not in {"it", "that", "this"}:
+            items.append(item)
+    return items
+
+def extract_scheduler_detail_items(text, context_label=""):
+    """Extract explicit non-agenda details without preserving the raw prompt."""
+    original = (text or "").strip()
+    if not original:
+        return []
+
+    detail_text = original
+    detail_markers = [
+        r"\bnotes?\s*:?\s*(.+)",
+        r"\bdetails?\s*:?\s*(.+)",
+        r"\bremember\s+to\s*:?\s*(.+)",
+    ]
+    for pattern in detail_markers:
+        match = re.search(pattern, original, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            detail_text = match.group(1)
+            break
+
+    detail_text = re.sub(
+        r"^\s*(please\s+)?(remind me|remember|add|put|schedule)\s+(to|about|that)?\s*",
+        "",
+        detail_text,
+        flags=re.IGNORECASE,
+    )
+    detail_text = re.sub(r"\b(today|tomorrow|next week)\b", "", detail_text, flags=re.IGNORECASE)
+    detail_text = re.sub(r"\bon\s+\d{4}-\d{2}-\d{2}\b", "", detail_text, flags=re.IGNORECASE)
+    if context_label:
+        detail_text = re.sub(rf"\b(my|the)?\s*{re.escape(context_label)}('?s)?\b", "", detail_text, flags=re.IGNORECASE)
+    detail_text = re.sub(r"\b(appointment|appt|reminder|agenda|note)\b", "", detail_text, flags=re.IGNORECASE)
+    detail_text = re.sub(r"\s+", " ", detail_text).strip(" .:-")
+    if not detail_text or len(detail_text) < 4:
+        return []
+
+    raw_items = re.split(r"\s*(?:,|;|\n|\band\b)\s*", detail_text)
+    items = []
+    for raw_item in raw_items:
+        item = raw_item.strip(" .:-")
+        if item and item.lower() not in {"it", "that", "this"}:
+            items.append(item)
+    return items[:5]
+
+def clean_scheduler_note_line(line):
+    """Normalize a scheduler note line and drop obvious prompt echoes."""
+    cleaned = re.sub(r"^[-*]\s*", "", (line or "").strip())
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+    if not cleaned:
+        return ""
+    if re.search(r"\b(add|put)\b.*\b(to|under|in)\b.*\b(bullet|bullets|card|item|scheduler)\b", cleaned, re.IGNORECASE):
+        return ""
+    parts = [
+        part.strip(" .")
+        for part in re.split(r"\s*(?:[.;]\s+|\n+)\s*", cleaned)
+        if part.strip(" .")
+    ]
+    if len(parts) > 1:
+        deduped_parts = []
+        seen_parts = set()
+        for part in parts:
+            key = part.lower()
+            if key not in seen_parts:
+                deduped_parts.append(part)
+                seen_parts.add(key)
+        cleaned = ". ".join(deduped_parts)
+    return cleaned[:180]
+
+def is_scheduler_child_note_line(line):
+    """Detect indented markdown-ish child bullets."""
+    return bool(re.match(r"^\s{2,}[-*]\s+", line or ""))
+
+def format_scheduler_note_lines(lines):
+    """Format note lines while preserving explicit child bullets."""
+    formatted = []
+    for line in lines:
+        if not line:
+            continue
+        if is_scheduler_child_note_line(line):
+            child = clean_scheduler_note_line(line)
+            if child:
+                formatted.append(f"  - {child}")
+        else:
+            parent = clean_scheduler_note_line(line)
+            if parent:
+                formatted.append(f"- {parent}")
+    return "\n".join(formatted)
+
+def normalize_scheduler_notes(notes):
+    """Return clean, deduplicated bullet-form notes, preserving one nested level."""
+    lines = []
+    seen = set()
+    for raw_line in (notes or "").splitlines():
+        line = clean_scheduler_note_line(raw_line)
+        is_child = is_scheduler_child_note_line(raw_line)
+        key = f"{'child' if is_child else 'parent'}:{line.lower()}"
+        if line and key not in seen:
+            lines.append(f"  - {line}" if is_child and lines else f"- {line}")
+            seen.add(key)
+    return "\n".join(lines[:20])
+
+def merge_scheduler_notes(existing_notes, new_notes):
+    """Merge note bullets without duplicating existing content, preserving child bullets."""
+    merged_lines = []
+    seen = set()
+    for notes in [existing_notes or "", new_notes or ""]:
+        for raw_line in notes.splitlines():
+            line = clean_scheduler_note_line(raw_line)
+            is_child = is_scheduler_child_note_line(raw_line)
+            key = f"{'child' if is_child else 'parent'}:{line.lower()}"
+            if line and key not in seen:
+                merged_lines.append(f"  - {line}" if is_child and merged_lines else f"- {line}")
+                seen.add(key)
+    return "\n".join(merged_lines[:20])
+
+def scheduler_note_tree(notes):
+    """Build display-ready scheduler note parents with optional child bullets."""
+    items = []
+    for raw_line in (notes or "").splitlines():
+        text = clean_scheduler_note_line(raw_line)
+        if not text:
+            continue
+        if is_scheduler_child_note_line(raw_line) and items:
+            items[-1]["children"].append(text)
+        else:
+            items.append({"text": text, "children": []})
+    return items
+
+jinja_env.globals["scheduler_note_tree"] = scheduler_note_tree
+
+def find_open_scheduler_item_for_context(context_label, title=""):
+    """Find an existing open scheduler item by short context/title."""
+    context_key = (context_label or "").strip().lower()
+    title_key = (title or "").strip().lower()
+    if not context_key and not title_key:
+        return None
+    for item in dicts_from_rows(db.get_scheduler_items(status="open", limit=100)):
+        item_context = (item.get("context_label") or "").strip().lower()
+        item_title = (item.get("title") or "").strip().lower()
+        if context_key and context_key != "general" and context_key in {item_context, item_title}:
+            return item
+        if title_key and title_key in {item_context, item_title}:
+            return item
+    return None
+
+def extract_scheduler_bullet_additions(text, context_label=""):
+    """Extract bullet additions from requests like 'add X to mechanic bullets'."""
+    original = (text or "").strip()
+    if not original:
+        return []
+    context = (context_label or infer_scheduler_context_label(original) or "").lower()
+    context_pattern = re.escape(context) if context and context != "general" else r"[a-z]+"
+    patterns = [
+        rf"\badd\s+(?:this\s+)?(?:to\s+)?(?:my\s+|the\s+)?{context_pattern}\s+(?:bullet|bullets|card|item|note|notes)\s*:?\s*(.+)",
+        rf"\badd\s+(.+?)\s+(?:to|under|in)\s+(?:my\s+|the\s+)?{context_pattern}\s+(?:bullet|bullets|card|item|note|notes)\b",
+        rf"\b(?:also\s+)?ask\s+about\s+(.+)",
+    ]
+    addition_text = ""
+    for pattern in patterns:
+        match = re.search(pattern, original, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            addition_text = match.group(1)
+            break
+    if not addition_text:
+        return []
+    addition_text = re.sub(r"\b(today|tomorrow|next week)\b", "", addition_text, flags=re.IGNORECASE)
+    addition_text = re.sub(r"\s+", " ", addition_text).strip(" .:-")
+
+    stereo_match = re.search(
+        r"\b(?:a\s+)?good\s+stereo\s+guy\b(?P<details>.*)",
+        addition_text,
+        flags=re.IGNORECASE,
+    )
+    if stereo_match:
+        details_text = stereo_match.group("details").strip(" .:-")
+        detail_items = []
+        name_match = re.search(
+            r"\b(?:named|name(?:\s+is)?|called)\s+(.+?)(?=\s+(?:and\s+)?(?:phone|number|cell|mobile)\b|[,;.]|$)",
+            details_text,
+            flags=re.IGNORECASE,
+        )
+        if name_match:
+            detail_items.append(f"Name: {name_match.group(1).strip(' .')}")
+        phone_match = re.search(
+            r"\b(?:phone|number|cell|mobile)(?:\s+is)?\s*[:\-]?\s*([+()\d][+()\d\s.-]{5,})",
+            details_text,
+            flags=re.IGNORECASE,
+        )
+        if phone_match:
+            detail_items.append(f"Phone: {phone_match.group(1).strip(' .')}")
+        if not detail_items and details_text:
+            for part in re.split(r"\s*(?:,|;|\band\b)\s*", details_text):
+                cleaned = clean_scheduler_note_line(part)
+                if cleaned:
+                    detail_items.append(cleaned)
+        return ["Good stereo guy", *[f"  - {item}" for item in detail_items[:4]]]
+
+    raw_items = re.split(r"\s*(?:,|;|\n|\band\b)\s*", addition_text)
+    items = []
+    for raw_item in raw_items:
+        item = clean_scheduler_note_line(raw_item)
+        item = re.sub(r"^(ask\s+about|about)\s+", "", item, flags=re.IGNORECASE).strip(" .")
+        if item:
+            items.append(f"Ask about {item}")
+    return items[:8]
+
+def format_scheduler_confirmation(items):
+    """Explain scheduler changes in a useful, human-readable way."""
+    if not items:
+        return ""
+    lines = []
+    for item in items:
+        title = item.get("title") or "Untitled reminder"
+        context_label = item.get("context_label") or "General"
+        scheduled_for = item.get("scheduled_for") or ""
+        notes = item.get("notes") or ""
+        when = scheduled_for if scheduled_for else "no exact date saved"
+        lines.append(f"Saved to Scheduler: {title}")
+        lines.append(f"Context: {context_label}")
+        lines.append(f"When: {when}")
+        if notes:
+            lines.append(f"Notes: {notes}")
+        missing = []
+        if not scheduled_for:
+            missing.append("date")
+        if not re.search(r"\b\d{1,2}(:\d{2})?\s*(am|pm)\b|\b\d{1,2}:\d{2}\b", notes, flags=re.IGNORECASE):
+            missing.append("time")
+        if not re.search(r"\bat\b|\baddress\b|\blocation\b|\bshop\b|\bgarage\b|\bclinic\b", notes, flags=re.IGNORECASE):
+            missing.append("location")
+        if missing:
+            lines.append(f"Still useful to add later: {', '.join(missing)}.")
+        lines.append("You can review it at /apps/assistant/scheduler.")
+    return "\n".join(lines)
+
+def synthesize_scheduler_operation(user_message, operation):
+    """Turn raw reminder text into a concise scheduler record."""
+    original = (user_message or "").strip()
+    title = (operation.get("title") or original).strip()
+    context_label = (operation.get("context_label") or infer_scheduler_context_label(original)).strip()
+    scheduled_for = (operation.get("scheduled_for") or "").strip()
+    bullet_additions = extract_scheduler_bullet_additions(original, context_label)
+    agenda_items = bullet_additions or extract_scheduler_agenda_items(original)
+    detail_items = extract_scheduler_detail_items(original, context_label)
+
+    text = original.lower()
+    if not scheduled_for:
+        today = datetime.now().date()
+        if re.search(r"\btomorrow\b", text):
+            scheduled_for = (today + timedelta(days=1)).isoformat()
+        elif re.search(r"\btoday\b", text):
+            scheduled_for = today.isoformat()
+
+    rawish_title = title.lower() == original.lower() or len(title) > 80
+    if context_label and context_label != "General":
+        title = context_label
+    elif rawish_title:
+        cleaned = re.sub(
+            r"^\s*(please\s+)?(remind me|remember|add|put|schedule)\s+(to|about|that)?\s*",
+            "",
+            original,
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.sub(r"\b(today|tomorrow)\b", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+        if cleaned:
+            title = cleaned[0].upper() + cleaned[1:]
+        else:
+            title = "Scheduler reminder"
+
+    note_lines = []
+    if agenda_items:
+        note_lines = [
+            item if re.match(r"^ask\s+about\b", item, flags=re.IGNORECASE) else f"Ask about {item}"
+            for item in agenda_items
+        ]
+    elif detail_items and not (len(detail_items) == 1 and detail_items[0].lower() == title.lower()):
+        note_lines = detail_items
+
+    operation["title"] = title
+    operation["context_label"] = context_label or "General"
+    operation["scheduled_for"] = scheduled_for
+    operation["notes"] = normalize_scheduler_notes(format_scheduler_note_lines(note_lines))
+    return operation
+
+def scheduler_due_context():
+    """Build visible scheduler notifications for app entry pages."""
+    now = datetime.now()
+    today = now.date()
+    open_items = dicts_from_rows(db.get_scheduler_items(status="open", limit=100))
+    due_items = []
+    upcoming_items = []
+    for item in open_items:
+        scheduled_for = (item.get("scheduled_for") or "").strip()
+        if not scheduled_for:
+            continue
+        try:
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", scheduled_for):
+                scheduled_date = datetime.strptime(scheduled_for, "%Y-%m-%d").date()
+                is_due = scheduled_date <= today
+            else:
+                scheduled_at = datetime.fromisoformat(scheduled_for.replace("Z", "+00:00"))
+                scheduled_date = scheduled_at.date()
+                is_due = scheduled_at.replace(tzinfo=None) <= now
+        except ValueError:
+            continue
+        item["scheduled_date"] = scheduled_date.isoformat()
+        if is_due:
+            due_items.append(item)
+        else:
+            upcoming_items.append(item)
+    return {
+        "due_items": due_items[:5],
+        "upcoming_items": upcoming_items[:5],
+        "today": today.isoformat(),
+    }
+
+def propose_planner_edit(user_message, page_url="", conversation_history=None):
+    """Ask the model for a structured planner edit proposal."""
+    target, context = build_planner_edit_context(page_url)
+    if not llm_service:
+        scheduler_proposal = local_scheduler_proposal(user_message, target)
+        if scheduler_proposal:
+            return scheduler_proposal
+        result = agent_service.chat(
+            user_message=user_message,
+            project_context=agent_service.build_dashboard_context(),
+            conversation_history=conversation_history,
+        )
+        return {
+            "apply_change": bool(result.get("updates")),
+            "summary": "Updated planner." if result.get("updates") else "No structured planner edit was applied.",
+            "operations": [],
+            "assistant_message": result.get("response", "Planner model is not configured."),
+            "model": "local-planner",
+            "local_result": result,
+            "target": target,
+        }
+
+    prompt = (
+        f"[Planner Context]\n{context}\n\n"
+        f"Current date: {datetime.now().strftime('%Y-%m-%d')}\n"
+        "Interpret relative dates like today, tomorrow, and next week from the current date.\n\n"
+        f"User request:\n{user_message}"
+    )
+    messages = list(conversation_history or [])[-6:]
+    messages.append({"role": "user", "content": prompt})
+    raw_response = llm_service.provider.chat(messages, PLANNER_EDIT_SYSTEM_PROMPT)
+    parsed = extract_json_object(raw_response)
+    parsed["model"] = getattr(llm_service.provider, "model", "")
+    parsed["target"] = target
+    return parsed
+
+def snapshot_planner_target(target):
+    """Capture before/after state for planner edit logs."""
+    project_id = target.get("project_id")
+    action_id = target.get("action_id")
+    if action_id:
+        action = dict_from_row(db.get_recommended_action(action_id))
+        if action:
+            return {
+                "target_kind": "task",
+                "target_id": action_id,
+                "project": dict_from_row(db.get_project_by_id(action["project_id"])),
+                "task": action,
+                "steps": dicts_from_rows(db.get_task_steps(action_id)),
+                "scheduler_items": dicts_from_rows(db.get_scheduler_items(status="open", limit=20)),
+            }
+    if project_id:
+        return {
+            "target_kind": "project",
+            "target_id": project_id,
+            "project": dict_from_row(db.get_project_by_id(project_id)),
+            "tasks": dicts_from_rows(db.get_recommended_actions(project_id)),
+            "blockers": dicts_from_rows(db.get_blockers(project_id)),
+            "goals": dicts_from_rows(db.get_weekly_goals(project_id)),
+            "notes": dicts_from_rows(db.get_notes(project_id)),
+            "scheduler_items": [
+                item for item in dicts_from_rows(db.get_scheduler_items(status="open", limit=50))
+                if item.get("project_id") == project_id
+            ],
+        }
+    return {
+        "target_kind": "planner",
+        "target_id": 0,
+        "dashboard": agent_service.build_dashboard_context(),
+        "scheduler_items": dicts_from_rows(db.get_scheduler_items(status="open", limit=20)),
+    }
+
+def apply_planner_edit(user_message, page_url, proposal):
+    """Apply a structured planner edit proposal and record a change log."""
+    target = proposal.get("target") or parse_planner_target_from_url(page_url)
+    before = snapshot_planner_target(target)
+    applied = []
+    errors = []
+    allowed_priorities = {"high", "medium", "low"}
+    allowed_statuses = {"active", "paused", "done", "archived"}
+    allowed_scheduler_statuses = {"open", "done", "archived"}
+
+    if proposal.get("local_result"):
+        updates = proposal["local_result"].get("updates", [])
+        return {
+            "changed_fields": [update.get("type", "planner_update") for update in updates],
+            "summary": proposal.get("summary", "Updated planner."),
+            "assistant_message": proposal.get("assistant_message", ""),
+            "operations": updates,
+            "after": snapshot_planner_target(target),
+        }
+
+    if proposal.get("apply_change"):
+        for operation in proposal.get("operations") or []:
+            op = operation.get("op")
+            try:
+                if op == "add_project":
+                    project_id = db.add_project(
+                        operation.get("name", "").strip(),
+                        operation.get("description", "").strip(),
+                        int(operation.get("priority_score") or 3),
+                    )
+                    applied.append({"op": op, "project_id": project_id})
+                elif op == "update_project":
+                    status = operation.get("status")
+                    if status is not None and status not in allowed_statuses:
+                        raise ValueError("Unsupported project status")
+                    db.update_project_details(
+                        int(operation["project_id"]),
+                        name=operation.get("name"),
+                        description=operation.get("description"),
+                        priority_score=operation.get("priority_score"),
+                        focus_reason=operation.get("focus_reason"),
+                    )
+                    if status:
+                        db.update_project_status(int(operation["project_id"]), status)
+                    applied.append(operation)
+                elif op == "add_note":
+                    db.add_note(int(operation["project_id"]), operation.get("content", "").strip())
+                    applied.append(operation)
+                elif op == "add_task":
+                    priority = operation.get("priority") or "medium"
+                    if priority not in allowed_priorities:
+                        priority = "medium"
+                    action_id = db.add_recommended_action(
+                        int(operation["project_id"]),
+                        operation.get("action", "").strip(),
+                        priority,
+                    )
+                    applied.append({"op": op, "action_id": action_id})
+                elif op == "update_task":
+                    priority = operation.get("priority")
+                    if priority is not None and priority not in allowed_priorities:
+                        raise ValueError("Unsupported task priority")
+                    db.update_recommended_action_text(
+                        int(operation["action_id"]),
+                        action=operation.get("action"),
+                        priority=priority,
+                    )
+                    applied.append(operation)
+                elif op == "complete_task":
+                    db.mark_recommended_action_complete(int(operation["action_id"]))
+                    applied.append(operation)
+                elif op == "reopen_task":
+                    db.reopen_recommended_action(int(operation["action_id"]))
+                    applied.append(operation)
+                elif op == "add_step":
+                    step_id = db.add_task_step(int(operation["action_id"]), operation.get("step", "").strip())
+                    applied.append({"op": op, "step_id": step_id})
+                elif op == "update_step":
+                    db.update_task_step_text(int(operation["step_id"]), operation.get("step", "").strip())
+                    applied.append(operation)
+                elif op == "complete_step":
+                    db.mark_task_step_complete(int(operation["step_id"]))
+                    applied.append(operation)
+                elif op == "reopen_step":
+                    db.reopen_task_step(int(operation["step_id"]))
+                    applied.append(operation)
+                elif op == "add_blocker":
+                    severity = operation.get("severity") or "medium"
+                    if severity not in allowed_priorities:
+                        severity = "medium"
+                    db.add_blocker(int(operation["project_id"]), operation.get("description", "").strip(), severity)
+                    applied.append(operation)
+                elif op == "delete_blocker":
+                    db.delete_blocker(int(operation["blocker_id"]))
+                    applied.append(operation)
+                elif op == "add_goal":
+                    db.add_weekly_goal(int(operation["project_id"]), operation.get("goal", "").strip())
+                    applied.append(operation)
+                elif op == "complete_goal":
+                    db.mark_goal_complete(int(operation["goal_id"]))
+                    applied.append(operation)
+                elif op == "add_scheduler_item":
+                    operation = synthesize_scheduler_operation(user_message, operation)
+                    project_id = operation.get("project_id")
+                    action_id = operation.get("action_id")
+                    title = operation.get("title", "").strip()
+                    context_label = operation.get("context_label", "").strip()
+                    scheduled_for = operation.get("scheduled_for", "").strip()
+                    notes = operation.get("notes", "").strip()
+                    existing_item = find_open_scheduler_item_for_context(context_label, title) if notes else None
+                    if existing_item:
+                        item_id = int(existing_item["id"])
+                        merged_notes = merge_scheduler_notes(existing_item.get("notes", ""), notes)
+                        db.update_scheduler_item(
+                            item_id,
+                            title=existing_item.get("title") or title,
+                            context_label=existing_item.get("context_label") or context_label,
+                            scheduled_for=existing_item.get("scheduled_for") or scheduled_for,
+                            notes=merged_notes,
+                        )
+                        applied.append({
+                            "op": "update_scheduler_item",
+                            "scheduler_item_id": item_id,
+                            "title": existing_item.get("title") or title,
+                            "context_label": existing_item.get("context_label") or context_label,
+                            "scheduled_for": existing_item.get("scheduled_for") or scheduled_for,
+                            "notes": merged_notes,
+                        })
+                    else:
+                        item_id = db.add_scheduler_item(
+                            title,
+                            context_label=context_label,
+                            scheduled_for=scheduled_for,
+                            notes=notes,
+                            source="dieter",
+                            project_id=int(project_id) if project_id else None,
+                            action_id=int(action_id) if action_id else None,
+                        )
+                        applied.append({
+                            "op": op,
+                            "scheduler_item_id": item_id,
+                            "title": title,
+                            "context_label": context_label,
+                            "scheduled_for": scheduled_for,
+                            "notes": notes,
+                        })
+                elif op == "update_scheduler_item":
+                    status = operation.get("status")
+                    if status is not None and status not in allowed_scheduler_statuses:
+                        raise ValueError("Unsupported scheduler status")
+                    item_id = int(operation["scheduler_item_id"])
+                    existing_item = dict_from_row(db.get_scheduler_item(item_id))
+                    notes = operation.get("notes")
+                    if notes is not None:
+                        extracted_additions = extract_scheduler_bullet_additions(
+                            user_message,
+                            operation.get("context_label") or (existing_item or {}).get("context_label") or "",
+                        )
+                        addition_notes = format_scheduler_note_lines(extracted_additions)
+                        notes = merge_scheduler_notes((existing_item or {}).get("notes", ""), addition_notes or notes)
+                    db.update_scheduler_item(
+                        item_id,
+                        title=operation.get("title"),
+                        context_label=operation.get("context_label"),
+                        scheduled_for=operation.get("scheduled_for"),
+                        notes=notes,
+                        status=status,
+                    )
+                    operation["notes"] = notes if notes is not None else operation.get("notes")
+                    applied.append(operation)
+                elif op == "complete_scheduler_item":
+                    db.mark_scheduler_item_complete(int(operation["scheduler_item_id"]))
+                    applied.append(operation)
+                elif op == "reopen_scheduler_item":
+                    db.reopen_scheduler_item(int(operation["scheduler_item_id"]))
+                    applied.append(operation)
+                else:
+                    errors.append(f"Skipped unsupported operation: {op}")
+            except Exception as exc:
+                errors.append(f"{op or 'operation'} failed: {exc}")
+
+    after = snapshot_planner_target(target)
+    summary = proposal.get("summary") or ("Updated planner." if applied else "No planner changes were applied.")
+    if applied:
+        db.add_planner_change_log(
+            after.get("target_kind") or before.get("target_kind") or "planner",
+            after.get("target_id") or before.get("target_id") or 0,
+            user_message,
+            summary,
+            applied,
+            before,
+            after,
+            proposal.get("model", ""),
+        )
+
+    scheduler_added = [
+        operation for operation in applied
+        if operation.get("op") == "add_scheduler_item"
+    ]
+    scheduler_changed = [
+        operation for operation in applied
+        if operation.get("op") in {
+            "add_scheduler_item",
+            "update_scheduler_item",
+            "complete_scheduler_item",
+            "reopen_scheduler_item",
+            "delete_scheduler_item",
+        }
+    ]
+    scheduler_confirmation = format_scheduler_confirmation(scheduler_added)
+    assistant_message = scheduler_confirmation or proposal.get("assistant_message") or summary
+    if errors:
+        assistant_message = f"{assistant_message}\nSkipped: {'; '.join(errors)}"
+
+    return {
+        "changed_fields": [operation.get("op", "planner_update") for operation in applied],
+        "summary": summary,
+        "assistant_message": assistant_message,
+        "operations": applied,
+        "errors": errors,
+        "after": after,
+        "redirect_url": "/apps/assistant/scheduler" if scheduler_added else "",
+        "redirect_label": "View Scheduler" if scheduler_added else "",
+        "reload_page": bool(scheduler_changed),
+    }
 
 def build_recipe_extraction_stats(groups):
     """Summarize OCR progress for uploaded recipe card pairs."""
@@ -148,57 +2051,112 @@ def build_recipe_extraction_stats(groups):
         "progress_percent": round((processed / total) * 100) if total else 0,
     }
 
-def get_recipe_app_context():
-    """Resolve planner-backed recipe app links and import status."""
-    db.sync_recipe_complete_meals_from_extractions()
+def get_or_create_recipe_app_project():
+    """Return this user's private Kitchen backing project."""
+    user_id = get_current_user_id()
     project = db.get_project_by_name("Recipe display app")
+    if project:
+        return project
+    if not user_id:
+        return None
+
+    project_name = f"Recipe display app ({user_id})"
+    project = db.get_project_by_name(project_name)
+    if project:
+        return project
+
+    try:
+        project_id = db.add_project(
+            project_name,
+            "Private Dieter Kitchen workspace for recipes, meal plans, and grocery lists.",
+            3,
+        )
+    except Exception:
+        project = db.get_project_by_name(project_name)
+        if project:
+            return project
+        raise
+    db.add_recommended_action(project_id, "Import the first batch of recipe images", "medium")
+    return db.get_project_by_id(project_id)
+
+def empty_recipe_app_context(project=None, import_action=None):
+    """Return the shared recipe app context shape with optional shell links."""
+    import_url = "/apps/recipes/import" if import_action else ""
+    return {
+        "project": project,
+        "import_action": import_action,
+        "import_url": import_url,
+        "groups": [],
+        "complete_meals": [],
+        "components": [],
+        "component_sections": [],
+        "available_grocery_items": [],
+        "available_grocery_options": [],
+        "meal_plan_items": [],
+        "grocery_lists": [],
+        "done_grocery_lists": [],
+        "stats": {
+            "total_pairs": 0,
+            "scraped_pairs": 0,
+            "pending_pairs": 0,
+            "sections": 0,
+            "complete_meals": 0,
+            "complete_meals_ready": 0,
+            "complete_meals_needing_review": 0,
+            "components": 0,
+        },
+    }
+
+def recipe_maintenance_due(now=None):
+    """Throttle recipe cleanup work so normal page navigation stays snappy."""
+    global recipe_maintenance_last_run
+    now = now or datetime.utcnow()
+    if (
+        recipe_maintenance_last_run
+        and (now - recipe_maintenance_last_run).total_seconds() < RECIPE_MAINTENANCE_INTERVAL_SECONDS
+    ):
+        return False
+    recipe_maintenance_last_run = now
+    return True
+
+def run_recipe_app_maintenance(force=False):
+    """Run maintenance that keeps extracted recipes mirrored into app tables."""
+    with recipe_context_lock:
+        if not force and not recipe_maintenance_due():
+            return
+        db.sync_recipe_complete_meals_from_extractions()
+        db.cleanup_empty_recipe_placeholders()
+        db.cleanup_duplicate_recipes()
+
+def get_recipe_app_context(include_library=True, run_maintenance=True):
+    """Resolve planner-backed recipe app links and import status."""
+    if run_maintenance:
+        run_recipe_app_maintenance()
+    project = get_or_create_recipe_app_project()
     if not project:
-        return {
-            "project": None,
-            "import_action": None,
-            "import_url": "",
-            "groups": [],
-            "complete_meals": [],
-            "components": [],
-            "stats": {
-                "total_pairs": 0,
-                "scraped_pairs": 0,
-                "pending_pairs": 0,
-                "sections": 0,
-                "complete_meals": 0,
-                "complete_meals_ready": 0,
-                "complete_meals_needing_review": 0,
-                "components": 0,
-            },
-        }
+        return empty_recipe_app_context()
 
     import_action = db.find_recommended_action(
         project["id"],
         "Import the first batch of recipe images",
     )
     if not import_action:
-        return {
-            "project": project,
-            "import_action": None,
-            "import_url": "",
-            "groups": [],
-            "complete_meals": [],
-            "components": [],
-            "stats": {
-                "total_pairs": 0,
-                "scraped_pairs": 0,
-                "pending_pairs": 0,
-                "sections": 0,
-                "complete_meals": 0,
-                "complete_meals_ready": 0,
-                "complete_meals_needing_review": 0,
-                "components": 0,
-            },
-        }
+        return empty_recipe_app_context(project)
+
+    if not include_library:
+        return empty_recipe_app_context(project, import_action)
 
     groups = prepare_recipe_image_groups(db.get_recipe_image_groups(import_action["id"]))
     complete_meals = prepare_recipe_complete_meals(db.get_recipe_complete_meals())
-    components = dicts_from_rows(db.get_recipe_components())
+    components = prepare_recipe_components(db.get_recipe_components())
+    component_sections = group_recipe_components(components)
+    available_grocery_items = build_available_grocery_items(complete_meals, components)
+    available_grocery_options = build_available_grocery_options(available_grocery_items)
+    meal_plan_items = prepare_meal_plan_items(db.get_recipe_meal_plan_items("pending"))
+    for grocery_list in prepare_grocery_lists(db.get_recipe_grocery_lists(50, "active")):
+        refresh_grocery_list_completion(grocery_list["id"])
+    grocery_lists = annotate_grocery_list_cook_counts(prepare_grocery_lists(db.get_recipe_grocery_lists(8, "active")))
+    done_grocery_lists = annotate_grocery_list_cook_counts(prepare_grocery_lists(db.get_recipe_grocery_lists(8, "done")))
     scraped_pairs = sum(1 for group in groups if group.get("extraction_status") == "extracted")
     sections = sum(len(group.get("sections", [])) for group in groups)
     complete_meals_ready = sum(1 for meal in complete_meals if meal.get("status") == "ready")
@@ -206,10 +2164,16 @@ def get_recipe_app_context():
     return {
         "project": project,
         "import_action": import_action,
-        "import_url": f"/apps/recipes/import?project_id={project['id']}&action_id={import_action['id']}",
+        "import_url": "/apps/recipes/import",
         "groups": groups,
         "complete_meals": complete_meals,
         "components": components,
+        "component_sections": component_sections,
+        "available_grocery_items": available_grocery_items,
+        "available_grocery_options": available_grocery_options,
+        "meal_plan_items": meal_plan_items,
+        "grocery_lists": grocery_lists,
+        "done_grocery_lists": done_grocery_lists,
         "stats": {
             "total_pairs": len(groups),
             "scraped_pairs": scraped_pairs,
@@ -321,7 +2285,7 @@ def build_action_codex_plan(project, action, selected_steps, blockers, notes, re
 Recipe app boundary:
 - Planner task pages own task status, checklists, and Codex planning.
 - Recipe app pages own image upload/import workflow.
-- Recipe import page: {recipe_import_url}
+- Recipe management page: {recipe_import_url}
 """
 
     return f"""# Codex Work Packet
@@ -380,6 +2344,26 @@ def api_work_packet():
 @app.post("/api/chat")
 def api_chat(message: ChatMessage):
     """Chat with the project agent. The agent can update local project memory."""
+    recipe_chat = parse_recipe_app_chat_content(message.content)
+    if recipe_chat:
+        db.add_chat_message("user", recipe_chat["user_message"])
+        response = recipe_chat_response(
+            recipe_chat["user_message"],
+            recipe_chat["page_url"],
+            message.conversation_history,
+        )
+        model = (
+            llm_service.provider.model
+            if llm_service and hasattr(llm_service.provider, "model")
+            else "local-recipe-context"
+        )
+        db.add_chat_message("assistant", response, model)
+        return {
+            "response": response,
+            "model": model,
+            "recipe_context": True,
+        }
+
     project_context = None
     if message.include_context:
         project_context = api_dashboard()
@@ -412,6 +2396,115 @@ def api_chat_history(limit: int = 50):
             status_code=500,
             content={"messages": [], "error": f"Could not load chat history: {exc}"},
         )
+
+@app.post("/api/recipes/edit")
+def api_recipe_edit(message: RecipeEditMessage):
+    """Let Dieter edit a recipe from recipe-page chat and keep a structured log."""
+    recipe_kind, recipe_id = parse_recipe_target_from_url(message.page_url)
+    if not recipe_kind or not recipe_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Open a complete meal or meal component page before asking Dieter to edit a recipe.",
+        )
+
+    recipe = recipe_record_for_edit(recipe_kind, recipe_id)
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    try:
+        proposal = propose_recipe_edit(
+            recipe_kind,
+            recipe,
+            message.content,
+            conversation_history=message.conversation_history,
+        )
+    except Exception as exc:
+        proposal = {
+            "apply_change": False,
+            "summary": "Feedback recorded; Dieter could not produce a structured recipe edit.",
+            "title": None,
+            "ingredients_text": None,
+            "instructions_text": None,
+            "changed_fields": [],
+            "assistant_message": f"I recorded that feedback, but I could not safely amend the recipe automatically: {exc}",
+            "model": getattr(llm_service.provider, "model", "") if llm_service else "",
+        }
+
+    result = apply_recipe_edit(recipe_kind, recipe_id, message.content, proposal)
+    result["recipe_kind"] = recipe_kind
+    result["recipe_id"] = recipe_id
+    return result
+
+@app.post("/api/dieter/action")
+def api_dieter_action(message: DieterActionMessage):
+    """Route Ask Dieter requests to recipe edits, planner edits, or contextual chat."""
+    page_url = message.page_url or ""
+    recipe_kind, recipe_id = parse_recipe_target_from_url(page_url)
+    if recipe_kind and recipe_id:
+        recipe_message = RecipeEditMessage(
+            content=message.content,
+            page_url=page_url,
+            conversation_history=message.conversation_history,
+        )
+        return api_recipe_edit(recipe_message)
+
+    if page_url.startswith("/apps/recipes"):
+        response = recipe_chat_response(
+            message.content,
+            page_url,
+            message.conversation_history,
+        )
+        return {
+            "assistant_message": response,
+            "changed_fields": [],
+            "recipe_context": True,
+            "model": (
+                llm_service.provider.model
+                if llm_service and hasattr(llm_service.provider, "model")
+                else "local-recipe-context"
+            ),
+        }
+
+    if page_url == "/" or re.search(r"/apps/assistant|/apps/planner|/dashboard|/projects|/apps\b", page_url):
+        try:
+            proposal = propose_planner_edit(
+                message.content,
+                page_url=page_url,
+                conversation_history=message.conversation_history,
+            )
+            result = apply_planner_edit(message.content, page_url, proposal)
+            result["planner_context"] = True
+            return result
+        except Exception as exc:
+            result = agent_service.chat(
+                user_message=f"Current page: {message.page_title}\nURL: {page_url}\n\n{message.content}",
+                project_context=agent_service.build_dashboard_context(),
+                conversation_history=message.conversation_history,
+            )
+            return {
+                "assistant_message": f"{result.get('response', '')}\n\nI could not safely apply a structured planner edit: {exc}",
+                "changed_fields": [],
+                "planner_context": True,
+                "model": "local-planner",
+            }
+
+    chat_payload = ChatMessage(
+        content="\n".join([
+            "Dieter chat request.",
+            f"Current page: {message.page_title}",
+            f"URL: {page_url}",
+            "User message:",
+            message.content,
+        ]),
+        include_context=True,
+        conversation_history=message.conversation_history,
+    )
+    result = api_chat(chat_payload)
+    return {
+        "assistant_message": result.get("response", "I could not produce a response."),
+        "changed_fields": result.get("updates", []),
+        "model": result.get("model", ""),
+    }
 
 
 @app.post("/api/priority-review")
@@ -572,12 +2665,253 @@ def api_complete_goal(project_id: int, goal_id: int):
     return {"status": "success"}
 
 
+@app.post("/api/projects/{project_id}/share")
+def api_share_project(project_id: int, share: ShareIn, request: Request):
+    """Share a project/plan with another user."""
+    project = dict_from_row(db.get_project_by_id(project_id))
+    current_user = request.state.current_user
+    if not project or not current_user or project.get("user_id") != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Only the project owner can share this project.")
+    target_user = dict_from_row(db.get_user_by_email(share.email))
+    if not target_user:
+        raise HTTPException(status_code=404, detail="No user with that email exists.")
+    permission = share.permission if share.permission in {"view", "edit"} else "view"
+    db.share_project(project_id, target_user["id"], permission)
+    return {"status": "success", "shared_with": target_user["email"], "permission": permission}
+
+
+# ============================================================================
+# API ROUTES - SCHEDULER
+# ============================================================================
+
+@app.get("/api/scheduler")
+def api_get_scheduler_items():
+    """Get open scheduler/agenda items."""
+    return {"scheduler_items": dicts_from_rows(db.get_scheduler_items(status="open", limit=50))}
+
+@app.post("/api/scheduler")
+def api_add_scheduler_item(item: SchedulerItemIn):
+    """Add a scheduler/agenda item."""
+    item_id = db.add_scheduler_item(
+        item.title,
+        context_label=item.context_label,
+        scheduled_for=item.scheduled_for,
+        notes=item.notes,
+        source="manual",
+    )
+    return {"status": "success", "scheduler_item_id": item_id}
+
+@app.post("/api/scheduler/{item_id}/complete")
+def api_complete_scheduler_item(item_id: int):
+    """Mark a scheduler item complete."""
+    db.mark_scheduler_item_complete(item_id)
+    return {"status": "success"}
+
+@app.post("/api/scheduler/{item_id}/reopen")
+def api_reopen_scheduler_item(item_id: int):
+    """Reopen a completed scheduler item."""
+    db.reopen_scheduler_item(item_id)
+    return {"status": "success"}
+
+@app.delete("/api/scheduler/{item_id}")
+def api_delete_scheduler_item(item_id: int):
+    """Delete a scheduler item."""
+    db.delete_scheduler_item(item_id)
+    return {"status": "success"}
+
+
+@app.post("/api/recipes/meals/{meal_id}/share")
+def api_share_recipe_meal(meal_id: int, share: ShareIn, request: Request):
+    """Share a saved/imported meal with another user."""
+    meal = dict_from_row(db.get_recipe_complete_meal(meal_id))
+    current_user = request.state.current_user
+    if not meal or not current_user or meal.get("user_id") != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Only the recipe owner can share this meal.")
+    target_user = dict_from_row(db.get_user_by_email(share.email))
+    if not target_user:
+        raise HTTPException(status_code=404, detail="No user with that email exists.")
+    permission = share.permission if share.permission in {"view", "edit"} else "view"
+    db.share_recipe("meal", meal_id, target_user["id"], permission)
+    return {"status": "success", "shared_with": target_user["email"], "permission": permission}
+
+
+@app.post("/api/recipes/components/{component_id}/share")
+def api_share_recipe_component(component_id: int, share: ShareIn, request: Request):
+    """Share a recipe component with another user."""
+    component = dict_from_row(db.get_recipe_component(component_id))
+    current_user = request.state.current_user
+    if not component or not current_user or component.get("user_id") != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Only the recipe owner can share this component.")
+    target_user = dict_from_row(db.get_user_by_email(share.email))
+    if not target_user:
+        raise HTTPException(status_code=404, detail="No user with that email exists.")
+    permission = share.permission if share.permission in {"view", "edit"} else "view"
+    db.share_recipe("component", component_id, target_user["id"], permission)
+    return {"status": "success", "shared_with": target_user["email"], "permission": permission}
+
+
+def share_project_with_email(project_id, email, permission, request):
+    project = dict_from_row(db.get_project_by_id(project_id))
+    current_user = request.state.current_user
+    if not project or not current_user or project.get("user_id") != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Only the project owner can share this project.")
+    target_user = dict_from_row(db.get_user_by_email(email))
+    if not target_user:
+        raise HTTPException(status_code=404, detail="No user with that email exists.")
+    permission = permission if permission in {"view", "edit"} else "view"
+    db.share_project(project_id, target_user["id"], permission)
+    return target_user
+
+
+def share_recipe_with_email(recipe_kind, recipe_id, email, permission, request):
+    record = (
+        dict_from_row(db.get_recipe_complete_meal(recipe_id))
+        if recipe_kind == "meal"
+        else dict_from_row(db.get_recipe_component(recipe_id))
+    )
+    current_user = request.state.current_user
+    if not record or not current_user or record.get("user_id") != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Only the owner can share this recipe.")
+    target_user = dict_from_row(db.get_user_by_email(email))
+    if not target_user:
+        raise HTTPException(status_code=404, detail="No user with that email exists.")
+    permission = permission if permission in {"view", "edit"} else "view"
+    db.share_recipe(recipe_kind, recipe_id, target_user["id"], permission)
+    return target_user
+
+def safe_redirect_path(path, fallback="/"):
+    """Keep form redirects inside this app."""
+    return path if path and path.startswith("/") and not path.startswith("//") else fallback
+
+def append_query_param(path, **params):
+    """Append query parameters to an internal redirect path."""
+    safe_path = safe_redirect_path(path, "/")
+    parts = urlsplit(safe_path)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.update({key: str(value) for key, value in params.items() if value is not None and value != ""})
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
 # ============================================================================
 # HTML ROUTES (Frontend)
 # ============================================================================
 
+@app.get("/login")
+def login_page(request: Request):
+    """Show login form."""
+    if request.state.current_user:
+        return RedirectResponse(url="/", status_code=303)
+    return render_auth_page(request, "login")
+
+
+@app.post("/login")
+def login_form(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+    next: str = Form("/"),
+):
+    """Log a user in."""
+    user = db.get_user_by_email(email)
+    if not user or not verify_password(password, user["password_hash"]):
+        return render_auth_page(request, "login", "Email or password was not recognized.")
+    if user["status"] != "active":
+        return render_auth_page(request, "login", "This account is not active.")
+    safe_next = next if next.startswith("/") and not next.startswith("//") else "/"
+    return create_login_response(user["id"], safe_next)
+
+
+@app.get("/register")
+def register_page(request: Request):
+    """Show registration form."""
+    if request.state.current_user:
+        return RedirectResponse(url="/", status_code=303)
+    return render_auth_page(request, "register")
+
+
+@app.post("/register")
+def register_form(
+    request: Request,
+    email: str = Form(...),
+    display_name: str = Form(""),
+    password: str = Form(...),
+    registration_code: str = Form(""),
+):
+    """Create a user account."""
+    email = email.strip().lower()
+    display_name = display_name.strip() or email.split("@")[0]
+    if len(password) < 10:
+        return render_auth_page(request, "register", "Use a password with at least 10 characters.")
+    if REGISTRATION_CODE and not hmac.compare_digest(registration_code.strip(), REGISTRATION_CODE):
+        return render_auth_page(request, "register", "Registration code was not recognized.")
+    if db.get_user_by_email(email):
+        return render_auth_page(request, "register", "An account with that email already exists.")
+
+    first_user = db.get_user_count() == 0
+    role = "admin" if first_user else "user"
+    user_id = db.create_user(email, display_name, hash_password(password), role)
+    if first_user:
+        db.claim_unowned_data(user_id)
+    return create_login_response(user_id)
+
+
+@app.post("/logout")
+def logout_form(request: Request):
+    """Log the current user out."""
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if token:
+        db.delete_session(hash_session_token(token))
+    return clear_login_response()
+
+
 @app.get("/")
+def home_default(request: Request):
+    """Dieter app launcher."""
+    return render_apps_page(request)
+
+
+@app.get("/dashboard")
 def dashboard(request: Request):
+    """Legacy planner route."""
+    return RedirectResponse(url="/apps/assistant/planner", status_code=303)
+
+
+@app.get("/apps/planner")
+def planner_app(request: Request):
+    """Legacy planner route."""
+    return RedirectResponse(url="/apps/assistant/planner", status_code=303)
+
+
+@app.get("/apps/assistant")
+def assistant_app(request: Request):
+    """Dieter Assistant default page."""
+    return RedirectResponse(url="/apps/assistant/planner", status_code=303)
+
+
+@app.get("/apps/assistant/planner")
+def assistant_planner_app(request: Request):
+    """Assistant planner page."""
+    return render_planner_app(request)
+
+
+@app.get("/apps/assistant/scheduler")
+def assistant_scheduler_app(request: Request):
+    """Assistant scheduler page."""
+    data = api_dashboard()
+    data_json = json.dumps(data, default=str)
+    data_clean = json.loads(data_json)
+    context = {
+        "request": request,
+        "scheduler_items": data_clean["scheduler_items"],
+        "completed_scheduler_items": dicts_from_rows(db.get_recent_completed_scheduler_items(limit=10)),
+        "stats": data_clean["stats"],
+        "scheduler_due": scheduler_due_context(),
+    }
+    template = jinja_env.get_template("scheduler.html")
+    return HTMLResponse(template.render(context))
+
+
+def render_planner_app(request: Request):
     """Main dashboard view - renders HTML."""
     data = api_dashboard()
     # Convert to JSON and back to ensure all dicts are pure Python dicts
@@ -594,11 +2928,41 @@ def dashboard(request: Request):
         "blockers": data_clean["blockers"],
         "actions": data_clean["actions"],
         "goals": data_clean["goals"],
+        "scheduler_items": data_clean["scheduler_items"],
         "stats": data_clean["stats"],
+        "scheduler_due": scheduler_due_context(),
         "recipe_app_url": "/apps/recipes" if recipe_app["project"] else "",
         "recipe_app": recipe_app,
     }
     template = jinja_env.get_template("dashboard.html")
+    html = template.render(context)
+    return HTMLResponse(html)
+
+
+@app.get("/apps")
+def apps_page(request: Request):
+    """Installed/local app launcher."""
+    return render_apps_page(request)
+
+
+def render_apps_page(request: Request):
+    """Render the Dieter launcher with direct app entry points."""
+    recipe_app = get_recipe_app_context()
+    dashboard_context = agent_service.build_dashboard_context()
+    context = {
+        "request": request,
+        "recipe_app_url": "/apps/recipes" if recipe_app["project"] else "",
+        "recipe_app": recipe_app,
+        "planner_url": "/apps/assistant/planner",
+        "planner": {
+            "recommended_project": dashboard_context.get("recommended_project"),
+            "next_action": dashboard_context.get("next_action"),
+            "open_actions": len([action for action in dashboard_context.get("actions", []) if not action.get("completed")]),
+            "scheduler_items": dashboard_context.get("scheduler_items", []),
+        },
+        "scheduler_due": scheduler_due_context(),
+    }
+    template = jinja_env.get_template("apps.html")
     html = template.render(context)
     return HTMLResponse(html)
 
@@ -662,11 +3026,52 @@ def action_detail(request: Request, project_id: int, action_id: int):
         "action": action,
         "steps": dicts_from_rows(db.get_task_steps(action_id)),
         "recipe_image_count": len(db.get_recipe_images(action_id)),
-        "recipe_import_url": f"/apps/recipes/import?project_id={project_id}&action_id={action_id}",
+        "recipe_import_url": "/apps/recipes/manage",
     }
     template = jinja_env.get_template("action_detail.html")
     html = template.render(context)
     return HTMLResponse(html)
+
+
+@app.post("/scheduler/create")
+def create_scheduler_item_form(
+    title: str = Form(...),
+    context_label: str = Form(""),
+    scheduled_for: str = Form(""),
+    notes: str = Form(""),
+):
+    """Create a scheduler item from the planner UI."""
+    db.add_scheduler_item(
+        title,
+        context_label=context_label,
+        scheduled_for=scheduled_for,
+        notes=notes,
+        source="manual",
+    )
+    return RedirectResponse(url="/apps/assistant/scheduler", status_code=303)
+
+
+@app.post("/scheduler/{item_id}/complete")
+def complete_scheduler_item_form(item_id: int, next: str = Form("/apps/assistant/scheduler")):
+    """Complete a scheduler item from the planner UI."""
+    db.mark_scheduler_item_complete(item_id)
+    redirect_url = append_query_param(
+        safe_redirect_path(next, "/apps/assistant/scheduler"),
+        undo_scheduler_id=item_id,
+    )
+    return RedirectResponse(url=redirect_url, status_code=303)
+
+@app.post("/scheduler/{item_id}/reopen")
+def reopen_scheduler_item_form(item_id: int, next: str = Form("/apps/assistant/scheduler")):
+    """Reopen a completed scheduler item from the planner UI."""
+    db.reopen_scheduler_item(item_id)
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/scheduler"), status_code=303)
+
+@app.post("/scheduler/{item_id}/delete")
+def delete_scheduler_item_form(item_id: int, next: str = Form("/apps/assistant/scheduler")):
+    """Delete a scheduler item from the planner UI."""
+    db.delete_scheduler_item(item_id)
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/scheduler"), status_code=303)
 
 
 @app.get("/projects/{project_id}/actions/{action_id}/steps/reviews/{review_id}")
@@ -714,7 +3119,7 @@ def codex_plan_preview(
         step for step in all_steps
         if step["status"] == "open" and (not selected_ids or step["id"] in selected_ids)
     ]
-    recipe_import_url = f"/apps/recipes/import?project_id={project_id}&action_id={action_id}"
+    recipe_import_url = "/apps/recipes/manage"
     markdown = build_action_codex_plan(
         project,
         action,
@@ -744,6 +3149,61 @@ def recipe_home_page(request: Request):
     if not recipe_app["project"]:
         raise HTTPException(status_code=404, detail="Recipe app project not found")
 
+    public_complete_meals = filter_public_complete_meals(recipe_app["complete_meals"])
+    context = {
+        "request": request,
+        "recipe_app": recipe_app,
+        "project": recipe_app["project"],
+        "import_action": recipe_app["import_action"],
+        "groups": recipe_app["groups"],
+        "complete_meals": public_complete_meals,
+        "components": recipe_app["components"],
+        "component_sections": recipe_app["component_sections"],
+        "meal_plan_items": recipe_app["meal_plan_items"],
+        "grocery_lists": recipe_app["grocery_lists"],
+        "done_grocery_lists": recipe_app["done_grocery_lists"],
+        "stats": recipe_app["stats"],
+        "recipe_view": "home",
+    }
+    template = jinja_env.get_template("recipe_home.html")
+    html = template.render(context)
+    return HTMLResponse(html)
+
+
+@app.get("/apps/recipes/create-meal")
+def recipe_create_meal_page(request: Request):
+    """Recipe app component picker page."""
+    recipe_app = get_recipe_app_context()
+    if not recipe_app["project"]:
+        raise HTTPException(status_code=404, detail="Recipe app project not found")
+
+    context = {
+        "request": request,
+        "recipe_app": recipe_app,
+        "project": recipe_app["project"],
+        "import_action": recipe_app["import_action"],
+        "groups": recipe_app["groups"],
+        "complete_meals": filter_public_complete_meals(recipe_app["complete_meals"]),
+        "components": recipe_app["components"],
+        "component_sections": recipe_app["component_sections"],
+        "meal_plan_items": recipe_app["meal_plan_items"],
+        "grocery_lists": recipe_app["grocery_lists"],
+        "done_grocery_lists": recipe_app["done_grocery_lists"],
+        "stats": recipe_app["stats"],
+        "recipe_view": "create_meal",
+    }
+    template = jinja_env.get_template("recipe_home.html")
+    html = template.render(context)
+    return HTMLResponse(html)
+
+
+@app.get("/apps/recipes/manage")
+def recipe_manage_page(request: Request):
+    """Recipe app management/admin page."""
+    recipe_app = get_recipe_app_context()
+    if not recipe_app["project"]:
+        raise HTTPException(status_code=404, detail="Recipe app project not found")
+
     context = {
         "request": request,
         "recipe_app": recipe_app,
@@ -754,24 +3214,102 @@ def recipe_home_page(request: Request):
         "components": recipe_app["components"],
         "stats": recipe_app["stats"],
     }
-    template = jinja_env.get_template("recipe_home.html")
+    template = jinja_env.get_template("recipe_manage.html")
+    html = template.render(context)
+    return HTMLResponse(html)
+
+
+@app.get("/apps/recipes/grocery-lists")
+def recipe_grocery_lists_page(request: Request):
+    """Recipe app archive of completed grocery lists."""
+    recipe_app = get_recipe_app_context(include_library=False, run_maintenance=False)
+    if not recipe_app["project"]:
+        raise HTTPException(status_code=404, detail="Recipe app project not found")
+
+    done_grocery_lists = annotate_grocery_list_cook_counts(
+        prepare_grocery_lists(db.get_recipe_grocery_lists(100, "done"))
+    )
+    context = {
+        "request": request,
+        "recipe_app": recipe_app,
+        "project": recipe_app["project"],
+        "done_grocery_lists": done_grocery_lists,
+    }
+    template = jinja_env.get_template("recipe_grocery_lists.html")
+    html = template.render(context)
+    return HTMLResponse(html)
+
+
+@app.get("/apps/recipes/meals/{meal_id}")
+def recipe_meal_detail_page(request: Request, meal_id: int):
+    """Complete meal detail page."""
+    recipe_app = get_recipe_app_context(include_library=False, run_maintenance=False)
+    meal = dict_from_row(db.get_recipe_complete_meal(meal_id))
+    if not recipe_app["project"] or not meal:
+        raise HTTPException(status_code=404, detail="Complete meal not found")
+
+    meal = prepare_recipe_complete_meals([meal])[0]
+    change_log = prepare_recipe_change_log(db.get_recipe_change_log("meal", meal_id))
+    context = {
+        "request": request,
+        "recipe_app": recipe_app,
+        "meal": meal,
+        "change_log": change_log,
+        "cooked_prompt": request.query_params.get("cooked") == "1",
+    }
+    template = jinja_env.get_template("recipe_meal_detail.html")
+    html = template.render(context)
+    return HTMLResponse(html)
+
+
+@app.get("/apps/recipes/components/{component_id}")
+def recipe_component_detail_page(request: Request, component_id: int):
+    """Meal component detail page."""
+    recipe_app = get_recipe_app_context(include_library=False, run_maintenance=False)
+    component = dict_from_row(db.get_recipe_component(component_id))
+    if not recipe_app["project"] or not component:
+        raise HTTPException(status_code=404, detail="Meal component not found")
+    component = prepare_recipe_components([component])[0]
+    change_log = prepare_recipe_change_log(db.get_recipe_change_log("component", component_id))
+
+    context = {
+        "request": request,
+        "recipe_app": recipe_app,
+        "component": component,
+        "change_log": change_log,
+    }
+    template = jinja_env.get_template("recipe_component_detail.html")
     html = template.render(context)
     return HTMLResponse(html)
 
 
 @app.get("/apps/recipes/import")
-def recipe_import_page(request: Request, project_id: int, action_id: int):
+def recipe_import_page(request: Request):
     """Recipe app import surface for uploading recipe images."""
-    project = dict_from_row(db.get_project_by_id(project_id))
-    action = dict_from_row(db.get_recommended_action(action_id))
-    if not project or not action or action["project_id"] != project_id:
+    recipe_app = get_recipe_app_context(include_library=False, run_maintenance=False)
+    project = recipe_app["project"]
+    action = recipe_app["import_action"]
+    if not project or not action:
         raise HTTPException(status_code=404, detail="Recipe import task not found")
+    project_id = project["id"]
+    action_id = action["id"]
+    db.sync_recipe_complete_meals_from_extractions()
+    recipe_image_groups = prepare_recipe_image_groups(db.get_recipe_image_groups(action_id))
+    meals_by_source_group = {
+        meal.get("source_group_id"): meal
+        for meal in prepare_recipe_complete_meals(db.get_recipe_complete_meals())
+    }
+    for group in recipe_image_groups:
+        meal = meals_by_source_group.get(group.get("id"))
+        group["imported_meal_id"] = meal.get("id") if meal else None
+        group["imported_meal_status"] = meal.get("status") if meal else ""
 
     context = {
         "request": request,
         "project": project,
         "action": action,
-        "recipe_image_groups": prepare_recipe_image_groups(db.get_recipe_image_groups(action_id)),
+        "recipe_app": recipe_app,
+        "recipe_image_groups": recipe_image_groups,
         "recipe_image_roles": [
             {"value": "front", "label": "Front"},
             {"value": "back", "label": "Back"},
@@ -795,8 +3333,352 @@ def analyze_recipe_components_form():
         result = recipe_ocr_service.analyze_components(meal)
         if result["status"] == "analyzed":
             db.replace_recipe_components_for_meal(meal["id"], result["components"])
+    db.cleanup_duplicate_recipes()
 
     return RedirectResponse(url="/apps/recipes", status_code=303)
+
+
+@app.post("/apps/recipes/components/amounts/analyze")
+def analyze_recipe_component_amounts_form():
+    """Analyze component ingredients into measurable structured amounts."""
+    components = dicts_from_rows(db.get_recipe_components())
+    for component in components:
+        images = []
+        if component.get("source_group_id"):
+            images = dicts_from_rows(db.get_recipe_images_for_group(component["source_group_id"]))
+        result = recipe_ocr_service.analyze_component_ingredient_amounts(component, images)
+        if result["status"] == "analyzed":
+            db.update_recipe_component_structured_ingredients(component["id"], result["ingredients"])
+
+    return RedirectResponse(url="/apps/recipes/create-meal", status_code=303)
+
+
+@app.post("/apps/recipes/meals/save")
+def save_selected_recipe_meal_form(
+    meal_name: str = Form(...),
+    selected_component_ids: str = Form("[]"),
+):
+    """Save selected meal components as a named complete meal."""
+    title = meal_name.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Meal name is required")
+    try:
+        component_ids = json.loads(selected_component_ids or "[]")
+    except json.JSONDecodeError:
+        component_ids = []
+    component_ids = [int(component_id) for component_id in component_ids if str(component_id).isdigit()]
+    if not component_ids:
+        raise HTTPException(status_code=400, detail="Select at least one meal part")
+
+    components_by_id = {}
+    for component_id in component_ids:
+        component = dict_from_row(db.get_recipe_component(component_id))
+        if component:
+            components_by_id[component_id] = prepare_recipe_components([component])[0]
+    components = [components_by_id[component_id] for component_id in component_ids if component_id in components_by_id]
+    if not components:
+        raise HTTPException(status_code=400, detail="Selected meal parts were not found")
+
+    ingredients_text, instructions_text = build_saved_meal_text_from_components(components)
+    meal_id = db.create_saved_recipe_meal(title, ingredients_text, instructions_text)
+    db.cleanup_duplicate_recipes()
+    return RedirectResponse(url=f"/apps/recipes/meals/{meal_id}", status_code=303)
+
+
+@app.post("/apps/recipes/meal-plan/meals/{meal_id}/add")
+def add_complete_meal_to_plan_form(meal_id: int):
+    """Add a complete meal to the pending meal plan."""
+    meal = dict_from_row(db.get_recipe_complete_meal(meal_id))
+    if not meal:
+        raise HTTPException(status_code=404, detail="Complete meal not found")
+    meal = prepare_recipe_complete_meals([meal])[0]
+    title = meal.get("display_title") or meal.get("title") or "Complete meal"
+    db.add_recipe_meal_plan_item("complete_meal", title, source_id=meal_id)
+    return RedirectResponse(url="/apps/recipes#meal-plan", status_code=303)
+
+
+@app.post("/apps/recipes/meals/{meal_id}/share")
+def share_recipe_meal_form(
+    request: Request,
+    meal_id: int,
+    email: str = Form(...),
+    permission: str = Form("view"),
+):
+    """Share a complete meal from the detail page."""
+    share_recipe_with_email("meal", meal_id, email, permission, request)
+    return RedirectResponse(url=f"/apps/recipes/meals/{meal_id}", status_code=303)
+
+
+@app.post("/apps/recipes/meal-plan/components/add")
+def add_component_meal_to_plan_form(
+    meal_name: str = Form(""),
+    selected_component_ids: str = Form("[]"),
+):
+    """Add selected components to the pending meal plan without saving a full recipe."""
+    try:
+        component_ids = json.loads(selected_component_ids or "[]")
+    except json.JSONDecodeError:
+        component_ids = []
+    component_ids = [int(component_id) for component_id in component_ids if str(component_id).isdigit()]
+    if not component_ids:
+        raise HTTPException(status_code=400, detail="Select at least one meal part")
+
+    components_by_id = {}
+    for component_id in component_ids:
+        component = dict_from_row(db.get_recipe_component(component_id))
+        if component:
+            components_by_id[component_id] = prepare_recipe_components([component])[0]
+    components = [components_by_id[component_id] for component_id in component_ids if component_id in components_by_id]
+    if not components:
+        raise HTTPException(status_code=400, detail="Selected meal parts were not found")
+
+    title = meal_name.strip()
+    if not title:
+        component_titles = [component.get("display_title") or component.get("title") for component in components[:3]]
+        suffix = "..." if len(components) > 3 else ""
+        title = f"Custom meal: {', '.join(component_titles)}{suffix}"
+
+    db.add_recipe_meal_plan_item("components", title, component_ids=component_ids)
+    return RedirectResponse(url="/apps/recipes#meal-plan", status_code=303)
+
+
+@app.post("/apps/recipes/components/{component_id}/share")
+def share_recipe_component_form(
+    request: Request,
+    component_id: int,
+    email: str = Form(...),
+    permission: str = Form("view"),
+):
+    """Share a recipe component from the detail page."""
+    share_recipe_with_email("component", component_id, email, permission, request)
+    return RedirectResponse(url=f"/apps/recipes/components/{component_id}", status_code=303)
+
+
+@app.post("/apps/recipes/meal-plan/{item_id}/remove")
+def remove_meal_plan_item_form(item_id: int):
+    """Remove a pending meal from the active meal plan."""
+    removed = db.remove_recipe_meal_plan_item(item_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Pending meal plan item not found")
+    return RedirectResponse(url="/apps/recipes#meal-plan", status_code=303)
+
+
+@app.post("/apps/recipes/grocery-lists/create")
+def create_recipe_grocery_list_form():
+    """Create a persistent grocery list from all pending meal-plan items."""
+    meal_plan_items = prepare_meal_plan_items(db.get_recipe_meal_plan_items("pending"))
+    if not meal_plan_items:
+        return RedirectResponse(url="/apps/recipes#meal-plan", status_code=303)
+    grocery_items = build_grocery_items_for_plan(meal_plan_items)
+    title = f"Grocery list {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    list_id = db.create_recipe_grocery_list(
+        title,
+        [item["id"] for item in meal_plan_items],
+        grocery_items,
+    )
+    return RedirectResponse(url=f"/apps/recipes/grocery-lists/{list_id}", status_code=303)
+
+
+@app.get("/apps/recipes/grocery-lists/{list_id}")
+def recipe_grocery_list_page(request: Request, list_id: int):
+    """Show one generated grocery list record."""
+    recipe_app = get_recipe_app_context(include_library=False, run_maintenance=False)
+    grocery_list = dict_from_row(db.get_recipe_grocery_list(list_id))
+    if not recipe_app["project"] or not grocery_list:
+        raise HTTPException(status_code=404, detail="Grocery list not found")
+    refresh_grocery_list_completion(list_id)
+    grocery_list = prepare_grocery_lists([dict_from_row(db.get_recipe_grocery_list(list_id))])[0]
+    needed_grocery_items = [
+        item for item in grocery_list["items"]
+        if item.get("status") != "gotten"
+    ]
+    needed_grocery_sections = group_grocery_items_by_category(needed_grocery_items)
+    gotten_grocery_items = [
+        item for item in grocery_list["items"]
+        if item.get("status") == "gotten"
+    ]
+    linked_items = prepare_meal_plan_items(db.get_recipe_meal_plan_items(None, 250))
+    linked_items_by_id = {item["id"]: item for item in linked_items}
+    linked_cookable_items = cookable_meal_plan_items_for_grocery_list(grocery_list, linked_items_by_id)
+    context = {
+        "request": request,
+        "recipe_app": recipe_app,
+        "grocery_list": grocery_list,
+        "needed_grocery_items": needed_grocery_items,
+        "needed_grocery_sections": needed_grocery_sections,
+        "gotten_grocery_items": gotten_grocery_items,
+        "linked_meal_plan_items": linked_cookable_items,
+    }
+    template = jinja_env.get_template("recipe_grocery_list.html")
+    html = template.render(context)
+    return HTMLResponse(html)
+
+
+@app.post("/apps/recipes/grocery-lists/{list_id}/delete")
+def delete_recipe_grocery_list_form(list_id: int):
+    """Delete an old grocery list record."""
+    deleted = db.delete_recipe_grocery_list(list_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Grocery list not found")
+    return RedirectResponse(url="/apps/recipes#meal-plan", status_code=303)
+
+
+def append_manual_grocery_item(list_id, item_name, quantity="", note="", category=""):
+    """Append a manually entered grocery item to an existing grocery list."""
+    grocery_list = dict_from_row(db.get_recipe_grocery_list(list_id))
+    if not grocery_list:
+        raise HTTPException(status_code=404, detail="Grocery list not found")
+    name = item_name.strip()
+    if not name:
+        return False
+    try:
+        items = json.loads(grocery_list.get("items_json") or "[]")
+    except json.JSONDecodeError:
+        items = []
+
+    manual_item = {
+        "name": title_case_grocery_name(normalize_grocery_name(name) or name),
+        "quantities": [quantity.strip()] if quantity.strip() else [],
+        "notes": [note.strip()] if note.strip() else [],
+        "sources": ["Manual"],
+        "status": "need",
+        "source_kind": "manual",
+    }
+    allowed_categories = {category_key for category_key, _, _ in GROCERY_CATEGORY_RULES}
+    if category in allowed_categories:
+        manual_item["category"] = category
+    items.append(manual_item)
+    db.update_recipe_grocery_list_items(list_id, items)
+    return True
+
+
+@app.post("/apps/recipes/grocery-lists/items/add")
+def add_manual_grocery_item_to_current_form(
+    item_name: str = Form(...),
+    quantity: str = Form(""),
+    note: str = Form(""),
+    category: str = Form(""),
+):
+    """Add a manual grocery item to the pending meal plan."""
+    name = item_name.strip()
+    if not name:
+        return RedirectResponse(url="/apps/recipes#meal-plan", status_code=303)
+    display_name = title_case_grocery_name(normalize_grocery_name(name) or name)
+    allowed_categories = {category_key for category_key, _, _ in GROCERY_CATEGORY_RULES}
+    manual_item = {
+        "name": display_name,
+        "quantity": quantity.strip(),
+        "note": note.strip(),
+        "category": category if category in allowed_categories else "",
+    }
+    db.add_recipe_meal_plan_item(
+        "manual_item",
+        f"Manual item: {display_name}",
+        component_ids=[manual_item],
+    )
+    return RedirectResponse(url="/apps/recipes#meal-plan", status_code=303)
+
+
+@app.post("/apps/recipes/grocery-lists/{list_id}/items/add")
+def add_manual_grocery_item_form(
+    list_id: int,
+    item_name: str = Form(...),
+    quantity: str = Form(""),
+    note: str = Form(""),
+    category: str = Form(""),
+):
+    """Add a manual item to a grocery list."""
+    append_manual_grocery_item(list_id, item_name, quantity, note, category)
+    return RedirectResponse(url=f"/apps/recipes/grocery-lists/{list_id}", status_code=303)
+
+
+@app.post("/apps/recipes/grocery-lists/{list_id}/items/{item_index}/status")
+def update_recipe_grocery_item_status_form(
+    list_id: int,
+    item_index: int,
+    status: str = Form(...),
+):
+    """Mark a grocery list item as needed or gotten."""
+    grocery_list = dict_from_row(db.get_recipe_grocery_list(list_id))
+    if not grocery_list:
+        raise HTTPException(status_code=404, detail="Grocery list not found")
+    try:
+        items = json.loads(grocery_list.get("items_json") or "[]")
+    except json.JSONDecodeError:
+        items = []
+    if item_index < 0 or item_index >= len(items) or not isinstance(items[item_index], dict):
+        raise HTTPException(status_code=404, detail="Grocery item not found")
+    if status not in {"need", "gotten"}:
+        raise HTTPException(status_code=400, detail="Unsupported grocery item status")
+    items[item_index]["status"] = status
+    db.update_recipe_grocery_list_items(list_id, items)
+    return RedirectResponse(url=f"/apps/recipes/grocery-lists/{list_id}", status_code=303)
+
+def record_meal_plan_cooked_feedback(item, feedback):
+    """Persist cooking feedback for a meal-plan item and mirror recipe feedback when possible."""
+    feedback = (feedback or "").strip()
+    db.add_recipe_meal_feedback(
+        item["id"],
+        item.get("source_kind", ""),
+        item.get("source_id"),
+        item.get("title", ""),
+        feedback,
+    )
+    if item.get("source_kind") == "complete_meal" and item.get("source_id") and feedback:
+        recipe = recipe_record_for_edit("meal", item["source_id"])
+        before = {
+            "title": recipe.get("display_title") or recipe.get("title") or item.get("title", ""),
+            "ingredients_text": recipe.get("display_ingredients_text") or "",
+            "instructions_text": recipe.get("display_instructions_text") or "",
+        } if recipe else {"title": item.get("title", ""), "ingredients_text": "", "instructions_text": ""}
+        db.add_recipe_change_log(
+            "meal",
+            item["source_id"],
+            feedback,
+            "Cooking feedback recorded.",
+            [],
+            before,
+            before,
+            "user-feedback",
+        )
+
+
+@app.post("/apps/recipes/grocery-lists/{list_id}/meal-plan/{item_id}/cooked")
+def mark_grocery_list_meal_plan_item_cooked_form(
+    list_id: int,
+    item_id: int,
+    feedback: str = Form(""),
+):
+    """Record cooking feedback from a grocery list and mark the meal cooked."""
+    grocery_list = dict_from_row(db.get_recipe_grocery_list(list_id))
+    if not grocery_list:
+        raise HTTPException(status_code=404, detail="Grocery list not found")
+    item = dict_from_row(db.get_recipe_meal_plan_item(item_id))
+    if not item:
+        raise HTTPException(status_code=404, detail="Meal plan item not found")
+    try:
+        linked_ids = json.loads(grocery_list.get("meal_plan_item_ids_json") or "[]")
+    except json.JSONDecodeError:
+        linked_ids = []
+    if item_id not in linked_ids:
+        raise HTTPException(status_code=400, detail="Meal is not linked to this grocery list")
+    record_meal_plan_cooked_feedback(item, feedback)
+    db.mark_recipe_meal_plan_item_cooked(item_id)
+    refresh_grocery_list_completion(list_id)
+    return RedirectResponse(url=f"/apps/recipes/grocery-lists/{list_id}", status_code=303)
+
+
+@app.post("/apps/recipes/meal-plan/{item_id}/cooked")
+def mark_meal_plan_item_cooked_form(item_id: int, feedback: str = Form("")):
+    """Mark a planned meal cooked and offer a recipe feedback moment."""
+    item = dict_from_row(db.get_recipe_meal_plan_item(item_id))
+    if not item:
+        raise HTTPException(status_code=404, detail="Meal plan item not found")
+    record_meal_plan_cooked_feedback(item, feedback)
+    db.mark_recipe_meal_plan_item_cooked(item_id)
+    if item.get("source_kind") == "complete_meal" and item.get("source_id"):
+        return RedirectResponse(url=f"/apps/recipes/meals/{item['source_id']}?cooked=1", status_code=303)
+    return RedirectResponse(url="/apps/recipes#meal-plan", status_code=303)
 
 
 # ============================================================================
@@ -814,6 +3696,18 @@ def create_project_form(name: str = Form(...), description: str = Form(""), prio
 def add_note_form(project_id: int, content: str = Form(...)):
     """Add note via form."""
     db.add_note(project_id, content)
+    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
+
+
+@app.post("/projects/{project_id}/share")
+def share_project_form(
+    request: Request,
+    project_id: int,
+    email: str = Form(...),
+    permission: str = Form("view"),
+):
+    """Share a project from the detail page."""
+    share_project_with_email(project_id, email, permission, request)
     return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
 
 @app.post("/projects/{project_id}/actions/add")
@@ -895,7 +3789,7 @@ def save_codex_plan_form(
         step for step in all_steps
         if step["status"] == "open" and (not selected_ids or step["id"] in selected_ids)
     ]
-    recipe_import_url = f"/apps/recipes/import?project_id={project_id}&action_id={action_id}"
+    recipe_import_url = "/apps/recipes/manage"
     markdown = build_action_codex_plan(
         project,
         action,
@@ -925,7 +3819,7 @@ async def upload_recipe_images_form(
     action_id: int = Form(...),
     files: List[UploadFile] = File(...),
 ):
-    """Upload recipe image files to the recipe app import queue."""
+    """Upload recipe image/PDF files to the recipe app import queue."""
     action = dict_from_row(db.get_recommended_action(action_id))
     if not action or action["project_id"] != project_id:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -943,7 +3837,62 @@ async def upload_recipe_images_form(
     for upload in files:
         if not upload.filename:
             continue
-        if upload.content_type and not upload.content_type.startswith("image/"):
+        original_name = Path(upload.filename).name
+        extension = Path(original_name).suffix.lower()
+        content_type = upload.content_type or mimetypes.guess_type(original_name)[0] or ""
+        is_pdf = content_type == "application/pdf" or extension == ".pdf"
+        is_image = content_type.startswith("image/")
+        if not is_image and not is_pdf:
+            continue
+
+        if is_pdf:
+            group_count += 1
+            image_group_id = db.create_recipe_image_group(
+                project_id,
+                action_id,
+                Path(original_name).stem or f"PDF recipe {group_count}",
+                layout="pdf",
+            )
+            stored_name = f"{uuid.uuid4().hex}.pdf"
+            destination = recipe_uploads_dir / stored_name
+            with destination.open("wb") as handle:
+                shutil.copyfileobj(upload.file, handle)
+            try:
+                cloud_persistence.sync_upload_file(destination)
+            except Exception as exc:
+                print(f"Warning: PDF upload cloud sync failed - {exc}")
+
+            db.add_recipe_image(
+                project_id,
+                action_id,
+                f"recipe_images/{stored_name}",
+                original_name,
+                "application/pdf",
+                image_group_id,
+                "pdf",
+            )
+
+            preview_name = ""
+            preview_label = ""
+            try:
+                preview_name, preview_label = extract_recipe_pdf_preview(destination, recipe_uploads_dir)
+            except Exception as exc:
+                print(f"Warning: PDF preview extraction failed - {exc}")
+            if preview_name:
+                preview_path = recipe_uploads_dir / preview_name
+                try:
+                    cloud_persistence.sync_upload_file(preview_path)
+                except Exception as exc:
+                    print(f"Warning: PDF preview cloud sync failed - {exc}")
+                db.add_recipe_image(
+                    project_id,
+                    action_id,
+                    f"recipe_images/{preview_name}",
+                    preview_label or f"{Path(original_name).stem} preview",
+                    mimetypes.guess_type(preview_name)[0] or "image/png",
+                    image_group_id,
+                    "photo",
+                )
             continue
 
         if open_group_id:
@@ -959,19 +3908,21 @@ async def upload_recipe_images_form(
             )
             side = "front"
 
-        original_name = Path(upload.filename).name
-        extension = Path(original_name).suffix.lower()
         stored_name = f"{uuid.uuid4().hex}{extension}"
         destination = recipe_uploads_dir / stored_name
         with destination.open("wb") as handle:
             shutil.copyfileobj(upload.file, handle)
+        try:
+            cloud_persistence.sync_upload_file(destination)
+        except Exception as exc:
+            print(f"Warning: upload cloud sync failed - {exc}")
 
         db.add_recipe_image(
             project_id,
             action_id,
             f"recipe_images/{stored_name}",
             original_name,
-            upload.content_type or "",
+            content_type,
             image_group_id,
             side,
         )
@@ -980,7 +3931,7 @@ async def upload_recipe_images_form(
             open_group_id = image_group_id
 
     return RedirectResponse(
-        url=f"/apps/recipes/import?project_id={project_id}&action_id={action_id}",
+        url="/apps/recipes/import",
         status_code=303,
     )
 
@@ -1018,8 +3969,10 @@ def extract_recipe_images_form(
             result.get("error", ""),
         )
 
+    db.sync_recipe_complete_meals_from_extractions()
+
     return RedirectResponse(
-        url=f"/apps/recipes/import?project_id={project_id}&action_id={action_id}",
+        url="/apps/recipes/import",
         status_code=303,
     )
 
@@ -1049,7 +4002,7 @@ def assign_recipe_image_form(
 
     db.update_recipe_image_assignment(image_id, group_id, side)
     return RedirectResponse(
-        url=f"/apps/recipes/import?project_id={project_id}&action_id={action_id}",
+        url="/apps/recipes/import",
         status_code=303,
     )
 

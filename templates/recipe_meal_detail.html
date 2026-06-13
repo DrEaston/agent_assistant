@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}{{ meal.title or "Complete meal" }} - Dieter Kitchen{% endblock %}
+
+{% block content %}
+<section class="detail-section recipe-detail">
+    <div class="section-header">
+        <div>
+            <p class="priority-label">Complete Meal</p>
+            <h1>{{ meal.display_title or meal.source_label or "Complete meal" }}</h1>
+            <p class="section-subtitle">
+                {% if meal.source_label %}{{ meal.source_label }}{% else %}Card-level recipe copy{% endif %}
+                <span class="meal-status meal-status-{{ meal.status }}">{{ meal.status|replace("_", " ")|upper }}</span>
+                {% if meal.has_dieter_edits %}
+                    <span class="meal-status meal-status-ready">DIETER EDITED</span>
+                {% endif %}
+            </p>
+        </div>
+        <div class="recipe-detail-actions">
+            <a class="button-link secondary-link" href="/apps/recipes">Back to Home</a>
+            <form method="post" action="/apps/recipes/meal-plan/meals/{{ meal.id }}/add" class="inline-form">
+                <button type="submit">Add to Meal Plan</button>
+            </form>
+            {% if recipe_app.import_url %}
+                <a class="button-link secondary-link" href="{{ recipe_app.import_url }}#pair-{{ meal.source_group_id }}">Review Source</a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if cooked_prompt %}
+        <div class="meal-warning-panel cooked-feedback-panel">
+            <strong>Meal marked cooked.</strong>
+            <p>Use Ask Dieter to note what worked, what needs changing, or any timing/seasoning tweaks for next time.</p>
+        </div>
+    {% endif %}
+
+    {% if request.state.current_user and meal.user_id == request.state.current_user.id %}
+        <div class="meal-warning-panel">
+            <strong>Share Meal</strong>
+            <form method="post" action="/apps/recipes/meals/{{ meal.id }}/share" class="inline-create">
+                <div class="form-group">
+                    <label for="share-meal-email">Email</label>
+                    <input type="email" id="share-meal-email" name="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="share-meal-permission">Permission</label>
+                    <select id="share-meal-permission" name="permission">
+                        <option value="view">View</option>
+                        <option value="edit">Edit</option>
+                    </select>
+                </div>
+                <button type="submit">Share Meal</button>
+            </form>
+        </div>
+    {% endif %}
+
+    {% if meal.quality_notes %}
+        <div class="meal-warning-panel">
+            <strong>Needs attention</strong>
+            <ul>
+                {% for note in meal.quality_notes %}
+                    <li>{{ note }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+
+    {% if meal.thumbnail_url %}
+        <div class="meal-detail-image">
+            <img src="{{ meal.thumbnail_url }}" alt="">
+        </div>
+    {% endif %}
+
+    <div class="recipe-meal-preview recipe-detail-grid">
+        <section class="recipe-ingredients-section">
+            <h2>Ingredients</h2>
+            {% if meal.display_ingredients_text %}
+                <pre class="recipe-ingredients-text">{{ meal.display_ingredients_text }}</pre>
+            {% else %}
+                <p class="muted-text">No ingredients were extracted yet.</p>
+            {% endif %}
+        </section>
+        <section class="recipe-steps-section">
+            <h2>Steps</h2>
+            {% if meal.display_instructions_text %}
+                <ul class="recipe-steps-list">
+                    {% for step in meal.display_instructions_text.splitlines() if step.strip() %}
+                        <li>{{ step.strip() }}</li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="muted-text">No steps were extracted yet.</p>
+            {% endif %}
+        </section>
+    </div>
+</section>
+
+<section class="detail-section">
+    <div class="section-header">
+        <div>
+            <h2>Dieter Change Log</h2>
+            <p class="section-subtitle">Recipe edits and cooking feedback are kept here.</p>
+        </div>
+    </div>
+    {% if change_log %}
+        <div class="recipe-change-log">
+            {% for change in change_log %}
+                <article class="recipe-change-entry">
+                    <strong>{{ change.summary }}</strong>
+                    <small>{{ change.created_at }}{% if change.changed_fields %} - changed {{ change.changed_fields|join(", ") }}{% endif %}</small>
+                    {% if change.user_message %}
+                        <p>{{ change.user_message }}</p>
+                    {% endif %}
+                </article>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p class="muted-text">No Dieter edits have been recorded for this meal yet.</p>
+    {% endif %}
+</section>
+{% endblock %}

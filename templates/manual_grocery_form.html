@@ -1,0 +1,205 @@
+{% set manual_grocery_target_id = target_grocery_list.id if target_grocery_list is defined and target_grocery_list else "new" %}
+{% set manual_grocery_action = "/apps/recipes/grocery-lists/" ~ target_grocery_list.id ~ "/items/add" if target_grocery_list is defined and target_grocery_list else "/apps/recipes/grocery-lists/items/add" %}
+{% if manual_grocery_open_cell|default(False) %}
+<section class="manual-grocery-panel manual-grocery-open-cell" data-manual-grocery-panel>
+{% else %}
+<details class="manual-grocery-disclosure">
+    <summary>{{ manual_grocery_summary|default("Add Grocery Item") }}</summary>
+    <section class="manual-grocery-panel" data-manual-grocery-panel>
+{% endif %}
+        <div class="meal-summary-header">
+            <strong>Add Grocery Item</strong>
+            <span data-manual-grocery-category-label>Auto category</span>
+        </div>
+        <div class="guided-component-filters" aria-label="Manual grocery item options">
+            <div>
+                <span class="component-filter-label">Shopping Section</span>
+                <div class="component-filter-controls">
+                    <button type="button" class="component-filter active" data-manual-category="">Auto</button>
+                    <button type="button" class="component-filter" data-manual-category="produce">Produce</button>
+                    <button type="button" class="component-filter" data-manual-category="meat_seafood">Meat</button>
+                    <button type="button" class="component-filter" data-manual-category="dairy">Dairy</button>
+                    <button type="button" class="component-filter" data-manual-category="grains_pasta">Bread/Pasta</button>
+                    <button type="button" class="component-filter" data-manual-category="canned_goods">Canned</button>
+                    <button type="button" class="component-filter" data-manual-category="sauces_condiments">Condiments</button>
+                    <button type="button" class="component-filter" data-manual-category="seasonings">Seasonings</button>
+                    <button type="button" class="component-filter" data-manual-category="pantry">Pantry</button>
+                </div>
+            </div>
+            <div>
+                <label class="component-filter-label" for="manual-grocery-item-{{ manual_grocery_target_id }}">Item</label>
+                <input
+                    id="manual-grocery-item-{{ manual_grocery_target_id }}"
+                    type="text"
+                    name="item_name"
+                    placeholder="Search or type an item..."
+                    aria-label="Item name"
+                    list="manual-grocery-suggestions-{{ manual_grocery_target_id }}"
+                    form="manual-grocery-form-{{ manual_grocery_target_id }}"
+                    required
+                    data-manual-item-name
+                >
+                <datalist id="manual-grocery-suggestions-{{ manual_grocery_target_id }}">
+                    {% for ingredient in recipe_app.available_grocery_options[:300] %}
+                        <option value="{{ ingredient.name }}" data-category="{{ ingredient.category }}"></option>
+                    {% endfor %}
+                </datalist>
+            </div>
+            <div>
+                <label class="component-filter-label" for="manual-grocery-ingredient-list-{{ manual_grocery_target_id }}">Available Ingredients</label>
+                <select id="manual-grocery-ingredient-list-{{ manual_grocery_target_id }}" data-manual-available-ingredient>
+                    <option value="">Choose from recipe ingredients...</option>
+                    {% for ingredient in recipe_app.available_grocery_options %}
+                        <option value="{{ ingredient.name }}" data-category="{{ ingredient.category }}">{{ ingredient.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="manual-grocery-detail-grid">
+                <div>
+                    <label class="component-filter-label" for="manual-grocery-quantity-{{ manual_grocery_target_id }}">Quantity</label>
+                    <input
+                        id="manual-grocery-quantity-{{ manual_grocery_target_id }}"
+                        type="text"
+                        name="quantity"
+                        placeholder="Optional quantity"
+                        aria-label="Optional quantity"
+                        form="manual-grocery-form-{{ manual_grocery_target_id }}"
+                    >
+                </div>
+                <div>
+                    <label class="component-filter-label" for="manual-grocery-note-{{ manual_grocery_target_id }}">Note</label>
+                    <input
+                        id="manual-grocery-note-{{ manual_grocery_target_id }}"
+                        type="text"
+                        name="note"
+                        placeholder="Optional note"
+                        aria-label="Optional note"
+                        form="manual-grocery-form-{{ manual_grocery_target_id }}"
+                    >
+                </div>
+            </div>
+        </div>
+        <form
+            id="manual-grocery-form-{{ manual_grocery_target_id }}"
+            method="post"
+            action="{{ manual_grocery_action }}"
+            class="manual-grocery-form"
+        >
+            <input type="hidden" name="category" value="" data-manual-category-input>
+            <button type="submit" class="compact">Add Item</button>
+        </form>
+        <p class="component-filter-status" data-manual-grocery-status>Choose a section or let Dieter sort it automatically.</p>
+{% if manual_grocery_open_cell|default(False) %}
+    </section>
+{% else %}
+    </section>
+</details>
+{% endif %}
+
+<script>
+    (() => {
+        const formContainer = document.currentScript.previousElementSibling;
+        const panel = formContainer?.matches("[data-manual-grocery-panel]")
+            ? formContainer
+            : formContainer?.querySelector("[data-manual-grocery-panel]");
+        if (!panel) {
+            return;
+        }
+
+        const categoryInput = panel.querySelector("[data-manual-category-input]");
+        const categoryLabel = panel.querySelector("[data-manual-grocery-category-label]");
+        const manualStatus = panel.querySelector("[data-manual-grocery-status]");
+        const itemNameInput = panel.querySelector("[data-manual-item-name]");
+        const availableIngredientSelect = panel.querySelector("[data-manual-available-ingredient]");
+        const suggestionList = itemNameInput?.list;
+        const allAvailableIngredients = Array.from(availableIngredientSelect?.options || [])
+            .filter((option) => option.value)
+            .map((option) => ({
+                name: option.value,
+                category: option.dataset.category || "other",
+            }));
+        const categoryLabels = {
+            "": "Auto category",
+            produce: "Produce",
+            meat_seafood: "Meat & Seafood",
+            dairy: "Dairy",
+            grains_pasta: "Grains, Pasta & Bread",
+            canned_goods: "Canned & Jarred",
+            sauces_condiments: "Sauces & Condiments",
+            seasonings: "Seasonings",
+            pantry: "Pantry",
+        };
+
+        const visibleIngredientsForCategory = (category) => {
+            const requestedCategory = category || "";
+            const matching = requestedCategory
+                ? allAvailableIngredients.filter((ingredient) => ingredient.category === requestedCategory)
+                : allAvailableIngredients;
+            return matching.length ? matching : allAvailableIngredients;
+        };
+
+        const renderIngredientChoices = (category) => {
+            const visibleIngredients = visibleIngredientsForCategory(category);
+            if (availableIngredientSelect) {
+                availableIngredientSelect.innerHTML = "";
+                const placeholder = document.createElement("option");
+                placeholder.value = "";
+                placeholder.textContent = category
+                    ? `Choose ${categoryLabels[category] || "matching"} ingredients...`
+                    : "Choose from recipe ingredients...";
+                availableIngredientSelect.appendChild(placeholder);
+                visibleIngredients.forEach((ingredient) => {
+                    const option = document.createElement("option");
+                    option.value = ingredient.name;
+                    option.textContent = ingredient.name;
+                    option.dataset.category = ingredient.category;
+                    availableIngredientSelect.appendChild(option);
+                });
+            }
+            if (suggestionList) {
+                suggestionList.innerHTML = "";
+                visibleIngredients.slice(0, 300).forEach((ingredient) => {
+                    const option = document.createElement("option");
+                    option.value = ingredient.name;
+                    option.dataset.category = ingredient.category;
+                    suggestionList.appendChild(option);
+                });
+            }
+        };
+
+        const setManualCategory = (category) => {
+            if (categoryInput) {
+                categoryInput.value = category || "";
+            }
+            panel.querySelectorAll("[data-manual-category]").forEach((button) => {
+                button.classList.toggle("active", (button.dataset.manualCategory || "") === (category || ""));
+            });
+            const label = categoryLabels[category || ""] || "Auto category";
+            if (categoryLabel) {
+                categoryLabel.textContent = label;
+            }
+            if (manualStatus) {
+                const visibleCount = visibleIngredientsForCategory(category).length;
+                manualStatus.textContent = category
+                    ? `Showing ${visibleCount} ${label.toLowerCase()} ingredient${visibleCount === 1 ? "" : "s"}.`
+                    : "Choose a section or let Dieter sort it automatically.";
+            }
+            renderIngredientChoices(category);
+        };
+
+        panel.querySelectorAll("[data-manual-category]").forEach((button) => {
+            button.addEventListener("click", () => {
+                setManualCategory(button.dataset.manualCategory || "");
+            });
+        });
+
+        availableIngredientSelect?.addEventListener("change", () => {
+            if (availableIngredientSelect.value && itemNameInput) {
+                itemNameInput.value = availableIngredientSelect.value;
+                itemNameInput.focus();
+            }
+        });
+
+        renderIngredientChoices("");
+    })();
+</script>

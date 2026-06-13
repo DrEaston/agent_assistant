@@ -1,46 +1,50 @@
 {% extends "base.html" %}
 
-{% block title %}Recipe Import - Project Agent{% endblock %}
+{% block title %}Import Recipes - Dieter{% endblock %}
 
 {% block content %}
-<div class="breadcrumb">
-    <a href="/">Dashboard</a> / <a href="/projects/{{ project.id }}">{{ project.name }}</a> / <a href="/projects/{{ project.id }}/actions/{{ action.id }}">{{ action.action }}</a> / Recipe Import
-</div>
+{% set unscanned_groups = recipe_image_groups|rejectattr("extraction_status")|list %}
+{% set processing_groups = recipe_image_groups|selectattr("extraction_status", "equalto", "processing")|list %}
+{% set waiting_groups = unscanned_groups + processing_groups %}
+{% set bad_uploads = recipe_image_groups|selectattr("extraction_status", "equalto", "error")|list %}
+{% set scanned_groups = recipe_image_groups|selectattr("extraction_status", "equalto", "extracted")|list %}
 
-<h1>Recipe Import</h1>
-
-<div class="app-shell">
-    <section class="detail-section">
-        <div class="section-header">
-            <div>
-                <h2>Upload Images</h2>
-                <p class="section-subtitle">Upload front/back recipe photos in order. If a recipe uses another format, mark extra pages after upload.</p>
-            </div>
+<section class="detail-section import-cards-section">
+    <div class="section-header">
+        <div>
+            <h2>Import Recipes</h2>
+            <p class="section-subtitle">Upload recipe photos or PDFs, then scan unprocessed files into structured meals.</p>
         </div>
+    </div>
 
+    <div class="import-subsection">
+        <div>
+            <h3>Upload Recipes</h3>
+            <p class="section-subtitle">Upload front/back recipe photos in order, or upload a recipe PDF as a standalone import.</p>
+        </div>
         <form method="post" action="/apps/recipes/import/upload" enctype="multipart/form-data" class="upload-form">
             <input type="hidden" name="project_id" value="{{ project.id }}">
             <input type="hidden" name="action_id" value="{{ action.id }}">
             <div class="form-group">
-                <label for="files">Images</label>
-                <input type="file" id="files" name="files" accept="image/*" multiple required>
+                <label for="files">Images or PDFs</label>
+                <input type="file" id="files" name="files" accept="image/*,application/pdf,.pdf" multiple required>
             </div>
-            <button type="submit">Upload Images</button>
+            <button type="submit">Upload Recipes</button>
         </form>
-    </section>
+    </div>
 
-    <section class="detail-section">
-        <div class="section-header">
+    <div class="import-subsection">
+        <div class="section-header import-subsection-header">
             <div>
-                <h2>Import Queue</h2>
-                <p class="section-subtitle">Uploaded images stay here while OCR turns them into structured recipes.</p>
+                <h3>Files Waiting To Scan</h3>
+                <p class="section-subtitle">Only uploaded files that have not been scanned show here.</p>
             </div>
             {% if recipe_image_groups %}
                 <form method="post" action="/apps/recipes/import/extract" class="plain-form" id="scrape-form">
                     <input type="hidden" name="project_id" value="{{ project.id }}">
                     <input type="hidden" name="action_id" value="{{ action.id }}">
-                    <button type="submit" {% if extraction_stats.pending == 0 %}disabled{% endif %}>
-                        Scrape Unprocessed Pairs
+                    <button type="submit" {% if not waiting_groups and not bad_uploads %}disabled{% endif %}>
+                        Scan Uploaded Files
                     </button>
                 </form>
             {% endif %}
@@ -50,138 +54,108 @@
             <div class="extraction-progress-panel" data-processed="{{ extraction_stats.processed }}" data-total="{{ extraction_stats.total }}">
                 <div class="focus-progress-row">
                     <span id="scrape-status-text">
-                        {{ extraction_stats.processed }}/{{ extraction_stats.total }} pairs processed
+                        {{ extraction_stats.processed }}/{{ extraction_stats.total }} files scanned
                     </span>
                     <span>{{ extraction_stats.progress_percent }}%</span>
                 </div>
-                <div class="task-progress focus-progress" aria-label="{{ extraction_stats.processed }} of {{ extraction_stats.total }} pairs processed">
+                <div class="task-progress focus-progress" aria-label="{{ extraction_stats.processed }} of {{ extraction_stats.total }} files scanned">
                     <div class="task-progress-fill" id="scrape-progress-fill" style="width: {{ extraction_stats.progress_percent }}%;"></div>
                 </div>
                 <p class="section-subtitle" id="scrape-helper-text">
-                    {% if extraction_stats.pending == 0 %}
-                        All uploaded pairs have been scraped.
-                    {% elif extraction_stats.processing %}
-                        {{ extraction_stats.processing }} pair{% if extraction_stats.processing != 1 %}s{% endif %} were interrupted while processing and will be retried.
-                    {% elif extraction_stats.errors %}
-                        {{ extraction_stats.errors }} pair{% if extraction_stats.errors != 1 %}s{% endif %} had OCR errors and will be retried.
+                    {% if waiting_groups %}
+                        {{ waiting_groups|length }} file{% if waiting_groups|length != 1 %}s{% endif %} waiting to scan.
+                    {% elif bad_uploads %}
+                        No new files are waiting. {{ bad_uploads|length }} bad upload{% if bad_uploads|length != 1 %}s{% endif %} can be retried.
                     {% else %}
-                        {{ extraction_stats.pending }} pair{% if extraction_stats.pending != 1 %}s{% endif %} still need OCR.
+                        No uploaded files are waiting to be scanned.
                     {% endif %}
                 </p>
             </div>
 
-            <div class="recipe-pair-list">
-                {% for group in recipe_image_groups %}
-                    <article class="recipe-pair" id="pair-{{ group.id }}">
-                        <div class="recipe-pair-header">
-                            <strong>{{ group.label or "Recipe pair" }}</strong>
-                            <small>
-                                {{ group.layout|replace("_", " ")|upper }} -
-                                {{ (group.extraction_status or group.status)|upper }}
-                            </small>
-                        </div>
-                        <div class="recipe-pair-images">
-                            {% set used_sides = group.images|map(attribute="side")|list %}
-                            {% for image in group.images %}
-                                <div class="image-tile">
-                                    <span class="side-label">{{ (image.side or "extra")|replace("_", " ")|upper }}</span>
-                                    <img src="/uploads/{{ image.filename }}" alt="{{ image.original_filename }}">
-                                    <div>
-                                        <strong>{{ image.original_filename }}</strong>
-                                        <small>{{ image.status|upper }}</small>
-                                        <form method="post" action="/apps/recipes/import/images/{{ image.id }}/assign" class="image-assignment-form">
-                                            <input type="hidden" name="project_id" value="{{ project.id }}">
-                                            <input type="hidden" name="action_id" value="{{ action.id }}">
-                                            <label>
-                                                Pair
-                                                <select name="group_id">
-                                                    {% for option_group in recipe_image_groups|reverse %}
-                                                        <option value="{{ option_group.id }}" {% if option_group.id == group.id %}selected{% endif %}>
-                                                            {{ option_group.label or ("Recipe pair " ~ loop.index) }}
-                                                        </option>
-                                                    {% endfor %}
-                                                </select>
-                                            </label>
-                                            <label>
-                                                Role
-                                                <select name="side">
-                                                    {% for role in recipe_image_roles %}
-                                                        <option value="{{ role.value }}" {% if role.value == image.side %}selected{% endif %}>{{ role.label }}</option>
-                                                    {% endfor %}
-                                                </select>
-                                            </label>
-                                            <button type="submit" class="secondary-button small-button">Update</button>
-                                        </form>
-                                    </div>
+            {% if waiting_groups %}
+                <div class="recipe-pair-list compact-import-list">
+                    {% for group in waiting_groups %}
+                        <article class="recipe-pair compact-import-item" id="pair-{{ group.id }}">
+                            <div class="recipe-pair-header">
+                                <div>
+                                    <strong>{{ group.label or "Recipe import" }}</strong>
+                                    <small>
+                                        {{ group.layout|replace("_", " ")|upper }} -
+                                        {{ (group.extraction_status or group.status)|upper }}
+                                    </small>
                                 </div>
-                            {% endfor %}
-
-                            {% for side in ["front", "back"] %}
-                                {% if side not in used_sides %}
-                                    <div class="image-tile missing-side">
-                                        <span class="side-label">{{ side|upper }}</span>
-                                        <div>
-                                            <strong>Missing {{ side }}</strong>
-                                            <small>Upload another image or relabel an existing page.</small>
-                                        </div>
-                                    </div>
-                                {% endif %}
-                            {% endfor %}
-                        </div>
-
-                        {% if group.extraction_status %}
-                            <div class="recipe-extraction">
-                                {% if group.extraction_error %}
-                                    <p class="error-text">{{ group.extraction_error }}</p>
-                                {% endif %}
-
-                                {% if group.ingredients_text or group.instructions_text %}
-                                    <div class="recipe-extraction-columns">
-                                        <section>
-                                            <h3>Ingredients</h3>
-                                            <pre>{{ group.ingredients_text }}</pre>
-                                        </section>
-                                        <section>
-                                            <h3>Steps</h3>
-                                            <pre>{{ group.instructions_text }}</pre>
-                                        </section>
-                                    </div>
-                                {% endif %}
-
-                                {% if group.sections %}
-                                    <div class="recipe-section-list">
-                                        {% for section in group.sections %}
-                                            <section class="recipe-section">
-                                                <div>
-                                                    <strong>{{ section.title or "Recipe section" }}</strong>
-                                                    <small>{{ section.type|default("unknown")|upper }}</small>
-                                                </div>
-                                                {% if section.ingredients %}
-                                                    <p>{{ section.ingredients|join("; ") }}</p>
-                                                {% endif %}
-                                                {% if section.instructions %}
-                                                    <ol>
-                                                        {% for instruction in section.instructions %}
-                                                            <li>{{ instruction }}</li>
-                                                        {% endfor %}
-                                                    </ol>
-                                                {% endif %}
-                                            </section>
-                                        {% endfor %}
-                                    </div>
-                                {% endif %}
                             </div>
+                            <ul class="compact-file-list">
+                                {% for image in group.images %}
+                                    <li>
+                                        <span>{{ (image.side or "file")|replace("_", " ")|upper }}</span>
+                                        {% if image.content_type == "application/pdf" or image.filename.endswith(".pdf") %}
+                                            <a href="/uploads/{{ image.filename }}" target="_blank" rel="noopener">{{ image.original_filename }}</a>
+                                        {% else %}
+                                            <a href="/uploads/{{ image.filename }}" target="_blank" rel="noopener">{{ image.original_filename }}</a>
+                                        {% endif %}
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <p>No uploaded files are waiting to be scanned.</p>
+                </div>
+            {% endif %}
+
+            {% if bad_uploads or scanned_groups %}
+                <details class="bad-upload-disclosure">
+                    <summary>Import history and bad uploads</summary>
+                    <div class="import-history-list">
+                        {% if bad_uploads %}
+                            <section>
+                                <h3>Bad uploads</h3>
+                                <ul class="compact-file-list">
+                                    {% for group in bad_uploads %}
+                                        <li>
+                                            <span>ERROR</span>
+                                            <a href="#pair-{{ group.id }}">{{ group.label or "Recipe import" }}</a>
+                                            {% if group.extraction_error %}
+                                                <small>{{ group.extraction_error }}</small>
+                                            {% endif %}
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            </section>
                         {% endif %}
-                    </article>
-                {% endfor %}
-            </div>
+                        {% if scanned_groups %}
+                            <section>
+                                <h3>Scanned imports</h3>
+                                <ul class="compact-file-list">
+                                    {% for group in scanned_groups[:20] %}
+                                        <li>
+                                            <span>SCANNED</span>
+                                            {% if group.imported_meal_id %}
+                                                <a href="/apps/recipes/meals/{{ group.imported_meal_id }}">{{ group.label or "Recipe import" }}</a>
+                                            {% else %}
+                                                <span>{{ group.label or "Recipe import" }}</span>
+                                            {% endif %}
+                                            {% if group.imported_meal_status %}
+                                                <small>{{ group.imported_meal_status|replace("_", " ")|upper }}</small>
+                                            {% endif %}
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            </section>
+                        {% endif %}
+                    </div>
+                </details>
+            {% endif %}
         {% else %}
             <div class="empty-state">
-                <p>No recipe images uploaded yet.</p>
+                <p>No recipe files uploaded yet.</p>
             </div>
         {% endif %}
-    </section>
-</div>
+    </div>
+</section>
 
 <script>
     const scrapeForm = document.getElementById("scrape-form");
@@ -196,9 +170,9 @@
             const total = panel ? panel.dataset.total : "0";
 
             button.disabled = true;
-            button.textContent = "Scraping...";
-            statusText.textContent = `${processed}/${total} pairs processed - scraping unfinished pairs`;
-            helperText.textContent = "You can refresh later; already processed pairs will be skipped and unfinished pairs can be resumed.";
+            button.textContent = "Scanning...";
+            statusText.textContent = `${processed}/${total} files scanned - scanning unfinished files`;
+            helperText.textContent = "You can refresh later; already scanned files will be skipped and unfinished files can be resumed.";
             fill.classList.add("progress-fill-active");
         });
     }

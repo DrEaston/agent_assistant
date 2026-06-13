@@ -130,6 +130,7 @@ class AgentService:
         all_actions = []
         all_blockers = []
         all_goals = []
+        scheduler_items = [dict(row) for row in self.db.get_scheduler_items(status="open", limit=12)]
 
         for project in projects:
             actions = [dict(row) for row in self.db.get_open_recommended_actions(project["id"])]
@@ -180,10 +181,12 @@ class AgentService:
             "blockers": all_blockers,
             "actions": other_project_actions[:3],
             "goals": all_goals,
+            "scheduler_items": scheduler_items,
             "stats": {
                 "total_projects": len(projects),
                 "total_blockers": len(all_blockers),
                 "total_actions": len(all_actions),
+                "total_scheduler_items": len(scheduler_items),
                 "completed_goals": sum(1 for goal in all_goals if goal["completed"]),
                 "total_goals": len(all_goals),
             },

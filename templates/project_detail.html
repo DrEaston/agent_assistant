@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 
-{% block title %}{{ project.name }} - Project Agent{% endblock %}
+{% block title %}{{ project.name }} - Dieter{% endblock %}
 
 {% block content %}
 <div class="breadcrumb">
-    <a href="/">Dashboard</a> / <a href="/projects">Projects</a> / {{ project.name }}
+    <a href="/">Home</a> / <a href="/apps/assistant/planner">Assistant</a> / <a href="/projects">Projects</a> / {{ project.name }}
 </div>
 
 <h1>{{ project.name }}</h1>
@@ -13,6 +13,35 @@
     <p>{{ project.description }}</p>
 {% endif %}
 
+{% if request.state.current_user and project.user_id == request.state.current_user.id %}
+    <section class="detail-section">
+        <div class="section-header">
+            <div>
+                <h2>Share</h2>
+                <p class="section-subtitle">Give another Dieter user access to this project.</p>
+            </div>
+        </div>
+        <form method="post" action="/projects/{{ project.id }}/share" class="inline-create">
+            <div class="form-group">
+                <label for="share-email">Email</label>
+                <input type="email" id="share-email" name="email" required>
+            </div>
+            <div class="form-group">
+                <label for="share-permission">Permission</label>
+                <select id="share-permission" name="permission">
+                    <option value="view">View</option>
+                    <option value="edit">Edit</option>
+                </select>
+            </div>
+            <button type="submit">Share Project</button>
+        </form>
+    </section>
+{% endif %}
+
+{% set open_actions = actions|selectattr('status', 'equalto', 'open')|list %}
+{% set completed_actions = actions|selectattr('status', 'equalto', 'done')|list %}
+{% set total_actions = open_actions|length + completed_actions|length %}
+
 <div class="dashboard-grid compact-metrics">
     <div class="metric">
         <div class="metric-value">{{ project.priority_score }}/5</div>
@@ -20,8 +49,13 @@
     </div>
 
     <div class="metric">
-        <div class="metric-value">{{ actions|selectattr('status', 'equalto', 'open')|list|length }}</div>
+        <div class="metric-value">{{ open_actions|length }}</div>
         <div class="metric-label">Open Tasks</div>
+    </div>
+
+    <div class="metric">
+        <div class="metric-value">{{ completed_actions|length }}/{{ total_actions }}</div>
+        <div class="metric-label">Tasks Done</div>
     </div>
 
     <div class="metric">
@@ -41,7 +75,10 @@
             <div class="section-header">
                 <div>
                     <h2>Tasks</h2>
-                    <p class="section-subtitle">Recommended next actions, grouped by priority.</p>
+                    <p class="section-subtitle">
+                        {{ completed_actions|length }} completed / {{ open_actions|length }} open
+                        {% if total_actions %}across {{ total_actions }} total tasks{% else %}tasks{% endif %}.
+                    </p>
                 </div>
                 <details class="inline-create">
                     <summary>Add Task</summary>
@@ -63,8 +100,6 @@
                 </details>
             </div>
 
-            {% set open_actions = actions|selectattr('status', 'equalto', 'open')|list %}
-            {% set completed_actions = actions|selectattr('status', 'equalto', 'done')|list %}
             {% set visible_open_actions = open_actions[:4] %}
             {% set hidden_open_actions = open_actions[4:] %}
 

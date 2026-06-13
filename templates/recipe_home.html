@@ -1,151 +1,820 @@
 {% extends "base.html" %}
 
-{% block title %}Recipe App - Project Agent{% endblock %}
+{% block title %}Dieter Kitchen - Dieter{% endblock %}
+{% block recipe_app_subtitle %}{% if recipe_view == "create_meal" %}Build a meal from flexible recipe parts and send it to the plan.{% else %}Plan meals, build grocery lists, and improve recipes as you cook.{% endif %}{% endblock %}
 
 {% block content %}
-<div class="breadcrumb">
-    <a href="/">Dashboard</a> / Recipe App
-</div>
-
-<h1>Recipe App</h1>
-
-<section class="recipe-home-hero">
-    <div>
-        <p class="priority-label">Recipe Library</p>
-        <h2>Complete meals first, components later</h2>
-        <p>Start with faithful card copies. The next pathway will analyze each meal into mains, sides, sauces, and other reusable parts.</p>
-    </div>
-    {% if recipe_app.import_url %}
-        <a class="button-link" href="{{ recipe_app.import_url }}">Import & Review Cards</a>
-    {% endif %}
-</section>
-
-<div class="dashboard-grid compact-metrics">
-    <div class="metric">
-        <div class="metric-value">{{ stats.total_pairs }}</div>
-        <div class="metric-label">Card Pairs</div>
-    </div>
-    <div class="metric">
-        <div class="metric-value">{{ stats.scraped_pairs }}</div>
-        <div class="metric-label">Scraped</div>
-    </div>
-    <div class="metric">
-        <div class="metric-value">{{ stats.complete_meals_needing_review }}</div>
-        <div class="metric-label">Needs Review</div>
-    </div>
-    <div class="metric">
-        <div class="metric-value">{{ stats.complete_meals_ready }}/{{ stats.complete_meals }}</div>
-        <div class="metric-label">Meals Ready</div>
-    </div>
-    <div class="metric">
-        <div class="metric-value">{{ stats.components }}</div>
-        <div class="metric-label">Components</div>
-    </div>
-</div>
-
-<section class="detail-section">
+{% if recipe_view != "create_meal" %}
+<section class="detail-section meal-plan-section" id="meal-plan">
     <div class="section-header">
         <div>
-            <h2>Complete Meals</h2>
-            <p class="section-subtitle">Faithful card-level copies. These should preserve the meal as written before any side/main analysis.</p>
+            <h2>Meal Plan</h2>
+            <p class="section-subtitle">Meals waiting to be cooked, plus grocery lists you generated.</p>
         </div>
-    </div>
-
-    {% if complete_meals %}
-        <div class="recipe-library-list">
-            {% for meal in complete_meals %}
-                <article class="recipe-library-card {% if meal.status != 'ready' %}needs-review{% endif %}">
-                    <div class="recipe-library-card-header">
-                        <div>
-                            <strong>{{ meal.title or meal.source_label or "Complete meal" }}</strong>
-                            <small>
-                                COMPLETE MEAL - {{ meal.source_label }}
-                                <span class="meal-status meal-status-{{ meal.status }}">{{ meal.status|replace("_", " ")|upper }}</span>
-                            </small>
-                        </div>
-                        <a href="{{ recipe_app.import_url }}#pair-{{ meal.source_group_id }}">Review Source</a>
-                    </div>
-                    {% if meal.quality_notes %}
-                        <div class="meal-warning-panel">
-                            <strong>Needs attention</strong>
-                            <ul>
-                                {% for note in meal.quality_notes %}
-                                    <li>{{ note }}</li>
-                                {% endfor %}
-                            </ul>
-                        </div>
-                    {% endif %}
-                    <div class="recipe-meal-preview">
-                        {% if meal.ingredients_text %}
-                            <section>
-                                <h3>Ingredients</h3>
-                                <pre>{{ meal.ingredients_text }}</pre>
-                            </section>
-                        {% endif %}
-                        {% if meal.instructions_text %}
-                            <section>
-                                <h3>Steps</h3>
-                                <pre>{{ meal.instructions_text }}</pre>
-                            </section>
-                        {% endif %}
-                    </div>
-                </article>
-            {% endfor %}
-        </div>
-    {% else %}
-        <div class="empty-state">
-            <p>No complete meals are ready yet.</p>
-            {% if recipe_app.import_url %}
-                <a class="button-link" href="{{ recipe_app.import_url }}">Open Import Queue</a>
+        <div class="meal-plan-header-actions">
+            {% if meal_plan_items %}
+                <form method="post" action="/apps/recipes/grocery-lists/create" class="inline-form create-grocery-list-form">
+                    <button type="submit" class="compact">Create Grocery List</button>
+                </form>
             {% endif %}
         </div>
-    {% endif %}
-</section>
-
-<section class="detail-section">
-    <div class="section-header">
-        <div>
-            <h2>Meal Components</h2>
-            <p class="section-subtitle">Planned analysis path for sides, mains, sauces, toppings, and reusable recipe parts.</p>
-        </div>
-        {% if complete_meals %}
-            <form method="post" action="/apps/recipes/components/analyze" class="plain-form">
-                <button type="submit">Scan Complete Meals</button>
-            </form>
-        {% endif %}
     </div>
-
-    {% if components %}
-        <div class="recipe-library-list">
-            {% for component in components %}
-                <article class="recipe-library-card">
-                    <div class="recipe-library-card-header">
-                        <div>
-                            <strong>{{ component.title }}</strong>
-                            <small>{{ component.component_type|upper }}{% if component.source_meal_title %} - from {{ component.source_meal_title }}{% endif %}</small>
-                        </div>
+    {% if meal_plan_items %}
+        <div class="meal-plan-list">
+            {% for item in meal_plan_items %}
+                <article class="meal-plan-item">
+                    <div>
+                        {% if item.source_url %}
+                            <a class="meal-plan-title-link" href="{{ item.source_url }}">{{ item.title }}</a>
+                        {% else %}
+                            <strong>{{ item.title }}</strong>
+                        {% endif %}
+                        <small>
+                            {% if item.source_kind == "complete_meal" %}Complete meal{% elif item.source_kind == "manual_item" %}Grocery item{% else %}Custom meal{% endif %}
+                            · added {{ item.created_at }}
+                        </small>
                     </div>
-                    {% if component.ingredients_text %}
-                        <div class="recipe-meal-preview">
-                            <section>
-                                <h3>Ingredients</h3>
-                                <pre>{{ component.ingredients_text }}</pre>
-                            </section>
-                            {% if component.instructions_text %}
-                                <section>
-                                    <h3>Relevant Steps</h3>
-                                    <pre>{{ component.instructions_text }}</pre>
-                                </section>
-                            {% endif %}
-                        </div>
-                    {% endif %}
+                    <div class="meal-plan-item-actions">
+                        <details class="delete-disclosure meal-plan-remove-disclosure">
+                            <summary>Remove</summary>
+                            <form method="post" action="/apps/recipes/meal-plan/{{ item.id }}/remove" class="inline-form">
+                                <button type="submit" class="compact">Confirm Remove</button>
+                            </form>
+                        </details>
+                    </div>
                 </article>
             {% endfor %}
         </div>
     {% else %}
-        <div class="empty-state">
-            <p>No meal components have been analyzed yet.</p>
+        <p class="muted-text">Choose a meal below, or create a new meal from the three-line menu.</p>
+    {% endif %}
+
+    {% if grocery_lists %}
+        <div class="recent-grocery-lists">
+            <h3>Recent Grocery Lists</h3>
+            <div class="grocery-list-record-list">
+                {% for grocery_list in grocery_lists %}
+                    <article class="grocery-list-record">
+                        <div>
+                            <strong>{{ grocery_list.title or "Grocery list" }}</strong>
+                            <small>
+                                {{ grocery_list["items"]|length }} item{% if grocery_list["items"]|length != 1 %}s{% endif %}
+                                {% if grocery_list.recipes_total_count %}
+                                    - {{ grocery_list.recipes_to_cook_count }}/{{ grocery_list.recipes_total_count }} recipe{% if grocery_list.recipes_total_count != 1 %}s{% endif %} left to cook
+                                {% else %}
+                                    - no recipes to cook
+                                {% endif %}
+                            </small>
+                        </div>
+                        <div class="grocery-list-record-actions">
+                            <a class="button-link secondary-link compact-link" href="/apps/recipes/grocery-lists/{{ grocery_list.id }}">Open</a>
+                            <details class="delete-disclosure">
+                                <summary>Delete</summary>
+                                <form method="post" action="/apps/recipes/grocery-lists/{{ grocery_list.id }}/delete" class="inline-form">
+                                    <button type="submit" class="danger compact">Confirm Delete</button>
+                                </form>
+                            </details>
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
         </div>
     {% endif %}
 </section>
+
+<section class="detail-section recipe-browser meal-ideas-section">
+    <div class="section-header">
+        <div>
+            <h2>Add Meals to Plan</h2>
+            <p class="section-subtitle">A few options first, with more meals available below.</p>
+        </div>
+    </div>
+        {% if complete_meals %}
+            <div class="complete-meal-featured-grid" data-complete-meal-featured>
+                {% for meal in complete_meals[:3] %}
+                    <article
+                        class="complete-meal-featured-card {% if meal.status != 'ready' %}needs-review{% endif %}"
+                    >
+                        <a href="/apps/recipes/meals/{{ meal.id }}">
+                            {% if meal.thumbnail_url %}
+                                <img src="{{ meal.thumbnail_url }}" alt="">
+                            {% else %}
+                                <div class="complete-meal-placeholder">{{ meal.source_kind|default("saved")|upper }}</div>
+                            {% endif %}
+                            <span>
+                                <strong>{{ meal.display_title or meal.source_label or "Complete meal" }}</strong>
+                                {% if meal.status != 'ready' %}
+                                    <small>Needs review</small>
+                                {% elif meal.source_kind == 'saved' %}
+                                    <small>Saved meal</small>
+                                {% endif %}
+                            </span>
+                        </a>
+                        <form method="post" action="/apps/recipes/meal-plan/meals/{{ meal.id }}/add" class="inline-form featured-meal-action">
+                            <button type="submit" class="compact">Add to Plan</button>
+                        </form>
+                    </article>
+                {% endfor %}
+            </div>
+
+            <div class="complete-meal-controls">
+                <label for="complete-meal-search-input">Search complete meals</label>
+                <input
+                    id="complete-meal-search-input"
+                    type="search"
+                    placeholder="Search complete meals"
+                    aria-label="Search complete meals"
+                    data-meal-filter-input
+                >
+            </div>
+            <p class="complete-meal-filter-status" data-meal-filter-status>
+                Showing {{ complete_meals|length }} meals.
+            </p>
+
+            <details class="complete-meal-browser" data-complete-meal-browser>
+                <summary>Browse complete meals</summary>
+                <div class="recipe-title-list" data-complete-meal-list>
+                {% for meal in complete_meals %}
+                    <div
+                        class="recipe-title-row {% if meal.status != 'ready' %}needs-review{% endif %}"
+                        data-complete-meal-row
+                        data-meal-index="{{ loop.index }}"
+                        data-meal-title="{{ (meal.display_title or meal.source_label or 'Complete meal')|lower|e }}"
+                        data-meal-search="{{ ((meal.display_title or meal.source_label or 'Complete meal') ~ ' ' ~ (meal.display_ingredients_text or '') ~ ' ' ~ (meal.display_instructions_text or ''))|lower|e }}"
+                        data-meal-status="{{ meal.status }}"
+                        data-meal-kind="{{ meal.source_kind|default('card') }}"
+                    >
+                        <a class="recipe-title-copy" href="/apps/recipes/meals/{{ meal.id }}">
+                            <strong>{{ meal.display_title or meal.source_label or "Complete meal" }}</strong>
+                        </a>
+                        <span class="recipe-title-meta">
+                            {% if meal.status != 'ready' %}
+                                <span class="meal-status meal-status-{{ meal.status }}">{{ meal.status|replace("_", " ")|upper }}</span>
+                            {% endif %}
+                            {% if meal.quality_notes %}
+                                <span class="review-count">{{ meal.quality_notes|length }} note{% if meal.quality_notes|length != 1 %}s{% endif %}</span>
+                            {% endif %}
+                            <form method="post" action="/apps/recipes/meal-plan/meals/{{ meal.id }}/add" class="inline-form">
+                                <button type="submit" class="compact">Add to Plan</button>
+                            </form>
+                        </span>
+                    </div>
+                {% endfor %}
+                </div>
+                <p class="empty-state complete-meal-empty is-hidden" data-complete-meal-empty>No meals match that search.</p>
+            </details>
+        {% else %}
+            <div class="empty-state">
+                <p>No complete meals are ready yet.</p>
+                {% if recipe_app.import_url %}
+                    <a class="button-link" href="{{ recipe_app.import_url }}">Open Import Queue</a>
+                {% endif %}
+            </div>
+        {% endif %}
+</section>
+
+<section class="detail-section manual-grocery-section">
+    {% if grocery_lists %}
+        {% set target_grocery_list = grocery_lists[0] %}
+    {% endif %}
+    {% set manual_grocery_summary = "Add Grocery Item" %}
+    {% set manual_grocery_open_cell = True %}
+    {% include "manual_grocery_form.html" %}
+</section>
+{% endif %}
+
+{% if recipe_view == "create_meal" %}
+<section class="detail-section recipe-browser create-meal-section" id="meal-components">
+    <div class="section-header">
+        <div>
+            <h2>Create New Meal</h2>
+            <p class="section-subtitle">Choose any combination of reusable components.</p>
+        </div>
+    </div>
+        {% if components %}
+            <div class="component-picker-panel">
+                <div class="meal-summary-header">
+                    <strong>Meal Summary</strong>
+                    <span data-meal-selection-count>0 selected</span>
+                </div>
+                <div class="guided-component-filters" aria-label="Filter meal components">
+                    <div>
+                        <span class="component-filter-label">Choose Type</span>
+                        <div class="component-filter-controls">
+                            <button type="button" class="component-filter" data-component-primary-filter="all">All</button>
+                            <button type="button" class="component-filter active" data-component-primary-filter="meat">Protein</button>
+                            <button type="button" class="component-filter" data-component-primary-filter="carb">Carb</button>
+                            <button type="button" class="component-filter" data-component-primary-filter="vegetable">Vegetable</button>
+                            <button type="button" class="component-filter" data-component-primary-filter="sauce">Sauce</button>
+                            <button type="button" class="component-filter" data-component-primary-filter="soup">Soup</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="component-filter-label" for="component-search-input">Search Components</label>
+                        <input
+                            id="component-search-input"
+                            type="search"
+                            placeholder="Search chicken, broccoli, couscous..."
+                            data-component-search-input
+                        >
+                    </div>
+                    <div>
+                        <label class="component-filter-label" for="component-ingredient-filter">Narrow By Ingredient</label>
+                        <select id="component-ingredient-filter" data-component-subfilter-select></select>
+                    </div>
+                </div>
+                <div class="selected-components" data-selected-components aria-live="polite">
+                    <p class="selected-components-empty" data-selected-components-empty>No meal parts selected.</p>
+                </div>
+                <form method="post" action="/apps/recipes/meals/save" class="save-meal-form" data-save-meal-form>
+                    <input type="hidden" name="selected_component_ids" value="[]" data-selected-component-ids>
+                    <input type="text" name="meal_name" placeholder="Name this meal" aria-label="Meal name">
+                    <button type="submit" class="compact">Save Meal</button>
+                </form>
+                <form method="post" action="/apps/recipes/meal-plan/components/add" class="save-meal-form" data-add-component-meal-form>
+                    <input type="hidden" name="selected_component_ids" value="[]" data-selected-component-ids>
+                    <input type="text" name="meal_name" placeholder="Optional meal name" aria-label="Optional meal name">
+                    <button type="submit" class="compact">Add to Meal Plan</button>
+                </form>
+                <div class="component-picker-actions">
+                    <button type="button" class="compact" data-generate-grocery-list>Preview Grocery List</button>
+                    <button type="button" class="secondary compact" data-clear-meal-selection>Clear Meal Picks</button>
+                </div>
+                <div class="grocery-list-panel" data-grocery-list-panel hidden>
+                    <div class="grocery-list-header">
+                        <strong>Grocery List</strong>
+                        <span data-grocery-list-count>0 ingredients</span>
+                    </div>
+                    <div data-grocery-list-output></div>
+                </div>
+                <p class="component-filter-status" data-component-filter-status>Showing protein components.</p>
+            </div>
+            <div class="component-section-list">
+                {% for section in component_sections %}
+                    <section class="component-library-section component-{{ section.type }}" data-component-section="{{ section.type }}">
+                        <div class="component-library-section-header">
+                            <h3>{{ section.label }}</h3>
+                            <span>{{ section.components|length }}</span>
+                        </div>
+                        <div class="component-library-list">
+                            {% for component in section.components %}
+                                <div
+                                    class="component-picker-row component-{{ component.component_type }}"
+                                    data-component-type="{{ component.component_type }}"
+                                    data-component-id="{{ component.id }}"
+                                    data-component-title="{{ component.display_title|e }}"
+                                    data-component-search="{{ (component.display_title ~ ' ' ~ component.display_ingredients_text)|lower|e }}"
+                                    data-component-ingredients="{{ component.display_ingredients_text|e }}"
+                                    data-component-structured-ingredients='{{ component.structured_ingredients_json_attr|e }}'
+                                >
+                                    <a class="recipe-title-row component-row" href="/apps/recipes/components/{{ component.id }}">
+                                        <span class="recipe-title-copy">
+                                            <strong>{{ component.display_title }}</strong>
+                                        </span>
+                                    </a>
+                                    <button
+                                        type="button"
+                                        class="select-component-button"
+                                        data-component-select="{{ component.component_type }}"
+                                        data-component-id="{{ component.id }}"
+                                        data-component-title="{{ component.display_title|e }}"
+                                        aria-label="Select {{ component.display_title|e }} for {{ component.component_type }}"
+                                        title="Select"
+                                    >
+                                        +
+                                    </button>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </section>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <p>No meal components have been analyzed yet.</p>
+            </div>
+        {% endif %}
+</section>
+{% endif %}
+
+<script>
+    const mealSelectionStorageKey = "recipeAppMealPartSelections";
+    const componentTypeLabels = {
+        meat: "Protein",
+        carb: "Carb",
+        vegetable: "Vegetable",
+        sauce: "Sauce",
+        soup: "Soup",
+        other: "Other",
+    };
+
+    const loadMealSelections = () => {
+        try {
+            const saved = JSON.parse(localStorage.getItem(mealSelectionStorageKey) || "[]");
+            if (Array.isArray(saved)) {
+                return saved.filter((selection) => selection?.id && selection?.title);
+            }
+            return Object.entries(saved || {})
+                .filter(([, selection]) => selection?.id && selection?.title)
+                .map(([type, selection]) => ({
+                    id: String(selection.id),
+                    title: selection.title,
+                    type,
+                }));
+        } catch {
+            return [];
+        }
+    };
+
+    const saveMealSelections = (selections) => {
+        localStorage.setItem(mealSelectionStorageKey, JSON.stringify(selections));
+    };
+
+    let mealSelections = loadMealSelections();
+
+    const renderMealSelections = () => {
+        Object.entries(defaultMealSelections).forEach(([type]) => {
+            const selection = mealSelections[type];
+            const slot = document.querySelector(`[data-selected-slot="${type}"] strong`);
+            if (slot) {
+                slot.textContent = selection?.title || "None";
+                slot.closest("[data-selected-slot]")?.classList.toggle("has-selection", Boolean(selection?.id));
+            }
+            document.querySelectorAll(`[data-component-select="${type}"]`).forEach((button) => {
+                const isSelected = String(selection?.id || "") === String(button.dataset.componentId || "");
+                button.classList.toggle("selected", isSelected);
+                button.textContent = isSelected ? "✓" : "+";
+                button.title = isSelected ? "Selected" : "Select";
+                button.textContent = isSelected ? "-" : "+";
+            });
+        });
+        const selectedCount = Object.values(mealSelections).filter((selection) => selection?.id).length;
+        const count = document.querySelector("[data-meal-selection-count]");
+        if (count) {
+            count.textContent = `${selectedCount} selected`;
+        }
+    };
+
+    const renderMealSelectionsList = () => {
+        const selectedIds = new Set(mealSelections.map((selection) => String(selection.id)));
+        document.querySelectorAll("[data-component-select]").forEach((button) => {
+            const isSelected = selectedIds.has(String(button.dataset.componentId || ""));
+            button.classList.toggle("selected", isSelected);
+            button.textContent = isSelected ? "-" : "+";
+            button.title = isSelected ? "Remove from meal" : "Add to meal";
+        });
+
+        const selectedList = document.querySelector("[data-selected-components]");
+        const emptyState = document.querySelector("[data-selected-components-empty]");
+        if (selectedList) {
+            selectedList.querySelectorAll("[data-selected-meal-item]").forEach((item) => item.remove());
+            if (emptyState) {
+                emptyState.hidden = mealSelections.length > 0;
+            }
+            mealSelections.forEach((selection) => {
+                const item = document.createElement("div");
+                item.className = "selected-meal-item";
+                item.dataset.selectedMealItem = selection.id;
+
+                const copy = document.createElement("span");
+                const label = document.createElement("small");
+                label.textContent = componentTypeLabels[selection.type] || selection.type || "Other";
+                const title = document.createElement("strong");
+                title.textContent = selection.title;
+                copy.appendChild(label);
+                copy.appendChild(title);
+                item.appendChild(copy);
+
+                const remove = document.createElement("button");
+                remove.type = "button";
+                remove.className = "selected-meal-remove";
+                remove.dataset.removeSelection = selection.id;
+                remove.textContent = "Remove";
+                item.appendChild(remove);
+
+                selectedList.appendChild(item);
+            });
+        }
+
+        const count = document.querySelector("[data-meal-selection-count]");
+        if (count) {
+            count.textContent = `${mealSelections.length} selected`;
+        }
+        document.querySelectorAll("[data-selected-component-ids]").forEach((selectedIdsInput) => {
+            selectedIdsInput.value = JSON.stringify(mealSelections.map((selection) => selection.id));
+        });
+    };
+
+    document.querySelectorAll("[data-recipe-view-target]").forEach((tab) => {
+        tab.addEventListener("click", () => {
+            const targetId = tab.dataset.recipeViewTarget;
+            document.querySelectorAll("[data-recipe-view-target]").forEach((button) => {
+                const isActive = button === tab;
+                button.classList.toggle("active", isActive);
+                button.setAttribute("aria-selected", isActive ? "true" : "false");
+            });
+            document.querySelectorAll(".recipe-browser-view").forEach((view) => {
+                view.classList.toggle("active", view.id === targetId);
+            });
+            history.replaceState(null, "", `#${targetId}`);
+        });
+    });
+
+    const initialView = window.location.hash.slice(1);
+    if (initialView) {
+        document.querySelector(`[data-recipe-view-target="${initialView}"]`)?.click();
+    }
+
+    const filterAndSortCompleteMeals = () => {
+        const list = document.querySelector("[data-complete-meal-list]");
+        if (!list) {
+            return;
+        }
+        const filterValue = (document.querySelector("[data-meal-filter-input]")?.value || "").trim().toLowerCase();
+        const filterTerms = filterValue.split(/\s+/).filter(Boolean);
+        const rows = Array.from(list.querySelectorAll("[data-complete-meal-row]"));
+        let visibleCount = 0;
+        rows.forEach((row) => {
+            const searchText = row.dataset.mealSearch || row.dataset.mealTitle || "";
+            const isVisible = !filterTerms.length || filterTerms.every((term) => searchText.includes(term));
+            row.classList.toggle("is-hidden", !isVisible);
+            if (isVisible) {
+                visibleCount += 1;
+            }
+        });
+        document.querySelector("[data-complete-meal-featured]")?.classList.toggle("is-hidden", Boolean(filterValue));
+        document.querySelector("[data-complete-meal-empty]")?.classList.toggle("is-hidden", visibleCount !== 0);
+        const status = document.querySelector("[data-meal-filter-status]");
+        if (status) {
+            status.textContent = filterValue
+                ? `${visibleCount} meal${visibleCount === 1 ? "" : "s"} matching "${filterValue}".`
+                : `Showing ${visibleCount} meal${visibleCount === 1 ? "" : "s"}.`;
+        }
+        const browser = document.querySelector("[data-complete-meal-browser]");
+        if (browser && filterValue) {
+            browser.open = true;
+        }
+    };
+
+    document.querySelector("[data-meal-filter-input]")?.addEventListener("input", filterAndSortCompleteMeals);
+
+    const componentFilterState = {
+        primary: "meat",
+        subfilter: "all",
+        query: "",
+    };
+
+    const componentSubfilterOptions = {
+        all: [
+            ["all", "Any ingredient"],
+        ],
+        meat: [
+            ["all", "Any protein"],
+            ["chicken", "Chicken"],
+            ["pork", "Pork"],
+            ["beef", "Beef"],
+            ["steak", "Steak"],
+            ["sausage", "Sausage"],
+            ["bacon", "Bacon"],
+            ["shrimp", "Shrimp"],
+            ["bean", "Beans"],
+            ["chickpea", "Chickpea"],
+            ["hummus", "Hummus"],
+        ],
+        carb: [
+            ["all", "Any carb"],
+            ["rice", "Rice"],
+            ["potato", "Potato"],
+            ["pasta", "Pasta"],
+            ["couscous", "Couscous"],
+            ["bread", "Bread"],
+        ],
+        vegetable: [
+            ["all", "Any vegetable"],
+            ["broccoli", "Broccoli"],
+            ["zucchini", "Zucchini"],
+            ["kale", "Kale"],
+            ["tomato", "Tomato"],
+            ["cucumber", "Cucumber"],
+            ["brussels", "Brussels"],
+        ],
+        sauce: [
+            ["all", "Any sauce"],
+            ["cream", "Cream"],
+            ["tomato", "Tomato"],
+            ["balsamic", "Balsamic"],
+            ["fig", "Fig"],
+            ["greek", "Greek"],
+            ["dijon", "Dijon"],
+        ],
+        soup: [
+            ["all", "Any soup"],
+            ["chicken", "Chicken"],
+            ["sausage", "Sausage"],
+            ["kale", "Kale"],
+            ["tomato", "Tomato"],
+            ["chickpea", "Chickpea"],
+        ],
+    };
+
+    const componentTypeDisplayLabel = (type) => {
+        if (type === "all") {
+            return "components";
+        }
+        return `${componentTypeLabels[type] || type} components`.toLowerCase();
+    };
+
+    const proteinSearchTerms = ["bean", "chickpea", "hummus"];
+
+    const updateComponentSubfilterSelect = () => {
+        const select = document.querySelector("[data-component-subfilter-select]");
+        if (!select) {
+            return;
+        }
+        const options = componentSubfilterOptions[componentFilterState.primary] || componentSubfilterOptions.all;
+        const hasSelectedOption = options.some(([value]) => value === componentFilterState.subfilter);
+        if (!hasSelectedOption) {
+            componentFilterState.subfilter = "all";
+        }
+        select.innerHTML = "";
+        options.forEach(([value, label]) => {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = label;
+            option.selected = value === componentFilterState.subfilter;
+            select.appendChild(option);
+        });
+    };
+
+    const applyComponentFilter = () => {
+        document.querySelectorAll("[data-component-primary-filter]").forEach((filterButton) => {
+            filterButton.classList.toggle(
+                "active",
+                filterButton.dataset.componentPrimaryFilter === componentFilterState.primary
+            );
+        });
+        updateComponentSubfilterSelect();
+
+        let visibleCount = 0;
+        document.querySelectorAll("[data-component-type]").forEach((row) => {
+            const searchText = row.dataset.componentSearch || row.dataset.componentTitle?.toLowerCase() || "";
+            const proteinMatch = row.dataset.componentType === "meat"
+                || proteinSearchTerms.some((term) => searchText.includes(term));
+            const primaryMatch = componentFilterState.primary === "all"
+                || (componentFilterState.primary === "meat" ? proteinMatch : row.dataset.componentType === componentFilterState.primary);
+            const subfilterMatch = componentFilterState.subfilter === "all"
+                || searchText.includes(componentFilterState.subfilter);
+            const queryMatch = !componentFilterState.query || searchText.includes(componentFilterState.query);
+            const show = primaryMatch && subfilterMatch && queryMatch;
+            row.classList.toggle("is-hidden", !show);
+            if (show) {
+                visibleCount += 1;
+            }
+        });
+        document.querySelectorAll("[data-component-section]").forEach((section) => {
+            const visibleRows = section.querySelectorAll("[data-component-type]:not(.is-hidden)").length;
+            section.classList.toggle("is-hidden", visibleRows === 0);
+        });
+        const status = document.querySelector("[data-component-filter-status]");
+        if (status) {
+            const subfilterLabel = componentFilterState.subfilter === "all"
+                ? ""
+                : ` matching ${componentFilterState.subfilter}`;
+            const queryLabel = componentFilterState.query ? ` for "${componentFilterState.query}"` : "";
+            status.textContent = `Showing ${visibleCount} ${componentTypeDisplayLabel(componentFilterState.primary)}${subfilterLabel}${queryLabel}.`;
+        }
+    };
+
+    document.querySelectorAll("[data-component-primary-filter]").forEach((button) => {
+        button.addEventListener("click", () => {
+            componentFilterState.primary = button.dataset.componentPrimaryFilter || "all";
+            componentFilterState.subfilter = "all";
+            applyComponentFilter();
+        });
+    });
+
+    document.querySelector("[data-component-subfilter-select]")?.addEventListener("change", (event) => {
+        componentFilterState.subfilter = event.target.value || "all";
+        applyComponentFilter();
+    });
+
+    document.querySelector("[data-component-search-input]")?.addEventListener("input", (event) => {
+        componentFilterState.query = event.target.value.trim().toLowerCase();
+        applyComponentFilter();
+    });
+
+    applyComponentFilter();
+
+    document.querySelectorAll("[data-component-select]").forEach((button) => {
+        button.addEventListener("click", () => {
+            const componentId = String(button.dataset.componentId || "");
+            const existingIndex = mealSelections.findIndex((selection) => String(selection.id) === componentId);
+            if (existingIndex >= 0) {
+                mealSelections.splice(existingIndex, 1);
+            } else {
+                mealSelections.push({
+                    id: componentId,
+                    title: button.dataset.componentTitle,
+                    type: button.dataset.componentSelect,
+                });
+            }
+            saveMealSelections(mealSelections);
+            renderMealSelectionsList();
+            document.querySelector("[data-grocery-list-panel]")?.setAttribute("hidden", "");
+        });
+    });
+
+    document.querySelector("[data-clear-meal-selection]")?.addEventListener("click", () => {
+        mealSelections = [];
+        saveMealSelections(mealSelections);
+        renderMealSelectionsList();
+        document.querySelector("[data-grocery-list-panel]")?.setAttribute("hidden", "");
+    });
+
+    const getSelectedComponentRows = () => {
+        return mealSelections
+            .filter((selection) => selection?.id)
+            .map((selection) => ({
+                type: selection.type,
+                selection,
+                row: document.querySelector(`[data-component-id="${selection.id}"]`),
+            }))
+            .filter((entry) => entry.row);
+    };
+
+    const splitIngredientLines = (ingredientsText) => {
+        return (ingredientsText || "")
+            .split(/\r?\n/)
+            .map((line) => line.trim().replace(/^[-*]\s*/, ""))
+            .filter(Boolean);
+    };
+
+    const normalizeIngredientName = (ingredient) => {
+        return ingredient
+            .toLowerCase()
+            .replace(/\([^)]*\)/g, "")
+            .replace(/\b(optional|divided|to taste|plus more|for serving)\b/g, "")
+            .replace(/^[\d\s./]+/g, "")
+            .replace(/\b(cup|cups|tbsp|tablespoons?|tsp|teaspoons?|oz|ounces?|lb|lbs|pounds?|g|grams?|cloves?|small|medium|large|pinch|packet|packets|can|cans)\b/g, "")
+            .replace(/[^a-z0-9]+/g, " ")
+            .trim();
+    };
+
+    const extractQuantityPhrase = (ingredient) => {
+        const match = ingredient.match(/^([\d\s./]+(?:cup|cups|tbsp|tablespoons?|tsp|teaspoons?|oz|ounces?|lb|lbs|pounds?|g|grams?|cloves?|pinch|packet|packets|can|cans)?)/i);
+        return match ? match[1].trim() : "";
+    };
+
+    const titleCaseIngredient = (ingredient) => {
+        return ingredient.replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+    };
+
+    const buildConsolidatedGroceryItems = (selectedRows) => {
+        const itemsByName = new Map();
+        selectedRows.forEach(({ type, selection, row }) => {
+            let structuredIngredients = [];
+            try {
+                structuredIngredients = JSON.parse(row.dataset.componentStructuredIngredients || "[]");
+            } catch {
+                structuredIngredients = [];
+            }
+            const sourceIngredients = structuredIngredients.length
+                ? structuredIngredients.map((ingredient) => ({
+                    name: ingredient.name || "",
+                    amount: ingredient.amount || "",
+                    unit: ingredient.unit || "",
+                    preparation: ingredient.preparation || "",
+                    sourceText: ingredient.source_text || "",
+                    purchaseNote: ingredient.purchase_note || "",
+                    confidence: ingredient.confidence || "low",
+                }))
+                : splitIngredientLines(row.dataset.componentIngredients || "").map((ingredient) => ({
+                    name: ingredient,
+                    amount: extractQuantityPhrase(ingredient),
+                    unit: "",
+                    preparation: "",
+                    sourceText: ingredient,
+                    purchaseNote: "",
+                    confidence: "low",
+                }));
+
+            sourceIngredients.forEach((ingredient) => {
+                const normalized = normalizeIngredientName(ingredient.name || ingredient.sourceText);
+                const key = normalized || (ingredient.name || ingredient.sourceText).toLowerCase();
+                if (!itemsByName.has(key)) {
+                    itemsByName.set(key, {
+                        name: titleCaseIngredient(normalized || ingredient.name || ingredient.sourceText),
+                        rawLines: new Set(),
+                        quantities: new Set(),
+                        notes: new Set(),
+                        confidence: new Set(),
+                        sources: new Set(),
+                        types: new Set(),
+                    });
+                }
+                const item = itemsByName.get(key);
+                item.rawLines.add(ingredient.sourceText || ingredient.name);
+                const quantity = [ingredient.amount, ingredient.unit].filter(Boolean).join(" ").trim();
+                if (quantity) {
+                    item.quantities.add(quantity);
+                }
+                if (ingredient.preparation) {
+                    item.notes.add(ingredient.preparation);
+                }
+                const provenancePattern = /(source:|card shows|the card|2-serving|4-serving|for 2 servings|for 4 servings|using the .*serving amount|estimated as)/i;
+                if (ingredient.purchaseNote && !provenancePattern.test(ingredient.purchaseNote)) {
+                    item.notes.add(ingredient.purchaseNote);
+                }
+                if (ingredient.confidence) {
+                    item.confidence.add(ingredient.confidence);
+                }
+                item.sources.add(selection.title);
+                item.types.add(type);
+            });
+        });
+        return Array.from(itemsByName.values()).sort((a, b) => a.name.localeCompare(b.name));
+    };
+
+    const renderGroceryList = () => {
+        const panel = document.querySelector("[data-grocery-list-panel]");
+        const output = document.querySelector("[data-grocery-list-output]");
+        const count = document.querySelector("[data-grocery-list-count]");
+        if (!panel || !output || !count) {
+            return;
+        }
+
+        const selectedRows = getSelectedComponentRows();
+        output.innerHTML = "";
+
+        if (!selectedRows.length) {
+            count.textContent = "0 ingredients";
+            output.innerHTML = "<p class=\"muted-text\">Select at least one meal part first.</p>";
+            panel.removeAttribute("hidden");
+            return;
+        }
+
+        const groceryItems = buildConsolidatedGroceryItems(selectedRows);
+        if (!groceryItems.length) {
+            count.textContent = "0 ingredients";
+            output.innerHTML = "<p class=\"muted-text\">No ingredients were extracted for the selected meal parts.</p>";
+            panel.removeAttribute("hidden");
+            return;
+        }
+
+        const list = document.createElement("ul");
+        list.className = "grocery-consolidated-list";
+        groceryItems.forEach((groceryItem) => {
+            const item = document.createElement("li");
+            item.className = "grocery-item";
+
+            const itemName = document.createElement("strong");
+            itemName.textContent = groceryItem.name;
+            item.appendChild(itemName);
+
+            const details = document.createElement("span");
+            const quantities = Array.from(groceryItem.quantities);
+            const notes = Array.from(groceryItem.notes);
+            const sources = Array.from(groceryItem.sources);
+            const quantityCopy = quantities.length ? quantities.join(" + ") : "";
+            const notesCopy = notes.length ? notes.join("; ") : "";
+            const sourceCopy = `Used in ${sources.length} component${sources.length === 1 ? "" : "s"}: ${sources.join(", ")}.`;
+            const groceryCopy = [quantityCopy, notesCopy].filter(Boolean).join(" - ");
+            details.textContent = [groceryCopy ? `${groceryCopy}.` : "", sourceCopy].filter(Boolean).join(" ");
+            item.appendChild(details);
+
+            list.appendChild(item);
+        });
+        output.appendChild(list);
+
+        count.textContent = `${groceryItems.length} unique ingredient${groceryItems.length === 1 ? "" : "s"}`;
+        panel.removeAttribute("hidden");
+    };
+
+    document.querySelector("[data-selected-components]")?.addEventListener("click", (event) => {
+        const removeButton = event.target.closest("[data-remove-selection]");
+        if (!removeButton) {
+            return;
+        }
+        mealSelections = mealSelections.filter((selection) => String(selection.id) !== String(removeButton.dataset.removeSelection));
+        saveMealSelections(mealSelections);
+        renderMealSelectionsList();
+        document.querySelector("[data-grocery-list-panel]")?.setAttribute("hidden", "");
+    });
+
+    document.querySelector("[data-save-meal-form]")?.addEventListener("submit", (event) => {
+        if (!mealSelections.length) {
+            event.preventDefault();
+        }
+    });
+
+    document.querySelector("[data-add-component-meal-form]")?.addEventListener("submit", (event) => {
+        if (!mealSelections.length) {
+            event.preventDefault();
+        }
+    });
+
+    document.querySelector("[data-generate-grocery-list]")?.addEventListener("click", renderGroceryList);
+
+    renderMealSelectionsList();
+</script>
 {% endblock %}

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Past Grocery Lists - Dieter Kitchen{% endblock %}
+
+{% block content %}
+<section class="detail-section meal-plan-section">
+    <div class="section-header">
+        <div>
+            <h2>Past Grocery Lists</h2>
+            <p class="section-subtitle">Completed grocery lists and the recipes they were tied to.</p>
+        </div>
+    </div>
+
+    {% if done_grocery_lists %}
+        <div class="grocery-list-record-list">
+            {% for grocery_list in done_grocery_lists %}
+                <article class="grocery-list-record grocery-list-record-done">
+                    <div>
+                        <strong>{{ grocery_list.title or "Grocery list" }}</strong>
+                        <small>
+                            {{ grocery_list["items"]|length }} item{% if grocery_list["items"]|length != 1 %}s{% endif %}
+                            {% if grocery_list.recipes_total_count %}
+                                - {{ grocery_list.recipes_total_count }} recipe{% if grocery_list.recipes_total_count != 1 %}s{% endif %} cooked
+                            {% else %}
+                                - no recipes attached
+                            {% endif %}
+                        </small>
+                    </div>
+                    <div class="grocery-list-record-actions">
+                        <a class="button-link secondary-link compact-link" href="/apps/recipes/grocery-lists/{{ grocery_list.id }}">Open</a>
+                        <details class="delete-disclosure">
+                            <summary>Delete</summary>
+                            <form method="post" action="/apps/recipes/grocery-lists/{{ grocery_list.id }}/delete" class="inline-form">
+                                <button type="submit" class="danger compact">Confirm Delete</button>
+                            </form>
+                        </details>
+                    </div>
+                </article>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p class="muted-text">No past grocery lists yet.</p>
+    {% endif %}
+</section>
+{% endblock %}

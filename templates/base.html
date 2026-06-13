@@ -3,72 +3,739 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Project Agent{% endblock %}</title>
+    <title>{% block title %}Dieter{% endblock %}</title>
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
-            background: #f5f5f5;
+            background: var(--page-bg, #f5f5f5);
+            --page-theme-color: #334155;
+            --page-theme-border: color-mix(in srgb, var(--page-theme-color) 28%, white);
+            --page-theme-panel: color-mix(in srgb, var(--page-theme-color) 7%, white);
+            --page-theme-panel-strong: color-mix(in srgb, var(--page-theme-color) 12%, white);
+            --page-theme-text: var(--page-theme-color);
+            --page-theme-hover: color-mix(in srgb, var(--page-theme-color) 16%, white);
+            --page-theme-shadow: color-mix(in srgb, var(--page-theme-color) 20%, transparent);
+            --page-theme-subtitle: color-mix(in srgb, var(--page-theme-color) 16%, white);
+            --page-bg: color-mix(in srgb, var(--page-theme-color) 4%, white);
+            --shell-border: color-mix(in srgb, var(--page-theme-color) 78%, black);
             color: #333;
             line-height: 1.6;
         }
-        
+
         nav {
             background: #2c3e50;
             color: white;
             padding: 1rem 2rem;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        
+
         nav a {
             color: white;
             text-decoration: none;
             margin-right: 2rem;
             font-weight: 500;
         }
-        
+
         nav a:hover {
             color: #3498db;
         }
-        
+
+        nav button[data-recipe-chat-open] {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            border-radius: 6px;
+            color: #fff;
+            cursor: pointer;
+            font: inherit;
+            font-style: italic;
+            font-weight: 700;
+            margin-left: 0.25rem;
+            padding: 0.42rem 0.75rem;
+        }
+
+        nav button[data-recipe-chat-open]:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: #fff;
+        }
+
+        .recipe-shell-page nav button[data-recipe-chat-open] {
+            background: #3b0764;
+            border-color: #7c3aed;
+            color: #fff;
+        }
+
+        .recipe-shell-page nav button[data-recipe-chat-open]:hover {
+            background: #4c1d95;
+            border-color: #8b5cf6;
+            color: #fff;
+        }
+
+        .planner-shell-page nav button[data-recipe-chat-open] {
+            background: #164e63;
+            border-color: #0891b2;
+            color: #fff;
+        }
+
+        .planner-shell-page nav button[data-recipe-chat-open]:hover {
+            background: #155e75;
+            border-color: #22d3ee;
+            color: #fff;
+        }
+
+        .app-shell {
+            --shell-bg: var(--page-theme-color);
+            --shell-border: color-mix(in srgb, var(--page-theme-color) 78%, black);
+            --shell-band-bg: var(--page-theme-panel);
+            --shell-band-border: var(--page-theme-border);
+            --shell-control-border: var(--page-theme-border);
+            --shell-control-text: var(--page-theme-text);
+            --shell-control-hover: var(--page-theme-hover);
+            --shell-control-hover-border: var(--page-theme-color);
+            --shell-subtitle: var(--page-theme-subtitle);
+            background: var(--shell-bg);
+            border-bottom: 1px solid var(--shell-border);
+            color: #f4f4f5;
+            padding: 1.35rem 2rem 1.05rem;
+        }
+
+        .recipe-shell-page,
+        .app-shell-recipe {
+            --page-theme-color: #3b0764;
+            --page-theme-border: #decdf8;
+            --page-theme-panel: #fbf7ff;
+            --page-theme-panel-strong: #f1e9ff;
+            --page-theme-text: #4c1d95;
+            --page-theme-hover: #f1e9ff;
+            --page-theme-subtitle: #ddd6fe;
+        }
+
+        .planner-shell-page,
+        .app-shell-planner {
+            --page-theme-color: #164e63;
+            --page-theme-border: #a5f3fc;
+            --page-theme-panel: #ecfeff;
+            --page-theme-panel-strong: #cffafe;
+            --page-theme-text: #155e75;
+            --page-theme-hover: #cffafe;
+            --page-theme-subtitle: #cffafe;
+        }
+
+        .launcher-shell-page,
+        .app-shell-launcher {
+            --page-theme-color: #334155;
+            --page-theme-border: #cbd5e1;
+            --page-theme-panel: #f1f5f9;
+            --page-theme-panel-strong: #e2e8f0;
+            --page-theme-text: #334155;
+            --page-theme-hover: #e2e8f0;
+            --page-theme-subtitle: #e2e8f0;
+        }
+
+        .app-shell-top {
+            align-items: start;
+            display: flex;
+            gap: 1rem;
+            justify-content: space-between;
+        }
+
+        .app-shell h1 {
+            border-bottom: 0;
+            color: #fff;
+            font-family: Georgia, 'Times New Roman', serif;
+            font-size: clamp(2rem, 3.5vw, 3rem);
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            line-height: 1;
+            margin: 0;
+            padding: 0;
+        }
+
+        .app-shell h1 a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .app-shell h1 a:hover {
+            color: inherit;
+            text-decoration: underline;
+        }
+
+        .app-shell p:last-child {
+            color: var(--shell-subtitle);
+            font-size: 1rem;
+            font-style: italic;
+            margin: 0.35rem 0 0;
+        }
+
+        .app-shell-actions {
+            align-items: center;
+            display: flex;
+            gap: 0.65rem;
+        }
+
+        .app-shell-actions button {
+            align-items: center;
+            display: inline-flex;
+            justify-content: center;
+            min-height: 2.5rem;
+            white-space: nowrap;
+        }
+
+        .app-shell-band {
+            align-items: center;
+            background: var(--shell-band-bg);
+            border-bottom: 1px solid var(--shell-band-border);
+            display: flex;
+            gap: 0.75rem;
+            margin: 1rem -2rem -1.05rem;
+            padding: 0.75rem 2rem;
+        }
+
+        .app-shell-band a,
+        .app-shell-band button {
+            align-items: center;
+            background: #fff;
+            border: 1px solid var(--shell-control-border);
+            border-radius: 6px;
+            color: var(--shell-control-text);
+            cursor: pointer;
+            display: inline-flex;
+            font: inherit;
+            font-weight: 700;
+            justify-content: center;
+            min-height: 2.35rem;
+            padding: 0.45rem 0.7rem;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+        .app-shell-band a:hover,
+        .app-shell-band button:hover {
+            background: var(--shell-control-hover);
+            border-color: var(--shell-control-hover-border);
+            color: var(--shell-control-text);
+        }
+
+        .app-shell-band form,
+        .app-menu .app-nav form {
+            background: transparent;
+            border: 0;
+            box-shadow: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .app-menu {
+            position: relative;
+        }
+
+        .app-menu summary {
+            align-items: center;
+            background: #fff;
+            border: 1px solid var(--shell-control-border);
+            border-radius: 6px;
+            cursor: pointer;
+            display: inline-flex;
+            height: 2.5rem;
+            justify-content: center;
+            list-style: none;
+            padding: 0;
+            width: 2.5rem;
+        }
+
+        .app-menu summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .app-menu summary:hover {
+            background: var(--shell-control-hover);
+            border-color: var(--shell-control-hover-border);
+        }
+
+        .app-menu-icon {
+            display: grid;
+            gap: 0.26rem;
+            width: 1.2rem;
+        }
+
+        .app-menu-icon span {
+            background: var(--shell-control-text);
+            border-radius: 999px;
+            display: block;
+            height: 3px;
+        }
+
+        .app-menu[open] .app-nav {
+            display: grid;
+        }
+
+        .app-menu .app-nav {
+            background: var(--shell-bg);
+            border: 1px solid var(--shell-control-hover-border);
+            border-radius: 8px;
+            box-shadow: 0 12px 30px rgba(21, 6, 45, 0.25);
+            display: none;
+            gap: 0.5rem;
+            min-width: 14rem;
+            padding: 0.65rem;
+            position: absolute;
+            right: 0;
+            top: calc(100% + 0.5rem);
+            z-index: 8;
+        }
+
+        .app-menu .app-nav button {
+            text-align: left;
+            width: 100%;
+        }
+
+        .app-nav {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+            background: #fbf7ff;
+            border-bottom: 1px solid #decdf8;
+            padding: 0.75rem 2rem;
+        }
+
+        .app-nav a,
+        .app-nav button {
+            background: #fff;
+            border: 1px solid #decdf8;
+            border-radius: 6px;
+            color: #4c1d95;
+            cursor: pointer;
+            font: inherit;
+            font-weight: 700;
+            padding: 0.45rem 0.7rem;
+            text-decoration: none;
+        }
+
+        .app-nav a:hover,
+        .app-nav button:hover {
+            background: #f1e9ff;
+            border-color: #7c3aed;
+            color: #4c1d95;
+        }
+
+        .app-shell .app-shell-band.app-nav {
+            background: var(--shell-band-bg);
+            border-bottom-color: var(--shell-band-border);
+        }
+
+        .app-shell .app-shell-band.app-nav a,
+        .app-shell .app-shell-band.app-nav button {
+            background: #fff;
+            border-color: var(--shell-control-border);
+            color: var(--shell-control-text);
+        }
+
+        .app-shell .app-shell-band.app-nav a:hover,
+        .app-shell .app-shell-band.app-nav button:hover {
+            background: var(--shell-control-hover);
+            border-color: var(--shell-control-hover-border);
+            color: var(--shell-control-text);
+        }
+
+        .app-shell .app-menu .app-nav a,
+        .app-shell .app-menu .app-nav button {
+            background: var(--shell-control-hover);
+            border-color: var(--shell-control-border);
+            color: var(--shell-control-text);
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+        }
+
+        .app-shell .app-menu .app-nav a:hover,
+        .app-shell .app-menu .app-nav button:hover {
+            background: var(--shell-band-bg);
+            border-color: var(--shell-control-hover-border);
+            color: var(--shell-control-text);
+        }
+
+        .planner-app-heading > .app-nav {
+            background: #ecfeff;
+            border-bottom-color: #a5f3fc;
+            margin: 1rem -2rem -1.05rem;
+        }
+
+        .planner-app-heading > .app-nav a,
+        .planner-app-heading > .app-nav button {
+            background: #fff;
+            border-color: #67e8f9;
+            color: #155e75;
+            box-shadow: 0 2px 8px rgba(8, 145, 178, 0.08);
+        }
+
+        .planner-app-heading > .app-nav a:hover,
+        .planner-app-heading > .app-nav button:hover {
+            background: #cffafe;
+            border-color: #0891b2;
+            color: #164e63;
+        }
+
+        .recipe-app-heading,
+        .planner-app-heading {
+            background: #3b0764;
+            border-bottom: 1px solid #581c87;
+            color: #f4f4f5;
+            padding: 1.35rem 2rem 1.05rem;
+        }
+
+        .planner-app-heading {
+            background: #164e63;
+            border-bottom-color: #0e7490;
+        }
+
+        .recipe-app-heading .priority-label {
+            color: #ddd6fe;
+            margin: 0 0 0.2rem;
+        }
+
+        .recipe-app-heading h1,
+        .planner-app-heading h1 {
+            border-bottom: 0;
+            color: #fff;
+            font-family: Georgia, 'Times New Roman', serif;
+            font-size: clamp(2rem, 3.5vw, 3rem);
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            line-height: 1;
+            margin: 0;
+            padding: 0;
+        }
+
+        .recipe-app-heading h1 a,
+        .planner-app-heading h1 a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .recipe-app-heading h1 a:hover,
+        .planner-app-heading h1 a:hover {
+            color: inherit;
+            text-decoration: underline;
+        }
+
+        .recipe-app-heading p:last-child,
+        .planner-app-heading p:last-child {
+            color: #ddd6fe;
+            font-size: 1rem;
+            font-style: italic;
+            margin: 0.35rem 0 0;
+        }
+
+        .recipe-app-heading-inner {
+            align-items: start;
+            display: flex;
+            gap: 1rem;
+            justify-content: space-between;
+        }
+
+        .recipe-app-menu {
+            position: relative;
+        }
+
+        .recipe-app-menu summary {
+            align-items: center;
+            background: #fff;
+            border: 1px solid #decdf8;
+            border-radius: 6px;
+            cursor: pointer;
+            display: inline-flex;
+            height: 2.5rem;
+            justify-content: center;
+            list-style: none;
+            padding: 0;
+            width: 2.5rem;
+        }
+
+        .recipe-app-menu summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .recipe-app-menu summary:hover {
+            background: #f1e9ff;
+            border-color: #c4b5fd;
+        }
+
+        .recipe-app-menu-icon {
+            display: grid;
+            gap: 0.26rem;
+            width: 1.2rem;
+        }
+
+        .recipe-app-menu-icon span {
+            background: #4c1d95;
+            border-radius: 999px;
+            display: block;
+            height: 3px;
+        }
+
+        .recipe-app-menu[open] .app-nav {
+            display: grid;
+        }
+
+        .recipe-app-menu .app-nav {
+            background: #4c1d95;
+            border: 1px solid #7c3aed;
+            border-radius: 8px;
+            box-shadow: 0 12px 30px rgba(21, 6, 45, 0.25);
+            display: none;
+            gap: 0.5rem;
+            min-width: 14rem;
+            padding: 0.65rem;
+            position: absolute;
+            right: 0;
+            top: calc(100% + 0.5rem);
+            z-index: 8;
+        }
+
+        .recipe-app-menu .app-nav form {
+            background: transparent;
+            border: 0;
+            box-shadow: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .recipe-app-menu .app-nav button {
+            text-align: left;
+            width: 100%;
+        }
+
+        .recipe-app-actions {
+            align-items: center;
+            display: flex;
+            gap: 0.65rem;
+        }
+
+        .recipe-app-actions .button-link,
+        .recipe-app-actions button {
+            align-items: center;
+            display: inline-flex;
+            justify-content: center;
+            min-height: 2.5rem;
+            white-space: nowrap;
+        }
+
+        .recipe-app-actions .button-link {
+            text-decoration: none;
+        }
+
+        .recipe-app-subnav {
+            align-items: center;
+            background: var(--page-theme-panel);
+            border-bottom: 1px solid var(--page-theme-border);
+            display: flex;
+            gap: 0.75rem;
+            margin: 1rem -2rem -1.05rem;
+            padding: 0.75rem 2rem;
+        }
+
+        .recipe-app-subnav a,
+        .recipe-app-subnav .button-link,
+        .recipe-app-subnav button {
+            align-items: center;
+            background: #fff;
+            border: 1px solid var(--page-theme-border);
+            border-radius: 6px;
+            color: var(--page-theme-text);
+            display: inline-flex;
+            font: inherit;
+            font-weight: 700;
+            justify-content: center;
+            min-height: 2.35rem;
+            padding: 0.45rem 0.7rem;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+        .recipe-app-subnav a:hover,
+        .recipe-app-subnav .button-link:hover,
+        .recipe-app-subnav button:hover {
+            background: var(--page-theme-hover);
+            border-color: var(--page-theme-color);
+            color: var(--page-theme-text);
+        }
+
+        .planner-app-heading > .app-nav form {
+            background: transparent;
+            border: 0;
+            box-shadow: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .planner-app-heading .recipe-app-menu .app-nav {
+            background: #164e63;
+            border-color: #0891b2;
+        }
+
+        .planner-app-heading .recipe-app-menu summary {
+            border-color: #67e8f9;
+        }
+
+        .planner-app-heading .recipe-app-menu summary:hover {
+            background: #cffafe;
+            border-color: #0891b2;
+        }
+
+        .planner-app-heading .recipe-app-menu-icon span {
+            background: #155e75;
+        }
+
+        .recipe-app-subnav form {
+            background: transparent;
+            border: 0;
+            box-shadow: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .kitchen-chat-button {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.28);
+            border-radius: 6px;
+            color: #fff;
+            cursor: pointer;
+            font: inherit;
+            font-style: italic;
+            font-weight: 800;
+            min-height: 2.5rem;
+            padding: 0.5rem 0.85rem;
+        }
+
+        .kitchen-chat-button:hover {
+            background: rgba(255, 255, 255, 0.16);
+        }
+
+        .planner-app-heading-inner {
+            align-items: start;
+            display: flex;
+            gap: 1rem;
+            justify-content: space-between;
+        }
+
+        .planner-chat-button {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 6px;
+            color: #fff;
+            cursor: pointer;
+            font: inherit;
+            font-style: italic;
+            font-weight: 800;
+            min-height: 2.5rem;
+            padding: 0.5rem 0.85rem;
+        }
+
+        .planner-chat-button:hover {
+            background: rgba(255, 255, 255, 0.16);
+        }
+
+        .planner-app-heading p:last-child {
+            color: #cffafe;
+        }
+
+        .recipe-shell-page .container .detail-section {
+            background: #fbf7ff;
+            border: 1px solid #decdf8;
+            border-left: 5px solid #7c3aed;
+        }
+
+        .recipe-shell-page .container .section-header {
+            border-bottom-color: #decdf8;
+        }
+
+        .recipe-shell-page .container .section-header h2,
+        .recipe-shell-page .container .priority-label {
+            color: #4c1d95;
+        }
+
+        .recipe-shell-page .container button:not(.recipe-chat-close),
+        .recipe-shell-page .container .button-link {
+            background: #7c3aed;
+            border: 1px solid #6d28d9;
+            color: #fff;
+        }
+
+        .recipe-shell-page .container button:not(.recipe-chat-close):hover,
+        .recipe-shell-page .container .button-link:hover {
+            background: #6d28d9;
+            color: #fff;
+        }
+
+        .recipe-shell-page .container button.secondary,
+        .recipe-shell-page .container .secondary-link,
+        .recipe-shell-page .container .secondary-button {
+            background: #fff;
+            border: 1px solid #7c3aed;
+            color: #4c1d95;
+        }
+
+        .recipe-shell-page .container button.secondary:hover,
+        .recipe-shell-page .container .secondary-link:hover,
+        .recipe-shell-page .container .secondary-button:hover {
+            background: #f1e9ff;
+            color: #4c1d95;
+        }
+
+        .recipe-shell-page .container .delete-disclosure summary {
+            background: #fff;
+            border-color: #7c3aed;
+            color: #4c1d95;
+        }
+
+        .recipe-shell-page .container .delete-disclosure summary:hover {
+            background: #f1e9ff;
+            color: #4c1d95;
+        }
+
+        .recipe-shell-page .container .delete-disclosure form,
+        .recipe-shell-page .container form {
+            border-color: #decdf8;
+        }
+
         .container {
             max-width: 1200px;
             margin: 0 auto;
             padding: 2rem;
         }
-        
+
         h1, h2, h3 {
             margin: 1.5rem 0 1rem;
             color: #2c3e50;
         }
-        
+
         h1 {
             font-size: 2.5rem;
             border-bottom: 3px solid #3498db;
             padding-bottom: 0.5rem;
         }
-        
+
         h2 {
             font-size: 1.5rem;
             margin-top: 2rem;
         }
-        
+
         h3 {
             font-size: 1.2rem;
         }
-        
+
         .dashboard-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
             gap: 1.5rem;
             margin: 2rem 0;
         }
-        
+
         .card {
             background: white;
             border-radius: 8px;
@@ -76,27 +743,27 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
             transition: transform 0.2s, box-shadow 0.2s;
         }
-        
+
         .card:hover {
             transform: translateY(-2px);
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         }
-        
+
         .card h3 {
             margin-top: 0;
             color: #3498db;
         }
-        
+
         .card a {
             color: #3498db;
             text-decoration: none;
             font-weight: 500;
         }
-        
+
         .card a:hover {
             text-decoration: underline;
         }
-        
+
         .metric {
             background: white;
             padding: 1.5rem;
@@ -104,20 +771,20 @@
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             margin-bottom: 1rem;
         }
-        
+
         .metric-value {
             font-size: 2.5rem;
             font-weight: bold;
             color: #3498db;
         }
-        
+
         .metric-label {
             color: #666;
             font-size: 0.9rem;
             text-transform: uppercase;
             letter-spacing: 0.05em;
         }
-        
+
         .action, .blocker, .goal {
             background: white;
             padding: 1rem;
@@ -125,12 +792,12 @@
             border-left: 4px solid #ccc;
             border-radius: 4px;
         }
-        
+
         .action-high {
             border-left-color: #c0268a;
             background: #fff7fd;
         }
-        
+
         .blocker-high {
             border-left-color: #c0268a;
             background: #fff7fd;
@@ -140,7 +807,7 @@
             border-left-color: #f39c12;
             background: #fef5e7;
         }
-        
+
         .action-low {
             border-left-color: #0891b2;
             background: #effcff;
@@ -331,16 +998,16 @@
         .quiet-list a:hover {
             border-color: #3498db;
         }
-        
+
         .goal {
             border-left-color: #3498db;
         }
-        
+
         .goal.completed {
             opacity: 0.6;
             text-decoration: line-through;
         }
-        
+
         form {
             background: white;
             padding: 1.5rem;
@@ -348,22 +1015,22 @@
             margin: 1.5rem 0;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
-        
+
         form h3 {
             margin-top: 0;
         }
-        
+
         .form-group {
             margin-bottom: 1rem;
         }
-        
+
         label {
             display: block;
             margin-bottom: 0.5rem;
             font-weight: 500;
             color: #2c3e50;
         }
-        
+
         input, textarea, select {
             width: 100%;
             padding: 0.75rem;
@@ -372,18 +1039,18 @@
             font-family: inherit;
             font-size: 1rem;
         }
-        
+
         input:focus, textarea:focus, select:focus {
             outline: none;
             border-color: #3498db;
             box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
         }
-        
+
         textarea {
             resize: vertical;
             min-height: 100px;
         }
-        
+
         button {
             background: #3498db;
             color: white;
@@ -394,7 +1061,7 @@
             font-weight: 500;
             transition: background 0.2s;
         }
-        
+
         button:hover {
             background: #2980b9;
         }
@@ -403,30 +1070,30 @@
             cursor: wait;
             opacity: 0.7;
         }
-        
+
         button.secondary {
             background: #95a5a6;
         }
-        
+
         button.secondary:hover {
             background: #7f8c8d;
         }
-        
+
         button.danger {
             background: #c0268a;
         }
-        
+
         button.danger:hover {
             background: #9d1f72;
         }
-        
+
         .project-list {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
             gap: 1.5rem;
             margin: 2rem 0;
         }
-        
+
         .project-card {
             background: white;
             padding: 1.5rem;
@@ -434,50 +1101,50 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
             border-top: 4px solid #3498db;
         }
-        
+
         .project-card h3 {
             margin-top: 0;
         }
-        
+
         .project-card a {
             color: #3498db;
             text-decoration: none;
             font-weight: 500;
         }
-        
+
         .project-card a:hover {
             text-decoration: underline;
         }
-        
+
         .breadcrumb {
             margin: 1rem 0;
             font-size: 0.9rem;
         }
-        
+
         .breadcrumb a {
             color: #3498db;
             text-decoration: none;
         }
-        
+
         .breadcrumb a:hover {
             text-decoration: underline;
         }
-        
+
         .empty-state {
             text-align: center;
             padding: 2rem;
             color: #999;
         }
-        
+
         .empty-state p {
             margin: 1rem 0;
         }
-        
+
         .emoji {
             font-size: 1.2em;
             margin-right: 0.5rem;
         }
-        
+
         .badge {
             display: inline-block;
             padding: 0.25rem 0.75rem;
@@ -486,22 +1153,22 @@
             font-weight: 500;
             margin: 0.25rem;
         }
-        
+
         .badge-high {
             background: #c0268a;
             color: white;
         }
-        
+
         .badge-medium {
             background: #f39c12;
             color: white;
         }
-        
+
         .badge-low {
             background: #27ae60;
             color: white;
         }
-        
+
         .actions-row {
             margin-top: 1rem;
             display: flex;
@@ -852,6 +1519,117 @@
             color: #52616f;
         }
 
+        .apps-launcher-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1rem;
+            margin: 1.25rem 0;
+        }
+
+        .app-launch-card {
+            --card-theme-color: var(--page-theme-color);
+            --card-theme-border: var(--page-theme-border);
+            --card-theme-panel: var(--page-theme-panel);
+            --card-theme-text: var(--page-theme-text);
+            display: grid;
+            gap: 0.2rem;
+            background: var(--card-theme-panel);
+            border: 1px solid var(--card-theme-border);
+            border-left-color: var(--card-theme-color);
+            border-left-style: solid;
+            border-left-width: 5px;
+            border-radius: 8px;
+            color: #2c3e50;
+            padding: 1rem 1.1rem;
+            text-decoration: none;
+            box-shadow: 0 2px 8px var(--page-theme-shadow);
+        }
+
+        .app-launch-card:hover {
+            border-color: var(--card-theme-border);
+            border-left-color: var(--card-theme-color);
+            box-shadow: 0 4px 12px var(--page-theme-shadow);
+        }
+
+        .app-launch-card strong {
+            font-size: 1.2rem;
+        }
+
+        .app-launch-card small {
+            color: #52616f;
+        }
+
+        .app-launch-kicker {
+            color: var(--card-theme-text);
+            font-size: 0.78rem;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .launcher-shell-page {
+            background: #f8fafc;
+        }
+
+        .launcher-shell-page .container {
+            max-width: 980px;
+        }
+
+        .launcher-hero {
+            margin: 1rem 0 1.25rem;
+            padding: 0.35rem 0 0;
+        }
+
+        .launcher-hero h1 {
+            border: 0;
+            color: #111827;
+            font-family: Georgia, 'Times New Roman', serif;
+            font-size: clamp(2rem, 4vw, 3rem);
+            line-height: 1;
+            margin: 0.15rem 0 0.6rem;
+            padding: 0;
+        }
+
+        .launcher-hero p {
+            color: #4b5563;
+            margin: 0;
+            max-width: 42rem;
+        }
+
+        .launcher-kicker {
+            color: #475569;
+            font-size: 0.82rem;
+            font-weight: 900;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .launcher-app-grid {
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        }
+
+        .launcher-app-grid .app-launch-card {
+            min-height: 11rem;
+            padding: 1.25rem;
+        }
+
+        .planner-launch-card {
+            --card-theme-color: #0891b2;
+            --card-theme-border: #a5f3fc;
+            --card-theme-panel: #ecfeff;
+            --card-theme-text: #155e75;
+        }
+
+        .kitchen-launch-card {
+            --card-theme-color: #7c3aed;
+            --card-theme-border: #decdf8;
+            --card-theme-panel: #fbf7ff;
+            --card-theme-text: #4c1d95;
+        }
+
+        .app-launch-card.unavailable {
+            opacity: 0.65;
+        }
+
         .recipe-home-hero {
             display: flex;
             justify-content: space-between;
@@ -877,6 +1655,1531 @@
         .recipe-library-list {
             display: grid;
             gap: 0.85rem;
+        }
+
+        .recipe-browser-tabs {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        .recipe-browser-tab {
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            align-items: center;
+            background: #f7fbff;
+            color: #2c3e50;
+            border: 1px solid #d9ecfb;
+            border-bottom: 3px solid #0891b2;
+            border-radius: 6px;
+        }
+
+        .recipe-browser-tab:hover,
+        .recipe-browser-tab.active {
+            background: #effcff;
+            border-color: #b7edf4;
+            color: #155e75;
+        }
+
+        .recipe-browser-tab span {
+            display: inline-flex;
+            justify-content: center;
+            min-width: 1.85rem;
+            padding: 0.1rem 0.4rem;
+            border-radius: 999px;
+            background: #0891b2;
+            color: #fff;
+            font-size: 0.8rem;
+            font-weight: 800;
+        }
+
+        .recipe-browser-view {
+            display: none;
+        }
+
+        .recipe-browser-view.active {
+            display: block;
+        }
+
+        .recipe-browser-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            justify-content: flex-end;
+        }
+
+        .recipe-browser-actions .plain-form {
+            margin: 0;
+        }
+
+        .meal-ideas-section {
+            background: #fbf7ff;
+            border: 1px solid #decdf8;
+            border-left: 5px solid #7c3aed;
+        }
+
+        .create-meal-section {
+            background: #f6fbf7;
+            border: 1px solid #cae8d4;
+            border-left: 5px solid #27ae60;
+        }
+
+        .meal-plan-section {
+            background: #fbf7ff;
+            border: 1px solid #decdf8;
+            border-left: 5px solid #7c3aed;
+        }
+
+        .manual-grocery-section {
+            background: #fbf7ff;
+            border: 1px solid #decdf8;
+            border-left: 5px solid #7c3aed;
+        }
+
+        .meal-ideas-section .section-header {
+            border-bottom-color: #decdf8;
+        }
+
+        .meal-plan-section .section-header {
+            border-bottom-color: #decdf8;
+        }
+
+        .create-meal-section .section-header {
+            border-bottom-color: #cae8d4;
+        }
+
+        .meal-ideas-section .section-header h2 {
+            color: #4c1d95;
+        }
+
+        .create-meal-section .section-header h2 {
+            color: #17683a;
+        }
+
+        .meal-plan-section .section-header h2 {
+            color: #4c1d95;
+        }
+
+        .meal-plan-list {
+            display: grid;
+            gap: 0.7rem;
+        }
+
+        .meal-plan-item {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: center;
+            background: #f5edff;
+            border: 1px solid #decdf8;
+            border-radius: 8px;
+            padding: 0.8rem 0.9rem;
+        }
+
+        .meal-plan-title-link {
+            color: #2c3e50;
+            display: block;
+            font-weight: 800;
+            text-decoration: none;
+        }
+
+        .meal-plan-title-link:hover {
+            color: #6d28d9;
+            text-decoration: underline;
+        }
+
+        .meal-plan-item strong,
+        .meal-plan-item small {
+            display: block;
+        }
+
+        .meal-plan-item small {
+            color: #667;
+            margin-top: 0.15rem;
+        }
+
+        .meal-plan-item-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            justify-content: flex-end;
+        }
+
+        .meal-plan-item-actions > .inline-form,
+        .meal-plan-item-actions > .delete-disclosure {
+            flex: 0 0 auto;
+        }
+
+        .meal-plan-item-actions button.compact,
+        .meal-plan-item-actions .delete-disclosure summary,
+        .grocery-list-record-actions .button-link.compact-link,
+        .grocery-list-record-actions .delete-disclosure summary {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 2.3rem;
+            padding: 0.45rem 0.75rem;
+            text-align: center;
+        }
+
+        .meal-plan-item-actions button.compact,
+        .meal-plan-item-actions .delete-disclosure summary {
+            width: 7.25rem;
+        }
+
+        .grocery-list-record-actions .button-link.compact-link,
+        .grocery-list-record-actions .delete-disclosure summary {
+            min-width: 7.25rem;
+        }
+
+        .meal-plan-section button.compact,
+        .meal-plan-section .button-link.compact-link,
+        .meal-plan-section .delete-disclosure summary {
+            background: #7c3aed;
+            border: 1px solid #6d28d9;
+            color: #fff;
+        }
+
+        .meal-plan-section button.compact:hover,
+        .meal-plan-section .button-link.compact-link:hover,
+        .meal-plan-section .delete-disclosure summary:hover {
+            background: #6d28d9;
+            color: #fff;
+        }
+
+        .meal-plan-section .meal-plan-item-actions form button.compact {
+            background: #6d28d9;
+            border-color: #5b21b6;
+            color: #fff;
+        }
+
+        .meal-plan-section .meal-plan-item-actions form button.compact:hover {
+            background: #5b21b6;
+            color: #fff;
+        }
+
+        .meal-plan-section .meal-plan-item-actions .delete-disclosure summary {
+            background: #fff;
+            border-color: #7c3aed;
+            color: #4c1d95;
+        }
+
+        .meal-plan-section .meal-plan-item-actions .delete-disclosure summary:hover {
+            background: #f1e9ff;
+            color: #4c1d95;
+        }
+
+        .meal-plan-section .meal-plan-item-actions .meal-plan-remove-disclosure form button.compact {
+            background: #7c3aed;
+            border-color: #6d28d9;
+            color: #fff;
+        }
+
+        .meal-plan-section .meal-plan-item-actions .meal-plan-remove-disclosure form button.compact:hover {
+            background: #6d28d9;
+            color: #fff;
+        }
+
+        .meal-plan-section .meal-plan-item-actions > .inline-form,
+        .meal-plan-section .meal-plan-item-actions > .meal-plan-remove-disclosure {
+            width: 7.25rem;
+        }
+
+        .meal-plan-section .meal-plan-item-actions button.compact,
+        .meal-plan-section .meal-plan-item-actions .meal-plan-remove-disclosure > summary {
+            box-sizing: border-box;
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 800;
+            line-height: 1.2;
+            min-height: 2.35rem;
+            width: 100%;
+        }
+
+        .meal-plan-section .grocery-list-record-actions .button-link.compact-link {
+            background: #f1e9ff;
+            border-color: #decdf8;
+            color: #4c1d95;
+        }
+
+        .meal-plan-section .grocery-list-record-actions .button-link.compact-link:hover {
+            background: #e8dcff;
+            color: #4c1d95;
+        }
+
+        .meal-plan-section .grocery-list-record-actions .delete-disclosure summary {
+            background: #fff;
+            border-color: #decdf8;
+            color: #4c1d95;
+        }
+
+        .meal-plan-section .grocery-list-record-actions .delete-disclosure summary:hover {
+            background: #f1e9ff;
+            color: #4c1d95;
+        }
+
+        .meal-plan-section .grocery-list-record-actions .delete-disclosure form button.compact {
+            background: #7c3aed;
+            border-color: #6d28d9;
+            color: #fff;
+        }
+
+        .meal-plan-section .grocery-list-record-actions .delete-disclosure form button.compact:hover {
+            background: #6d28d9;
+            color: #fff;
+        }
+
+        .done-grocery-lists {
+            margin-top: 1rem;
+        }
+
+        .done-grocery-lists > summary {
+            background: #fff;
+            border: 1px solid #decdf8;
+            border-radius: 6px;
+            color: #4c1d95;
+            cursor: pointer;
+            display: inline-flex;
+            font-weight: 800;
+            list-style: none;
+            padding: 0.5rem 0.75rem;
+        }
+
+        .done-grocery-lists > summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .done-grocery-lists .grocery-list-record-list {
+            margin-top: 0.75rem;
+        }
+
+        .grocery-list-record-done {
+            opacity: 0.86;
+        }
+
+        .meal-plan-header-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.65rem;
+            justify-content: space-between;
+            align-items: flex-start;
+            width: min(100%, 32rem);
+        }
+
+        .meal-plan-header-actions .manual-grocery-disclosure {
+            margin: 0;
+        }
+
+        .meal-plan-header-actions .manual-grocery-panel {
+            width: min(32rem, calc(100vw - 4rem));
+        }
+
+        .meal-plan-header-actions button.compact,
+        .meal-plan-header-actions .manual-grocery-disclosure summary {
+            align-items: center;
+            border-radius: 6px;
+            color: #fff;
+            display: inline-flex;
+            font-size: 0.9rem;
+            font-weight: 800;
+            justify-content: center;
+            line-height: 1.2;
+            min-height: 2.35rem;
+            padding: 0.5rem 0.8rem;
+            width: 11.5rem;
+        }
+
+        .meal-plan-header-actions .manual-grocery-disclosure summary {
+            background: #7c3aed;
+            border: 1px solid #6d28d9;
+        }
+
+        .meal-plan-header-actions .manual-grocery-disclosure summary:hover {
+            background: #6d28d9;
+        }
+
+        .meal-plan-header-actions .create-grocery-list-form {
+            margin-left: auto;
+        }
+
+        .meal-plan-header-actions .create-grocery-list-form button.compact {
+            background: #6d28d9;
+            border: 1px solid #5b21b6;
+        }
+
+        .meal-plan-header-actions .create-grocery-list-form button.compact:hover {
+            background: #5b21b6;
+        }
+
+        .manual-grocery-section .manual-grocery-open-cell {
+            background: transparent;
+            border: 0;
+            margin: 0;
+            padding: 0;
+        }
+
+        .manual-grocery-section .meal-summary-header {
+            border-bottom-color: #decdf8;
+        }
+
+        .manual-grocery-section .meal-summary-header strong {
+            color: #4c1d95;
+        }
+
+        .manual-grocery-section .meal-summary-header span,
+        .manual-grocery-section .component-filter.active,
+        .manual-grocery-section .manual-grocery-form button {
+            background: #7c3aed;
+            border-color: #6d28d9;
+            color: #fff;
+        }
+
+        .manual-grocery-section .component-filter {
+            border-color: #decdf8;
+            color: #4c1d95;
+        }
+
+        .manual-grocery-section .component-filter:hover,
+        .manual-grocery-section .manual-grocery-quick-list button:hover {
+            background: #f1e9ff;
+        }
+
+        .manual-grocery-section .manual-grocery-quick-list button {
+            border-color: #decdf8;
+            color: #4c1d95;
+        }
+
+        .manual-grocery-section .manual-grocery-form button:hover {
+            background: #6d28d9;
+        }
+
+        .compact-link {
+            padding: 0.45rem 0.75rem;
+            font-size: 0.9rem;
+        }
+
+        .recent-grocery-lists {
+            border-top: 1px solid #decdf8;
+            margin-top: 1rem;
+            padding-top: 1rem;
+        }
+
+        .recent-grocery-lists h3 {
+            color: #4c1d95;
+            font-size: 1rem;
+            margin: 0 0 0.65rem;
+        }
+
+        .grocery-list-record-list {
+            display: grid;
+            gap: 0.5rem;
+        }
+
+        .grocery-list-record {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: center;
+            background: #fff;
+            border: 1px solid #decdf8;
+            border-radius: 8px;
+            color: #2c3e50;
+            padding: 0.7rem 0.8rem;
+        }
+
+        .grocery-list-record:hover {
+            border-color: #7c3aed;
+        }
+
+        .grocery-list-record strong,
+        .grocery-list-record small {
+            display: block;
+        }
+
+        .grocery-list-record small {
+            color: #667;
+            margin-top: 0.15rem;
+        }
+
+        .grocery-list-record-actions {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+        }
+
+        .delete-disclosure {
+            position: relative;
+        }
+
+        .delete-disclosure summary {
+            background: #fbf7ff;
+            border: 1px solid #decdf8;
+            border-radius: 4px;
+            color: #4c1d95;
+            cursor: pointer;
+            font-weight: 700;
+            list-style: none;
+            padding: 0.45rem 0.75rem;
+            white-space: nowrap;
+        }
+
+        .delete-disclosure summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .delete-disclosure form {
+            position: absolute;
+            right: 0;
+            top: calc(100% + 0.4rem);
+            z-index: 4;
+            background: #fff;
+            border: 1px solid #decdf8;
+            border-radius: 8px;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.14);
+            padding: 0.6rem;
+        }
+
+        .recipe-title-list {
+            display: grid;
+            gap: 0;
+        }
+
+        .recipe-title-list > .recipe-title-row {
+            border-bottom: 1px solid #eef2f5;
+        }
+
+        .recipe-title-row.is-hidden {
+            display: none;
+        }
+
+        .complete-meal-featured-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 0.9rem;
+            margin-bottom: 1rem;
+        }
+
+        .complete-meal-featured-grid.is-hidden,
+        .complete-meal-empty.is-hidden {
+            display: none;
+        }
+
+        .complete-meal-featured-card {
+            display: grid;
+            grid-template-rows: auto min-content;
+            gap: 0.65rem;
+            background: #fff;
+            border: 1px solid #decdf8;
+            border-radius: 8px;
+            color: #2c3e50;
+            overflow: hidden;
+            text-decoration: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+
+        .complete-meal-featured-card a {
+            color: inherit;
+            display: grid;
+            grid-template-rows: 8.5rem auto;
+            gap: 0.65rem;
+            text-decoration: none;
+        }
+
+        .complete-meal-featured-card:hover {
+            border-color: #7c3aed;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .complete-meal-featured-card.needs-review {
+            border-color: #f2c7e8;
+        }
+
+        .complete-meal-featured-card img,
+        .complete-meal-placeholder {
+            width: 100%;
+            height: 8.5rem;
+            object-fit: cover;
+            background: #eaf4f8;
+        }
+
+        .complete-meal-featured-card img {
+            filter: contrast(1.2) saturate(1.06) brightness(1.05) hue-rotate(-10deg);
+            object-position: center 18%;
+            transform: scale(1.08);
+        }
+
+        .meal-detail-image {
+            height: clamp(13rem, 34vw, 22rem);
+            overflow: hidden;
+            border: 1px solid #d9ecfb;
+            border-radius: 8px;
+            margin: 1rem 0;
+            background: #eaf4f8;
+        }
+
+        .meal-detail-image img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: center 18%;
+            filter: contrast(1.2) saturate(1.06) brightness(1.05) hue-rotate(-10deg);
+            transform: scale(1.08);
+        }
+
+        .complete-meal-placeholder {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #155e75;
+            font-weight: 800;
+        }
+
+        .complete-meal-featured-card span {
+            display: grid;
+            gap: 0.1rem;
+            padding: 0 0.8rem 0.8rem;
+        }
+
+        .complete-meal-featured-card small {
+            color: #667;
+        }
+
+        .featured-meal-action {
+            border-top: 1px solid #decdf8;
+            margin: 0;
+            padding: 0.65rem 0.8rem 0.8rem;
+        }
+
+        .featured-meal-action button {
+            width: 100%;
+        }
+
+        .complete-meal-browser {
+            background: #fff;
+            border: 1px solid #decdf8;
+            border-radius: 8px;
+            padding: 0.85rem;
+        }
+
+        .complete-meal-browser summary {
+            color: #2c3e50;
+            cursor: pointer;
+            font-weight: 800;
+        }
+
+        .complete-meal-controls {
+            display: grid;
+            gap: 0.35rem;
+            margin: 0.85rem 0;
+        }
+
+        .complete-meal-controls label {
+            color: #4c1d5f;
+            font-size: 0.88rem;
+            font-weight: 800;
+        }
+
+        .complete-meal-controls input {
+            width: 100%;
+        }
+
+        .complete-meal-filter-status {
+            color: #52616f;
+            font-size: 0.9rem;
+            margin: -0.25rem 0 0.75rem;
+        }
+
+        .component-section-list {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .component-library-section {
+            display: grid;
+            gap: 0;
+            background: #eaf4f8;
+            border: 1px solid #cbe7f0;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 4px rgba(12, 74, 110, 0.06);
+        }
+
+        .component-library-section.is-hidden {
+            display: none;
+        }
+
+        .component-library-section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            background: #dbeff6;
+            border-bottom: 1px solid #cbe7f0;
+            padding: 0.7rem 0.85rem;
+        }
+
+        .component-library-section h3 {
+            color: #2c3e50;
+            font-size: 1rem;
+            letter-spacing: 0;
+            margin: 0;
+            padding: 0;
+        }
+
+        .component-library-section-header span {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 1.65rem;
+            border-radius: 999px;
+            background: #edf7fb;
+            color: #155e75;
+            font-size: 0.8rem;
+            font-weight: 800;
+            padding: 0.1rem 0.45rem;
+        }
+
+        .component-library-list {
+            display: grid;
+            gap: 0.45rem;
+            background: #eaf4f8;
+            padding: 0.55rem;
+        }
+
+        .component-picker-panel {
+            display: grid;
+            gap: 0.85rem;
+            background: #f7fbff;
+            border: 1px solid #d9ecfb;
+            border-left: 4px solid #0891b2;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .component-picker-panel p {
+            color: #52616f;
+            margin: 0.2rem 0 0;
+        }
+
+        .meal-summary-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .meal-summary-header strong {
+            color: #2c3e50;
+            font-size: 1rem;
+        }
+
+        .meal-summary-header span {
+            background: #0891b2;
+            border-radius: 999px;
+            color: #fff;
+            font-size: 0.8rem;
+            font-weight: 800;
+            padding: 0.15rem 0.55rem;
+            white-space: nowrap;
+        }
+
+        .component-filter-controls {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .guided-component-filters {
+            display: grid;
+            gap: 0.85rem;
+        }
+
+        .component-filter-label {
+            display: block;
+            color: #52616f;
+            font-size: 0.76rem;
+            font-weight: 800;
+            letter-spacing: 0;
+            margin-bottom: 0.35rem;
+            text-transform: uppercase;
+        }
+
+        .component-subfilter-groups {
+            display: grid;
+            gap: 0.35rem;
+        }
+
+        .component-subfilter-group {
+            display: none;
+        }
+
+        .component-subfilter-group.active {
+            display: flex;
+        }
+
+        .component-filter {
+            background: #fff;
+            color: #2c3e50;
+            border: 1px solid #d9ecfb;
+            padding: 0.45rem 0.7rem;
+        }
+
+        .component-filter:hover,
+        .component-filter.active {
+            background: #0891b2;
+            border-color: #0891b2;
+            color: #fff;
+        }
+
+        .selected-components {
+            display: grid;
+            gap: 0.5rem;
+        }
+
+        .selected-components-empty {
+            color: #52616f;
+            margin: 0;
+        }
+
+        .selected-meal-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.75rem;
+            background: #effcff;
+            border: 1px solid #b7edf4;
+            border-radius: 6px;
+            padding: 0.55rem 0.65rem;
+        }
+
+        .selected-meal-item span {
+            display: grid;
+            min-width: 0;
+        }
+
+        .selected-meal-item small {
+            color: #155e75;
+            font-size: 0.72rem;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .selected-meal-item strong {
+            color: #2c3e50;
+            overflow-wrap: anywhere;
+        }
+
+        .selected-meal-remove {
+            flex: 0 0 auto;
+            background: transparent;
+            border: 1px solid #b7edf4;
+            color: #155e75;
+            padding: 0.25rem 0.45rem;
+            font-size: 0.78rem;
+        }
+
+        .selected-meal-remove:hover {
+            background: #d9f6fb;
+            color: #155e75;
+        }
+
+        .save-meal-form {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 0.5rem;
+            align-items: center;
+            margin: 0;
+        }
+
+        .save-meal-form input[type="text"] {
+            margin: 0;
+            min-height: 2.35rem;
+        }
+
+        .selected-component-slot {
+            background: #fff;
+            border: 1px dashed #c9d7df;
+            border-radius: 6px;
+            color: #667;
+            cursor: pointer;
+            font-size: 0.9rem;
+            padding: 0.55rem 0.65rem;
+            text-align: left;
+        }
+
+        .selected-component-slot:hover,
+        .selected-component-slot.active {
+            border-color: #0891b2;
+            color: #155e75;
+        }
+
+        .selected-component-slot.has-selection {
+            background: #effcff;
+            border-color: #0891b2;
+            border-style: solid;
+            color: #155e75;
+        }
+
+        .selected-component-slot strong {
+            color: #2c3e50;
+        }
+
+        .component-filter-status {
+            color: #52616f;
+            font-size: 0.9rem;
+            margin: 0;
+        }
+
+        .component-picker-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            justify-content: flex-end;
+        }
+
+        .grocery-list-panel {
+            background: #fff;
+            border: 1px solid #d9ecfb;
+            border-radius: 8px;
+            padding: 1rem;
+        }
+
+        .grocery-list-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: center;
+            border-bottom: 1px solid #e8e8e8;
+            padding-bottom: 0.65rem;
+            margin-bottom: 0.8rem;
+        }
+
+        .grocery-list-header span {
+            color: #667;
+            font-size: 0.9rem;
+        }
+
+        .create-meal-section .component-picker-panel {
+            background: #f7fcf8;
+            border-color: #cae8d4;
+            border-left-color: #27ae60;
+        }
+
+        .create-meal-section .meal-summary-header span {
+            background: #27ae60;
+        }
+
+        .create-meal-section .component-filter {
+            border-color: #cae8d4;
+        }
+
+        .create-meal-section .component-filter:hover,
+        .create-meal-section .component-filter.active {
+            background: #27ae60;
+            border-color: #27ae60;
+        }
+
+        .create-meal-section .selected-meal-item {
+            background: #edf8f0;
+            border-color: #b9dfc6;
+        }
+
+        .create-meal-section .selected-meal-item small,
+        .create-meal-section .selected-meal-remove {
+            color: #17683a;
+        }
+
+        .create-meal-section .selected-meal-remove {
+            border-color: #b9dfc6;
+        }
+
+        .create-meal-section .selected-meal-remove:hover {
+            background: #dff2e5;
+            color: #17683a;
+        }
+
+        .create-meal-section .grocery-list-panel {
+            border-color: #cae8d4;
+        }
+
+        .create-meal-section .component-library-section {
+            background: #edf8f0;
+            border-color: #cae8d4;
+        }
+
+        .create-meal-section .component-library-section-header {
+            background: #dff2e5;
+            border-bottom-color: #cae8d4;
+        }
+
+        .create-meal-section .component-library-section-header span {
+            background: #f7fcf8;
+            color: #17683a;
+        }
+
+        .create-meal-section .component-library-list {
+            background: #edf8f0;
+        }
+
+        .create-meal-section .component-picker-row {
+            border-color: #cae8d4;
+        }
+
+        .create-meal-section .component-picker-row .select-component-button {
+            background: #f7fcf8;
+            border-color: #b9dfc6;
+            color: #17683a;
+        }
+
+        .create-meal-section .component-picker-row .select-component-button:hover,
+        .create-meal-section .component-picker-row .select-component-button.selected {
+            background: #27ae60;
+            border-color: #27ae60;
+            color: #fff;
+        }
+
+        .grocery-consolidated-list {
+            display: grid;
+            gap: 0.65rem;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .grocery-checklist {
+            display: grid;
+            gap: 1.25rem;
+        }
+
+        .grocery-checklist-heading {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: 0.65rem;
+        }
+
+        .grocery-checklist-heading h2 {
+            color: #9d1f72;
+            font-size: 1rem;
+            margin: 0;
+        }
+
+        .grocery-checklist-heading span {
+            background: #c0268a;
+            border-radius: 999px;
+            color: #fff;
+            font-size: 0.8rem;
+            font-weight: 800;
+            padding: 0.12rem 0.55rem;
+        }
+
+        .grocery-checklist-heading.gotten-heading h2 {
+            color: #155e75;
+        }
+
+        .grocery-checklist-heading.gotten-heading span {
+            background: #0891b2;
+        }
+
+        .recipes-to-cook-panel {
+            background: #f7fcf8;
+            border: 1px solid #cae8d4;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            padding: 0.8rem;
+        }
+
+        .recipes-to-cook-heading {
+            margin-bottom: 0.55rem;
+        }
+
+        .recipes-to-cook-heading h2 {
+            color: #17683a;
+        }
+
+        .recipes-to-cook-heading span {
+            background: #27ae60;
+        }
+
+        .recipes-to-cook-list {
+            display: grid;
+            gap: 0.45rem;
+        }
+
+        .recipe-to-cook-item {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            align-items: center;
+            background: #fff;
+            border: 1px solid #dff2e5;
+            border-radius: 6px;
+            padding: 0.55rem 0.65rem;
+        }
+
+        .recipe-to-cook-item strong,
+        .recipe-to-cook-item small {
+            display: block;
+        }
+
+        .recipe-to-cook-item small {
+            color: #667;
+            margin-top: 0.1rem;
+        }
+
+        .cook-feedback-disclosure {
+            position: relative;
+        }
+
+        .cook-feedback-disclosure summary {
+            align-items: center;
+            background: #7c3aed;
+            border: 1px solid #6d28d9;
+            border-radius: 6px;
+            color: #fff;
+            cursor: pointer;
+            display: inline-flex;
+            font-size: 0.9rem;
+            font-weight: 800;
+            justify-content: center;
+            list-style: none;
+            min-height: 2.3rem;
+            padding: 0.45rem 0.75rem;
+            white-space: nowrap;
+        }
+
+        .cook-feedback-disclosure summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .cook-feedback-form {
+            background: #fff;
+            border: 1px solid #decdf8;
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+            display: grid;
+            gap: 0.65rem;
+            margin: 0.55rem 0 0;
+            padding: 0.75rem;
+            position: absolute;
+            right: 0;
+            top: 100%;
+            width: min(22rem, calc(100vw - 2rem));
+            z-index: 5;
+        }
+
+        .cook-feedback-form label {
+            color: #4c1d95;
+            display: grid;
+            font-size: 0.85rem;
+            font-weight: 800;
+            gap: 0.3rem;
+        }
+
+        .cook-feedback-form textarea {
+            min-height: 5.5rem;
+            resize: vertical;
+        }
+
+        .manual-grocery-panel {
+            background: #fffaf1;
+            border: 1px solid #f8d8a6;
+            border-radius: 8px;
+            margin-top: 0.75rem;
+            margin-bottom: 1rem;
+            padding: 0.8rem;
+        }
+
+        .manual-grocery-disclosure {
+            margin: 1rem 0;
+        }
+
+        .manual-grocery-disclosure summary {
+            display: inline-flex;
+            align-items: center;
+            background: #17683a;
+            border-radius: 6px;
+            color: #fff;
+            cursor: pointer;
+            font-weight: 800;
+            list-style: none;
+            padding: 0.55rem 0.8rem;
+        }
+
+        .manual-grocery-disclosure summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .manual-grocery-disclosure summary:hover {
+            background: #10512c;
+        }
+
+        .manual-grocery-heading {
+            margin-bottom: 0.55rem;
+        }
+
+        .manual-grocery-heading h2 {
+            color: #8a5a00;
+        }
+
+        .manual-grocery-form {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.5rem;
+            align-items: center;
+            background: transparent;
+            box-shadow: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .manual-grocery-form input {
+            min-height: 2.35rem;
+        }
+
+        .manual-grocery-detail-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.5rem;
+        }
+
+        .manual-grocery-quick-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+            margin: 0.75rem 0;
+        }
+
+        .manual-grocery-quick-list button {
+            background: #fff;
+            border: 1px solid #f8d8a6;
+            color: #8a5a00;
+            padding: 0.4rem 0.6rem;
+        }
+
+        .manual-grocery-quick-list button:hover {
+            background: #fff4dc;
+        }
+
+        .recipe-home-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 1rem;
+        }
+
+        .grocery-category-list {
+            display: grid;
+            gap: 0.9rem;
+        }
+
+        .grocery-category {
+            background: #fff;
+            border: 1px solid #f2c7e8;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .grocery-category-heading {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: center;
+            background: #fff0fa;
+            border-bottom: 1px solid #f2c7e8;
+            padding: 0.55rem 0.75rem;
+        }
+
+        .grocery-category-heading h3 {
+            color: #9d1f72;
+            font-size: 0.95rem;
+            margin: 0;
+        }
+
+        .grocery-category-heading span {
+            background: #c0268a;
+            border-radius: 999px;
+            color: #fff;
+            font-size: 0.75rem;
+            font-weight: 800;
+            padding: 0.1rem 0.45rem;
+        }
+
+        .grocery-category .grocery-consolidated-list {
+            gap: 0.45rem;
+            padding: 0.55rem;
+        }
+
+        .grocery-item {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 0.85rem;
+            align-items: center;
+            border: 1px solid #e8e8e8;
+            border-left: 4px solid #c0268a;
+            border-radius: 6px;
+            padding: 0.7rem 0.8rem;
+        }
+
+        .grocery-item-copy {
+            min-width: 0;
+        }
+
+        .grocery-item-action {
+            justify-self: end;
+            white-space: nowrap;
+        }
+
+        .grocery-item-needed {
+            background: #fff7fd;
+            border-color: #f2c7e8;
+            border-left-color: #c0268a;
+        }
+
+        .grocery-item-gotten {
+            background: #effcff;
+            border-color: #b7edf4;
+            border-left-color: #0891b2;
+        }
+
+        .grocery-item strong {
+            color: #2c3e50;
+            display: block;
+        }
+
+        .grocery-item span {
+            color: #667;
+            display: block;
+            font-size: 0.9rem;
+            overflow-wrap: anywhere;
+        }
+
+        .component-picker-row {
+            display: flex;
+            gap: 0.45rem;
+            align-items: center;
+            background: #f8fcfd;
+            border: 1px solid #d9ecfb;
+            border-radius: 6px;
+            padding: 0.3rem 0.45rem 0.3rem 0.7rem;
+        }
+
+        .component-picker-row:last-child {
+            border-bottom: 1px solid #d9ecfb;
+        }
+
+        .component-picker-row.is-hidden {
+            display: none;
+        }
+
+        .component-picker-row .recipe-title-row {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .component-picker-row .select-component-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            align-self: center;
+            justify-self: end;
+            flex: 0 0 1.55rem;
+            width: 1.55rem;
+            height: 1.55rem;
+            min-width: 1.55rem;
+            max-width: 1.55rem;
+            min-height: 1.55rem;
+            max-height: 1.55rem;
+            border-radius: 999px;
+            border: 1px solid #d9ecfb;
+            background: #f7fbff;
+            color: #155e75;
+            font-size: 0.9rem;
+            font-weight: 800;
+            line-height: 1;
+            padding: 0 !important;
+            text-align: center;
+        }
+
+        .component-picker-row .select-component-button:hover,
+        .component-picker-row .select-component-button.selected {
+            background: #0891b2;
+            border-color: #0891b2;
+            color: #fff;
+        }
+
+        .recipe-title-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: center;
+            background: transparent;
+            border: 0;
+            border-radius: 0;
+            color: #2c3e50;
+            padding: 0.55rem 0;
+            text-decoration: none;
+        }
+
+        .recipe-title-row:hover {
+            color: #0891b2;
+            box-shadow: none;
+        }
+
+        .recipe-title-row.needs-review {
+            border-color: #f2c7e8;
+            border-left-color: #c0268a;
+            background: #fff7fd;
+        }
+
+        .recipe-title-list > .recipe-title-row.is-hidden,
+        .recipe-title-row.is-hidden {
+            display: none !important;
+        }
+
+        .recipe-title-copy {
+            min-width: 0;
+        }
+
+        .recipe-title-copy strong,
+        .recipe-title-copy small {
+            display: block;
+        }
+
+        .recipe-title-copy strong {
+            overflow-wrap: anywhere;
+        }
+
+        .recipe-title-copy small {
+            color: #667;
+            margin-top: 0.15rem;
+        }
+
+        .recipe-title-meta {
+            display: flex;
+            justify-content: end;
+            gap: 0.5rem;
+            align-items: center;
+            flex-wrap: wrap;
+            flex: 0 0 auto;
+        }
+
+        .review-count,
+        .component-type {
+            display: inline-block;
+            padding: 0.12rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.72rem;
+            font-weight: 800;
+        }
+
+        .review-count {
+            background: #f8d8ef;
+            color: #6f1d55;
+        }
+
+        .component-type {
+            background: #0891b2;
+            color: #fff;
+        }
+
+        .component-meat .component-type {
+            background: #c0268a;
+        }
+
+        .component-carb .component-type {
+            background: #f39c12;
+        }
+
+        .component-vegetable .component-type {
+            background: #27ae60;
+        }
+
+        .component-sauce .component-type {
+            background: #8e44ad;
+        }
+
+        .component-soup .component-type {
+            background: #0f766e;
+        }
+
+        .recipe-detail h1 {
+            border-bottom: 0;
+            margin: 0.15rem 0 0.35rem;
+            padding-bottom: 0;
+        }
+
+        .recipe-detail-actions {
+            display: flex;
+            gap: 0.65rem;
+            flex-wrap: wrap;
+            justify-content: end;
+        }
+
+        .recipe-detail-actions .button-link,
+        .recipe-detail-actions button {
+            align-items: center;
+            border-radius: 6px;
+            display: inline-flex;
+            font-family: inherit;
+            font-size: 0.95rem;
+            font-weight: 800;
+            justify-content: center;
+            line-height: 1.2;
+            min-height: 2.65rem;
+            min-width: 9.25rem;
+            padding: 0.65rem 0.9rem;
+            text-align: center;
+        }
+
+        .recipe-detail-actions .inline-form {
+            display: inline-flex;
+        }
+
+        .recipe-detail-grid pre {
+            max-height: none;
+        }
+
+        .muted-text {
+            color: #667;
+        }
+
+        .structured-ingredients-panel {
+            border: 1px solid #d9ecfb;
+            border-radius: 8px;
+            background: #f7fbff;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .structured-ingredients-panel h2 {
+            margin: 0 0 0.75rem;
+            font-size: 1.05rem;
+        }
+
+        .structured-ingredient-list {
+            display: grid;
+            gap: 0.65rem;
+        }
+
+        .structured-ingredient {
+            display: grid;
+            gap: 0.15rem;
+            background: #fff;
+            border: 1px solid #e8e8e8;
+            border-left: 4px solid #0891b2;
+            border-radius: 6px;
+            padding: 0.7rem 0.8rem;
+        }
+
+        .structured-ingredient span,
+        .structured-ingredient small {
+            color: #667;
         }
 
         .recipe-library-card {
@@ -979,12 +3282,30 @@
         }
 
         .recipe-meal-preview pre {
-            max-height: 14rem;
-            overflow: auto;
-            background: #f8f8f8;
-            border: 1px solid #e8e8e8;
-            border-radius: 6px;
-            padding: 0.75rem;
+            max-height: none;
+            overflow: visible;
+            background: transparent;
+            border: 0;
+            border-radius: 0;
+            padding: 0;
+            line-height: 1.65;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        .recipe-steps-list {
+            display: grid;
+            gap: 0.85rem;
+            line-height: 1.65;
+            list-style: none;
+            margin: 0;
+            max-height: none;
+            overflow: visible;
+            padding: 0;
+        }
+
+        .recipe-steps-list li {
+            overflow-wrap: anywhere;
         }
 
         .review-grid {
@@ -1043,6 +3364,75 @@
             gap: 1rem;
         }
 
+        .bad-upload-disclosure {
+            border-top: 1px solid #e8e8e8;
+            margin-top: 1rem;
+            padding-top: 1rem;
+        }
+
+        .bad-upload-disclosure summary {
+            color: #7f1d1d;
+            cursor: pointer;
+            font-weight: 800;
+            margin-bottom: 0.75rem;
+        }
+
+        .compact-import-list {
+            gap: 0.65rem;
+        }
+
+        .compact-import-item {
+            padding: 0.85rem 1rem;
+        }
+
+        .compact-import-item .recipe-pair-header {
+            margin-bottom: 0.5rem;
+        }
+
+        .compact-file-list {
+            display: grid;
+            gap: 0.35rem;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .compact-file-list li {
+            align-items: center;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+        }
+
+        .compact-file-list span:first-child {
+            background: #f1e9ff;
+            border: 1px solid #decdf8;
+            border-radius: 4px;
+            color: #4c1d95;
+            font-size: 0.72rem;
+            font-weight: 800;
+            padding: 0.12rem 0.38rem;
+        }
+
+        .compact-file-list a {
+            color: #4c1d95;
+            font-weight: 800;
+        }
+
+        .compact-file-list small {
+            color: #7f1d1d;
+            flex-basis: 100%;
+        }
+
+        .import-history-list {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .import-history-list h3 {
+            margin: 0 0 0.5rem;
+        }
+
         .extraction-progress-panel {
             border: 1px solid #b7edf4;
             border-left: 4px solid #0891b2;
@@ -1096,6 +3486,28 @@
             border-radius: 8px;
             overflow: hidden;
             background: #fff;
+        }
+
+        .pdf-file-tile {
+            align-items: center;
+            background: #f8f3ff;
+            color: #4c1d95;
+            display: grid;
+            gap: 0.35rem;
+            justify-items: center;
+            min-height: 210px;
+            padding: 2rem 1rem 1rem;
+            text-align: center;
+        }
+
+        .pdf-file-tile strong {
+            font-size: 1.7rem;
+            letter-spacing: 0.08em;
+        }
+
+        .pdf-file-tile a {
+            color: #6d28d9;
+            font-weight: 800;
         }
 
         .side-label {
@@ -1333,6 +3745,413 @@
             gap: 0.75rem;
         }
 
+        .recipe-chat-drawer {
+            position: fixed;
+            right: 1rem;
+            bottom: 1rem;
+            width: min(380px, calc(100vw - 2rem));
+            z-index: 20;
+        }
+
+        .recipe-chat-panel {
+            display: none;
+            background: #fff;
+            border: 1px solid #cae8d4;
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.16);
+            overflow: hidden;
+        }
+
+        .recipe-chat-panel.open {
+            display: grid;
+            grid-template-rows: auto minmax(8rem, 14rem) auto;
+        }
+
+        .recipe-chat-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            align-items: start;
+            background: #edf8f0;
+            border-bottom: 1px solid #cae8d4;
+            padding: 0.8rem;
+        }
+
+        .recipe-chat-header strong {
+            color: #17683a;
+            display: block;
+        }
+
+        .recipe-chat-header small {
+            color: #52616f;
+        }
+
+        .recipe-chat-close {
+            background: transparent;
+            border: 1px solid #b9dfc6;
+            color: #17683a;
+            padding: 0.25rem 0.45rem;
+        }
+
+        .recipe-chat-messages {
+            display: grid;
+            align-content: start;
+            gap: 0.55rem;
+            overflow-y: auto;
+            padding: 0.8rem;
+        }
+
+        .recipe-chat-message {
+            border-radius: 8px;
+            padding: 0.6rem 0.7rem;
+            white-space: pre-wrap;
+        }
+
+        .recipe-chat-message.agent {
+            background: #f7fcf8;
+            border: 1px solid #dff2e5;
+        }
+
+        .recipe-chat-message.user {
+            background: #effcff;
+            border: 1px solid #b7edf4;
+        }
+
+        .recipe-chat-action {
+            justify-self: start;
+            margin-left: 0.2rem;
+        }
+
+        .recipe-chat-form {
+            display: grid;
+            grid-template-columns: auto auto minmax(0, 1fr);
+            align-items: start;
+            gap: 0.5rem;
+            margin: 0;
+            padding: 0.8rem;
+            box-shadow: none;
+            border-top: 1px solid #edf2f5;
+        }
+
+        .recipe-chat-form textarea {
+            grid-column: 1 / -1;
+            min-height: 7rem;
+        }
+
+        .recipe-chat-voice-button {
+            min-width: 2.75rem;
+        }
+
+        .recipe-chat-voice-button.listening {
+            background: #c0268a;
+            border-color: #9d1b70;
+            color: #fff;
+        }
+
+        .recipe-chat-voice-status {
+            color: #52616f;
+            font-size: 0.82rem;
+            grid-column: 1 / -1;
+            line-height: 1.2;
+            min-height: 1rem;
+        }
+
+        .scheduler-note-list {
+            color: #164e63;
+            margin: 0.85rem 0 0;
+            padding-left: 1.25rem;
+        }
+
+        .scheduler-note-list li + li {
+            margin-top: 0.35rem;
+        }
+
+        .scheduler-note-list ul {
+            margin: 0.25rem 0 0;
+            padding-left: 1.1rem;
+        }
+
+        .scheduler-note-list ul li + li {
+            margin-top: 0.15rem;
+        }
+
+        .scheduler-list {
+            gap: 1rem;
+        }
+
+        .scheduler-card {
+            align-items: stretch;
+            background: linear-gradient(180deg, #f0fdff 0%, #ffffff 100%);
+            border: 1px solid #a5f3fc;
+            border-left: 6px solid #0891b2;
+            box-shadow: 0 6px 18px rgba(8, 145, 178, 0.1);
+            display: grid;
+            gap: 0.9rem;
+            grid-template-columns: 1fr;
+            padding: 1.1rem 1.15rem;
+        }
+
+        .scheduler-card-title {
+            border: 0;
+            color: #164e63;
+            font-family: Georgia, 'Times New Roman', serif;
+            font-size: 1.45rem;
+            line-height: 1.15;
+            margin: 0;
+            padding: 0;
+        }
+
+        .scheduler-card-meta {
+            color: #0e7490;
+            display: block;
+            font-size: 0.88rem;
+            font-weight: 800;
+            margin-top: 0.2rem;
+            text-transform: uppercase;
+        }
+
+        .scheduler-card-completed {
+            background: #f8fafc;
+            border-color: #cbd5e1;
+            border-left-color: #64748b;
+            box-shadow: none;
+            opacity: 0.86;
+        }
+
+        .scheduler-card-completed .scheduler-card-title {
+            color: #475569;
+            text-decoration: line-through;
+        }
+
+        .scheduler-card-completed .scheduler-card-meta,
+        .scheduler-card-completed .scheduler-note-list {
+            color: #64748b;
+        }
+
+        .scheduler-item-actions {
+            align-items: center;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            justify-content: flex-start;
+            border-top: 1px solid #cffafe;
+            padding-top: 0.85rem;
+        }
+
+        .scheduler-item-actions .inline-form {
+            margin: 0;
+        }
+
+        .scheduler-upcoming-strip {
+            background: #fff7fd;
+            border: 1px solid #f2c7e8;
+            border-left: 5px solid #c0268a;
+            border-radius: 8px;
+            margin-bottom: 1.25rem;
+            overflow: hidden;
+        }
+
+        .scheduler-upcoming-strip summary {
+            cursor: pointer;
+            list-style: none;
+            padding: 0.95rem 1.1rem;
+        }
+
+        .scheduler-upcoming-strip summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .scheduler-upcoming-strip summary:hover {
+            background: #fff1f8;
+        }
+
+        .scheduler-upcoming-strip h2 {
+            border: 0;
+            color: #9d1b70;
+            font-size: 1.05rem;
+            margin: 0 0 0.45rem;
+            padding: 0;
+        }
+
+        .scheduler-upcoming-strip ul {
+            color: #6f1d55;
+            margin: 0;
+            padding-left: 1.2rem;
+        }
+
+        .scheduler-upcoming-strip[open] summary ul {
+            display: none;
+        }
+
+        .scheduler-upcoming-strip li + li {
+            margin-top: 0.25rem;
+        }
+
+        .scheduler-upcoming-detail {
+            border-top: 1px solid #f2c7e8;
+            display: grid;
+            gap: 0.85rem;
+            padding: 1rem;
+        }
+
+        .scheduler-upcoming-detail .scheduler-card {
+            background: #fff;
+            border-color: #f2c7e8;
+            border-left: 1px solid #f2c7e8;
+            box-shadow: 0 6px 18px rgba(192, 38, 138, 0.09);
+        }
+
+        .scheduler-upcoming-detail .scheduler-card-title {
+            color: #9d1b70;
+        }
+
+        .scheduler-upcoming-detail .scheduler-card-meta {
+            color: #6f1d55;
+        }
+
+        .scheduler-due-overlay {
+            align-items: center;
+            background: rgba(15, 23, 42, 0.46);
+            display: flex;
+            inset: 0;
+            justify-content: center;
+            padding: 1.25rem;
+            position: fixed;
+            z-index: 30;
+        }
+
+        .scheduler-due-overlay.hidden {
+            display: none;
+        }
+
+        .scheduler-due-panel {
+            background: #f8feff;
+            border: 1px solid #67e8f9;
+            border-radius: 8px;
+            box-shadow: 0 24px 70px rgba(8, 47, 73, 0.28);
+            max-height: min(82vh, 680px);
+            max-width: 720px;
+            overflow-y: auto;
+            padding: 1.2rem;
+            width: min(720px, 100%);
+        }
+
+        .scheduler-due-header {
+            display: flex;
+            gap: 1rem;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+
+        .scheduler-due-header h2 {
+            border: 0;
+            color: #164e63;
+            font-family: Georgia, 'Times New Roman', serif;
+            font-size: 1.75rem;
+            line-height: 1.1;
+            margin: 0;
+            padding: 0;
+        }
+
+        .scheduler-due-header p {
+            color: #155e75;
+            margin: 0.25rem 0 0;
+        }
+
+        .scheduler-due-close {
+            align-self: start;
+            background: #fff;
+            border: 1px solid #0891b2;
+            color: #155e75;
+            min-width: 4.5rem;
+        }
+
+        .scheduler-due-close:hover {
+            background: #cffafe;
+            color: #164e63;
+        }
+
+        .undo-toast {
+            align-items: center;
+            background: #111827;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            border-radius: 8px;
+            bottom: 1rem;
+            box-shadow: 0 12px 32px rgba(15, 23, 42, 0.28);
+            color: #fff;
+            display: flex;
+            gap: 0.75rem;
+            left: 50%;
+            padding: 0.75rem 0.85rem;
+            position: fixed;
+            transform: translateX(-50%);
+            z-index: 45;
+        }
+
+        .undo-toast.hidden {
+            display: none;
+        }
+
+        .undo-toast form {
+            background: transparent;
+            border: 0;
+            box-shadow: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .undo-toast button {
+            background: #fff;
+            border: 1px solid #fff;
+            color: #111827;
+            padding: 0.45rem 0.7rem;
+        }
+
+        .undo-toast button:hover {
+            background: #e5e7eb;
+            color: #111827;
+        }
+
+        .planner-shell-page button.danger-button {
+            background: #fff;
+            border-color: #c0268a;
+            color: #9d1b70;
+        }
+
+        .planner-shell-page button.danger-button:hover {
+            background: #fff1f8;
+            border-color: #9d1b70;
+            color: #831843;
+        }
+
+        .recipe-change-log {
+            display: grid;
+            gap: 0.75rem;
+        }
+
+        .recipe-change-entry {
+            background: #f7fcf8;
+            border: 1px solid #cae8d4;
+            border-left: 4px solid #27ae60;
+            border-radius: 8px;
+            padding: 0.85rem 1rem;
+        }
+
+        .recipe-change-entry strong {
+            color: #17683a;
+            display: block;
+        }
+
+        .recipe-change-entry small {
+            color: #52616f;
+            display: block;
+            margin-top: 0.2rem;
+        }
+
+        .recipe-change-entry p {
+            margin: 0.55rem 0 0;
+        }
+
         .work-packet {
             background: #1f2933;
             color: #f5f7fa;
@@ -1341,6 +4160,326 @@
             white-space: pre-wrap;
             font-family: Consolas, 'Courier New', monospace;
             font-size: 0.92rem;
+        }
+
+        .recipe-shell-page .container .detail-section,
+        .recipe-shell-page .container .recipe-home-hero,
+        .recipe-shell-page .container .component-picker-panel,
+        .recipe-shell-page .container .component-library-section,
+        .recipe-shell-page .container .review-notes,
+        .recipe-shell-page .container .extraction-progress-panel,
+        .recipe-shell-page .container .metric,
+        .recipe-shell-page .container .recipes-to-cook-panel {
+            background: #fbf7ff;
+            border-color: #decdf8;
+            border-left-color: #7c3aed;
+        }
+
+        .recipe-shell-page .container .section-header,
+        .recipe-shell-page .container .featured-meal-action,
+        .recipe-shell-page .container .component-library-section-header,
+        .recipe-shell-page .container .meal-summary-header,
+        .recipe-shell-page .container .grocery-checklist-heading,
+        .recipe-shell-page .container .recipe-pair-header,
+        .recipe-shell-page .container .recipe-extraction {
+            border-color: #decdf8;
+            border-bottom-color: #decdf8;
+            border-top-color: #decdf8;
+        }
+
+        .recipe-shell-page .container .section-header h2,
+        .recipe-shell-page .container .priority-label,
+        .recipe-shell-page .container .component-library-section-header h3,
+        .recipe-shell-page .container .meal-summary-header strong,
+        .recipe-shell-page .container .complete-meal-placeholder,
+        .recipe-shell-page .container .component-filter-label,
+        .recipe-shell-page .container .selected-meal-item small,
+        .recipe-shell-page .container .review-count,
+        .recipe-shell-page .container .metric-value,
+        .recipe-shell-page .container .metric-label,
+        .recipe-shell-page .container .recipe-pair-header strong,
+        .recipe-shell-page .container .recipe-extraction h3,
+        .recipe-shell-page .container .recipe-section strong {
+            color: #4c1d95;
+        }
+
+        .recipe-shell-page .container .complete-meal-featured-card,
+        .recipe-shell-page .container .complete-meal-browser,
+        .recipe-shell-page .container .recipe-title-row,
+        .recipe-shell-page .container .component-picker-row,
+        .recipe-shell-page .container .selected-meal-item,
+        .recipe-shell-page .container .grocery-item,
+        .recipe-shell-page .container .recipe-to-cook-item,
+        .recipe-shell-page .container .image-tile,
+        .recipe-shell-page .container .recipe-pair,
+        .recipe-shell-page .container .recipe-extraction pre,
+        .recipe-shell-page .container .review-list,
+        .recipe-shell-page .container .upload-form,
+        .recipe-shell-page .container form {
+            border-color: #decdf8;
+        }
+
+        .recipe-shell-page .container .component-library-section-header,
+        .recipe-shell-page .container .component-library-list,
+        .recipe-shell-page .container .selected-meal-item,
+        .recipe-shell-page .container .grocery-list-panel,
+        .recipe-shell-page .container .recipe-title-row,
+        .recipe-shell-page .container .recipe-pair,
+        .recipe-shell-page .container .recipe-extraction pre,
+        .recipe-shell-page .container .review-list,
+        .recipe-shell-page .container .image-tile,
+        .recipe-shell-page .container .upload-form,
+        .recipe-shell-page .container .recipe-section,
+        .recipe-shell-page .container .success-panel {
+            background: #f5edff;
+        }
+
+        .recipe-shell-page .container .recipe-pair-header,
+        .recipe-shell-page .container .image-tile div,
+        .recipe-shell-page .container .image-assignment-form,
+        .recipe-shell-page .container .recipe-section div,
+        .recipe-shell-page .container .import-subsection {
+            background: #efe2ff;
+        }
+
+        .recipe-shell-page .container .import-subsection {
+            border: 1px solid #decdf8;
+            border-radius: 8px;
+            display: grid;
+            gap: 0.85rem;
+            margin-top: 1rem;
+            padding: 0.9rem;
+        }
+
+        .recipe-shell-page .container .import-subsection h3 {
+            color: #4c1d95;
+            margin: 0;
+        }
+
+        .recipe-shell-page .container .import-subsection-header {
+            margin-bottom: 0;
+            padding-bottom: 0.75rem;
+        }
+
+        .recipe-shell-page .container .metric {
+            box-shadow: 0 2px 8px rgba(76, 29, 149, 0.08);
+        }
+
+        .recipe-shell-page .container .recipe-pair {
+            border-left: 4px solid #7c3aed;
+        }
+
+        .recipe-shell-page .container .recipe-section {
+            border-left-color: #7c3aed;
+        }
+
+        .recipe-shell-page .container .missing-side {
+            background: #fbf7ff;
+            border-style: dashed;
+        }
+
+        .recipe-shell-page .container .side-label {
+            background: rgba(59, 7, 100, 0.92);
+        }
+
+        .recipe-shell-page .container .image-assignment-form label,
+        .recipe-shell-page .container .recipe-pair-header small,
+        .recipe-shell-page .container .recipe-section small,
+        .recipe-shell-page .container .image-tile small {
+            color: #6b4b8d;
+        }
+
+        .recipe-shell-page .container input,
+        .recipe-shell-page .container select,
+        .recipe-shell-page .container textarea {
+            border-color: #c4b5fd;
+        }
+
+        .recipe-shell-page .container input:focus,
+        .recipe-shell-page .container select:focus,
+        .recipe-shell-page .container textarea:focus {
+            border-color: #7c3aed;
+            box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.12);
+            outline: none;
+        }
+
+        .recipe-shell-page .container button:not(.recipe-chat-close),
+        .recipe-shell-page .container .button-link,
+        .recipe-shell-page .container .component-filter.active,
+        .recipe-shell-page .container .component-filter:hover,
+        .recipe-shell-page .container .select-component-button:hover,
+        .recipe-shell-page .container .select-component-button.selected,
+        .recipe-shell-page .container .meal-summary-header span,
+        .recipe-shell-page .container .recipe-browser-tab span {
+            background: #7c3aed;
+            border-color: #6d28d9;
+            color: #fff;
+        }
+
+        .recipe-shell-page .container button:not(.recipe-chat-close):hover,
+        .recipe-shell-page .container .button-link:hover {
+            background: #6d28d9;
+            color: #fff;
+        }
+
+        .recipe-shell-page .container button.secondary,
+        .recipe-shell-page .container .secondary-link,
+        .recipe-shell-page .container .secondary-button,
+        .recipe-shell-page .container .component-filter,
+        .recipe-shell-page .container .select-component-button,
+        .recipe-shell-page .container .selected-meal-remove,
+        .recipe-shell-page .container .delete-disclosure summary {
+            background: #fff;
+            border-color: #7c3aed;
+            color: #4c1d95;
+        }
+
+        .recipe-shell-page .container button.secondary:hover,
+        .recipe-shell-page .container .secondary-link:hover,
+        .recipe-shell-page .container .secondary-button:hover,
+        .recipe-shell-page .container .selected-meal-remove:hover,
+        .recipe-shell-page .container .delete-disclosure summary:hover {
+            background: #f1e9ff;
+            color: #4c1d95;
+        }
+
+        .recipe-shell-page .container button.component-filter,
+        .recipe-shell-page .container button.select-component-button,
+        .recipe-shell-page .container button.selected-meal-remove {
+            background: #fff;
+            border-color: #7c3aed;
+            color: #4c1d95;
+        }
+
+        .recipe-shell-page .container button.component-filter:hover,
+        .recipe-shell-page .container button.component-filter.active,
+        .recipe-shell-page .container button.select-component-button:hover,
+        .recipe-shell-page .container button.select-component-button.selected {
+            background: #7c3aed;
+            border-color: #6d28d9;
+            color: #fff;
+        }
+
+        .recipe-shell-page .container button.selected-meal-remove:hover {
+            background: #f1e9ff;
+            color: #4c1d95;
+        }
+
+        .recipe-shell-page .container .progress-fill,
+        .recipe-shell-page .container .progress-fill-active {
+            background: #7c3aed;
+        }
+
+        .recipe-shell-page .recipe-app-heading {
+            background: #3b0764;
+            border-bottom-color: #581c87;
+        }
+
+        .planner-shell-page .focus-panel,
+        .planner-shell-page .app-shortcuts,
+        .planner-shell-page .dashboard-two-column > section {
+            background: var(--page-theme-panel);
+            border: 1px solid var(--page-theme-border);
+            border-left: 5px solid var(--page-theme-color);
+            border-radius: 8px;
+            box-shadow: 0 2px 8px var(--page-theme-shadow);
+            padding: 1.5rem;
+        }
+
+        .planner-shell-page .focus-panel {
+            border-top: 1px solid var(--page-theme-border);
+        }
+
+        .planner-shell-page .section-header,
+        .planner-shell-page .focus-next-steps {
+            border-color: var(--page-theme-border);
+            border-bottom-color: var(--page-theme-border);
+            border-top-color: var(--page-theme-border);
+        }
+
+        .planner-shell-page .section-header h2,
+        .planner-shell-page .priority-label,
+        .planner-shell-page .focus-meta,
+        .planner-shell-page .metric-value,
+        .planner-shell-page .dashboard-two-column h2,
+        .planner-shell-page .app-shortcuts h2 {
+            color: var(--page-theme-text);
+        }
+
+        .planner-shell-page .focus-task a:hover,
+        .planner-shell-page .dashboard-action-header a:hover {
+            color: var(--page-theme-color);
+        }
+
+        .planner-shell-page .metric,
+        .planner-shell-page .quiet-list a {
+            background: var(--page-theme-panel);
+            border-color: var(--page-theme-border);
+        }
+
+        .planner-shell-page .action,
+        .planner-shell-page .blocker {
+            background: #fff;
+            border-color: #d8eef2;
+        }
+
+        .planner-shell-page .action-high,
+        .planner-shell-page .blocker-high {
+            border-left-color: #c0268a;
+        }
+
+        .planner-shell-page .action-medium,
+        .planner-shell-page .blocker-medium {
+            border-left-color: #f39c12;
+        }
+
+        .planner-shell-page .action-low,
+        .planner-shell-page .blocker-low {
+            border-left-color: var(--page-theme-color);
+        }
+
+        .planner-shell-page .metric {
+            box-shadow: 0 2px 8px var(--page-theme-shadow);
+        }
+
+        .planner-shell-page .task-progress-fill,
+        .planner-shell-page .progress-fill {
+            background: var(--page-theme-color);
+        }
+
+        .planner-shell-page .button-link,
+        .planner-shell-page button:not(.recipe-chat-close) {
+            background: var(--page-theme-color);
+            border-color: var(--shell-border);
+            color: #fff;
+        }
+
+        .planner-shell-page .button-link:hover,
+        .planner-shell-page button:not(.recipe-chat-close):hover {
+            background: var(--shell-border);
+            color: #fff;
+        }
+
+        .planner-shell-page .secondary-link,
+        .planner-shell-page button.secondary {
+            background: #fff;
+            border-color: var(--page-theme-color);
+            color: var(--page-theme-text);
+        }
+
+        body .app-shell > .app-shell-band a,
+        body .app-shell > .app-shell-band button {
+            background: #fff;
+            border-color: var(--shell-control-border);
+            color: var(--shell-control-text);
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+        }
+
+        body .app-shell > .app-shell-band a:hover,
+        body .app-shell > .app-shell-band button:hover {
+            background: var(--shell-control-hover);
+            border-color: var(--shell-control-hover-border);
+            color: var(--shell-control-text);
         }
 
         @media (max-width: 850px) {
@@ -1367,10 +4506,55 @@
                 text-align: center;
             }
 
-            .recipe-home-hero,
-            .recipe-library-card-header {
+            .scheduler-item-actions {
                 align-items: stretch;
                 flex-direction: column;
+            }
+
+            .scheduler-item-actions button {
+                width: 100%;
+            }
+
+            .scheduler-due-header {
+                flex-direction: column;
+            }
+
+            .scheduler-due-close {
+                width: 100%;
+            }
+
+            .recipe-home-hero,
+            .recipe-library-card-header,
+            .recipe-title-row {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .recipe-browser-tabs {
+                grid-template-columns: 1fr;
+            }
+
+            .component-picker-row {
+                display: flex;
+                align-items: center;
+            }
+
+            .component-picker-row .recipe-title-row {
+                align-items: center;
+                flex-direction: row;
+            }
+
+            .component-picker-row .select-component-button {
+                flex: 0 0 1.55rem;
+                height: 1.55rem;
+                width: 1.55rem;
+                min-width: 1.55rem;
+                max-width: 1.55rem;
+            }
+
+            .recipe-title-meta,
+            .recipe-detail-actions {
+                justify-content: start;
             }
 
             .recipe-meal-preview {
@@ -1416,6 +4600,81 @@
                 grid-template-columns: 1fr;
             }
 
+            .app-nav {
+                padding: 0.75rem 1rem;
+            }
+
+            .recipe-app-heading,
+            .planner-app-heading {
+                padding-left: 1rem;
+                padding-right: 1rem;
+            }
+
+            .app-shell {
+                padding-left: 1rem;
+                padding-right: 1rem;
+            }
+
+            .app-shell-band {
+                margin-left: -1rem;
+                margin-right: -1rem;
+                padding-left: 1rem;
+                padding-right: 1rem;
+            }
+
+            .recipe-chat-form {
+                grid-template-columns: 1fr;
+            }
+
+            .app-shell-band {
+                flex-wrap: nowrap;
+            }
+
+            .meal-plan-item {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .grocery-list-record {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .grocery-list-record-actions {
+                justify-content: flex-start;
+            }
+
+            .recipe-to-cook-item {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .manual-grocery-detail-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .manual-grocery-form {
+                justify-content: stretch;
+            }
+
+            .manual-grocery-form button {
+                width: 100%;
+            }
+
+            .recipe-home-actions {
+                justify-content: stretch;
+            }
+
+            .recipe-home-actions .button-link {
+                text-align: center;
+                width: 100%;
+            }
+
+            .delete-disclosure form {
+                left: 0;
+                right: auto;
+            }
+
             .recipe-pair-images {
                 grid-template-columns: 1fr;
             }
@@ -1430,16 +4689,563 @@
         }
     </style>
 </head>
-<body>
-    <nav>
-        <a href="/" style="font-size: 1.2rem; font-weight: bold;">📊 Project Agent</a>
-        <a href="/">Dashboard</a>
-        <a href="/chat">Chat</a>
-        <a href="/projects">Projects</a>
-    </nav>
-    
+{% set show_recipe_shell = recipe_app is defined and request is defined and request.url.path.startswith("/apps/recipes") %}
+{% set show_planner_shell = request is defined and (request.url.path.startswith("/apps/assistant") or request.url.path.startswith("/apps/planner") or request.url.path.startswith("/dashboard")) %}
+{% set show_launcher_shell = request is defined and (request.url.path == "/" or request.url.path == "/apps") %}
+{% set show_auth_shell = request is defined and (request.url.path.startswith("/login") or request.url.path.startswith("/register")) %}
+{% set show_global_nav = not show_recipe_shell and not show_planner_shell and not show_launcher_shell %}
+{% set show_dieter_chat = request is defined and not show_auth_shell %}
+{% set page_theme = none %}
+{% if show_recipe_shell %}
+    {% set page_theme = {
+        "color": "#3b0764",
+        "border": "#decdf8",
+        "panel": "#fbf7ff",
+        "panel_strong": "#f1e9ff",
+        "text": "#4c1d95",
+        "hover": "#f1e9ff",
+        "subtitle": "#ddd6fe"
+    } %}
+{% elif show_planner_shell %}
+    {% set page_theme = {
+        "color": "#164e63",
+        "border": "#a5f3fc",
+        "panel": "#ecfeff",
+        "panel_strong": "#cffafe",
+        "text": "#155e75",
+        "hover": "#cffafe",
+        "subtitle": "#cffafe"
+    } %}
+{% elif show_launcher_shell %}
+    {% set page_theme = {
+        "color": "#334155",
+        "border": "#cbd5e1",
+        "panel": "#f1f5f9",
+        "panel_strong": "#e2e8f0",
+        "text": "#334155",
+        "hover": "#e2e8f0",
+        "subtitle": "#e2e8f0"
+    } %}
+{% endif %}
+<body class="{% if show_recipe_shell %}recipe-shell-page{% endif %}{% if show_planner_shell %} planner-shell-page{% endif %}{% if show_launcher_shell %} launcher-shell-page{% endif %}"{% if page_theme %} style="--page-theme-color: {{ page_theme.color }}; --page-theme-border: {{ page_theme.border }}; --page-theme-panel: {{ page_theme.panel }}; --page-theme-panel-strong: {{ page_theme.panel_strong }}; --page-theme-text: {{ page_theme.text }}; --page-theme-hover: {{ page_theme.hover }}; --page-theme-subtitle: {{ page_theme.subtitle }};"{% endif %}>
+    {% if show_global_nav %}
+        <nav>
+            <a href="/" style="font-size: 1.2rem; font-weight: bold;">Dieter</a>
+            <a href="/apps/assistant/planner">Assistant</a>
+            <a href="/apps/recipes">Kitchen</a>
+            {% if show_dieter_chat %}
+                <button type="button" data-recipe-chat-open>Ask Dieter</button>
+            {% endif %}
+            {% if request is defined and request.state.current_user %}
+                <form method="post" action="/logout" class="inline-form">
+                    <button type="submit" class="secondary compact">Log Out</button>
+                </form>
+            {% endif %}
+        </nav>
+    {% endif %}
+    {% if show_recipe_shell %}
+        <section class="app-shell app-shell-recipe recipe-app-heading">
+            <div class="app-shell-top recipe-app-heading-inner">
+                <div>
+                    <h1><a href="/">Dieter Kitchen</a></h1>
+                    <p>Plan meals, build grocery lists, and interactive recipes</p>
+                </div>
+                <div class="app-shell-actions recipe-app-actions">
+                    <button type="button" class="kitchen-chat-button" data-recipe-chat-open>Ask Dieter</button>
+                    <details class="app-menu recipe-app-menu">
+                        <summary aria-label="Open Kitchen navigation">
+                            <span class="app-menu-icon recipe-app-menu-icon" aria-hidden="true">
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                            </span>
+                        </summary>
+                        <div class="app-nav" aria-label="Recipe app navigation">
+                            <a href="/apps/recipes">Meal Plan</a>
+                            <a href="/apps/recipes/grocery-lists">Past Grocery Lists</a>
+                            <a href="/apps/recipes/create-meal">Create New Meal</a>
+                            <a href="/apps/recipes/manage">Manage</a>
+                            {% if recipe_app.import_url %}
+                                <a href="{{ recipe_app.import_url }}">Import Recipes</a>
+                            {% endif %}
+                        </div>
+                    </details>
+                </div>
+            </div>
+            <div class="app-shell-band recipe-app-subnav" aria-label="Kitchen utility navigation">
+                <a href="/">Home</a>
+                <form method="post" action="/logout" class="inline-form">
+                    <button type="submit">Log Out</button>
+                </form>
+            </div>
+        </section>
+    {% elif show_planner_shell %}
+        <section class="app-shell app-shell-planner planner-app-heading">
+            <div class="app-shell-top planner-app-heading-inner">
+                <div>
+                    <h1><a href="/">Dieter Assistant</a></h1>
+                    <p>Plan projects, remember agenda items, and keep life moving.</p>
+                </div>
+                <div class="app-shell-actions recipe-app-actions">
+                    <button type="button" class="planner-chat-button" data-recipe-chat-open>Ask Dieter</button>
+                    <details class="app-menu recipe-app-menu">
+                        <summary aria-label="Open Assistant navigation">
+                            <span class="app-menu-icon recipe-app-menu-icon" aria-hidden="true">
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                            </span>
+                        </summary>
+                        <div class="app-nav" aria-label="Assistant section navigation">
+                            <a href="/apps/assistant/planner">Planner</a>
+                            <a href="/apps/assistant/scheduler">Scheduler</a>
+                        </div>
+                    </details>
+                </div>
+            </div>
+            <div class="app-shell-band recipe-app-subnav" aria-label="Assistant utility navigation">
+                <a href="/">Home</a>
+                <form method="post" action="/logout" class="inline-form">
+                    <button type="submit">Log Out</button>
+                </form>
+            </div>
+        </section>
+    {% elif show_launcher_shell %}
+        <section class="app-shell app-shell-launcher">
+            <div class="app-shell-top">
+                <div>
+                    <h1><a href="/">Dieter</a></h1>
+                    <p>Open an app or ask Dieter to help from here.</p>
+                </div>
+                <div class="app-shell-actions recipe-app-actions">
+                    <button type="button" class="planner-chat-button" data-recipe-chat-open>Ask Dieter</button>
+                </div>
+            </div>
+            <div class="app-shell-band app-nav" aria-label="Dieter navigation">
+                <form method="post" action="/logout" class="inline-form">
+                    <button type="submit">Log Out</button>
+                </form>
+            </div>
+        </section>
+    {% endif %}
+
+    {% if scheduler_due is defined and scheduler_due.due_items %}
+        <aside class="scheduler-due-overlay" data-scheduler-due-overlay aria-label="Due scheduler items">
+            <section class="scheduler-due-panel">
+                <div class="scheduler-due-header">
+                    <div>
+                        <h2>Due Today</h2>
+                        <p>These are ready for attention now.</p>
+                    </div>
+                    <button type="button" class="scheduler-due-close" data-scheduler-due-close>Close</button>
+                </div>
+                <div class="task-list scheduler-list">
+                    {% for item in scheduler_due.due_items %}
+                        <article class="task-item scheduler-card">
+                            <div class="task-copy">
+                                <h3 class="scheduler-card-title">{{ item.title }}</h3>
+                                <small class="scheduler-card-meta">
+                                    {{ item.context_label or "General" }}{% if item.scheduled_for %} - {{ item.scheduled_for }}{% endif %}
+                                </small>
+                                {% if item.notes %}
+                                    <ul class="scheduler-note-list">
+                                        {% for note in scheduler_note_tree(item.notes) %}
+                                            <li>
+                                                {{ note.text }}
+                                                {% if note.children %}
+                                                    <ul>
+                                                        {% for child in note.children %}
+                                                            <li>{{ child }}</li>
+                                                        {% endfor %}
+                                                    </ul>
+                                                {% endif %}
+                                            </li>
+                                        {% endfor %}
+                                    </ul>
+                                {% endif %}
+                            </div>
+                            <div class="scheduler-item-actions">
+                                <form method="post" action="/scheduler/{{ item.id }}/complete" class="inline-form">
+                                    <input type="hidden" name="next" value="{{ request.url.path }}">
+                                    <button type="submit" class="secondary compact">Done</button>
+                                </form>
+                                <button type="button" class="secondary compact" data-scheduler-due-close>Close</button>
+                                <form method="post" action="/scheduler/{{ item.id }}/delete" class="inline-form">
+                                    <input type="hidden" name="next" value="{{ request.url.path }}">
+                                    <button type="submit" class="secondary compact danger-button">Delete</button>
+                                </form>
+                            </div>
+                        </article>
+                    {% endfor %}
+                </div>
+            </section>
+        </aside>
+    {% endif %}
+
     <div class="container">
+        {% if scheduler_due is defined and scheduler_due.upcoming_items %}
+            <details class="scheduler-upcoming-strip" data-scheduler-upcoming-panel>
+                <summary aria-label="Coming up">
+                    <h2>Coming Up</h2>
+                    <ul>
+                        {% for item in scheduler_due.upcoming_items[:5] %}
+                            <li>{{ item.title }}</li>
+                        {% endfor %}
+                    </ul>
+                </summary>
+                <div class="scheduler-upcoming-detail">
+                    {% for item in scheduler_due.upcoming_items[:5] %}
+                        <article class="task-item scheduler-card">
+                            <div class="task-copy">
+                                <h3 class="scheduler-card-title">{{ item.title }}</h3>
+                                <small class="scheduler-card-meta">
+                                    {{ item.context_label or "General" }}{% if item.scheduled_for %} - {{ item.scheduled_for }}{% endif %}
+                                </small>
+                                {% if item.notes %}
+                                    <ul class="scheduler-note-list">
+                                        {% for note in scheduler_note_tree(item.notes) %}
+                                            <li>
+                                                {{ note.text }}
+                                                {% if note.children %}
+                                                    <ul>
+                                                        {% for child in note.children %}
+                                                            <li>{{ child }}</li>
+                                                        {% endfor %}
+                                                    </ul>
+                                                {% endif %}
+                                            </li>
+                                        {% endfor %}
+                                    </ul>
+                                {% endif %}
+                            </div>
+                            <div class="scheduler-item-actions">
+                                <form method="post" action="/scheduler/{{ item.id }}/complete" class="inline-form">
+                                    <input type="hidden" name="next" value="{{ request.url.path }}">
+                                    <button type="submit" class="secondary compact">Done</button>
+                                </form>
+                                <button type="button" class="secondary compact" data-scheduler-upcoming-close>Close</button>
+                                <form method="post" action="/scheduler/{{ item.id }}/delete" class="inline-form">
+                                    <input type="hidden" name="next" value="{{ request.url.path }}">
+                                    <button type="submit" class="secondary compact danger-button">Delete</button>
+                                </form>
+                            </div>
+                        </article>
+                    {% endfor %}
+                </div>
+            </details>
+        {% endif %}
         {% block content %}{% endblock %}
     </div>
+    {% if request is defined and request.query_params.get("undo_scheduler_id") %}
+        <aside class="undo-toast" data-undo-toast>
+            <span>Marked done.</span>
+            <form method="post" action="/scheduler/{{ request.query_params.get('undo_scheduler_id') }}/reopen">
+                <input type="hidden" name="next" value="{{ request.url.path }}">
+                <button type="submit">Undo</button>
+            </form>
+        </aside>
+    {% endif %}
+    {% if show_dieter_chat %}
+        <aside class="recipe-chat-drawer" aria-label="Recipe chat">
+            <div class="recipe-chat-panel" data-recipe-chat-panel>
+                <div class="recipe-chat-header">
+                    <div>
+                        <strong>Ask Dieter</strong>
+                        <small>Ask a question, plan your work, or draft a recipe change.</small>
+                    </div>
+                    <button type="button" class="recipe-chat-close" data-recipe-chat-close aria-label="Close recipe chat">Close</button>
+                </div>
+                <div class="recipe-chat-messages" data-recipe-chat-messages>
+                    <div class="recipe-chat-message agent">Tell me what you want to plan, cook, or change.</div>
+                </div>
+                <form class="recipe-chat-form" data-recipe-chat-form>
+                    <textarea data-recipe-chat-input placeholder="Example: Help me pick what to work on, or update this recipe note." required></textarea>
+                    <button type="button" class="recipe-chat-voice-button" data-recipe-chat-voice aria-label="Dictate message" title="Dictate message">Mic</button>
+                    <button type="submit">Send</button>
+                    <small class="recipe-chat-voice-status" data-recipe-chat-voice-status aria-live="polite"></small>
+                </form>
+            </div>
+        </aside>
+    {% endif %}
+    <script>
+        (() => {
+            document.querySelectorAll("[data-scheduler-due-close]").forEach((button) => {
+                button.addEventListener("click", () => {
+                    document.querySelector("[data-scheduler-due-overlay]")?.classList.add("hidden");
+                });
+            });
+
+            document.querySelectorAll("[data-scheduler-upcoming-close]").forEach((button) => {
+                button.addEventListener("click", () => {
+                    const panel = button.closest("[data-scheduler-upcoming-panel]");
+                    if (panel) {
+                        panel.open = false;
+                    }
+                });
+            });
+
+            const undoToast = document.querySelector("[data-undo-toast]");
+            if (undoToast) {
+                window.setTimeout(() => {
+                    undoToast.classList.add("hidden");
+                }, 3000);
+            }
+
+            const panel = document.querySelector("[data-recipe-chat-panel]");
+            if (!panel) {
+                return;
+            }
+            const messages = document.querySelector("[data-recipe-chat-messages]");
+            const form = document.querySelector("[data-recipe-chat-form]");
+            const input = document.querySelector("[data-recipe-chat-input]");
+            const sendButton = form?.querySelector('button[type="submit"]');
+            const openButtons = document.querySelectorAll("[data-recipe-chat-open]");
+            const closeButton = document.querySelector("[data-recipe-chat-close]");
+            const voiceButton = document.querySelector("[data-recipe-chat-voice]");
+            const voiceStatus = document.querySelector("[data-recipe-chat-voice-status]");
+            const history = [];
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            let recognition = null;
+            let isListening = false;
+            let keepVoiceOpen = false;
+            let voiceBaseValue = "";
+            let voiceSessionText = "";
+            let voiceRestartTimer = null;
+            let voiceNeedsReview = false;
+            let voiceReviewConfirmed = false;
+            const voiceRestartDelayMs = 60;
+
+            const setVoiceStatus = (message = "") => {
+                if (voiceStatus) {
+                    voiceStatus.textContent = message;
+                }
+            };
+
+            const setVoiceListening = (listening) => {
+                isListening = listening;
+                voiceButton?.classList.toggle("listening", listening);
+                if (voiceButton) {
+                    voiceButton.textContent = listening ? "Stop" : "Mic";
+                    voiceButton.setAttribute("aria-pressed", listening ? "true" : "false");
+                }
+                setVoiceStatus(listening ? "Listening..." : "");
+            };
+
+            const addRecipeChatMessage = (role, content) => {
+                const node = document.createElement("div");
+                node.className = `recipe-chat-message ${role}`;
+                node.textContent = content;
+                messages.appendChild(node);
+                messages.scrollTop = messages.scrollHeight;
+                return node;
+            };
+
+            const addRecipeChatAction = (href, label) => {
+                const node = document.createElement("a");
+                node.className = "button-link secondary-link recipe-chat-action";
+                node.href = href;
+                node.textContent = label;
+                messages.appendChild(node);
+                messages.scrollTop = messages.scrollHeight;
+            };
+
+            openButtons.forEach((button) => {
+                button.addEventListener("click", () => {
+                    panel.classList.add("open");
+                    input.focus();
+                });
+            });
+
+            closeButton?.addEventListener("click", () => {
+                panel.classList.remove("open");
+            });
+
+            const stopVoiceInput = () => {
+                keepVoiceOpen = false;
+                window.clearTimeout(voiceRestartTimer);
+                voiceRestartTimer = null;
+                try {
+                    recognition?.abort();
+                } catch (error) {
+                    recognition?.stop();
+                }
+                recognition = null;
+                setVoiceListening(false);
+                if (voiceNeedsReview) {
+                    setVoiceStatus("Review the dictated text before sending.");
+                }
+            };
+
+            const startVoiceSegment = () => {
+                if (!SpeechRecognition || !keepVoiceOpen) {
+                    return;
+                }
+
+                recognition = new SpeechRecognition();
+                recognition.continuous = false;
+                recognition.interimResults = false;
+                recognition.lang = "en-US";
+                let segmentCaptured = false;
+
+                recognition.addEventListener("result", (event) => {
+                    if (segmentCaptured) {
+                        return;
+                    }
+                    const result = event.results[event.resultIndex] || event.results[0];
+                    const phrase = result?.[0]?.transcript?.trim() || "";
+                    if (!phrase) {
+                        setVoiceStatus("Listening...");
+                        return;
+                    }
+                    segmentCaptured = true;
+                    voiceSessionText = phrase;
+                    const spacer = voiceBaseValue && voiceSessionText ? " " : "";
+                    input.value = `${voiceBaseValue}${spacer}${voiceSessionText}`;
+                    voiceNeedsReview = true;
+                    voiceReviewConfirmed = false;
+                    if (sendButton) {
+                        sendButton.textContent = "Send";
+                    }
+                });
+
+                recognition.addEventListener("end", () => {
+                    recognition = null;
+                    isListening = false;
+                    if (keepVoiceOpen) {
+                        voiceBaseValue = input.value.trim();
+                        voiceSessionText = "";
+                        setVoiceStatus("Listening...");
+                        window.clearTimeout(voiceRestartTimer);
+                        voiceRestartTimer = window.setTimeout(startVoiceSegment, voiceRestartDelayMs);
+                    } else {
+                        setVoiceListening(false);
+                        input.focus();
+                    }
+                });
+
+                recognition.addEventListener("error", (event) => {
+                    recognition = null;
+                    isListening = false;
+                    if (event.error === "no-speech" && keepVoiceOpen) {
+                        voiceBaseValue = input.value.trim();
+                        voiceSessionText = "";
+                        setVoiceStatus("Listening...");
+                        window.clearTimeout(voiceRestartTimer);
+                        voiceRestartTimer = window.setTimeout(startVoiceSegment, voiceRestartDelayMs);
+                        return;
+                    }
+                    keepVoiceOpen = false;
+                    setVoiceListening(false);
+                    setVoiceStatus(event.error === "not-allowed" ? "Microphone permission was blocked." : "Voice input stopped.");
+                });
+
+                try {
+                    recognition.start();
+                    setVoiceListening(true);
+                } catch (error) {
+                    recognition = null;
+                    keepVoiceOpen = false;
+                    setVoiceListening(false);
+                    setVoiceStatus("Voice input could not start.");
+                }
+            };
+
+            if (!SpeechRecognition && voiceButton) {
+                voiceButton.disabled = true;
+                voiceButton.title = "Voice input is not available in this browser";
+                setVoiceStatus("Voice input unavailable in this browser.");
+            }
+
+            voiceButton?.addEventListener("click", () => {
+                if (!SpeechRecognition) {
+                    setVoiceStatus("Voice input unavailable in this browser.");
+                    return;
+                }
+
+                if (isListening || keepVoiceOpen) {
+                    stopVoiceInput();
+                    return;
+                }
+
+                voiceBaseValue = input.value.trim();
+                voiceSessionText = "";
+                voiceNeedsReview = false;
+                voiceReviewConfirmed = false;
+                if (sendButton) {
+                    sendButton.textContent = "Send";
+                }
+                keepVoiceOpen = true;
+                startVoiceSegment();
+            });
+
+            form?.addEventListener("submit", async (event) => {
+                event.preventDefault();
+                const content = input.value.trim();
+                if (!content) {
+                    return;
+                }
+                if (voiceNeedsReview && !voiceReviewConfirmed) {
+                    if (isListening || keepVoiceOpen) {
+                        stopVoiceInput();
+                    }
+                    voiceReviewConfirmed = true;
+                    if (sendButton) {
+                        sendButton.textContent = "Confirm";
+                    }
+                    setVoiceStatus("Review the dictated text, edit if needed, then press Confirm.");
+                    input.focus();
+                    return;
+                }
+
+                addRecipeChatMessage("user", content);
+                history.push({role: "user", content});
+                input.value = "";
+                input.disabled = true;
+                voiceNeedsReview = false;
+                voiceReviewConfirmed = false;
+                if (sendButton) {
+                    sendButton.textContent = "Send";
+                }
+                if (isListening || keepVoiceOpen) {
+                    stopVoiceInput();
+                }
+
+                const endpoint = "/api/dieter/action";
+                const requestBody = {
+                    content,
+                    page_title: document.title,
+                    page_url: `${window.location.pathname}${window.location.search}${window.location.hash}`,
+                    conversation_history: history.slice(-8),
+                };
+
+                try {
+                    const response = await fetch(endpoint, {
+                        method: "POST",
+                        headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify(requestBody),
+                    });
+                    const data = await response.json();
+                    const answer = data.assistant_message || data.response || data.detail || "I could not produce a response.";
+                    addRecipeChatMessage("agent", answer);
+                    if (data.redirect_url && data.redirect_label) {
+                        addRecipeChatAction(data.redirect_url, data.redirect_label);
+                    }
+                    history.push({role: "assistant", content: answer});
+                    if (data.reload_page) {
+                        window.setTimeout(() => {
+                            window.location.reload();
+                        }, 1100);
+                    } else if (data.changed_fields && data.changed_fields.length && !data.redirect_url) {
+                        addRecipeChatAction(window.location.href, "Refresh Page");
+                    }
+                } catch (error) {
+                    addRecipeChatMessage("agent", `Chat request failed: ${error}`);
+                } finally {
+                    input.disabled = false;
+                    input.focus();
+                }
+            });
+        })();
+    </script>
 </body>
 </html>

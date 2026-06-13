@@ -1,11 +1,9 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Project Agent{% endblock %}
+{% block title %}Planner - Dieter Assistant{% endblock %}
 
 {% block content %}
-<h1>Dashboard</h1>
-
-<section class="focus-panel">
+<section class="focus-panel planner-admin-panel">
     {% if recommended_project and next_action %}
         <div class="focus-meta">
             <span>{{ recommended_project.name }}</span>
@@ -49,20 +47,6 @@
     {% endif %}
 </section>
 
-{% if recipe_app_url %}
-    <section class="app-shortcuts">
-        <div>
-            <p class="priority-label">Apps</p>
-            <h2>Recipe App</h2>
-            <p>
-                {{ recipe_app.stats.scraped_pairs }}/{{ recipe_app.stats.total_pairs }}
-                recipe card pairs scraped.
-            </p>
-        </div>
-        <a class="button-link" href="{{ recipe_app_url }}">Open Recipe App</a>
-    </section>
-{% endif %}
-
 <div class="dashboard-grid compact-metrics">
     <div class="metric">
         <div class="metric-value">{{ projects|length }}</div>
@@ -72,6 +56,11 @@
     <div class="metric">
         <div class="metric-value">{{ stats.total_actions }}</div>
         <div class="metric-label">Open Tasks</div>
+    </div>
+
+    <div class="metric">
+        <div class="metric-value">{{ stats.total_scheduler_items }}</div>
+        <div class="metric-label">Agenda Items</div>
     </div>
 
     <div class="metric">

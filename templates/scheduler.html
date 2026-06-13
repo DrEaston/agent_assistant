@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block title %}Scheduler - Dieter Assistant{% endblock %}
+
+{% block content %}
+<section class="detail-section">
+    <div class="section-header">
+        <div>
+            <h2>Scheduler</h2>
+            <p class="section-subtitle">Agenda items, errands, and things to remember in context.</p>
+        </div>
+        <details class="inline-create">
+            <summary>Add</summary>
+            <form method="post" action="/scheduler/create">
+                <div class="form-group">
+                    <label for="scheduler-title">Item</label>
+                    <input type="text" id="scheduler-title" name="title" placeholder="What should Dieter remember?" required>
+                </div>
+                <div class="form-group">
+                    <label for="scheduler-context">Context</label>
+                    <input type="text" id="scheduler-context" name="context_label" placeholder="Mechanic, doctor, store...">
+                </div>
+                <div class="form-group">
+                    <label for="scheduler-date">Date</label>
+                    <input type="date" id="scheduler-date" name="scheduled_for">
+                </div>
+                <div class="form-group">
+                    <label for="scheduler-notes">Notes</label>
+                    <textarea id="scheduler-notes" name="notes" placeholder="Useful details..."></textarea>
+                </div>
+                <button type="submit">Add Item</button>
+            </form>
+        </details>
+    </div>
+
+    {% if scheduler_items %}
+        <div class="task-list scheduler-list">
+            {% for item in scheduler_items %}
+                <article class="task-item scheduler-card">
+                    <div class="task-copy">
+                        <h3 class="scheduler-card-title">{{ item.title }}</h3>
+                        <small class="scheduler-card-meta">
+                            {% if item.context_label %}{{ item.context_label }}{% else %}General{% endif %}
+                            {% if item.scheduled_for %} - {{ item.scheduled_for }}{% endif %}
+                        </small>
+                        {% if item.notes %}
+                            <ul class="scheduler-note-list">
+                                {% for note in scheduler_note_tree(item.notes) %}
+                                    <li>
+                                        {{ note.text }}
+                                        {% if note.children %}
+                                            <ul>
+                                                {% for child in note.children %}
+                                                    <li>{{ child }}</li>
+                                                {% endfor %}
+                                            </ul>
+                                        {% endif %}
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% endif %}
+                    </div>
+                    <div class="scheduler-item-actions">
+                        <form method="post" action="/scheduler/{{ item.id }}/complete" class="inline-form">
+                            <input type="hidden" name="next" value="{{ request.url.path }}">
+                            <button type="submit" class="secondary compact">Done</button>
+                        </form>
+                        <form method="post" action="/scheduler/{{ item.id }}/delete" class="inline-form">
+                            <input type="hidden" name="next" value="{{ request.url.path }}">
+                            <button type="submit" class="secondary compact danger-button">Delete</button>
+                        </form>
+                    </div>
+                </article>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="empty-state">
+            <p>No scheduler items yet.</p>
+        </div>
+    {% endif %}
+</section>
+
+{% if completed_scheduler_items %}
+    <section class="detail-section scheduler-completed-section">
+        <div class="section-header">
+            <div>
+                <h2>Completed Recently</h2>
+                <p class="section-subtitle">Finished scheduler items linger here so accidental clicks are easy to undo.</p>
+            </div>
+        </div>
+        <div class="task-list scheduler-list">
+            {% for item in completed_scheduler_items %}
+                <article class="task-item scheduler-card scheduler-card-completed">
+                    <div class="task-copy">
+                        <h3 class="scheduler-card-title">{{ item.title }}</h3>
+                        <small class="scheduler-card-meta">
+                            {% if item.context_label %}{{ item.context_label }}{% else %}General{% endif %}
+                            {% if item.completed_at %} - Completed {{ item.completed_at }}{% endif %}
+                        </small>
+                        {% if item.notes %}
+                            <ul class="scheduler-note-list">
+                                {% for note in scheduler_note_tree(item.notes) %}
+                                    <li>
+                                        {{ note.text }}
+                                        {% if note.children %}
+                                            <ul>
+                                                {% for child in note.children %}
+                                                    <li>{{ child }}</li>
+                                                {% endfor %}
+                                            </ul>
+                                        {% endif %}
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% endif %}
+                    </div>
+                    <div class="scheduler-item-actions">
+                        <form method="post" action="/scheduler/{{ item.id }}/reopen" class="inline-form">
+                            <input type="hidden" name="next" value="{{ request.url.path }}">
+                            <button type="submit" class="secondary compact">Undo</button>
+                        </form>
+                        <form method="post" action="/scheduler/{{ item.id }}/delete" class="inline-form">
+                            <input type="hidden" name="next" value="{{ request.url.path }}">
+                            <button type="submit" class="secondary compact danger-button">Delete</button>
+                        </form>
+                    </div>
+                </article>
+            {% endfor %}
+        </div>
+    </section>
+{% endif %}
+{% endblock %}

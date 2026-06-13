@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}{{ component.title }} - Dieter Kitchen{% endblock %}
+
+{% block content %}
+<section class="detail-section recipe-detail">
+    <div class="section-header">
+        <div>
+            <p class="priority-label">Meal Component</p>
+            <h1>{{ component.display_title }}</h1>
+            <p class="section-subtitle">
+                <span class="component-type">{{ component.component_type|replace("_", " ")|upper }}</span>
+                {% if component.source_meal_title %} from {{ component.source_meal_title }}{% endif %}
+                {% if component.has_dieter_edits %}
+                    <span class="meal-status meal-status-ready">DIETER EDITED</span>
+                {% endif %}
+            </p>
+        </div>
+        <div class="recipe-detail-actions">
+            <a class="button-link secondary-link" href="/apps/recipes/create-meal">Back to Components</a>
+            {% if component.source_meal_id %}
+                <a class="button-link" href="/apps/recipes/meals/{{ component.source_meal_id }}">Open Source Meal</a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if request.state.current_user and component.user_id == request.state.current_user.id %}
+        <div class="meal-warning-panel">
+            <strong>Share Component</strong>
+            <form method="post" action="/apps/recipes/components/{{ component.id }}/share" class="inline-create">
+                <div class="form-group">
+                    <label for="share-component-email">Email</label>
+                    <input type="email" id="share-component-email" name="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="share-component-permission">Permission</label>
+                    <select id="share-component-permission" name="permission">
+                        <option value="view">View</option>
+                        <option value="edit">Edit</option>
+                    </select>
+                </div>
+                <button type="submit">Share Component</button>
+            </form>
+        </div>
+    {% endif %}
+
+    <div class="recipe-meal-preview recipe-detail-grid">
+        <section class="recipe-ingredients-section">
+            <h2>Ingredients</h2>
+            {% if component.edited_ingredients_text %}
+                <pre class="recipe-ingredients-text">{{ component.edited_ingredients_text }}</pre>
+            {% elif component.structured_ingredients %}
+                <pre class="recipe-ingredients-text">{% for ingredient in component.structured_ingredients %}{% if ingredient.amount or ingredient.unit %}{{ ingredient.amount }}{% if ingredient.unit %} {{ ingredient.unit }}{% endif %} {% endif %}{{ ingredient.name }}{% if ingredient.preparation %} - {{ ingredient.preparation }}{% endif %}{% if not loop.last %}
+{% endif %}{% endfor %}</pre>
+            {% elif component.ingredients_text %}
+                <pre class="recipe-ingredients-text">{{ component.ingredients_text }}</pre>
+            {% else %}
+                <p class="muted-text">No component ingredients were extracted yet.</p>
+            {% endif %}
+        </section>
+        <section class="recipe-steps-section">
+            <h2>Relevant Steps</h2>
+            {% if component.display_instructions_text %}
+                <ul class="recipe-steps-list">
+                    {% for step in component.display_instructions_text.splitlines() if step.strip() %}
+                        <li>{{ step.strip() }}</li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="muted-text">No component steps were extracted yet.</p>
+            {% endif %}
+        </section>
+    </div>
+</section>
+
+<section class="detail-section">
+    <div class="section-header">
+        <div>
+            <h2>Dieter Change Log</h2>
+            <p class="section-subtitle">Component edits and cooking feedback are kept here.</p>
+        </div>
+    </div>
+    {% if change_log %}
+        <div class="recipe-change-log">
+            {% for change in change_log %}
+                <article class="recipe-change-entry">
+                    <strong>{{ change.summary }}</strong>
+                    <small>{{ change.created_at }}{% if change.changed_fields %} - changed {{ change.changed_fields|join(", ") }}{% endif %}</small>
+                    {% if change.user_message %}
+                        <p>{{ change.user_message }}</p>
+                    {% endif %}
+                </article>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p class="muted-text">No Dieter edits have been recorded for this component yet.</p>
+    {% endif %}
+</section>
+{% endblock %}

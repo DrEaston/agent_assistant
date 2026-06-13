@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Dieter{% endblock %}
+
+{% block content %}
+<section class="launcher-hero">
+    <h1>Choose an app</h1>
+</section>
+
+<section class="apps-launcher-grid launcher-app-grid" aria-label="Dieter apps">
+    <a class="app-launch-card planner-launch-card" href="{{ planner_url or '/apps/assistant/planner' }}">
+        <span class="app-launch-kicker">Assistant</span>
+        <strong>Dieter Assistant</strong>
+        {% if planner.next_action %}
+            <small>Next: {{ planner.next_action.action }}</small>
+        {% else %}
+            <small>Planner, Scheduler, priorities, blockers, and task steps.</small>
+        {% endif %}
+    </a>
+
+    {% if recipe_app_url %}
+        <a class="app-launch-card kitchen-launch-card" href="{{ recipe_app_url }}">
+            <span class="app-launch-kicker">Kitchen</span>
+            <strong>Dieter Kitchen</strong>
+            <small>Meal plans, grocery lists, recipe cards, and cooking feedback.</small>
+        </a>
+    {% else %}
+        <div class="app-launch-card kitchen-launch-card unavailable">
+            <span class="app-launch-kicker">Kitchen</span>
+            <strong>Dieter Kitchen</strong>
+            <small>No recipe app data is available yet.</small>
+        </div>
+    {% endif %}
+</section>
+{% endblock %}
