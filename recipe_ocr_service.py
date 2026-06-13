@@ -110,6 +110,45 @@ Rules:
   as one component with the best type.
 """
 
+RECIPE_BAKE_MODE_CLEANUP_PROMPT = """You clean up extracted recipe text for a kitchen Bake Mode interface.
+
+Input is already OCR-extracted recipe JSON. Do one careful editorial pass.
+
+Return only JSON with this shape:
+{
+  "title": "",
+  "ingredients_text": "",
+  "instructions_text": "",
+  "sections": [
+    {
+      "title": "",
+      "type": "main|side|sauce|component|note|unknown",
+      "ingredients": [],
+      "instructions": []
+    }
+  ],
+  "uncertain": []
+}
+
+Rules:
+- Do not invent ingredients, amounts, times, or temperatures.
+- Preserve the recipe's meaning and visible wording when possible.
+- Fix obvious OCR errors only when context is clear.
+- Break ingredients into practical prep sections when the recipe supports it.
+  Examples: Dough, Filling, Icing; Crust, Pesto, Chicken, Toppings; Sauce,
+  Potatoes, Pork Chops, Vegetables.
+- Use recipe-specific section names. Do not force everything into dough,
+  filling, and icing.
+- Format ingredients_text with section headings when sections exist:
+  "Crust:\n- ...\n\nChicken:\n- ..."
+- Format instructions_text as concise steps. If a recipe has clear component
+  phases, use matching headings so later Bake Mode parsing can attach the right
+  steps to the right ingredient section.
+- If a step combines multiple components, split it only when the source clearly
+  supports the split.
+- Keep uncertain notes short and explicit.
+"""
+
 RECIPE_INGREDIENT_AMOUNT_PROMPT = """You convert recipe component ingredients into measurable grocery quantities.
 
 You may receive:
@@ -183,6 +222,7 @@ class RecipeOCRService:
         self.uploads_dir = Path(uploads_dir)
         self.api_key = os.getenv("OPENAI_API_KEY")
         self.model = os.getenv("RECIPE_OCR_MODEL", os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
+        self.cleanup_model = os.getenv("RECIPE_CLEANUP_MODEL", os.getenv("OPENAI_REVIEW_MODEL", "")).strip()
 
     @property
     def available(self):
@@ -246,13 +286,26 @@ class RecipeOCRService:
             raw_response = response.choices[0].message.content or ""
             payload = self._parse_json(raw_response)
             payload = self._normalize_payload(payload)
+            cleanup_raw_response = ""
+            cleaned_payload = self._cleanup_payload_for_bake_mode(client, payload)
+            if cleaned_payload:
+                cleanup_raw_response = cleaned_payload.pop("_raw_response", "")
+                payload = self._normalize_payload(cleaned_payload)
+            stored_raw_response = raw_response
+            if cleanup_raw_response:
+                stored_raw_response = json.dumps({
+                    "ocr_model": self.model,
+                    "ocr_response": raw_response,
+                    "cleanup_model": self.cleanup_model,
+                    "cleanup_response": cleanup_raw_response,
+                })
             return {
                 "status": "extracted",
                 "error": "",
                 "ingredients_text": payload.get("ingredients_text", ""),
                 "instructions_text": payload.get("instructions_text", ""),
                 "sections_json": json.dumps(payload.get("sections", [])),
-                "raw_response": raw_response,
+                "raw_response": stored_raw_response,
             }
         except Exception as exc:
             return {
@@ -263,6 +316,27 @@ class RecipeOCRService:
                 "sections_json": "[]",
                 "raw_response": "",
             }
+
+    def _cleanup_payload_for_bake_mode(self, client, payload):
+        """Run one higher-quality text cleanup pass after OCR extraction."""
+        if not self.cleanup_model or self.cleanup_model.lower() in {"0", "false", "off", "none"}:
+            return None
+        try:
+            response = client.chat.completions.create(
+                model=self.cleanup_model,
+                temperature=0,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": RECIPE_BAKE_MODE_CLEANUP_PROMPT},
+                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+                ],
+            )
+            raw_response = response.choices[0].message.content or ""
+            cleaned_payload = self._parse_json(raw_response)
+            cleaned_payload["_raw_response"] = raw_response
+            return cleaned_payload
+        except Exception:
+            return None
 
     def analyze_components(self, meal):
         """Split a complete meal into reusable components."""

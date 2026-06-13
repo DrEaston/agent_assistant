@@ -84,6 +84,18 @@ if (-not $openAiModel) {
 if (-not $openAiModel) {
     $openAiModel = "gpt-4o-mini"
 }
+$openAiReviewModel = $env:OPENAI_REVIEW_MODEL
+if (-not $openAiReviewModel) {
+    $openAiReviewModel = Get-DotEnvValue "OPENAI_REVIEW_MODEL"
+}
+$recipeOcrModel = $env:RECIPE_OCR_MODEL
+if (-not $recipeOcrModel) {
+    $recipeOcrModel = Get-DotEnvValue "RECIPE_OCR_MODEL"
+}
+$recipeCleanupModel = $env:RECIPE_CLEANUP_MODEL
+if (-not $recipeCleanupModel) {
+    $recipeCleanupModel = Get-DotEnvValue "RECIPE_CLEANUP_MODEL"
+}
 if (-not $RegistrationCode) {
     $RegistrationCode = Get-DotEnvValue "DIETER_REGISTRATION_CODE"
 }
@@ -145,6 +157,15 @@ if ($secretIamExitCode -ne 0) {
 }
 
 $envVars = "DB_PATH=/tmp/projects.db,UPLOADS_DIR=/tmp/uploads,GCS_BUCKET=$DataBucket,GCS_PREFIX=$DataPrefix,LLM_PROVIDER=$llmProvider,OPENAI_MODEL=$openAiModel"
+if ($openAiReviewModel) {
+    $envVars = "$envVars,OPENAI_REVIEW_MODEL=$openAiReviewModel"
+}
+if ($recipeOcrModel) {
+    $envVars = "$envVars,RECIPE_OCR_MODEL=$recipeOcrModel"
+}
+if ($recipeCleanupModel) {
+    $envVars = "$envVars,RECIPE_CLEANUP_MODEL=$recipeCleanupModel"
+}
 if ($RegistrationCode) {
     $envVars = "$envVars,DIETER_REGISTRATION_CODE=$RegistrationCode"
 }
