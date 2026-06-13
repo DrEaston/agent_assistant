@@ -3145,6 +3145,187 @@
             max-height: none;
         }
 
+        .baking-mode-callout {
+            align-items: center;
+            background: #fff7ed;
+            border: 2px solid #fdba74;
+            border-left: 8px solid #ea580c;
+            border-radius: 8px;
+            display: flex;
+            gap: 1rem;
+            justify-content: space-between;
+            margin: 1rem 0;
+            padding: 1rem;
+        }
+
+        .baking-mode-callout h2 {
+            border-bottom: 0;
+            color: #9a3412;
+            margin: 0.15rem 0;
+            padding: 0;
+        }
+
+        .baking-mode-callout .priority-label,
+        .baking-mode-callout .section-subtitle {
+            color: #9a3412;
+        }
+
+        .baking-mode-callout .button-link,
+        .recipe-detail-actions .bake-mode-jump {
+            background: #ea580c;
+            border-color: #c2410c;
+            color: #fff;
+        }
+
+        .baking-mode-callout .button-link:hover,
+        .recipe-detail-actions .bake-mode-jump:hover {
+            background: #c2410c;
+            border-color: #9a3412;
+            color: #fff;
+        }
+
+        .baking-prep-panel,
+        .baking-intake-panel {
+            background: #fff;
+            border: 1px solid var(--page-theme-border);
+            border-radius: 8px;
+            margin: 1rem 0;
+            padding: 1rem;
+        }
+
+        .baking-prep-header,
+        .baking-prep-stage-header {
+            align-items: start;
+            display: flex;
+            gap: 1rem;
+            justify-content: space-between;
+        }
+
+        .baking-prep-header h2,
+        .baking-prep-stage-header h2 {
+            border-bottom: 0;
+            color: var(--page-theme-text);
+            margin: 0;
+            padding: 0;
+        }
+
+        .baking-prep-actions,
+        .baking-prep-stage-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+            justify-content: end;
+        }
+
+        .baking-prep-stage {
+            background: #0f172a;
+            border-radius: 8px;
+            color: #fff;
+            margin-top: 1rem;
+            min-height: min(72vh, 46rem);
+            padding: clamp(1rem, 2vw, 1.5rem);
+        }
+
+        .baking-prep-stage .priority-label,
+        .baking-prep-stage .section-subtitle {
+            color: #cbd5e1;
+        }
+
+        .baking-prep-stage-header {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+        }
+
+        .baking-prep-stage-header h2 {
+            color: #fff;
+            font-size: 2.25rem;
+        }
+
+        .baking-prep-list {
+            display: grid;
+            gap: 0.85rem;
+        }
+
+        .baking-prep-stage.is-rotated .baking-prep-list {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .baking-prep-item {
+            align-items: center;
+            background: #fff;
+            border: 4px solid transparent;
+            border-radius: 8px;
+            color: #111827;
+            cursor: pointer;
+            display: grid;
+            gap: 1rem;
+            grid-template-columns: 3.5rem 1fr;
+            min-height: 5.75rem;
+            padding: 0.85rem 1rem;
+        }
+
+        .baking-prep-item input {
+            height: 2.6rem;
+            width: 2.6rem;
+        }
+
+        .baking-prep-item span {
+            font-size: clamp(1.65rem, 3.5vw, 3rem);
+            font-weight: 900;
+            line-height: 1.08;
+        }
+
+        .baking-prep-item.is-checked {
+            background: #dcfce7;
+            border-color: #22c55e;
+            color: #14532d;
+        }
+
+        .baking-prep-item.is-checked span {
+            text-decoration: line-through;
+            text-decoration-thickness: 0.12em;
+        }
+
+        .baking-intake-panel summary {
+            color: var(--page-theme-text);
+            cursor: pointer;
+            font-weight: 900;
+        }
+
+        .baking-intake-form {
+            background: transparent;
+            border: 0;
+            box-shadow: none;
+            display: grid;
+            gap: 1rem;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            margin: 1rem 0 0;
+            padding: 0;
+        }
+
+        .baking-intake-form label {
+            color: var(--page-theme-text);
+            display: grid;
+            font-weight: 900;
+            gap: 0.4rem;
+        }
+
+        .baking-intake-form textarea {
+            border: 1px solid var(--page-theme-border);
+            border-radius: 6px;
+            font: inherit;
+            line-height: 1.35;
+            min-height: 11rem;
+            padding: 0.75rem;
+            resize: vertical;
+        }
+
+        .baking-intake-form button {
+            grid-column: 1 / -1;
+            justify-self: start;
+        }
+
         .muted-text {
             color: #667;
         }
@@ -4561,6 +4742,36 @@
                 grid-template-columns: 1fr;
             }
 
+            .baking-mode-callout {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .baking-mode-callout .button-link {
+                text-align: center;
+                width: 100%;
+            }
+
+            .baking-prep-header,
+            .baking-prep-stage-header {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .baking-prep-actions,
+            .baking-prep-stage-actions {
+                justify-content: stretch;
+            }
+
+            .baking-prep-actions button,
+            .baking-prep-stage-actions button {
+                width: 100%;
+            }
+
+            .baking-intake-form {
+                grid-template-columns: 1fr;
+            }
+
             .review-grid {
                 grid-template-columns: 1fr;
             }
@@ -4685,6 +4896,20 @@
 
             .recipe-extraction-columns {
                 grid-template-columns: 1fr;
+            }
+        }
+
+        @media (orientation: landscape) and (max-height: 700px) {
+            .baking-prep-stage {
+                min-height: calc(100vh - 2rem);
+            }
+
+            .baking-prep-list {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .baking-prep-item {
+                min-height: 5.2rem;
             }
         }
     </style>

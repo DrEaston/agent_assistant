@@ -576,6 +576,114 @@ def split_ingredient_lines(ingredients_text):
         if line.strip()
     ]
 
+BAKING_SECTION_LABELS = {
+    "dough": "Dough",
+    "filling": "Filling",
+    "icing": "Icing",
+}
+
+BAKING_SECTION_ALIASES = {
+    "dough": "dough",
+    "filling": "filling",
+    "fillings": "filling",
+    "cinnamon filling": "filling",
+    "icing": "icing",
+    "frosting": "icing",
+    "glaze": "icing",
+}
+
+BAKING_INGREDIENT_SECTION_TERMS = {
+    "dough": [
+        "starter", "levain", "flour", "bread flour", "all-purpose", "water",
+        "milk", "yeast", "salt", "egg", "eggs", "dough", "tangzhong",
+    ],
+    "filling": [
+        "brown sugar", "cinnamon", "nutmeg", "cardamom", "cocoa", "jam",
+        "preserves", "raisins", "nuts", "pecans", "walnuts", "filling",
+    ],
+    "icing": [
+        "powdered sugar", "confectioners", "cream cheese", "vanilla",
+        "icing", "frosting", "glaze", "maple syrup",
+    ],
+}
+
+def normalize_baking_section_heading(line):
+    """Return a known baking section key when a line looks like a heading."""
+    heading = re.sub(r"^#+\s*", "", line or "").strip()
+    heading = re.sub(r"[:\-]+$", "", heading).strip().lower()
+    heading = re.sub(r"^(for|make|the)\s+", "", heading)
+    return BAKING_SECTION_ALIASES.get(heading)
+
+def parse_baking_ingredient_sections(ingredients_text):
+    """Split recipe ingredients into touch-friendly baking sections."""
+    sections_by_key = {
+        key: {"key": key, "label": label, "items": []}
+        for key, label in BAKING_SECTION_LABELS.items()
+    }
+    other_items = []
+    current_key = None
+
+    source_lines = []
+    for raw_line in (ingredients_text or "").splitlines():
+        if "|" in raw_line and not normalize_baking_section_heading(raw_line):
+            source_lines.extend(part.strip() for part in raw_line.split("|"))
+        else:
+            source_lines.append(raw_line)
+
+    for raw_line in source_lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        heading_key = normalize_baking_section_heading(line)
+        if heading_key:
+            current_key = heading_key
+            continue
+        item = re.sub(r"^[-*]\s*", "", line).strip()
+        if not item:
+            continue
+        if current_key:
+            sections_by_key[current_key]["items"].append(item)
+        else:
+            other_items.append(item)
+
+    sections = [section for section in sections_by_key.values() if section["items"]]
+    if not sections and other_items:
+        categorized = {
+            key: {"key": key, "label": label, "items": []}
+            for key, label in BAKING_SECTION_LABELS.items()
+        }
+        uncategorized = []
+        for item in other_items:
+            lowered = item.lower()
+            target_key = ""
+            for key, terms in BAKING_INGREDIENT_SECTION_TERMS.items():
+                if any(term in lowered for term in terms):
+                    target_key = key
+                    break
+            if target_key:
+                categorized[target_key]["items"].append(item)
+            else:
+                uncategorized.append(item)
+        if any(section["items"] for section in categorized.values()):
+            sections = [section for section in categorized.values() if section["items"]]
+            other_items = uncategorized
+    if other_items:
+        sections.append({"key": "general", "label": "Ingredients", "items": other_items})
+    return sections
+
+def format_baking_ingredient_sections(section_values):
+    """Render saved ingredient sections in a predictable edited-recipe format."""
+    blocks = []
+    for key, label in BAKING_SECTION_LABELS.items():
+        lines = [
+            re.sub(r"^[-*]\s*", "", line.strip())
+            for line in (section_values.get(key) or "").splitlines()
+            if line.strip()
+        ]
+        if lines:
+            blocks.append(f"{label}:\n" + "\n".join(f"- {line}" for line in lines))
+    return "\n\n".join(blocks)
+
 def normalize_grocery_name(ingredient):
     """Normalize an ingredient line enough to combine repeats."""
     return re.sub(
@@ -3249,17 +3357,67 @@ def recipe_meal_detail_page(request: Request, meal_id: int):
         raise HTTPException(status_code=404, detail="Complete meal not found")
 
     meal = prepare_recipe_complete_meals([meal])[0]
+    ingredient_sections = parse_baking_ingredient_sections(meal.get("display_ingredients_text") or "")
     change_log = prepare_recipe_change_log(db.get_recipe_change_log("meal", meal_id))
     context = {
         "request": request,
         "recipe_app": recipe_app,
         "meal": meal,
+        "ingredient_sections": ingredient_sections,
+        "sectioned_ingredient_values": {
+            section["key"]: "\n".join(section["items"])
+            for section in ingredient_sections
+            if section["key"] in BAKING_SECTION_LABELS
+        },
         "change_log": change_log,
         "cooked_prompt": request.query_params.get("cooked") == "1",
     }
     template = jinja_env.get_template("recipe_meal_detail.html")
     html = template.render(context)
     return HTMLResponse(html)
+
+
+@app.post("/apps/recipes/meals/{meal_id}/ingredient-sections/save")
+def save_recipe_meal_ingredient_sections_form(
+    meal_id: int,
+    dough_ingredients: str = Form(""),
+    filling_ingredients: str = Form(""),
+    icing_ingredients: str = Form(""),
+):
+    """Save deliberate baking ingredient sections for a complete meal."""
+    meal = dict_from_row(db.get_recipe_complete_meal(meal_id))
+    if not meal:
+        raise HTTPException(status_code=404, detail="Complete meal not found")
+    ingredients_text = format_baking_ingredient_sections({
+        "dough": dough_ingredients,
+        "filling": filling_ingredients,
+        "icing": icing_ingredients,
+    })
+    if not ingredients_text:
+        raise HTTPException(status_code=400, detail="Add at least one ingredient section")
+    before = prepare_recipe_complete_meals([meal])[0]
+    db.update_recipe_complete_meal_edits(meal_id, ingredients_text=ingredients_text)
+    after = dict(before)
+    after["display_ingredients_text"] = ingredients_text
+    db.add_recipe_change_log(
+        "meal",
+        meal_id,
+        "Sectioned baking ingredient intake saved.",
+        "Saved dough/filling/icing ingredient sections.",
+        ["ingredients_text"],
+        {
+            "title": before.get("display_title") or before.get("title") or "",
+            "ingredients_text": before.get("display_ingredients_text") or "",
+            "instructions_text": before.get("display_instructions_text") or "",
+        },
+        {
+            "title": after.get("display_title") or after.get("title") or "",
+            "ingredients_text": ingredients_text,
+            "instructions_text": after.get("display_instructions_text") or "",
+        },
+        "baking-intake",
+    )
+    return RedirectResponse(url=f"/apps/recipes/meals/{meal_id}", status_code=303)
 
 
 @app.get("/apps/recipes/components/{component_id}")
@@ -3270,17 +3428,65 @@ def recipe_component_detail_page(request: Request, component_id: int):
     if not recipe_app["project"] or not component:
         raise HTTPException(status_code=404, detail="Meal component not found")
     component = prepare_recipe_components([component])[0]
+    ingredient_sections = parse_baking_ingredient_sections(component.get("display_ingredients_text") or "")
     change_log = prepare_recipe_change_log(db.get_recipe_change_log("component", component_id))
 
     context = {
         "request": request,
         "recipe_app": recipe_app,
         "component": component,
+        "ingredient_sections": ingredient_sections,
+        "sectioned_ingredient_values": {
+            section["key"]: "\n".join(section["items"])
+            for section in ingredient_sections
+            if section["key"] in BAKING_SECTION_LABELS
+        },
         "change_log": change_log,
     }
     template = jinja_env.get_template("recipe_component_detail.html")
     html = template.render(context)
     return HTMLResponse(html)
+
+
+@app.post("/apps/recipes/components/{component_id}/ingredient-sections/save")
+def save_recipe_component_ingredient_sections_form(
+    component_id: int,
+    dough_ingredients: str = Form(""),
+    filling_ingredients: str = Form(""),
+    icing_ingredients: str = Form(""),
+):
+    """Save deliberate baking ingredient sections for a component."""
+    component = dict_from_row(db.get_recipe_component(component_id))
+    if not component:
+        raise HTTPException(status_code=404, detail="Meal component not found")
+    ingredients_text = format_baking_ingredient_sections({
+        "dough": dough_ingredients,
+        "filling": filling_ingredients,
+        "icing": icing_ingredients,
+    })
+    if not ingredients_text:
+        raise HTTPException(status_code=400, detail="Add at least one ingredient section")
+    before = prepare_recipe_components([component])[0]
+    db.update_recipe_component_edits(component_id, ingredients_text=ingredients_text)
+    db.add_recipe_change_log(
+        "component",
+        component_id,
+        "Sectioned baking ingredient intake saved.",
+        "Saved dough/filling/icing ingredient sections.",
+        ["ingredients_text"],
+        {
+            "title": before.get("display_title") or before.get("title") or "",
+            "ingredients_text": before.get("display_ingredients_text") or "",
+            "instructions_text": before.get("display_instructions_text") or "",
+        },
+        {
+            "title": before.get("display_title") or before.get("title") or "",
+            "ingredients_text": ingredients_text,
+            "instructions_text": before.get("display_instructions_text") or "",
+        },
+        "baking-intake",
+    )
+    return RedirectResponse(url=f"/apps/recipes/components/{component_id}", status_code=303)
 
 
 @app.get("/apps/recipes/import")

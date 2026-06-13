@@ -17,12 +17,22 @@
             </p>
         </div>
         <div class="recipe-detail-actions">
+            <a class="button-link bake-mode-jump" href="#bake-mode">Bake Mode</a>
             <a class="button-link secondary-link" href="/apps/recipes/create-meal">Back to Components</a>
             {% if component.source_meal_id %}
                 <a class="button-link" href="/apps/recipes/meals/{{ component.source_meal_id }}">Open Source Meal</a>
             {% endif %}
         </div>
     </div>
+
+    <section class="baking-mode-callout" aria-label="Bake Mode">
+        <div>
+            <p class="priority-label">Bake Mode</p>
+            <h2>Big, checkable ingredient steps for the counter</h2>
+            <p class="section-subtitle">Use this while mixing dough, filling, and icing on a tablet.</p>
+        </div>
+        <a class="button-link" href="#bake-mode">Open Bake Mode</a>
+    </section>
 
     {% if request.state.current_user and component.user_id == request.state.current_user.id %}
         <div class="meal-warning-panel">
@@ -43,6 +53,62 @@
             </form>
         </div>
     {% endif %}
+
+    <section class="baking-prep-panel" id="bake-mode" data-baking-prep data-meal-id="component-{{ component.id }}">
+        <div class="baking-prep-header">
+            <div>
+                <h2>Bake Mode</h2>
+                <p class="section-subtitle">Open one part at a time with large touch targets.</p>
+            </div>
+            {% if ingredient_sections %}
+                <div class="baking-prep-actions">
+                    {% for section in ingredient_sections %}
+                        <button type="button" data-baking-section-open="{{ section.key }}">
+                            Make {{ section.label }}
+                        </button>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+
+        {% if ingredient_sections %}
+            <div class="baking-prep-stage" data-baking-stage hidden>
+                <div class="baking-prep-stage-header">
+                    <div>
+                        <p class="priority-label">Bake Mode</p>
+                        <h2 data-baking-stage-title>Ingredients</h2>
+                    </div>
+                    <div class="baking-prep-stage-actions">
+                        <button type="button" class="secondary compact" data-baking-stage-rotate>Rotate Layout</button>
+                        <button type="button" class="secondary compact" data-baking-stage-reset>Reset Checks</button>
+                        <button type="button" class="secondary compact" data-baking-stage-close>Close</button>
+                    </div>
+                </div>
+                <div class="baking-prep-list" data-baking-stage-list></div>
+            </div>
+        {% else %}
+            <p class="muted-text">Add dough, filling, or icing ingredients below to enable Bake Mode.</p>
+        {% endif %}
+    </section>
+
+    <details class="baking-intake-panel" open>
+        <summary>Section Recipe Ingredients</summary>
+        <form method="post" action="/apps/recipes/components/{{ component.id }}/ingredient-sections/save" class="baking-intake-form">
+            <label>
+                Dough
+                <textarea name="dough_ingredients" rows="7" placeholder="500 g bread flour&#10;100 g starter&#10;300 g water">{{ sectioned_ingredient_values.get("dough", "") }}</textarea>
+            </label>
+            <label>
+                Filling
+                <textarea name="filling_ingredients" rows="7" placeholder="Brown sugar&#10;Cinnamon&#10;Softened butter">{{ sectioned_ingredient_values.get("filling", "") }}</textarea>
+            </label>
+            <label>
+                Icing
+                <textarea name="icing_ingredients" rows="7" placeholder="Powdered sugar&#10;Milk&#10;Vanilla">{{ sectioned_ingredient_values.get("icing", "") }}</textarea>
+            </label>
+            <button type="submit">Save Ingredient Sections</button>
+        </form>
+    </details>
 
     <div class="recipe-meal-preview recipe-detail-grid">
         <section class="recipe-ingredients-section">
@@ -96,4 +162,87 @@
         <p class="muted-text">No Dieter edits have been recorded for this component yet.</p>
     {% endif %}
 </section>
+
+<script>
+    (() => {
+        const sections = {{ ingredient_sections|tojson }};
+        const panel = document.querySelector("[data-baking-prep]");
+        if (!panel || !sections.length) {
+            return;
+        }
+
+        const mealId = panel.dataset.mealId || "component";
+        const stage = panel.querySelector("[data-baking-stage]");
+        const title = panel.querySelector("[data-baking-stage-title]");
+        const list = panel.querySelector("[data-baking-stage-list]");
+        const storagePrefix = `bakingPrep:${mealId}:`;
+        let activeSection = null;
+
+        const checkedSetFor = (sectionKey) => {
+            try {
+                return new Set(JSON.parse(localStorage.getItem(`${storagePrefix}${sectionKey}`) || "[]"));
+            } catch (error) {
+                return new Set();
+            }
+        };
+
+        const saveCheckedSet = (sectionKey, checkedSet) => {
+            localStorage.setItem(`${storagePrefix}${sectionKey}`, JSON.stringify([...checkedSet]));
+        };
+
+        const renderSection = (sectionKey) => {
+            activeSection = sections.find((section) => section.key === sectionKey) || sections[0];
+            if (!activeSection) {
+                return;
+            }
+            const checked = checkedSetFor(activeSection.key);
+            title.textContent = activeSection.label;
+            list.innerHTML = "";
+            activeSection.items.forEach((item, index) => {
+                const id = String(index);
+                const row = document.createElement("label");
+                row.className = "baking-prep-item";
+                const checkbox = document.createElement("input");
+                checkbox.type = "checkbox";
+                checkbox.checked = checked.has(id);
+                const text = document.createElement("span");
+                text.textContent = item;
+                row.append(checkbox, text);
+                row.classList.toggle("is-checked", checkbox.checked);
+                row.addEventListener("change", () => {
+                    if (checkbox.checked) {
+                        checked.add(id);
+                    } else {
+                        checked.delete(id);
+                    }
+                    row.classList.toggle("is-checked", checkbox.checked);
+                    saveCheckedSet(activeSection.key, checked);
+                });
+                list.appendChild(row);
+            });
+            stage.hidden = false;
+            stage.scrollIntoView({behavior: "smooth", block: "start"});
+        };
+
+        panel.querySelectorAll("[data-baking-section-open]").forEach((button) => {
+            button.addEventListener("click", () => renderSection(button.dataset.bakingSectionOpen));
+        });
+
+        panel.querySelector("[data-baking-stage-close]")?.addEventListener("click", () => {
+            stage.hidden = true;
+        });
+
+        panel.querySelector("[data-baking-stage-rotate]")?.addEventListener("click", () => {
+            stage.classList.toggle("is-rotated");
+        });
+
+        panel.querySelector("[data-baking-stage-reset]")?.addEventListener("click", () => {
+            if (!activeSection) {
+                return;
+            }
+            localStorage.removeItem(`${storagePrefix}${activeSection.key}`);
+            renderSection(activeSection.key);
+        });
+    })();
+</script>
 {% endblock %}
