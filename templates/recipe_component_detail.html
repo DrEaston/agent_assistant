@@ -25,15 +25,6 @@
         </div>
     </div>
 
-    <section class="baking-mode-callout" aria-label="Bake Mode">
-        <div>
-            <p class="priority-label">Bake Mode</p>
-            <h2>Big, checkable ingredient steps for the counter</h2>
-            <p class="section-subtitle">Use this while mixing dough, filling, and icing on a tablet.</p>
-        </div>
-        <a class="button-link" href="#bake-mode">Open Bake Mode</a>
-    </section>
-
     {% if request.state.current_user and component.user_id == request.state.current_user.id %}
         <div class="meal-warning-panel">
             <strong>Share Component</strong>
@@ -80,9 +71,7 @@
                         <h2 data-baking-stage-title>Ingredients</h2>
                     </div>
                     <div class="baking-prep-stage-actions">
-                        <button type="button" class="secondary compact" data-baking-stage-rotate>Rotate Layout</button>
-                        <button type="button" class="secondary compact" data-baking-stage-reset>Reset Checks</button>
-                        <button type="button" class="secondary compact" data-baking-stage-complete>All Items Added</button>
+                        <button type="button" class="secondary compact" data-baking-stage-reset>Reset</button>
                         <button type="button" class="secondary compact" data-baking-stage-close>Close</button>
                     </div>
                 </div>
@@ -176,7 +165,6 @@
 
         const mealId = panel.dataset.mealId || "component";
         const overlay = panel.querySelector("[data-baking-overlay]");
-        const stage = panel.querySelector("[data-baking-stage]");
         const title = panel.querySelector("[data-baking-stage-title]");
         const list = panel.querySelector("[data-baking-stage-list]");
         const storagePrefix = `bakingPrep:${mealId}:`;
@@ -241,19 +229,6 @@
             if (event.target === overlay) {
                 overlay.classList.add("hidden");
             }
-        });
-
-        panel.querySelector("[data-baking-stage-rotate]")?.addEventListener("click", () => {
-            stage.classList.toggle("is-rotated");
-        });
-
-        panel.querySelector("[data-baking-stage-complete]")?.addEventListener("click", () => {
-            if (!activeSection) {
-                return;
-            }
-            const checked = new Set(activeSection.items.map((_, index) => String(index)));
-            saveCheckedSet(activeSection.key, checked);
-            overlay?.classList.add("hidden");
         });
 
         panel.querySelector("[data-baking-stage-reset]")?.addEventListener("click", () => {

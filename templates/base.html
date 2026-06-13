@@ -3145,39 +3145,12 @@
             max-height: none;
         }
 
-        .baking-mode-callout {
-            align-items: center;
-            background: #fff7ed;
-            border: 2px solid #fdba74;
-            border-left: 8px solid #ea580c;
-            border-radius: 8px;
-            display: flex;
-            gap: 1rem;
-            justify-content: space-between;
-            margin: 1rem 0;
-            padding: 1rem;
-        }
-
-        .baking-mode-callout h2 {
-            border-bottom: 0;
-            color: #9a3412;
-            margin: 0.15rem 0;
-            padding: 0;
-        }
-
-        .baking-mode-callout .priority-label,
-        .baking-mode-callout .section-subtitle {
-            color: #9a3412;
-        }
-
-        .baking-mode-callout .button-link,
         .recipe-detail-actions .bake-mode-jump {
             background: #ea580c;
             border-color: #c2410c;
             color: #fff;
         }
 
-        .baking-mode-callout .button-link:hover,
         .recipe-detail-actions .bake-mode-jump:hover {
             background: #c2410c;
             border-color: #9a3412;
@@ -3218,6 +3191,12 @@
             flex-wrap: wrap;
             gap: 0.4rem;
             justify-content: end;
+        }
+
+        .baking-prep-stage-actions {
+            display: grid;
+            flex: 0 0 auto;
+            grid-template-columns: repeat(2, minmax(4.4rem, 1fr));
         }
 
         .baking-prep-overlay {
@@ -3269,32 +3248,16 @@
             font-size: 2.25rem;
         }
 
-        .baking-prep-stage-actions [data-baking-stage-complete] {
-            background: #22c55e;
-            border-color: #16a34a;
-            color: #052e16;
-        }
-
-        .baking-prep-stage-actions [data-baking-stage-complete]:hover {
-            background: #86efac;
-            border-color: #22c55e;
-            color: #052e16;
-        }
-
         .baking-prep-stage-actions button.compact {
             font-size: 0.78rem;
             min-height: 2rem;
             min-width: 0;
-            padding: 0.32rem 0.5rem;
+            padding: 0.28rem 0.45rem;
         }
 
         .baking-prep-list {
             display: grid;
             gap: 0.85rem;
-        }
-
-        .baking-prep-stage.is-rotated .baking-prep-list {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
         .baking-prep-item {
@@ -3331,6 +3294,12 @@
         .baking-prep-item.is-checked span {
             text-decoration: line-through;
             text-decoration-thickness: 0.12em;
+        }
+
+        @media (orientation: landscape) {
+            .baking-prep-list {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
         }
 
         .baking-intake-panel .section-header {
@@ -4878,16 +4847,6 @@
 
             .recipe-meal-preview {
                 grid-template-columns: 1fr;
-            }
-
-            .baking-mode-callout {
-                align-items: stretch;
-                flex-direction: column;
-            }
-
-            .baking-mode-callout .button-link {
-                text-align: center;
-                width: 100%;
             }
 
             .baking-prep-header,
