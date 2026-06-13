@@ -1935,6 +1935,10 @@ def format_scheduler_confirmation(items):
         lines.append("You can review it at /apps/assistant/scheduler.")
     return "\n".join(lines)
 
+def scheduler_text_implies_today(text):
+    """Detect casual same-day scheduler phrasing."""
+    return bool(re.search(r"\b(today|tonight|before bed|bedtime|this evening)\b", text or "", flags=re.IGNORECASE))
+
 def synthesize_scheduler_operation(user_message, operation):
     """Turn raw reminder text into a concise scheduler record."""
     original = (user_message or "").strip()
@@ -1950,7 +1954,7 @@ def synthesize_scheduler_operation(user_message, operation):
         today = datetime.now().date()
         if re.search(r"\btomorrow\b", text):
             scheduled_for = (today + timedelta(days=1)).isoformat()
-        elif re.search(r"\btoday\b", text):
+        elif scheduler_text_implies_today(text):
             scheduled_for = today.isoformat()
 
     rawish_title = title.lower() == original.lower() or len(title) > 80
@@ -1963,7 +1967,8 @@ def synthesize_scheduler_operation(user_message, operation):
             original,
             flags=re.IGNORECASE,
         )
-        cleaned = re.sub(r"\b(today|tomorrow)\b", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\b(today|tomorrow|tonight|before bed|bedtime|this evening)\b", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\b(to|in|on)\s+(the\s+)?scheduler\b", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
         if cleaned:
             title = cleaned[0].upper() + cleaned[1:]
@@ -1977,7 +1982,10 @@ def synthesize_scheduler_operation(user_message, operation):
             for item in agenda_items
         ]
     elif detail_items and not (len(detail_items) == 1 and detail_items[0].lower() == title.lower()):
-        note_lines = detail_items
+        normalized_title = re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
+        normalized_detail = re.sub(r"[^a-z0-9]+", " ", detail_items[0].lower()).strip() if len(detail_items) == 1 else ""
+        if not (normalized_title and normalized_title in normalized_detail and scheduler_text_implies_today(normalized_detail)):
+            note_lines = detail_items
 
     operation["title"] = title
     operation["context_label"] = context_label or "General"
@@ -1985,41 +1993,86 @@ def synthesize_scheduler_operation(user_message, operation):
     operation["notes"] = normalize_scheduler_notes(format_scheduler_note_lines(note_lines))
     return operation
 
+def enrich_scheduler_item_priority(item, today=None):
+    """Add date priority fields used by scheduler cards."""
+    today = today or datetime.now().date()
+    scheduled_for = (item.get("scheduled_for") or "").strip()
+    if not scheduled_for:
+        combined_text = " ".join([
+            item.get("title") or "",
+            item.get("context_label") or "",
+            item.get("notes") or "",
+        ])
+        if scheduler_text_implies_today(combined_text):
+            item["scheduled_date"] = today.isoformat()
+            item["is_due"] = False
+            item["is_today"] = True
+            item["scheduler_visual_priority"] = "today"
+            return item
+        item["is_due"] = False
+        item["is_today"] = False
+        item["scheduler_visual_priority"] = "unscheduled"
+        return item
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", scheduled_for):
+            scheduled_date = datetime.strptime(scheduled_for, "%Y-%m-%d").date()
+        else:
+            scheduled_at = datetime.fromisoformat(scheduled_for.replace("Z", "+00:00"))
+            scheduled_date = scheduled_at.date()
+    except ValueError:
+        item["is_due"] = False
+        item["is_today"] = False
+        item["scheduler_visual_priority"] = "upcoming"
+        return item
+    is_today = scheduled_date == today
+    is_due = scheduled_date < today
+    item["scheduled_date"] = scheduled_date.isoformat()
+    item["is_due"] = is_due
+    item["is_today"] = is_today
+    item["scheduler_visual_priority"] = "today" if is_today else "due" if is_due else "upcoming"
+    return item
+
 def scheduler_due_context():
     """Build visible scheduler notifications for app entry pages."""
-    now = datetime.now()
-    today = now.date()
-    open_items = dicts_from_rows(db.get_scheduler_items(status="open", limit=100))
+    today = datetime.now().date()
+    open_items = dicts_from_rows(db.get_scheduler_items(status="open", limit=250))
     due_items = []
     upcoming_items = []
     for item in open_items:
-        scheduled_for = (item.get("scheduled_for") or "").strip()
-        if not scheduled_for:
-            continue
-        try:
-            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", scheduled_for):
-                scheduled_date = datetime.strptime(scheduled_for, "%Y-%m-%d").date()
-                is_due = scheduled_date < today
-                is_today = scheduled_date == today
-            else:
-                scheduled_at = datetime.fromisoformat(scheduled_for.replace("Z", "+00:00"))
-                scheduled_date = scheduled_at.date()
-                is_today = scheduled_date == today
-                is_due = scheduled_date < today
-        except ValueError:
-            continue
-        item["scheduled_date"] = scheduled_date.isoformat()
-        item["is_today"] = is_today
-        item["scheduler_visual_priority"] = "today" if is_today else "due" if is_due else "upcoming"
-        if is_due:
-            due_items.append(item)
-        else:
+        item = enrich_scheduler_item_priority(item, today)
+        if item["scheduler_visual_priority"] == "upcoming" or item["scheduler_visual_priority"] == "today":
             upcoming_items.append(item)
+        elif item["scheduler_visual_priority"] == "due":
+            due_items.append(item)
+    due_items.sort(key=lambda item: item.get("scheduled_date") or "")
+    upcoming_items.sort(key=lambda item: (
+        0 if item.get("is_today") else 1,
+        item.get("scheduled_date") or "",
+        (item.get("title") or "").lower(),
+    ))
+    today_items = [item for item in upcoming_items if item.get("is_today")]
+    future_items = [item for item in upcoming_items if not item.get("is_today")]
+    visible_upcoming_items = today_items + future_items[:max(0, 8 - len(today_items))]
     return {
-        "due_items": due_items[:5],
-        "upcoming_items": upcoming_items[:5],
+        "due_items": due_items[:8],
+        "upcoming_items": visible_upcoming_items,
         "today": today.isoformat(),
     }
+
+def prepare_scheduler_items_for_display(items):
+    """Add priority display fields to scheduler items."""
+    today = datetime.now().date()
+    enriched_items = [
+        enrich_scheduler_item_priority(dict(item), today)
+        for item in items
+    ]
+    priority_order = {"today": 0, "due": 1, "upcoming": 2, "unscheduled": 3}
+    enriched_items.sort(key=lambda item: (
+        priority_order.get(item.get("scheduler_visual_priority"), 4),
+        item.get("scheduled_date") or "9999-12-31",
+        (item.get("title") or "").lower(),
+    ))
+    return enriched_items
 
 def propose_planner_edit(user_message, page_url="", conversation_history=None):
     """Ask the model for a structured planner edit proposal."""
@@ -3186,7 +3239,7 @@ def assistant_scheduler_app(request: Request):
     data_clean = json.loads(data_json)
     context = {
         "request": request,
-        "scheduler_items": data_clean["scheduler_items"],
+        "scheduler_items": prepare_scheduler_items_for_display(data_clean["scheduler_items"]),
         "completed_scheduler_items": dicts_from_rows(db.get_recent_completed_scheduler_items(limit=10)),
         "stats": data_clean["stats"],
         "scheduler_due": scheduler_due_context(),
@@ -3212,7 +3265,7 @@ def render_planner_app(request: Request):
         "blockers": data_clean["blockers"],
         "actions": data_clean["actions"],
         "goals": data_clean["goals"],
-        "scheduler_items": data_clean["scheduler_items"],
+        "scheduler_items": prepare_scheduler_items_for_display(data_clean["scheduler_items"]),
         "stats": data_clean["stats"],
         "scheduler_due": scheduler_due_context(),
         "recipe_app_url": "/apps/recipes" if recipe_app["project"] else "",

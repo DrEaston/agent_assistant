@@ -36,13 +36,13 @@
     {% if scheduler_items %}
         <div class="task-list scheduler-list">
             {% for item in scheduler_items %}
-                <article class="task-item scheduler-card {% if item.scheduled_for and scheduler_due is defined and item.scheduled_for == scheduler_due.today %}scheduler-card-coming-up{% endif %}">
+                <article class="task-item scheduler-card scheduler-card-priority-{{ item.scheduler_visual_priority or 'upcoming' }} {% if item.is_today %}scheduler-card-coming-up{% endif %}">
                     <div class="task-copy">
                         <h3 class="scheduler-card-title">{{ item.title }}</h3>
                         <small class="scheduler-card-meta">
                             {% if item.context_label %}{{ item.context_label }}{% else %}General{% endif %}
                             {% if item.scheduled_for %} - {{ item.scheduled_for }}{% endif %}
-                            {% if item.scheduled_for and scheduler_due is defined and item.scheduled_for == scheduler_due.today %} - Coming Up{% endif %}
+                            {% if item.is_today %} - Coming Up{% endif %}
                         </small>
                         {% if item.notes %}
                             <ul class="scheduler-note-list">
