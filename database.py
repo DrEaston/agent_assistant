@@ -125,6 +125,51 @@ class Database:
             )
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS recipe_favorites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recipe_kind TEXT NOT NULL,
+                recipe_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(recipe_kind, recipe_id, user_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS recipe_variations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recipe_kind TEXT NOT NULL,
+                recipe_id INTEGER NOT NULL,
+                title TEXT DEFAULT '',
+                ingredients_text TEXT DEFAULT '',
+                instructions_text TEXT DEFAULT '',
+                summary TEXT DEFAULT '',
+                status TEXT DEFAULT 'candidate',
+                review_status TEXT DEFAULT 'pending',
+                upvote_count INTEGER DEFAULT 0,
+                promotion_threshold INTEGER DEFAULT 2,
+                created_by_user_id INTEGER,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS recipe_variation_votes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                variation_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                vote TEXT DEFAULT 'up',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(variation_id, user_id),
+                FOREIGN KEY (variation_id) REFERENCES recipe_variations(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+
         # Projects table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS projects (
@@ -447,6 +492,9 @@ class Database:
         self._ensure_column(cursor, "recipe_grocery_lists", "user_id", "INTEGER")
         self._ensure_column(cursor, "planner_change_log", "user_id", "INTEGER")
         self._ensure_column(cursor, "chat_messages", "user_id", "INTEGER")
+        self._ensure_column(cursor, "recipe_complete_meals", "visibility", "TEXT DEFAULT 'shared'")
+        self._ensure_column(cursor, "recipe_components", "visibility", "TEXT DEFAULT 'shared'")
+        self._ensure_column(cursor, "recipe_variations", "promotion_threshold", "INTEGER DEFAULT 2")
         self._repair_sample_data_links(cursor)
         self._deprioritize_overlong_actions(cursor)
         self._ensure_recipe_import_steps(cursor)
@@ -1827,17 +1875,26 @@ class Database:
                     FROM recipe_images
                     WHERE recipe_images.group_id = recipe_complete_meals.source_group_id
                 ) AS thumbnail_candidates
+                ,
+                CASE WHEN recipe_complete_meals.user_id = ? THEN 1 ELSE 0 END AS is_owner,
+                CASE WHEN recipe_favorites.id IS NULL THEN 0 ELSE 1 END AS is_favorite
             FROM recipe_complete_meals
             LEFT JOIN recipe_image_groups
                 ON recipe_image_groups.id = recipe_complete_meals.source_group_id
             LEFT JOIN recipe_shares
                 ON recipe_shares.recipe_kind = 'meal'
                 AND recipe_shares.recipe_id = recipe_complete_meals.id
+                AND recipe_shares.shared_with_user_id = ?
+            LEFT JOIN recipe_favorites
+                ON recipe_favorites.recipe_kind = 'meal'
+                AND recipe_favorites.recipe_id = recipe_complete_meals.id
+                AND recipe_favorites.user_id = ?
             WHERE (? IS NULL OR recipe_complete_meals.user_id = ? OR recipe_shares.shared_with_user_id = ?)
+              AND (COALESCE(recipe_complete_meals.visibility, 'shared') != 'private' OR recipe_complete_meals.user_id = ?)
             ORDER BY recipe_complete_meals.updated_at DESC, recipe_complete_meals.id DESC
             """
             ,
-            (user_id, user_id, user_id),
+            (user_id, user_id, user_id, user_id, user_id, user_id, user_id),
         )
         meals = cursor.fetchall()
         self.close()
@@ -1866,16 +1923,25 @@ class Database:
                     FROM recipe_images
                     WHERE recipe_images.group_id = recipe_complete_meals.source_group_id
                 ) AS thumbnail_candidates
+                ,
+                CASE WHEN recipe_complete_meals.user_id = ? THEN 1 ELSE 0 END AS is_owner,
+                CASE WHEN recipe_favorites.id IS NULL THEN 0 ELSE 1 END AS is_favorite
             FROM recipe_complete_meals
             LEFT JOIN recipe_image_groups
                 ON recipe_image_groups.id = recipe_complete_meals.source_group_id
             LEFT JOIN recipe_shares
                 ON recipe_shares.recipe_kind = 'meal'
                 AND recipe_shares.recipe_id = recipe_complete_meals.id
+                AND recipe_shares.shared_with_user_id = ?
+            LEFT JOIN recipe_favorites
+                ON recipe_favorites.recipe_kind = 'meal'
+                AND recipe_favorites.recipe_id = recipe_complete_meals.id
+                AND recipe_favorites.user_id = ?
             WHERE recipe_complete_meals.id = ?
               AND (? IS NULL OR recipe_complete_meals.user_id = ? OR recipe_shares.shared_with_user_id = ?)
+              AND (COALESCE(recipe_complete_meals.visibility, 'shared') != 'private' OR recipe_complete_meals.user_id = ?)
             """,
-            (meal_id, user_id, user_id, user_id),
+            (user_id, user_id, user_id, meal_id, user_id, user_id, user_id, user_id),
         )
         meal = cursor.fetchone()
         self.close()
@@ -1907,7 +1973,7 @@ class Database:
         self._commit()
         self.close()
 
-    def create_saved_recipe_meal(self, title, ingredients_text, instructions_text):
+    def create_saved_recipe_meal(self, title, ingredients_text, instructions_text, visibility="shared"):
         """Create a complete meal assembled from selected recipe components."""
         self.connect()
         cursor = self.conn.cursor()
@@ -1930,10 +1996,10 @@ class Database:
         cursor.execute(
             """
             INSERT INTO recipe_complete_meals
-                (source_group_id, source_kind, title, ingredients_text, instructions_text, status, quality_notes_json, updated_at, user_id)
-            VALUES (?, 'saved', ?, ?, ?, 'ready', '[]', CURRENT_TIMESTAMP, ?)
+                (source_group_id, source_kind, title, ingredients_text, instructions_text, status, quality_notes_json, updated_at, user_id, visibility)
+            VALUES (?, 'saved', ?, ?, ?, 'ready', '[]', CURRENT_TIMESTAMP, ?, ?)
             """,
-            (source_group_id, title, ingredients_text, instructions_text, self._active_user_id()),
+            (source_group_id, title, ingredients_text, instructions_text, self._active_user_id(), visibility),
         )
         meal_id = cursor.lastrowid
         self._commit()
@@ -2081,18 +2147,26 @@ class Database:
                 recipe_complete_meals.title AS source_meal_title,
                 recipe_complete_meals.ingredients_text AS source_meal_ingredients_text,
                 recipe_complete_meals.instructions_text AS source_meal_instructions_text,
-                recipe_complete_meals.source_group_id AS source_group_id
+                recipe_complete_meals.source_group_id AS source_group_id,
+                CASE WHEN recipe_components.user_id = ? THEN 1 ELSE 0 END AS is_owner,
+                CASE WHEN recipe_favorites.id IS NULL THEN 0 ELSE 1 END AS is_favorite
             FROM recipe_components
             LEFT JOIN recipe_complete_meals
                 ON recipe_complete_meals.id = recipe_components.source_meal_id
             LEFT JOIN recipe_shares
                 ON recipe_shares.recipe_kind = 'component'
                 AND recipe_shares.recipe_id = recipe_components.id
+                AND recipe_shares.shared_with_user_id = ?
+            LEFT JOIN recipe_favorites
+                ON recipe_favorites.recipe_kind = 'component'
+                AND recipe_favorites.recipe_id = recipe_components.id
+                AND recipe_favorites.user_id = ?
             WHERE (? IS NULL OR recipe_components.user_id = ? OR recipe_shares.shared_with_user_id = ?)
+              AND (COALESCE(recipe_components.visibility, 'shared') != 'private' OR recipe_components.user_id = ?)
             ORDER BY recipe_components.updated_at DESC, recipe_components.id DESC
             """
             ,
-            (user_id, user_id, user_id),
+            (user_id, user_id, user_id, user_id, user_id, user_id, user_id),
         )
         components = cursor.fetchall()
         self.close()
@@ -2110,17 +2184,25 @@ class Database:
                 recipe_complete_meals.title AS source_meal_title,
                 recipe_complete_meals.ingredients_text AS source_meal_ingredients_text,
                 recipe_complete_meals.instructions_text AS source_meal_instructions_text,
-                recipe_complete_meals.source_group_id AS source_group_id
+                recipe_complete_meals.source_group_id AS source_group_id,
+                CASE WHEN recipe_components.user_id = ? THEN 1 ELSE 0 END AS is_owner,
+                CASE WHEN recipe_favorites.id IS NULL THEN 0 ELSE 1 END AS is_favorite
             FROM recipe_components
             LEFT JOIN recipe_complete_meals
                 ON recipe_complete_meals.id = recipe_components.source_meal_id
             LEFT JOIN recipe_shares
                 ON recipe_shares.recipe_kind = 'component'
                 AND recipe_shares.recipe_id = recipe_components.id
+                AND recipe_shares.shared_with_user_id = ?
+            LEFT JOIN recipe_favorites
+                ON recipe_favorites.recipe_kind = 'component'
+                AND recipe_favorites.recipe_id = recipe_components.id
+                AND recipe_favorites.user_id = ?
             WHERE recipe_components.id = ?
               AND (? IS NULL OR recipe_components.user_id = ? OR recipe_shares.shared_with_user_id = ?)
+              AND (COALESCE(recipe_components.visibility, 'shared') != 'private' OR recipe_components.user_id = ?)
             """,
-            (component_id, user_id, user_id, user_id),
+            (user_id, user_id, user_id, component_id, user_id, user_id, user_id, user_id),
         )
         component = cursor.fetchone()
         self.close()
@@ -2151,6 +2233,98 @@ class Database:
         )
         self._commit()
         self.close()
+
+    def set_recipe_favorite(self, recipe_kind, recipe_id, is_favorite=True):
+        """Set or clear the active user's favorite marker for a recipe."""
+        user_id = self._active_user_id()
+        if not user_id:
+            return
+        self.connect()
+        cursor = self.conn.cursor()
+        if is_favorite:
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO recipe_favorites (recipe_kind, recipe_id, user_id)
+                VALUES (?, ?, ?)
+                """,
+                (recipe_kind, recipe_id, user_id),
+            )
+        else:
+            cursor.execute(
+                "DELETE FROM recipe_favorites WHERE recipe_kind = ? AND recipe_id = ? AND user_id = ?",
+                (recipe_kind, recipe_id, user_id),
+            )
+        self._commit()
+        self.close()
+
+    def add_recipe_variation(self, recipe_kind, recipe_id, title, ingredients_text, instructions_text, summary, threshold=2):
+        """Record an edited recipe as a candidate variation."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO recipe_variations
+                (recipe_kind, recipe_id, title, ingredients_text, instructions_text, summary, promotion_threshold, created_by_user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                recipe_kind,
+                recipe_id,
+                title,
+                ingredients_text,
+                instructions_text,
+                summary,
+                threshold,
+                self._active_user_id(),
+            ),
+        )
+        variation_id = cursor.lastrowid
+        self._commit()
+        self.close()
+        return variation_id
+
+    def upvote_recipe_variation(self, variation_id):
+        """Upvote a recipe variation and move it to review-ready at threshold."""
+        user_id = self._active_user_id()
+        if not user_id:
+            return None
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO recipe_variation_votes (variation_id, user_id, vote)
+            VALUES (?, ?, 'up')
+            """,
+            (variation_id, user_id),
+        )
+        cursor.execute(
+            """
+            UPDATE recipe_variations
+            SET upvote_count = (
+                    SELECT COUNT(*)
+                    FROM recipe_variation_votes
+                    WHERE recipe_variation_votes.variation_id = recipe_variations.id
+                      AND recipe_variation_votes.vote = 'up'
+                ),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (variation_id,),
+        )
+        cursor.execute(
+            """
+            UPDATE recipe_variations
+            SET review_status = 'ready_for_review'
+            WHERE id = ?
+              AND upvote_count >= promotion_threshold
+              AND review_status = 'pending'
+            """,
+            (variation_id,),
+        )
+        variation = cursor.execute("SELECT * FROM recipe_variations WHERE id = ?", (variation_id,)).fetchone()
+        self._commit()
+        self.close()
+        return variation
 
     def add_recipe_change_log(self, recipe_kind, recipe_id, user_message, summary, changed_fields, before, after, model=""):
         """Record a structured Dieter recipe edit."""

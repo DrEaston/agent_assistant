@@ -419,6 +419,7 @@ def extract_recipe_pdf_preview(pdf_path, output_dir):
 def prepare_recipe_complete_meals(meals):
     """Parse complete-meal quality notes for rendering."""
     prepared = []
+    new_cutoff = datetime.utcnow() - timedelta(days=14)
     for meal in meals:
         meal_data = dict(meal)
         try:
@@ -441,6 +442,15 @@ def prepare_recipe_complete_meals(meals):
             or meal_data.get("edited_ingredients_text")
             or meal_data.get("edited_instructions_text")
         )
+        meal_data["visibility"] = meal_data.get("visibility") or "shared"
+        meal_data["is_owner"] = bool(meal_data.get("is_owner"))
+        meal_data["is_favorite"] = bool(meal_data.get("is_favorite"))
+        meal_data["catalogue_label"] = "Private" if meal_data["visibility"] == "private" else "Shared"
+        try:
+            created_at = datetime.fromisoformat((meal_data.get("created_at") or "").replace("Z", "+00:00"))
+            meal_data["is_new"] = created_at.replace(tzinfo=None) >= new_cutoff
+        except ValueError:
+            meal_data["is_new"] = False
         prepared.append(meal_data)
     return prepared
 
@@ -1490,8 +1500,21 @@ def apply_recipe_edit(recipe_kind, recipe_id, user_message, proposal):
         after,
         proposal.get("model", ""),
     )
+    variation_id = None
+    if changed_fields:
+        variation_id = db.add_recipe_variation(
+            recipe_kind,
+            recipe_id,
+            after["title"],
+            after["ingredients_text"],
+            after["instructions_text"],
+            summary,
+            threshold=2,
+        )
+        db.upvote_recipe_variation(variation_id)
     return {
         "change_id": change_id,
+        "variation_id": variation_id,
         "changed_fields": changed_fields,
         "summary": summary,
         "assistant_message": proposal.get("assistant_message") or summary,
@@ -3844,6 +3867,7 @@ def save_selected_recipe_meal_form(
     ingredients_text, instructions_text = build_saved_meal_text_from_components(components)
     meal_id = db.create_saved_recipe_meal(title, ingredients_text, instructions_text)
     db.cleanup_duplicate_recipes()
+    db.share_recipe_library_with_all_users()
     return RedirectResponse(url=f"/apps/recipes/meals/{meal_id}", status_code=303)
 
 
@@ -3857,6 +3881,32 @@ def add_complete_meal_to_plan_form(meal_id: int):
     title = meal.get("display_title") or meal.get("title") or "Complete meal"
     db.add_recipe_meal_plan_item("complete_meal", title, source_id=meal_id)
     return RedirectResponse(url="/apps/recipes#meal-plan", status_code=303)
+
+
+@app.post("/apps/recipes/meals/{meal_id}/favorite")
+def favorite_recipe_meal_form(
+    meal_id: int,
+    next: str = Form("/apps/recipes"),
+):
+    """Mark a recipe as a per-user favorite."""
+    meal = dict_from_row(db.get_recipe_complete_meal(meal_id))
+    if not meal:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    db.set_recipe_favorite("meal", meal_id, True)
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/recipes"), status_code=303)
+
+
+@app.post("/apps/recipes/meals/{meal_id}/favorite/delete")
+def unfavorite_recipe_meal_form(
+    meal_id: int,
+    next: str = Form("/apps/recipes"),
+):
+    """Remove a recipe from the current user's favorites."""
+    meal = dict_from_row(db.get_recipe_complete_meal(meal_id))
+    if not meal:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    db.set_recipe_favorite("meal", meal_id, False)
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/recipes"), status_code=303)
 
 
 @app.post("/apps/recipes/meals/{meal_id}/share")

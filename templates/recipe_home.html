@@ -119,6 +119,11 @@
 
             <div class="complete-meal-controls">
                 <label for="complete-meal-search-input">Search complete meals</label>
+                <select id="complete-meal-scope-select" data-meal-scope-select aria-label="Recipe catalogue scope">
+                    <option value="favorites">Favorites</option>
+                    <option value="new">New</option>
+                    <option value="all">All Recipes</option>
+                </select>
                 <input
                     id="complete-meal-search-input"
                     type="search"
@@ -143,11 +148,21 @@
                         data-meal-search="{{ ((meal.display_title or meal.source_label or 'Complete meal') ~ ' ' ~ (meal.display_ingredients_text or '') ~ ' ' ~ (meal.display_instructions_text or ''))|lower|e }}"
                         data-meal-status="{{ meal.status }}"
                         data-meal-kind="{{ meal.source_kind|default('card') }}"
+                        data-meal-favorite="{{ 'true' if meal.is_favorite else 'false' }}"
+                        data-meal-new="{{ 'true' if meal.is_new else 'false' }}"
                     >
                         <a class="recipe-title-copy" href="/apps/recipes/meals/{{ meal.id }}">
                             <strong>{{ meal.display_title or meal.source_label or "Complete meal" }}</strong>
                         </a>
                         <span class="recipe-title-meta">
+                            <form method="post" action="/apps/recipes/meals/{{ meal.id }}{% if meal.is_favorite %}/favorite/delete{% else %}/favorite{% endif %}" class="inline-form">
+                                <input type="hidden" name="next" value="{{ request.url.path }}">
+                                <button type="submit" class="secondary compact">{% if meal.is_favorite %}Favorited{% else %}Favorite{% endif %}</button>
+                            </form>
+                            <span class="meal-status meal-status-ready">{{ meal.catalogue_label }}</span>
+                            {% if meal.is_new %}
+                                <span class="meal-status meal-status-ready">NEW</span>
+                            {% endif %}
                             {% if meal.status != 'ready' %}
                                 <span class="meal-status meal-status-{{ meal.status }}">{{ meal.status|replace("_", " ")|upper }}</span>
                             {% endif %}
@@ -431,12 +446,18 @@
             return;
         }
         const filterValue = (document.querySelector("[data-meal-filter-input]")?.value || "").trim().toLowerCase();
+        const scopeValue = document.querySelector("[data-meal-scope-select]")?.value || "favorites";
         const filterTerms = filterValue.split(/\s+/).filter(Boolean);
         const rows = Array.from(list.querySelectorAll("[data-complete-meal-row]"));
         let visibleCount = 0;
         rows.forEach((row) => {
             const searchText = row.dataset.mealSearch || row.dataset.mealTitle || "";
-            const isVisible = !filterTerms.length || filterTerms.every((term) => searchText.includes(term));
+            const scopeVisible =
+                scopeValue === "all"
+                || (scopeValue === "favorites" && row.dataset.mealFavorite === "true")
+                || (scopeValue === "new" && row.dataset.mealNew === "true");
+            const searchVisible = !filterTerms.length || filterTerms.every((term) => searchText.includes(term));
+            const isVisible = scopeVisible && searchVisible;
             row.classList.toggle("is-hidden", !isVisible);
             if (isVisible) {
                 visibleCount += 1;
@@ -446,17 +467,20 @@
         document.querySelector("[data-complete-meal-empty]")?.classList.toggle("is-hidden", visibleCount !== 0);
         const status = document.querySelector("[data-meal-filter-status]");
         if (status) {
+            const scopeLabel = scopeValue === "all" ? "all recipes" : scopeValue;
             status.textContent = filterValue
-                ? `${visibleCount} meal${visibleCount === 1 ? "" : "s"} matching "${filterValue}".`
-                : `Showing ${visibleCount} meal${visibleCount === 1 ? "" : "s"}.`;
+                ? `${visibleCount} ${scopeLabel} meal${visibleCount === 1 ? "" : "s"} matching "${filterValue}".`
+                : `Showing ${visibleCount} ${scopeLabel} meal${visibleCount === 1 ? "" : "s"}.`;
         }
         const browser = document.querySelector("[data-complete-meal-browser]");
-        if (browser && filterValue) {
+        if (browser && (filterValue || scopeValue !== "favorites")) {
             browser.open = true;
         }
     };
 
     document.querySelector("[data-meal-filter-input]")?.addEventListener("input", filterAndSortCompleteMeals);
+    document.querySelector("[data-meal-scope-select]")?.addEventListener("change", filterAndSortCompleteMeals);
+    filterAndSortCompleteMeals();
 
     const componentFilterState = {
         primary: "meat",

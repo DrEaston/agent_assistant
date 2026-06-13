@@ -14,6 +14,10 @@
                 {% if meal.has_dieter_edits %}
                     <span class="meal-status meal-status-ready">DIETER EDITED</span>
                 {% endif %}
+                <span class="meal-status meal-status-ready">{{ meal.catalogue_label }}</span>
+                {% if meal.is_favorite %}
+                    <span class="meal-status meal-status-ready">FAVORITE</span>
+                {% endif %}
             </p>
         </div>
         <div class="recipe-detail-actions">
