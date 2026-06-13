@@ -580,6 +580,11 @@ BAKING_SECTION_LABELS = {
     "dough": "Dough",
     "filling": "Filling",
     "icing": "Icing",
+    "crust": "Crust",
+    "sauce": "Sauce",
+    "pesto": "Pesto",
+    "chicken": "Chicken",
+    "toppings": "Toppings",
 }
 
 BAKING_SECTION_ALIASES = {
@@ -590,6 +595,16 @@ BAKING_SECTION_ALIASES = {
     "icing": "icing",
     "frosting": "icing",
     "glaze": "icing",
+    "crust": "crust",
+    "pizza crust": "crust",
+    "sauce": "sauce",
+    "pizza sauce": "sauce",
+    "pesto": "pesto",
+    "pesto sauce": "pesto",
+    "chicken": "chicken",
+    "seared chicken": "chicken",
+    "topping": "toppings",
+    "toppings": "toppings",
 }
 
 BAKING_INGREDIENT_SECTION_TERMS = {
@@ -604,6 +619,22 @@ BAKING_INGREDIENT_SECTION_TERMS = {
     "icing": [
         "powdered sugar", "confectioners", "cream cheese", "vanilla",
         "icing", "frosting", "glaze", "maple syrup",
+    ],
+    "crust": [
+        "00 flour", "bread flour", "cornmeal", "crust", "dough", "flour",
+        "olive oil", "pizza dough", "semolina", "yeast",
+    ],
+    "sauce": [
+        "marinara", "pizza sauce", "sauce", "tomato", "tomatoes",
+    ],
+    "pesto": [
+        "basil", "garlic", "parmesan", "pine nut", "pine nuts", "pesto",
+    ],
+    "chicken": [
+        "chicken", "chicken breast", "chicken thighs",
+    ],
+    "toppings": [
+        "cheese", "mozzarella", "onion", "pepper", "topping", "toppings",
     ],
 }
 
@@ -620,23 +651,74 @@ BAKING_INSTRUCTION_SECTION_TERMS = {
         "cream cheese", "drizzle", "frost", "frosting", "glaze", "icing",
         "powdered sugar", "vanilla", "whisk",
     ],
+    "crust": [
+        "bake", "crust", "dough", "flour", "knead", "parbake", "pizza stone",
+        "proof", "rise", "shape", "stretch",
+    ],
+    "sauce": [
+        "sauce", "simmer", "tomato",
+    ],
+    "pesto": [
+        "basil", "blend", "garlic", "parmesan", "pesto", "pine nut", "process",
+    ],
+    "chicken": [
+        "chicken", "cook", "saute", "sear", "slice",
+    ],
+    "toppings": [
+        "assemble", "cheese", "mozzarella", "scatter", "sprinkle", "top",
+        "topping", "toppings",
+    ],
 }
 
+def slugify_baking_section_key(label):
+    """Create a stable key for a recipe-provided Bake Mode section."""
+    key = re.sub(r"[^a-z0-9]+", "-", (label or "").lower()).strip("-")
+    return key or "section"
+
+def baking_section_label_for_key(key):
+    """Return a human label for a known or recipe-provided Bake Mode section."""
+    return BAKING_SECTION_LABELS.get(key) or (key or "Section").replace("-", " ").title()
+
+def parse_baking_section_heading(line):
+    """Return a Bake Mode section when a line is likely a section heading."""
+    raw_heading = re.sub(r"^#+\s*", "", line or "").strip()
+    if not raw_heading:
+        return None
+    has_heading_marker = bool(re.match(r"^\s*#+", line or "") or re.search(r"[:\-]\s*$", raw_heading))
+    heading = re.sub(r"[:\-]+$", "", raw_heading).strip()
+    heading = re.sub(r"^(for|make|the)\s+", "", heading, flags=re.IGNORECASE).strip()
+    normalized = heading.lower()
+    alias_key = BAKING_SECTION_ALIASES.get(normalized)
+    if alias_key:
+        return {"key": alias_key, "label": baking_section_label_for_key(alias_key)}
+    if not has_heading_marker and not re.match(r"^(for|make|the)\s+", raw_heading, flags=re.IGNORECASE):
+        return None
+    if len(heading.split()) > 5:
+        return None
+    key = slugify_baking_section_key(heading)
+    return {"key": key, "label": baking_section_label_for_key(key)}
+
 def normalize_baking_section_heading(line):
-    """Return a known baking section key when a line looks like a heading."""
-    heading = re.sub(r"^#+\s*", "", line or "").strip()
-    heading = re.sub(r"[:\-]+$", "", heading).strip().lower()
-    heading = re.sub(r"^(for|make|the)\s+", "", heading)
-    return BAKING_SECTION_ALIASES.get(heading)
+    """Return a Bake Mode section key when a line looks like a heading."""
+    heading = parse_baking_section_heading(line)
+    return heading["key"] if heading else None
 
 def parse_baking_ingredient_sections(ingredients_text):
     """Split recipe ingredients into touch-friendly baking sections."""
-    sections_by_key = {
-        key: {"key": key, "label": label, "items": []}
-        for key, label in BAKING_SECTION_LABELS.items()
-    }
+    sections_by_key = {}
+    section_order = []
     other_items = []
     current_key = None
+
+    def ensure_section(key, label=None):
+        if key not in sections_by_key:
+            sections_by_key[key] = {
+                "key": key,
+                "label": label or baking_section_label_for_key(key),
+                "items": [],
+            }
+            section_order.append(key)
+        return sections_by_key[key]
 
     source_lines = []
     for raw_line in (ingredients_text or "").splitlines():
@@ -649,46 +731,80 @@ def parse_baking_ingredient_sections(ingredients_text):
         line = raw_line.strip()
         if not line:
             continue
-        heading_key = normalize_baking_section_heading(line)
-        if heading_key:
-            current_key = heading_key
+        heading = parse_baking_section_heading(line)
+        if heading:
+            current_key = heading["key"]
+            ensure_section(current_key, heading["label"])
             continue
         item = re.sub(r"^[-*]\s*", "", line).strip()
         if not item:
             continue
         if current_key:
-            sections_by_key[current_key]["items"].append(item)
+            ensure_section(current_key)["items"].append(item)
         else:
             other_items.append(item)
 
-    sections = [section for section in sections_by_key.values() if section["items"]]
+    sections = [sections_by_key[key] for key in section_order if sections_by_key[key]["items"]]
     if not sections and other_items:
-        categorized = {
-            key: {"key": key, "label": label, "items": []}
-            for key, label in BAKING_SECTION_LABELS.items()
-        }
+        categorized = {}
+        categorized_order = []
+
+        def ensure_categorized(key):
+            if key not in categorized:
+                categorized[key] = {
+                    "key": key,
+                    "label": baking_section_label_for_key(key),
+                    "items": [],
+                }
+                categorized_order.append(key)
+            return categorized[key]
+
         uncategorized = []
         for item in other_items:
             lowered = item.lower()
             target_key = ""
+            scored_keys = []
             for key, terms in BAKING_INGREDIENT_SECTION_TERMS.items():
-                if any(term in lowered for term in terms):
-                    target_key = key
-                    break
+                score = sum(len(term) for term in terms if term in lowered)
+                if score:
+                    scored_keys.append((score, key))
+            if scored_keys:
+                scored_keys.sort(key=lambda item: item[0], reverse=True)
+                target_key = scored_keys[0][1]
             if target_key:
-                categorized[target_key]["items"].append(item)
+                ensure_categorized(target_key)["items"].append(item)
             else:
                 uncategorized.append(item)
         if any(section["items"] for section in categorized.values()):
-            sections = [section for section in categorized.values() if section["items"]]
+            sections = [categorized[key] for key in categorized_order if categorized[key]["items"]]
             other_items = uncategorized
     if other_items:
         sections.append({"key": "general", "label": "Ingredients", "items": other_items})
     return sections
 
-def parse_baking_instruction_sections(instructions_text):
+def parse_baking_instruction_sections(instructions_text, ingredient_sections=None):
     """Split recipe instructions into the baking sections they most likely support."""
-    sections_by_key = {key: [] for key in BAKING_SECTION_LABELS}
+    section_sources = ingredient_sections or [
+        {"key": key, "label": label, "items": []}
+        for key, label in BAKING_SECTION_LABELS.items()
+    ]
+    sections_by_key = {section["key"]: [] for section in section_sources}
+    section_order = [section["key"] for section in section_sources]
+    term_map = {}
+    for section in section_sources:
+        key = section["key"]
+        label = section.get("label") or baking_section_label_for_key(key)
+        terms = set(BAKING_INSTRUCTION_SECTION_TERMS.get(key, []))
+        terms.add(label.lower())
+        terms.update(word for word in re.findall(r"[a-z]{4,}", label.lower()))
+        for ingredient in section.get("items", [])[:8]:
+            ingredient_text = re.sub(
+                r"\b\d+(?:[./]\d+)?|\b(cup|cups|tbsp|tablespoons?|tsp|teaspoons?|oz|ounces?|lb|lbs|g|grams?)\b",
+                " ",
+                ingredient.lower(),
+            )
+            terms.update(word for word in re.findall(r"[a-z]{4,}", ingredient_text)[:3])
+        term_map[key] = terms
     current_key = None
     for raw_line in (instructions_text or "").splitlines():
         line = re.sub(r"^\s*(?:[-*]|\d+[.)])\s*", "", raw_line).strip()
@@ -696,25 +812,29 @@ def parse_baking_instruction_sections(instructions_text):
             continue
         heading_key = normalize_baking_section_heading(line)
         if heading_key:
-            current_key = heading_key
+            current_key = heading_key if heading_key in sections_by_key else None
             continue
         lowered = line.lower()
         target_key = current_key
         scored_keys = []
-        for key, terms in BAKING_INSTRUCTION_SECTION_TERMS.items():
+        for key, terms in term_map.items():
             score = sum(1 for term in terms if term in lowered)
             if score:
                 scored_keys.append((score, key))
         if scored_keys:
-            scored_keys.sort(key=lambda item: (item[0], item[1] != "dough"))
-            target_key = scored_keys[-1][1]
-        if target_key:
+            best_score = max(score for score, _ in scored_keys)
+            best_keys = [key for score, key in scored_keys if score == best_score]
+            if current_key in best_keys:
+                target_key = current_key
+            else:
+                target_key = min(best_keys, key=lambda key: section_order.index(key))
+        if target_key and target_key in sections_by_key:
             sections_by_key[target_key].append(line)
     return sections_by_key
 
 def attach_baking_instructions_to_sections(ingredient_sections, instructions_text):
     """Add section-specific instruction snippets to ingredient sections for Bake Mode."""
-    instructions_by_key = parse_baking_instruction_sections(instructions_text)
+    instructions_by_key = parse_baking_instruction_sections(instructions_text, ingredient_sections)
     return [
         {
             **section,
