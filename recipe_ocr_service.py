@@ -4,6 +4,7 @@ import base64
 import json
 import mimetypes
 import os
+import re
 from pathlib import Path
 
 
@@ -45,6 +46,11 @@ Text rules:
 - Preserve wording when possible.
 - The front image usually contains ingredients.
 - The back image usually contains instructions.
+- Page breaks can split section headings from their ingredients or steps. If a
+  heading such as "Icing", "Glaze", "Filling", "Sauce", "Crust", or "Chicken"
+  appears at the end of one page, attach the following ingredient or instruction
+  lines at the start of the next page to that heading unless another heading
+  clearly intervenes.
 - If text is unclear, put a short note in "uncertain" rather than inventing
   exact wording.
 """
@@ -54,6 +60,9 @@ PDF_RECIPE_EXTRACTION_NOTE = """This import came from a recipe PDF.
 Use the extracted PDF text as the primary source for title, ingredients, and
 instructions. Use the accompanying image/photo only as visual context, thumbnail
 context, or to resolve ambiguity. Do not assume front/back recipe card layout.
+The extracted text includes page markers. Treat page markers as layout hints,
+not recipe content. Preserve section continuity across page markers when a
+heading is separated from its ingredients or instructions.
 """
 
 GENERIC_RECIPE_TITLES = {
@@ -142,6 +151,10 @@ Rules:
 - Preserve small sub-recipes completely. Icing, glaze, frosting, sauces,
   fillings, marinades, and toppings should keep their own ingredients and all
   directly related mixing/thinning/drizzling/spreading steps when visible.
+- Pay special attention to page-break artifacts. If a section heading is split
+  from its list by a page marker, keep the heading and following list together.
+  For example, "Icing" at the end of one page followed by powdered sugar, milk,
+  vanilla, or cream cheese on the next page is one Icing section.
 - Format ingredients_text with section headings when sections exist:
   "Crust:\n- ...\n\nChicken:\n- ..."
 - Format instructions_text as concise steps. If a recipe has clear component
@@ -534,6 +547,12 @@ class RecipeOCRService:
         title = str(payload.get("title") or "").strip()
         normalized_title = RecipeOCRService._normalize_title_key(title)
         sections = payload.get("sections") or []
+        payload["ingredients_text"] = RecipeOCRService._repair_page_break_section_text(
+            payload.get("ingredients_text") or ""
+        )
+        payload["instructions_text"] = RecipeOCRService._repair_page_break_section_text(
+            payload.get("instructions_text") or ""
+        )
 
         if normalized_title in GENERIC_RECIPE_TITLES:
             title = RecipeOCRService._title_from_sections(sections) or title
@@ -550,6 +569,23 @@ class RecipeOCRService:
         payload["title"] = title
         payload["sections"] = sections
         return payload
+
+    @staticmethod
+    def _repair_page_break_section_text(text):
+        """Keep section headings attached to lists split by extracted page markers."""
+        if not text:
+            return ""
+        section_headings = (
+            "chicken|crust|dough|filling|fillings|frosting|glaze|icing|"
+            "marinade|pesto|sauce|topping|toppings"
+        )
+        repaired = re.sub(
+            rf"(?im)^(\s*(?:{section_headings})\s*:?)\s*\n\s*---\s*Page\s+\d+\s*---\s*\n",
+            lambda match: f"{match.group(1).rstrip(':')}:\n",
+            text,
+        )
+        repaired = re.sub(r"(?im)^\s*---\s*Page\s+\d+\s*---\s*$\n?", "", repaired)
+        return repaired.strip()
 
     @staticmethod
     def _title_from_sections(sections):
@@ -601,10 +637,10 @@ class RecipeOCRService:
         try:
             document = fitz.open(str(pdf_path))
             pages = []
-            for page in document:
+            for page_index, page in enumerate(document, start=1):
                 page_text = page.get_text("text").strip()
                 if page_text:
-                    pages.append(page_text)
+                    pages.append(f"--- Page {page_index} ---\n{page_text}")
             text = "\n\n".join(pages)
             return text[:16000]
         except Exception:
