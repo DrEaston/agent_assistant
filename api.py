@@ -2481,6 +2481,7 @@ def run_recipe_app_maintenance(force=False):
         db.sync_recipe_complete_meals_from_extractions()
         db.cleanup_empty_recipe_placeholders()
         db.cleanup_duplicate_recipes()
+        db.share_recipe_library_with_all_users()
 
 def get_recipe_app_context(include_library=True, run_maintenance=True):
     """Resolve planner-backed recipe app links and import status."""
@@ -3206,6 +3207,7 @@ def register_form(
     user_id = db.create_user(email, display_name, hash_password(password), role)
     if first_user:
         db.claim_unowned_data(user_id)
+    db.share_recipe_library_with_all_users()
     return create_login_response(user_id)
 
 

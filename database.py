@@ -612,6 +612,33 @@ class Database:
         self._commit()
         self.close()
 
+    def share_recipe_library_with_all_users(self):
+        """Share every owned recipe record with every other user as view-only."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO recipe_shares
+                (recipe_kind, recipe_id, owner_user_id, shared_with_user_id, permission)
+            SELECT 'meal', recipe_complete_meals.id, recipe_complete_meals.user_id, users.id, 'view'
+            FROM recipe_complete_meals
+            JOIN users ON users.id != recipe_complete_meals.user_id
+            WHERE recipe_complete_meals.user_id IS NOT NULL
+            """
+        )
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO recipe_shares
+                (recipe_kind, recipe_id, owner_user_id, shared_with_user_id, permission)
+            SELECT 'component', recipe_components.id, recipe_components.user_id, users.id, 'view'
+            FROM recipe_components
+            JOIN users ON users.id != recipe_components.user_id
+            WHERE recipe_components.user_id IS NOT NULL
+            """
+        )
+        self._commit()
+        self.close()
+
     def _repair_sample_data_links(self, cursor):
         """Repair older sample rows that were linked to the wrong project ids."""
         cursor.execute("SELECT id, name FROM projects")
