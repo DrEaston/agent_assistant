@@ -1827,14 +1827,18 @@ def scheduler_due_context():
         try:
             if re.fullmatch(r"\d{4}-\d{2}-\d{2}", scheduled_for):
                 scheduled_date = datetime.strptime(scheduled_for, "%Y-%m-%d").date()
-                is_due = scheduled_date <= today
+                is_due = scheduled_date < today
+                is_today = scheduled_date == today
             else:
                 scheduled_at = datetime.fromisoformat(scheduled_for.replace("Z", "+00:00"))
                 scheduled_date = scheduled_at.date()
-                is_due = scheduled_at.replace(tzinfo=None) <= now
+                is_today = scheduled_date == today
+                is_due = scheduled_date < today
         except ValueError:
             continue
         item["scheduled_date"] = scheduled_date.isoformat()
+        item["is_today"] = is_today
+        item["scheduler_visual_priority"] = "today" if is_today else "due" if is_due else "upcoming"
         if is_due:
             due_items.append(item)
         else:
