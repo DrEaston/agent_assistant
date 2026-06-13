@@ -97,7 +97,8 @@
         </div>
 
         {% if ingredient_sections %}
-            <div class="baking-prep-stage" data-baking-stage hidden>
+            <aside class="baking-prep-overlay hidden" data-baking-overlay aria-label="Bake Mode ingredient checklist">
+                <div class="baking-prep-stage" data-baking-stage>
                 <div class="baking-prep-stage-header">
                     <div>
                         <p class="priority-label">Bake Mode</p>
@@ -106,11 +107,13 @@
                     <div class="baking-prep-stage-actions">
                         <button type="button" class="secondary compact" data-baking-stage-rotate>Rotate Layout</button>
                         <button type="button" class="secondary compact" data-baking-stage-reset>Reset Checks</button>
+                        <button type="button" class="secondary compact" data-baking-stage-complete>All Items Added</button>
                         <button type="button" class="secondary compact" data-baking-stage-close>Close</button>
                     </div>
                 </div>
                 <div class="baking-prep-list" data-baking-stage-list></div>
-            </div>
+                </div>
+            </aside>
         {% else %}
             <p class="muted-text">Add dough, filling, or icing ingredients below to enable Bake Mode.</p>
         {% endif %}
@@ -210,6 +213,7 @@
         }
 
         const mealId = panel.dataset.mealId || "recipe";
+        const overlay = panel.querySelector("[data-baking-overlay]");
         const stage = panel.querySelector("[data-baking-stage]");
         const title = panel.querySelector("[data-baking-stage-title]");
         const list = panel.querySelector("[data-baking-stage-list]");
@@ -258,8 +262,7 @@
                 });
                 list.appendChild(row);
             });
-            stage.hidden = false;
-            stage.scrollIntoView({behavior: "smooth", block: "start"});
+            overlay?.classList.remove("hidden");
         };
 
         panel.querySelectorAll("[data-baking-section-open]").forEach((button) => {
@@ -267,11 +270,26 @@
         });
 
         panel.querySelector("[data-baking-stage-close]")?.addEventListener("click", () => {
-            stage.hidden = true;
+            overlay?.classList.add("hidden");
+        });
+
+        overlay?.addEventListener("click", (event) => {
+            if (event.target === overlay) {
+                overlay.classList.add("hidden");
+            }
         });
 
         panel.querySelector("[data-baking-stage-rotate]")?.addEventListener("click", () => {
             stage.classList.toggle("is-rotated");
+        });
+
+        panel.querySelector("[data-baking-stage-complete]")?.addEventListener("click", () => {
+            if (!activeSection) {
+                return;
+            }
+            const checked = new Set(activeSection.items.map((_, index) => String(index)));
+            saveCheckedSet(activeSection.key, checked);
+            overlay?.classList.add("hidden");
         });
 
         panel.querySelector("[data-baking-stage-reset]")?.addEventListener("click", () => {

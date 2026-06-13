@@ -3220,13 +3220,37 @@
             justify-content: end;
         }
 
+        .baking-prep-overlay {
+            align-items: center;
+            background: rgba(15, 23, 42, 0.58);
+            display: flex;
+            inset: 0;
+            justify-content: center;
+            padding: 1.25rem;
+            position: fixed;
+            z-index: 32;
+        }
+
+        .baking-prep-overlay.hidden {
+            display: none;
+        }
+
         .baking-prep-stage {
             background: #0f172a;
             border-radius: 8px;
+            box-shadow: 0 24px 70px rgba(15, 23, 42, 0.38);
             color: #fff;
             margin-top: 1rem;
             min-height: min(72vh, 46rem);
+            max-height: min(88vh, 760px);
+            max-width: 980px;
+            overflow-y: auto;
             padding: clamp(1rem, 2vw, 1.5rem);
+            width: min(980px, 100%);
+        }
+
+        .baking-prep-overlay .baking-prep-stage {
+            margin-top: 0;
         }
 
         .baking-prep-stage .priority-label,
@@ -3243,6 +3267,18 @@
         .baking-prep-stage-header h2 {
             color: #fff;
             font-size: 2.25rem;
+        }
+
+        .baking-prep-stage-actions [data-baking-stage-complete] {
+            background: #22c55e;
+            border-color: #16a34a;
+            color: #052e16;
+        }
+
+        .baking-prep-stage-actions [data-baking-stage-complete]:hover {
+            background: #86efac;
+            border-color: #22c55e;
+            color: #052e16;
         }
 
         .baking-prep-list {
