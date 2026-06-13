@@ -240,28 +240,30 @@
             const checked = checkedSetFor(activeSection.key);
             title.textContent = activeSection.label;
             list.innerHTML = "";
-            activeSection.items.forEach((item, index) => {
-                const id = String(index);
-                const row = document.createElement("label");
-                row.className = "baking-prep-item";
-                const checkbox = document.createElement("input");
-                checkbox.type = "checkbox";
-                checkbox.checked = checked.has(id);
-                const text = document.createElement("span");
-                text.textContent = item;
-                row.append(checkbox, text);
-                row.classList.toggle("is-checked", checkbox.checked);
-                row.addEventListener("change", () => {
-                    if (checkbox.checked) {
-                        checked.add(id);
-                    } else {
-                        checked.delete(id);
-                    }
+            activeSection.items
+                .map((item, index) => ({item, index, id: String(index), checked: checked.has(String(index))}))
+                .sort((left, right) => Number(left.checked) - Number(right.checked) || left.index - right.index)
+                .forEach(({item, id}) => {
+                    const row = document.createElement("label");
+                    row.className = "baking-prep-item";
+                    const checkbox = document.createElement("input");
+                    checkbox.type = "checkbox";
+                    checkbox.checked = checked.has(id);
+                    const text = document.createElement("span");
+                    text.textContent = item;
+                    row.append(checkbox, text);
                     row.classList.toggle("is-checked", checkbox.checked);
-                    saveCheckedSet(activeSection.key, checked);
+                    row.addEventListener("change", () => {
+                        if (checkbox.checked) {
+                            checked.add(id);
+                        } else {
+                            checked.delete(id);
+                        }
+                        saveCheckedSet(activeSection.key, checked);
+                        renderSection(activeSection.key);
+                    });
+                    list.appendChild(row);
                 });
-                list.appendChild(row);
-            });
             overlay?.classList.remove("hidden");
         };
 
