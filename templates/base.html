@@ -3287,10 +3287,53 @@
             text-decoration-thickness: 0.12em;
         }
 
-        .baking-intake-panel summary {
+        .baking-intake-panel .section-header {
+            margin-bottom: 1rem;
+        }
+
+        .baking-sectioned-ingredients {
+            display: grid;
+            gap: 1rem;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .baking-ingredient-section {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-left: 4px solid var(--page-theme-color);
+            border-radius: 8px;
+            padding: 1rem;
+        }
+
+        .baking-ingredient-section h3 {
+            color: var(--page-theme-text);
+            font-size: 1.1rem;
+            margin: 0 0 0.75rem;
+        }
+
+        .baking-ingredient-section ul {
+            display: grid;
+            gap: 0.45rem;
+            list-style-position: outside;
+            margin: 0;
+            padding-left: 1.15rem;
+        }
+
+        .baking-ingredient-section li {
+            color: #334155;
+            font-size: 1rem;
+            font-weight: 400;
+            line-height: 1.45;
+        }
+
+        .baking-edit-sections {
+            margin-top: 1rem;
+        }
+
+        .baking-edit-sections summary {
             color: var(--page-theme-text);
             cursor: pointer;
-            font-weight: 900;
+            font-weight: 700;
         }
 
         .baking-intake-form {
@@ -3298,26 +3341,34 @@
             border: 0;
             box-shadow: none;
             display: grid;
-            gap: 1rem;
+            gap: 1.25rem;
             grid-template-columns: repeat(3, minmax(0, 1fr));
             margin: 1rem 0 0;
             padding: 0;
         }
 
         .baking-intake-form label {
-            color: var(--page-theme-text);
+            color: #334155;
             display: grid;
-            font-weight: 900;
-            gap: 0.4rem;
+            font-weight: 600;
+            gap: 0.5rem;
+        }
+
+        .baking-intake-form label > span {
+            color: var(--page-theme-text);
+            font-size: 1.05rem;
+            font-weight: 800;
         }
 
         .baking-intake-form textarea {
-            border: 1px solid var(--page-theme-border);
+            background: #fff;
+            border: 1px solid #cbd5e1;
             border-radius: 6px;
             font: inherit;
-            line-height: 1.35;
-            min-height: 11rem;
-            padding: 0.75rem;
+            font-size: 1rem;
+            line-height: 1.5;
+            min-height: 12rem;
+            padding: 0.85rem;
             resize: vertical;
         }
 
@@ -4769,6 +4820,10 @@
             }
 
             .baking-intake-form {
+                grid-template-columns: 1fr;
+            }
+
+            .baking-sectioned-ingredients {
                 grid-template-columns: 1fr;
             }
 

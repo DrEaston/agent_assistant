@@ -17,8 +17,6 @@
             </p>
         </div>
         <div class="recipe-detail-actions">
-            <a class="button-link bake-mode-jump" href="#bake-mode">Bake Mode</a>
-            <a class="button-link secondary-link" href="/apps/recipes">Back to Home</a>
             <form method="post" action="/apps/recipes/meal-plan/meals/{{ meal.id }}/add" class="inline-form">
                 <button type="submit">Add to Meal Plan</button>
             </form>
@@ -118,34 +116,52 @@
         {% endif %}
     </section>
 
-    <details class="baking-intake-panel" open>
-        <summary>Section Recipe Ingredients</summary>
-        <form method="post" action="/apps/recipes/meals/{{ meal.id }}/ingredient-sections/save" class="baking-intake-form">
-            <label>
-                Dough
-                <textarea name="dough_ingredients" rows="7" placeholder="500 g bread flour&#10;100 g starter&#10;300 g water">{{ sectioned_ingredient_values.get("dough", "") }}</textarea>
-            </label>
-            <label>
-                Filling
-                <textarea name="filling_ingredients" rows="7" placeholder="Brown sugar&#10;Cinnamon&#10;Softened butter">{{ sectioned_ingredient_values.get("filling", "") }}</textarea>
-            </label>
-            <label>
-                Icing
-                <textarea name="icing_ingredients" rows="7" placeholder="Powdered sugar&#10;Milk&#10;Vanilla">{{ sectioned_ingredient_values.get("icing", "") }}</textarea>
-            </label>
-            <button type="submit">Save Ingredient Sections</button>
-        </form>
-    </details>
+    <section class="baking-intake-panel">
+        <div class="section-header">
+            <div>
+                <h2>Ingredients</h2>
+                <p class="section-subtitle">Separated for this bake.</p>
+            </div>
+        </div>
+
+        {% if ingredient_sections %}
+            <div class="baking-sectioned-ingredients">
+                {% for section in ingredient_sections %}
+                    <section class="baking-ingredient-section baking-ingredient-section-{{ section.key }}">
+                        <h3>{{ section.label }}</h3>
+                        <ul>
+                            {% for item in section["items"] %}
+                                <li>{{ item }}</li>
+                            {% endfor %}
+                        </ul>
+                    </section>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="muted-text">Add dough, filling, and icing ingredients to section this bake.</p>
+        {% endif %}
+
+        <details class="baking-edit-sections" {% if not ingredient_sections %}open{% endif %}>
+            <summary>Edit Ingredient Sections</summary>
+            <form method="post" action="/apps/recipes/meals/{{ meal.id }}/ingredient-sections/save" class="baking-intake-form">
+                <label>
+                    <span>Dough</span>
+                    <textarea name="dough_ingredients" rows="7" placeholder="500 g bread flour&#10;100 g starter&#10;300 g water">{{ sectioned_ingredient_values.get("dough", "") }}</textarea>
+                </label>
+                <label>
+                    <span>Filling</span>
+                    <textarea name="filling_ingredients" rows="7" placeholder="Brown sugar&#10;Cinnamon&#10;Softened butter">{{ sectioned_ingredient_values.get("filling", "") }}</textarea>
+                </label>
+                <label>
+                    <span>Icing</span>
+                    <textarea name="icing_ingredients" rows="7" placeholder="Powdered sugar&#10;Milk&#10;Vanilla">{{ sectioned_ingredient_values.get("icing", "") }}</textarea>
+                </label>
+                <button type="submit">Save Ingredient Sections</button>
+            </form>
+        </details>
+    </section>
 
     <div class="recipe-meal-preview recipe-detail-grid">
-        <section class="recipe-ingredients-section">
-            <h2>Ingredients</h2>
-            {% if meal.display_ingredients_text %}
-                <pre class="recipe-ingredients-text">{{ meal.display_ingredients_text }}</pre>
-            {% else %}
-                <p class="muted-text">No ingredients were extracted yet.</p>
-            {% endif %}
-        </section>
         <section class="recipe-steps-section">
             <h2>Steps</h2>
             {% if meal.display_instructions_text %}
