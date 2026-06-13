@@ -139,6 +139,9 @@ Rules:
   Potatoes, Pork Chops, Vegetables.
 - Use recipe-specific section names. Do not force everything into dough,
   filling, and icing.
+- Preserve small sub-recipes completely. Icing, glaze, frosting, sauces,
+  fillings, marinades, and toppings should keep their own ingredients and all
+  directly related mixing/thinning/drizzling/spreading steps when visible.
 - Format ingredients_text with section headings when sections exist:
   "Crust:\n- ...\n\nChicken:\n- ..."
 - Format instructions_text as concise steps. If a recipe has clear component

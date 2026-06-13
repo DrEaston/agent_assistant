@@ -618,7 +618,8 @@ BAKING_INGREDIENT_SECTION_TERMS = {
     ],
     "icing": [
         "powdered sugar", "confectioners", "cream cheese", "vanilla",
-        "icing", "frosting", "glaze", "maple syrup",
+        "butter", "heavy cream", "icing", "frosting", "glaze", "lemon juice",
+        "maple syrup", "milk",
     ],
     "crust": [
         "00 flour", "bread flour", "cornmeal", "crust", "dough", "flour",
@@ -648,8 +649,9 @@ BAKING_INSTRUCTION_SECTION_TERMS = {
         "spread", "sprinkle", "swirl",
     ],
     "icing": [
-        "cream cheese", "drizzle", "frost", "frosting", "glaze", "icing",
-        "powdered sugar", "vanilla", "whisk",
+        "beat", "combine", "cream cheese", "drizzle", "frost", "frosting",
+        "glaze", "icing", "powdered sugar", "smooth", "thin", "vanilla",
+        "whisk",
     ],
     "crust": [
         "bake", "crust", "dough", "flour", "knead", "parbake", "pizza stone",
@@ -806,7 +808,13 @@ def parse_baking_instruction_sections(instructions_text, ingredient_sections=Non
             terms.update(word for word in re.findall(r"[a-z]{4,}", ingredient_text)[:3])
         term_map[key] = terms
     current_key = None
+    last_target_key = None
+    continuation_steps_remaining = 0
+    source_lines = []
     for raw_line in (instructions_text or "").splitlines():
+        pieces = re.split(r"\s+(?=\d+[.)]\s+)", raw_line.strip())
+        source_lines.extend(piece for piece in pieces if piece.strip())
+    for raw_line in source_lines:
         line = re.sub(r"^\s*(?:[-*]|\d+[.)])\s*", "", raw_line).strip()
         if not line:
             continue
@@ -828,8 +836,17 @@ def parse_baking_instruction_sections(instructions_text, ingredient_sections=Non
                 target_key = current_key
             else:
                 target_key = min(best_keys, key=lambda key: section_order.index(key))
+        elif last_target_key and continuation_steps_remaining > 0 and re.match(
+            r"^(add|beat|combine|drizzle|mix|pour|spread|stir|thin|whisk)\b",
+            lowered,
+        ):
+            target_key = last_target_key
         if target_key and target_key in sections_by_key:
             sections_by_key[target_key].append(line)
+            last_target_key = target_key
+            continuation_steps_remaining = 2 if target_key in {"icing", "glaze", "frosting"} else 1
+        elif continuation_steps_remaining > 0:
+            continuation_steps_remaining -= 1
     return sections_by_key
 
 def attach_baking_instructions_to_sections(ingredient_sections, instructions_text):
