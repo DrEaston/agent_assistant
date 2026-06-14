@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}Parrisa's Playlists{% endblock %}
+{% block title %}Dieter Music{% endblock %}
 
 {% block content %}
 <section class="detail-section playlists-home">
     <div class="section-header">
         <div>
-            <h2>Parrisa's Playlists</h2>
+            <h2>Dieter Music</h2>
             <p class="section-subtitle">Dictate a playlist, edit the songs, match them to Spotify, and submit when ready.</p>
         </div>
     </div>
@@ -23,7 +23,7 @@
                     <button type="submit" class="secondary compact danger-button">Disconnect Spotify</button>
                 </form>
             {% else %}
-                <p>Connect Spotify so Dieter can create playlists on Parrisa's account.</p>
+                <p>Connect Spotify so Dieter can create playlists on this account.</p>
                 <a class="button-link" href="/apps/playlists/spotify/connect">Connect Spotify</a>
             {% endif %}
             {% if request.query_params.get("spotify_connected") %}

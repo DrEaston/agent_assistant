@@ -5008,7 +5008,7 @@ def parse_playlist_dictation(text):
             song = parse_playlist_song_line(piece)
             if song and len(song["title"]) > 1 and not re.match(r"^(make|create|new)\s+playlist$", song["title"], flags=re.IGNORECASE):
                 songs.append(song)
-    return {"title": title or "Parrisa's Playlist", "songs": songs}
+    return {"title": title or "Dieter Music Playlist", "songs": songs}
 
 
 def parse_playlist_target(page_url):
@@ -5075,7 +5075,7 @@ def handle_playlist_action_request(message, page_url):
 
 
 def playlist_context(request, playlist_id=0):
-    """Build Parrisa's Playlists template context."""
+    """Build Dieter Music template context."""
     profile = dict_from_row(db.get_playlist_profile())
     playlists = dicts_from_rows(db.get_playlist_drafts(limit=50))
     selected = None
@@ -5097,14 +5097,14 @@ def playlist_context(request, playlist_id=0):
 
 @app.get("/apps/playlists")
 def playlists_app(request: Request, playlist_id: int = 0):
-    """Parrisa's Playlists home."""
+    """Dieter Music home."""
     template = jinja_env.get_template("playlists.html")
     return HTMLResponse(template.render(playlist_context(request, playlist_id)))
 
 
 @app.post("/apps/playlists/create")
 def create_playlist_draft(
-    title: str = Form("Parrisa's Playlist"),
+    title: str = Form("Dieter Music Playlist"),
     description: str = Form(""),
     is_public: str = Form(""),
 ):
