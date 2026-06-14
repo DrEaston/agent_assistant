@@ -187,10 +187,29 @@
         <div class="trainer-card-grid">
             <article class="trainer-card">
                 <span class="trainer-card-meta">Strava</span>
-                <h3>Import Staging</h3>
-                <p>Strava OAuth will connect here. For now, imported activities are stored with source ids, activity types, dates, and Trainer categories.</p>
+                <h3>Strava Runs</h3>
+                {% if not strava_configured %}
+                    <p>Strava is not configured yet. Add STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET to enable OAuth imports.</p>
+                {% elif is_viewing_own_trainer and not strava_connected %}
+                    <p>Connect your Strava account to import recent runs into Dieter Trainer.</p>
+                    <a class="button-link" href="/apps/trainer/strava/connect">Connect Strava</a>
+                {% elif is_viewing_own_trainer and strava_connected %}
+                    <p>Strava is connected. Pull your last 7 days of runs whenever you want to refresh this list.</p>
+                    <form method="post" action="/apps/trainer/imports/strava/last-week-runs">
+                        <button type="submit" class="compact">Pull last week of runs</button>
+                    </form>
+                    <form method="post" action="/apps/trainer/strava/disconnect">
+                        <button type="submit" class="secondary compact danger-button">Disconnect Strava</button>
+                    </form>
+                {% else %}
+                    <p>Viewing imported Strava activities shared by this athlete.</p>
+                {% endif %}
+                {% if request.query_params.get("imported") %}
+                    <p>{{ request.query_params.get("imported") }} run import{% if request.query_params.get("imported") != "1" %}s{% endif %} refreshed.</p>
+                {% endif %}
                 {% if is_viewing_own_trainer %}
                     <form method="post" action="/apps/trainer/imports/strava/manual">
+                        <span class="trainer-card-meta">Manual fallback</span>
                         <input type="text" name="external_id" placeholder="Strava activity id" required>
                         <input type="text" name="activity_type" placeholder="Run, Ride, WeightTraining">
                         <input type="text" name="title" placeholder="Activity title">

@@ -26,6 +26,9 @@ import hashlib
 import re
 import threading
 import mimetypes
+import time
+import urllib.error
+import urllib.request
 from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 from jinja2 import Environment, FileSystemLoader
 from llm_service import LLMService
@@ -102,6 +105,12 @@ SESSION_COOKIE_SECURE = bool(os.getenv("K_SERVICE")) or os.getenv("SESSION_COOKI
 REGISTRATION_CODE = os.getenv("DIETER_REGISTRATION_CODE", "")
 GUEST_EMAIL = os.getenv("DIETER_GUEST_EMAIL", "guest@askdieter.local")
 READ_ONLY_METHODS = {"GET", "HEAD", "OPTIONS"}
+STRAVA_CLIENT_ID = os.getenv("STRAVA_CLIENT_ID", "")
+STRAVA_CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET", "")
+STRAVA_API_BASE = "https://www.strava.com/api/v3"
+STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token"
+STRAVA_AUTHORIZE_URL = "https://www.strava.com/oauth/authorize"
+STRAVA_REDIRECT_URI = os.getenv("STRAVA_REDIRECT_URI", "")
 
 
 def hash_password(password):
@@ -3983,6 +3992,135 @@ def classify_strava_workout(activity_type, title=""):
         return "strength_glutes" if re.search(r"\b(glute|clam|rdl|deadlift|band|bridge|hip)\b", text) else "strength"
     return kind or "workout"
 
+def strava_configured():
+    """Return true when Strava OAuth credentials are available."""
+    return bool(STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET)
+
+
+def strava_callback_url(request):
+    """Build the OAuth callback URL for the current deployment."""
+    if STRAVA_REDIRECT_URI:
+        return STRAVA_REDIRECT_URI
+    return str(request.url_for("trainer_strava_callback"))
+
+
+def strava_oauth_state(user_id):
+    """Create a simple state token tied to the active Dieter user."""
+    payload = str(user_id or 0)
+    secret = (os.getenv("SECRET_KEY") or REGISTRATION_CODE or "dieter-local-secret").encode("utf-8")
+    signature = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{payload}:{signature}"
+
+
+def verify_strava_oauth_state(state, user_id):
+    """Validate the Strava OAuth state token."""
+    return bool(state and hmac.compare_digest(state, strava_oauth_state(user_id)))
+
+
+def strava_http_json(url, method="GET", data=None, access_token=""):
+    """Call Strava and return decoded JSON."""
+    body = None
+    headers = {"Accept": "application/json"}
+    if data is not None:
+        body = urlencode(data).encode("utf-8")
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+    if access_token:
+        headers["Authorization"] = f"Bearer {access_token}"
+    request = urllib.request.Request(url, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = response.read().decode("utf-8")
+            return json.loads(payload) if payload else {}
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise HTTPException(status_code=502, detail=f"Strava request failed: {exc.code} {detail[:300]}")
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach Strava: {exc.reason}")
+
+
+def exchange_strava_code(code, request):
+    """Exchange a Strava authorization code for tokens."""
+    return strava_http_json(
+        STRAVA_TOKEN_URL,
+        method="POST",
+        data={
+            "client_id": STRAVA_CLIENT_ID,
+            "client_secret": STRAVA_CLIENT_SECRET,
+            "code": code,
+            "grant_type": "authorization_code",
+        },
+    )
+
+
+def refresh_strava_profile_token(profile):
+    """Refresh a Strava access token if needed."""
+    if not profile or not profile.get("strava_refresh_token"):
+        raise HTTPException(status_code=400, detail="Connect Strava before importing runs.")
+    expires_at = int(profile.get("strava_token_expires_at") or 0)
+    if profile.get("strava_access_token") and expires_at > int(time.time()) + 60:
+        return profile.get("strava_access_token")
+    payload = strava_http_json(
+        STRAVA_TOKEN_URL,
+        method="POST",
+        data={
+            "client_id": STRAVA_CLIENT_ID,
+            "client_secret": STRAVA_CLIENT_SECRET,
+            "grant_type": "refresh_token",
+            "refresh_token": profile.get("strava_refresh_token"),
+        },
+    )
+    db.update_trainer_strava_tokens(
+        athlete_id=profile.get("strava_athlete_id"),
+        access_token=payload.get("access_token", ""),
+        refresh_token=payload.get("refresh_token", profile.get("strava_refresh_token", "")),
+        expires_at=payload.get("expires_at", 0),
+        scope=profile.get("strava_scope", ""),
+    )
+    return payload.get("access_token", "")
+
+
+def fetch_strava_activities(access_token, after_ts, before_ts=None, per_page=100):
+    """Fetch Strava activities for the authenticated athlete."""
+    params = {"after": int(after_ts), "per_page": min(max(per_page, 1), 100)}
+    if before_ts:
+        params["before"] = int(before_ts)
+    url = f"{STRAVA_API_BASE}/athlete/activities?{urlencode(params)}"
+    result = strava_http_json(url, access_token=access_token)
+    return result if isinstance(result, list) else []
+
+
+def import_recent_strava_runs(days=7):
+    """Import recent Strava run activities for the active athlete."""
+    profile = dict_from_row(db.get_trainer_profile())
+    if not strava_configured():
+        raise HTTPException(status_code=400, detail="Strava is not configured. Set STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET.")
+    access_token = refresh_strava_profile_token(profile)
+    now_ts = int(time.time())
+    after_ts = now_ts - int(days * 86400)
+    activities = fetch_strava_activities(access_token, after_ts=after_ts, before_ts=now_ts)
+    imported = 0
+    skipped = 0
+    for activity in activities:
+        activity_type = activity.get("type") or activity.get("sport_type") or ""
+        if activity_type not in {"Run", "TrailRun", "VirtualRun"}:
+            skipped += 1
+            continue
+        title = activity.get("name") or activity_type
+        category = classify_strava_workout(activity_type, title)
+        db.add_trainer_imported_workout(
+            external_id=str(activity.get("id")),
+            activity_type=activity_type,
+            workout_category=category,
+            title=title,
+            started_at=(activity.get("start_date_local") or activity.get("start_date") or "")[:10],
+            distance_meters=activity.get("distance"),
+            moving_time_seconds=activity.get("moving_time"),
+            elapsed_time_seconds=activity.get("elapsed_time"),
+            raw=activity,
+        )
+        imported += 1
+    return {"imported": imported, "skipped": skipped, "days": days}
+
 
 def trainer_grouped_suggestions():
     """Return grouped Trainer catalog suggestions for the home page."""
@@ -4002,11 +4140,14 @@ def trainer_context(request, active_tab="home", workout_type="", athlete_user_id
     current_user = request.state.current_user
     selected_athlete_id = athlete_user_id or (current_user or {}).get("id")
     workouts = [trainer_workout_view(row) for row in db.get_trainer_workouts(workout_type)]
+    trainer_profile = dict_from_row(db.get_trainer_profile())
     return {
         "request": request,
         "active_tab": active_tab,
         "workout_type": workout_type,
-        "trainer_profile": dict_from_row(db.get_trainer_profile()),
+        "trainer_profile": trainer_profile,
+        "strava_configured": strava_configured(),
+        "strava_connected": bool(trainer_profile and trainer_profile.get("strava_refresh_token")),
         "coach_grants": dicts_from_rows(db.get_trainer_coach_grants_for_athlete()),
         "coach_athletes": dicts_from_rows(db.get_trainer_athletes_for_coach()),
         "current_user_id": (current_user or {}).get("id"),
@@ -4067,6 +4208,62 @@ def trainer_imports_app(request: Request, athlete_user_id: int = 0):
         raise HTTPException(status_code=403, detail="This athlete has not shared Trainer access with you.")
     template = jinja_env.get_template("trainer.html")
     return HTMLResponse(template.render(trainer_context(request, "imports", athlete_user_id=selected_athlete_id)))
+
+
+@app.get("/apps/trainer/strava/connect")
+def trainer_strava_connect(request: Request):
+    """Send the athlete to Strava OAuth."""
+    if not strava_configured():
+        raise HTTPException(status_code=400, detail="Strava is not configured. Set STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET.")
+    user_id = get_current_user_id()
+    params = {
+        "client_id": STRAVA_CLIENT_ID,
+        "redirect_uri": strava_callback_url(request),
+        "response_type": "code",
+        "approval_prompt": "auto",
+        "scope": "read,activity:read_all",
+        "state": strava_oauth_state(user_id),
+    }
+    return RedirectResponse(url=f"{STRAVA_AUTHORIZE_URL}?{urlencode(params)}", status_code=303)
+
+
+@app.get("/apps/trainer/strava/callback")
+def trainer_strava_callback(request: Request, code: str = "", scope: str = "", state: str = "", error: str = ""):
+    """Handle Strava OAuth callback."""
+    user_id = get_current_user_id()
+    if error:
+        raise HTTPException(status_code=400, detail=f"Strava authorization failed: {error}")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing Strava authorization code.")
+    if not verify_strava_oauth_state(state, user_id):
+        raise HTTPException(status_code=400, detail="Strava authorization state did not match.")
+    payload = exchange_strava_code(code, request)
+    athlete = payload.get("athlete") or {}
+    db.update_trainer_strava_tokens(
+        athlete_id=athlete.get("id", ""),
+        access_token=payload.get("access_token", ""),
+        refresh_token=payload.get("refresh_token", ""),
+        expires_at=payload.get("expires_at", 0),
+        scope=scope or payload.get("scope", ""),
+    )
+    return RedirectResponse(url="/apps/trainer/imports?strava_connected=1", status_code=303)
+
+
+@app.post("/apps/trainer/strava/disconnect")
+def trainer_strava_disconnect():
+    """Disconnect the active athlete's Strava tokens."""
+    db.clear_trainer_strava_tokens()
+    return RedirectResponse(url="/apps/trainer/imports", status_code=303)
+
+
+@app.post("/apps/trainer/imports/strava/last-week-runs")
+def import_strava_last_week_runs():
+    """Pull the active athlete's last week of Strava runs."""
+    result = import_recent_strava_runs(days=7)
+    return RedirectResponse(
+        url=f"/apps/trainer/imports?imported={result['imported']}&skipped={result['skipped']}",
+        status_code=303,
+    )
 
 
 @app.get("/apps/trainer/settings")

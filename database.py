@@ -300,6 +300,10 @@ class Database:
                 user_id INTEGER NOT NULL UNIQUE,
                 mode TEXT DEFAULT 'athlete',
                 strava_athlete_id TEXT DEFAULT '',
+                strava_access_token TEXT DEFAULT '',
+                strava_refresh_token TEXT DEFAULT '',
+                strava_token_expires_at INTEGER DEFAULT 0,
+                strava_scope TEXT DEFAULT '',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -599,6 +603,10 @@ class Database:
         self._ensure_column(cursor, "app_feedback_reports", "user_id", "INTEGER")
         self._ensure_column(cursor, "app_feedback_reports", "destination_project_id", "INTEGER")
         self._ensure_column(cursor, "app_feedback_reports", "destination_action_id", "INTEGER")
+        self._ensure_column(cursor, "trainer_profiles", "strava_access_token", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "trainer_profiles", "strava_refresh_token", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "trainer_profiles", "strava_token_expires_at", "INTEGER DEFAULT 0")
+        self._ensure_column(cursor, "trainer_profiles", "strava_scope", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "recipe_complete_meals", "visibility", "TEXT DEFAULT 'shared'")
         self._ensure_column(cursor, "recipe_components", "visibility", "TEXT DEFAULT 'shared'")
         self._ensure_column(cursor, "recipe_variations", "promotion_threshold", "INTEGER DEFAULT 2")
@@ -3032,6 +3040,55 @@ class Database:
             ON CONFLICT(user_id) DO UPDATE SET mode = excluded.mode, updated_at = CURRENT_TIMESTAMP
             """,
             (user_id, mode),
+        )
+        self._commit()
+        self.close()
+
+    def update_trainer_strava_tokens(self, athlete_id, access_token, refresh_token, expires_at, scope=""):
+        """Save Strava OAuth tokens for the active Trainer profile."""
+        user_id = self._active_user_id()
+        if not user_id:
+            return
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO trainer_profiles
+                (user_id, mode, strava_athlete_id, strava_access_token, strava_refresh_token,
+                 strava_token_expires_at, strava_scope, updated_at)
+            VALUES (?, 'athlete', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET
+                strava_athlete_id = excluded.strava_athlete_id,
+                strava_access_token = excluded.strava_access_token,
+                strava_refresh_token = excluded.strava_refresh_token,
+                strava_token_expires_at = excluded.strava_token_expires_at,
+                strava_scope = excluded.strava_scope,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (user_id, str(athlete_id or ""), access_token or "", refresh_token or "", int(expires_at or 0), scope or ""),
+        )
+        self._commit()
+        self.close()
+
+    def clear_trainer_strava_tokens(self):
+        """Remove Strava OAuth tokens from the active Trainer profile."""
+        user_id = self._active_user_id()
+        if not user_id:
+            return
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE trainer_profiles
+            SET strava_athlete_id = '',
+                strava_access_token = '',
+                strava_refresh_token = '',
+                strava_token_expires_at = 0,
+                strava_scope = '',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ?
+            """,
+            (user_id,),
         )
         self._commit()
         self.close()
