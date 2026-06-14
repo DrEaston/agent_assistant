@@ -22,6 +22,7 @@
             --page-theme-hover: color-mix(in srgb, var(--page-theme-color) 16%, white);
             --page-theme-shadow: color-mix(in srgb, var(--page-theme-color) 20%, transparent);
             --page-theme-subtitle: color-mix(in srgb, var(--page-theme-color) 16%, white);
+            --page-theme-header: var(--page-theme-color);
             --page-bg: color-mix(in srgb, var(--page-theme-color) 4%, white);
             --shell-border: color-mix(in srgb, var(--page-theme-color) 78%, black);
             --app-button-bg: var(--page-theme-color);
@@ -124,7 +125,7 @@
         }
 
         .app-shell {
-            --shell-bg: var(--page-theme-color);
+            --shell-bg: var(--page-theme-header);
             --shell-border: color-mix(in srgb, var(--page-theme-color) 78%, black);
             --shell-band-bg: var(--page-theme-panel);
             --shell-band-border: var(--page-theme-border);
@@ -141,6 +142,7 @@
 
         .recipe-shell-page,
         .app-shell-recipe {
+            --page-theme-header: #2e064f;
             --page-theme-color: #3b0764;
             --page-theme-border: #decdf8;
             --page-theme-panel: #fbf7ff;
@@ -152,6 +154,7 @@
 
         .planner-shell-page,
         .app-shell-planner {
+            --page-theme-header: #083344;
             --page-theme-color: #164e63;
             --page-theme-border: #a5f3fc;
             --page-theme-panel: #ecfeff;
@@ -163,6 +166,7 @@
 
         .trainer-shell-page,
         .app-shell-trainer {
+            --page-theme-header: #022c22;
             --page-theme-color: #065f46;
             --page-theme-border: #a7f3d0;
             --page-theme-panel: #ecfdf5;
@@ -174,6 +178,7 @@
 
         .launcher-shell-page,
         .app-shell-launcher {
+            --page-theme-header: #0f172a;
             --page-theme-color: #334155;
             --page-theme-border: #cbd5e1;
             --page-theme-panel: #f1f5f9;
@@ -185,6 +190,7 @@
 
         .playlists-shell-page,
         .app-shell-playlists {
+            --page-theme-header: #7c2d12;
             --page-theme-color: #c2410c;
             --page-theme-border: #fed7aa;
             --page-theme-panel: #fff7ed;
@@ -4782,6 +4788,14 @@
             width: 1.15rem;
         }
 
+        .app-themed-page .container .scheduler-note-toggle button,
+        .app-themed-page .container .scheduler-note-toggle button:hover {
+            background: #ffffff;
+            border-color: currentColor;
+            color: inherit;
+            opacity: 1;
+        }
+
         .scheduler-note-checked {
             opacity: 0.68;
         }
@@ -4847,7 +4861,7 @@
 
         .scheduler-card-priority-today .scheduler-note-toggle button,
         .scheduler-card-coming-up .scheduler-note-toggle button {
-            background: #fff7fb;
+            background: #ffffff;
         }
 
         .scheduler-card-priority-week {
@@ -4867,7 +4881,7 @@
         }
 
         .scheduler-card-priority-week .scheduler-note-toggle button {
-            background: #fffaf5;
+            background: #ffffff;
         }
 
         .scheduler-card-priority-unscheduled {
@@ -4963,25 +4977,56 @@
             margin-top: 0.25rem;
         }
 
+        .scheduler-upcoming-priority-today {
+            background: #fdf2f8;
+            border-color: #f9a8d4;
+            border-left-color: #db2777;
+        }
+
+        .scheduler-upcoming-priority-today h2,
+        .scheduler-upcoming-priority-today ul {
+            color: #9d174d;
+        }
+
+        .scheduler-upcoming-priority-today summary:hover {
+            background: #fce7f3;
+        }
+
+        .scheduler-upcoming-priority-week {
+            background: #fff7ed;
+            border-color: #fed7aa;
+            border-left-color: #f97316;
+        }
+
+        .scheduler-upcoming-priority-week h2,
+        .scheduler-upcoming-priority-week ul {
+            color: #9a3412;
+        }
+
+        .scheduler-upcoming-priority-week summary:hover {
+            background: #ffedd5;
+        }
+
+        .scheduler-upcoming-priority-upcoming {
+            background: #ecfeff;
+            border-color: #a5f3fc;
+            border-left-color: #0891b2;
+        }
+
+        .scheduler-upcoming-priority-upcoming h2,
+        .scheduler-upcoming-priority-upcoming ul {
+            color: #155e75;
+        }
+
+        .scheduler-upcoming-priority-upcoming summary:hover {
+            background: #cffafe;
+        }
+
         .scheduler-upcoming-detail {
             border-top: 1px solid #cbd5e1;
             display: grid;
             gap: 0.85rem;
             padding: 1rem;
-        }
-
-        .scheduler-upcoming-detail .scheduler-card {
-            border-color: #f2c7e8;
-            border-left-color: #c0268a;
-            box-shadow: 0 6px 18px rgba(192, 38, 138, 0.09);
-        }
-
-        .scheduler-upcoming-detail .scheduler-card-title {
-            color: #9d1b70;
-        }
-
-        .scheduler-upcoming-detail .scheduler-card-meta {
-            color: #6f1d55;
         }
 
         .scheduler-due-overlay {
@@ -5722,6 +5767,7 @@
 {% set page_theme = none %}
 {% if show_recipe_shell %}
     {% set page_theme = {
+        "header": "#2e064f",
         "color": "#3b0764",
         "border": "#decdf8",
         "panel": "#fbf7ff",
@@ -5732,6 +5778,7 @@
     } %}
 {% elif show_planner_shell %}
     {% set page_theme = {
+        "header": "#083344",
         "color": "#164e63",
         "border": "#a5f3fc",
         "panel": "#ecfeff",
@@ -5742,6 +5789,7 @@
     } %}
 {% elif show_trainer_shell %}
     {% set page_theme = {
+        "header": "#022c22",
         "color": "#065f46",
         "border": "#a7f3d0",
         "panel": "#ecfdf5",
@@ -5752,6 +5800,7 @@
     } %}
 {% elif show_playlists_shell %}
     {% set page_theme = {
+        "header": "#7c2d12",
         "color": "#c2410c",
         "border": "#fed7aa",
         "panel": "#fff7ed",
@@ -5762,6 +5811,7 @@
     } %}
 {% elif show_launcher_shell %}
     {% set page_theme = {
+        "header": "#0f172a",
         "color": "#334155",
         "border": "#cbd5e1",
         "panel": "#f1f5f9",
@@ -5771,7 +5821,7 @@
         "subtitle": "#e2e8f0"
     } %}
 {% endif %}
-<body class="{% if page_theme %}app-themed-page{% endif %}{% if show_recipe_shell %} recipe-shell-page{% endif %}{% if show_planner_shell %} planner-shell-page{% endif %}{% if show_trainer_shell %} trainer-shell-page{% endif %}{% if show_playlists_shell %} playlists-shell-page{% endif %}{% if show_launcher_shell %} launcher-shell-page{% endif %}"{% if page_theme %} style="--page-theme-color: {{ page_theme.color }}; --page-theme-border: {{ page_theme.border }}; --page-theme-panel: {{ page_theme.panel }}; --page-theme-panel-strong: {{ page_theme.panel_strong }}; --page-theme-text: {{ page_theme.text }}; --page-theme-hover: {{ page_theme.hover }}; --page-theme-subtitle: {{ page_theme.subtitle }};"{% endif %}>
+<body class="{% if page_theme %}app-themed-page{% endif %}{% if show_recipe_shell %} recipe-shell-page{% endif %}{% if show_planner_shell %} planner-shell-page{% endif %}{% if show_trainer_shell %} trainer-shell-page{% endif %}{% if show_playlists_shell %} playlists-shell-page{% endif %}{% if show_launcher_shell %} launcher-shell-page{% endif %}"{% if page_theme %} style="--page-theme-header: {{ page_theme.header }}; --page-theme-color: {{ page_theme.color }}; --page-theme-border: {{ page_theme.border }}; --page-theme-panel: {{ page_theme.panel }}; --page-theme-panel-strong: {{ page_theme.panel_strong }}; --page-theme-text: {{ page_theme.text }}; --page-theme-hover: {{ page_theme.hover }}; --page-theme-subtitle: {{ page_theme.subtitle }};"{% endif %}>
     {% if show_global_nav %}
         <nav>
             <a href="/" style="font-size: 1.2rem; font-weight: bold;">Dieter</a>
@@ -6021,7 +6071,7 @@
 
     <div class="container">
         {% if scheduler_due is defined and scheduler_due.upcoming_items %}
-            <details class="scheduler-upcoming-strip" data-scheduler-upcoming-panel>
+            <details class="scheduler-upcoming-strip scheduler-upcoming-priority-{{ scheduler_due.upcoming_priority or 'upcoming' }}" data-scheduler-upcoming-panel>
                 <summary aria-label="Coming up">
                     <h2>Coming Up</h2>
                     <ul>

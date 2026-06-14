@@ -2346,9 +2346,17 @@ def scheduler_due_context():
     today_items = [item for item in upcoming_items if item.get("is_today")]
     future_items = [item for item in upcoming_items if not item.get("is_today")]
     visible_upcoming_items = today_items + future_items[:max(0, 8 - len(today_items))]
+    priority_rank = {"today": 0, "week": 1, "upcoming": 2, "unscheduled": 3}
+    upcoming_priority = "upcoming"
+    if visible_upcoming_items:
+        upcoming_priority = min(
+            (item.get("scheduler_visual_priority") or "upcoming" for item in visible_upcoming_items),
+            key=lambda priority: priority_rank.get(priority, 4),
+        )
     return {
         "due_items": due_items[:8],
         "upcoming_items": visible_upcoming_items,
+        "upcoming_priority": upcoming_priority,
         "today": today.isoformat(),
     }
 
