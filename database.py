@@ -466,9 +466,24 @@ class Database:
         """)
 
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS playlist_collections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                visibility TEXT DEFAULT 'visible',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, title),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS playlist_drafts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
+                collection_id INTEGER,
                 title TEXT NOT NULL,
                 description TEXT DEFAULT '',
                 is_public INTEGER DEFAULT 0,
@@ -478,6 +493,7 @@ class Database:
                 spotify_snapshot_id TEXT DEFAULT '',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (collection_id) REFERENCES playlist_collections(id) ON DELETE SET NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
         """)
@@ -771,6 +787,7 @@ class Database:
         self._ensure_column(cursor, "recipe_variations", "promotion_threshold", "INTEGER DEFAULT 2")
         self._ensure_column(cursor, "trainer_workouts", "workout_category", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_workout_sessions", "user_id", "INTEGER")
+        self._ensure_column(cursor, "playlist_drafts", "collection_id", "INTEGER")
         self._repair_sample_data_links(cursor)
         self._deprioritize_overlong_actions(cursor)
         self._ensure_recipe_import_steps(cursor)
@@ -3929,36 +3946,151 @@ class Database:
                 spotify_token_expires_at = 0,
                 spotify_scope = '',
                 updated_at = CURRENT_TIMESTAMP
-            WHERE playlist_drafts.user_id = ?
+            WHERE user_id = ?
             """,
             (target_user_id,),
         )
         self._commit()
         self.close()
 
-    def add_playlist_draft(self, title, description="", is_public=False, user_id=None):
-        """Create a playlist draft."""
+    def add_playlist_collection(self, title, description="", visibility="visible", user_id=None):
+        """Create a playlist repository/collection for the active user."""
         target_user_id = user_id or self._active_user_id()
+        if not target_user_id:
+            return None
+        clean_title = (title or "").strip() or "Parrisa's Playlists"
+        clean_visibility = visibility if visibility in {"visible", "private"} else "visible"
         self.connect()
         cursor = self.conn.cursor()
         cursor.execute(
             """
-            INSERT INTO playlist_drafts (user_id, title, description, is_public, updated_at)
+            INSERT INTO playlist_collections (user_id, title, description, visibility, updated_at)
             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id, title) DO UPDATE SET
+                description = COALESCE(NULLIF(excluded.description, ''), playlist_collections.description),
+                visibility = excluded.visibility,
+                updated_at = CURRENT_TIMESTAMP
             """,
-            (target_user_id, title.strip() or "New Playlist", description.strip(), 1 if is_public else 0),
+            (target_user_id, clean_title, (description or "").strip(), clean_visibility),
+        )
+        cursor.execute("SELECT id FROM playlist_collections WHERE user_id = ? AND title = ?", (target_user_id, clean_title))
+        row = cursor.fetchone()
+        collection_id = row["id"] if row else None
+        self._commit()
+        self.close()
+        return collection_id
+
+    def ensure_default_playlist_collection(self, user_id=None):
+        """Ensure the active user has a default visible playlist repository."""
+        target_user_id = user_id or self._active_user_id()
+        if not target_user_id:
+            return None
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT id FROM playlist_collections WHERE user_id = ? ORDER BY id ASC LIMIT 1",
+            (target_user_id,),
+        )
+        row = cursor.fetchone()
+        self.close()
+        if row:
+            return row["id"]
+        return self.add_playlist_collection(
+            "Parrisa's Playlists",
+            description="Visible playlist repository for drafts and Spotify submissions.",
+            visibility="visible",
+            user_id=target_user_id,
+        )
+
+    def get_playlist_collections(self, user_id=None, include_private=True):
+        """List playlist repositories for a user."""
+        target_user_id = user_id or self._active_user_id()
+        if not target_user_id:
+            return []
+        self.connect()
+        cursor = self.conn.cursor()
+        visibility_clause = "" if include_private else "AND playlist_collections.visibility = 'visible'"
+        cursor.execute(
+            f"""
+            SELECT playlist_collections.*,
+                   COUNT(playlist_drafts.id) AS playlist_count
+            FROM playlist_collections
+            LEFT JOIN playlist_drafts ON playlist_drafts.collection_id = playlist_collections.id
+            WHERE playlist_collections.user_id = ?
+              {visibility_clause}
+            GROUP BY playlist_collections.id
+            ORDER BY playlist_collections.updated_at DESC, playlist_collections.id DESC
+            """,
+            (target_user_id,),
+        )
+        rows = cursor.fetchall()
+        self.close()
+        return rows
+
+    def get_playlist_collection(self, collection_id, user_id=None):
+        """Get one playlist repository owned by the active user."""
+        target_user_id = user_id or self._active_user_id()
+        if not target_user_id or not collection_id:
+            return None
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT * FROM playlist_collections WHERE id = ? AND user_id = ?",
+            (collection_id, target_user_id),
+        )
+        row = cursor.fetchone()
+        self.close()
+        return row
+
+    def assign_uncollected_playlist_drafts(self, collection_id, user_id=None):
+        """Move older drafts without a repository into the selected default collection."""
+        target_user_id = user_id or self._active_user_id()
+        if not target_user_id or not collection_id:
+            return 0
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE playlist_drafts
+            SET collection_id = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ? AND collection_id IS NULL
+            """,
+            (collection_id, target_user_id),
+        )
+        changed = cursor.rowcount
+        self._commit()
+        self.close()
+        return changed
+
+    def add_playlist_draft(self, title, description="", is_public=False, user_id=None, collection_id=None):
+        """Create a playlist draft."""
+        target_user_id = user_id or self._active_user_id()
+        target_collection_id = collection_id or self.ensure_default_playlist_collection(target_user_id)
+        if target_collection_id and not self.get_playlist_collection(target_collection_id, target_user_id):
+            target_collection_id = self.ensure_default_playlist_collection(target_user_id)
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO playlist_drafts (user_id, collection_id, title, description, is_public, updated_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (target_user_id, target_collection_id, title.strip() or "New Playlist", description.strip(), 1 if is_public else 0),
         )
         draft_id = cursor.lastrowid
         self._commit()
         self.close()
         return draft_id
 
-    def update_playlist_draft(self, playlist_id, title=None, description=None, is_public=None, status=None, spotify_playlist_id=None, spotify_url=None, spotify_snapshot_id=None):
+    def update_playlist_draft(self, playlist_id, title=None, description=None, is_public=None, status=None, spotify_playlist_id=None, spotify_url=None, spotify_snapshot_id=None, collection_id=None):
         """Update a playlist draft owned by the active user."""
         active_user_id = self._active_user_id()
+        if collection_id is not None and collection_id and not self.get_playlist_collection(collection_id, active_user_id):
+            collection_id = None
         fields = []
         params = []
         for column, value in [
+            ("collection_id", collection_id),
             ("title", title),
             ("description", description),
             ("is_public", 1 if is_public else 0 if is_public is not None else None),
@@ -3985,24 +4117,33 @@ class Database:
         self.close()
         return changed
 
-    def get_playlist_drafts(self, user_id=None, limit=50):
+    def get_playlist_drafts(self, user_id=None, limit=50, collection_id=None):
         """List playlist drafts for a user."""
         target_user_id = user_id or self._active_user_id()
         self.connect()
         cursor = self.conn.cursor()
+        params = [target_user_id]
+        collection_clause = ""
+        if collection_id:
+            collection_clause = "AND playlist_drafts.collection_id = ?"
+            params.append(collection_id)
+        params.append(limit)
         cursor.execute(
-            """
+            f"""
             SELECT playlist_drafts.*,
+                   playlist_collections.title AS collection_title,
                    COUNT(playlist_items.id) AS item_count,
                    SUM(CASE WHEN playlist_items.spotify_uri != '' THEN 1 ELSE 0 END) AS matched_count
             FROM playlist_drafts
+            LEFT JOIN playlist_collections ON playlist_collections.id = playlist_drafts.collection_id
             LEFT JOIN playlist_items ON playlist_items.playlist_id = playlist_drafts.id
             WHERE playlist_drafts.user_id = ?
+              {collection_clause}
             GROUP BY playlist_drafts.id
             ORDER BY playlist_drafts.updated_at DESC, playlist_drafts.id DESC
             LIMIT ?
             """,
-            (target_user_id, limit),
+            params,
         )
         rows = cursor.fetchall()
         self.close()

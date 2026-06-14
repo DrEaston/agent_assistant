@@ -5012,13 +5012,17 @@ def parse_playlist_dictation(text):
 
 
 def parse_playlist_target(page_url):
-    """Find a playlist id from the Playlists page URL."""
+    """Find playlist and repository ids from the Dieter Music page URL."""
     try:
         params = dict(parse_qsl(urlsplit(page_url or "").query, keep_blank_values=True))
-        target = params.get("playlist_id")
-        return int(target) if target and str(target).isdigit() else 0
+        playlist_target = params.get("playlist_id")
+        collection_target = params.get("collection_id")
+        return {
+            "playlist_id": int(playlist_target) if playlist_target and str(playlist_target).isdigit() else 0,
+            "collection_id": int(collection_target) if collection_target and str(collection_target).isdigit() else 0,
+        }
     except (TypeError, ValueError):
-        return 0
+        return {"playlist_id": 0, "collection_id": 0}
 
 
 def message_requests_playlist_action(text, page_url=""):
@@ -5043,14 +5047,30 @@ def add_songs_to_playlist_draft(playlist_id, songs):
     return added
 
 
+def playlist_redirect_url(playlist_id, **params):
+    """Build a Dieter Music URL that keeps the playlist's repository selected."""
+    playlist = dict_from_row(db.get_playlist_draft(playlist_id)) if playlist_id else None
+    query = {}
+    if playlist and playlist.get("collection_id"):
+        query["collection_id"] = playlist["collection_id"]
+    if playlist_id:
+        query["playlist_id"] = playlist_id
+    for key, value in params.items():
+        if value:
+            query[key] = value
+    return f"/apps/playlists?{urlencode(query)}" if query else "/apps/playlists"
+
+
 def handle_playlist_action_request(message, page_url):
     """Create or edit playlist drafts from Ask Dieter."""
     parsed = parse_playlist_dictation(message.content)
-    playlist_id = parse_playlist_target(page_url)
+    target = parse_playlist_target(page_url)
+    playlist_id = target["playlist_id"]
+    collection_id = target["collection_id"] or db.ensure_default_playlist_collection()
     playlist = dict_from_row(db.get_playlist_draft(playlist_id)) if playlist_id else None
     created = False
     if not playlist:
-        playlist_id = db.add_playlist_draft(parsed["title"])
+        playlist_id = db.add_playlist_draft(parsed["title"], collection_id=collection_id)
         playlist = dict_from_row(db.get_playlist_draft(playlist_id))
         created = True
     elif parsed.get("title") and re.search(r"\b(rename|call it|title|named)\b", message.content or "", flags=re.IGNORECASE):
@@ -5062,25 +5082,37 @@ def handle_playlist_action_request(message, page_url):
             "assistant_message": "I found the playlist, but I did not detect any new songs. Dictate songs like `Song Title by Artist`, one per line.",
             "changed_fields": [],
             "playlist_context": True,
-            "redirect_url": f"/apps/playlists?playlist_id={playlist_id}",
+            "redirect_url": playlist_redirect_url(playlist_id),
             "redirect_label": "Open Playlist",
         }
     return {
         "assistant_message": f"{'Created' if created else 'Updated'} {playlist.get('title') or parsed['title']} with {added} song{'s' if added != 1 else ''}. Review matches before submitting to Spotify.",
         "changed_fields": ["playlist_draft", "playlist_items"],
         "playlist_context": True,
-        "redirect_url": f"/apps/playlists?playlist_id={playlist_id}",
+        "redirect_url": playlist_redirect_url(playlist_id),
         "redirect_label": "Open Playlist",
     }
 
 
-def playlist_context(request, playlist_id=0):
+def playlist_context(request, playlist_id=0, collection_id=0):
     """Build Dieter Music template context."""
     profile = dict_from_row(db.get_playlist_profile())
-    playlists = dicts_from_rows(db.get_playlist_drafts(limit=50))
+    default_collection_id = db.ensure_default_playlist_collection()
+    if default_collection_id:
+        db.assign_uncollected_playlist_drafts(default_collection_id)
+    collections = dicts_from_rows(db.get_playlist_collections())
+    selected_collection = None
+    if collection_id:
+        selected_collection = dict_from_row(db.get_playlist_collection(collection_id))
+    if not selected_collection and collections:
+        selected_collection = collections[0]
+        collection_id = selected_collection["id"]
+    playlists = dicts_from_rows(db.get_playlist_drafts(limit=50, collection_id=collection_id))
     selected = None
     if playlist_id:
         selected = dict_from_row(db.get_playlist_draft(playlist_id))
+        if selected and collection_id and selected.get("collection_id") != collection_id:
+            selected = None
     if not selected and playlists:
         selected = playlists[0]
     items = dicts_from_rows(db.get_playlist_items(selected["id"])) if selected else []
@@ -5089,6 +5121,8 @@ def playlist_context(request, playlist_id=0):
         "spotify_configured": spotify_configured(),
         "spotify_connected": bool(profile and profile.get("spotify_refresh_token")),
         "playlist_profile": profile,
+        "playlist_collections": collections,
+        "selected_collection": selected_collection,
         "playlists": playlists,
         "selected_playlist": selected,
         "playlist_items": items,
@@ -5096,10 +5130,21 @@ def playlist_context(request, playlist_id=0):
 
 
 @app.get("/apps/playlists")
-def playlists_app(request: Request, playlist_id: int = 0):
+def playlists_app(request: Request, playlist_id: int = 0, collection_id: int = 0):
     """Dieter Music home."""
     template = jinja_env.get_template("playlists.html")
-    return HTMLResponse(template.render(playlist_context(request, playlist_id)))
+    return HTMLResponse(template.render(playlist_context(request, playlist_id, collection_id)))
+
+
+@app.post("/apps/playlists/collections/create")
+def create_playlist_collection(
+    title: str = Form("Parrisa's Playlists"),
+    description: str = Form(""),
+    visibility: str = Form("visible"),
+):
+    """Create a visible playlist repository."""
+    collection_id = db.add_playlist_collection(title, description=description, visibility=visibility)
+    return RedirectResponse(url=f"/apps/playlists?collection_id={collection_id}", status_code=303)
 
 
 @app.post("/apps/playlists/create")
@@ -5107,10 +5152,12 @@ def create_playlist_draft(
     title: str = Form("Dieter Music Playlist"),
     description: str = Form(""),
     is_public: str = Form(""),
+    collection_id: int = Form(0),
 ):
     """Create a playlist draft."""
-    playlist_id = db.add_playlist_draft(title, description=description, is_public=bool(is_public))
-    return RedirectResponse(url=f"/apps/playlists?playlist_id={playlist_id}", status_code=303)
+    target_collection_id = collection_id or db.ensure_default_playlist_collection()
+    playlist_id = db.add_playlist_draft(title, description=description, is_public=bool(is_public), collection_id=target_collection_id)
+    return RedirectResponse(url=playlist_redirect_url(playlist_id), status_code=303)
 
 
 @app.post("/apps/playlists/{playlist_id}/update")
@@ -5119,10 +5166,11 @@ def update_playlist_draft_form(
     title: str = Form(""),
     description: str = Form(""),
     is_public: str = Form(""),
+    collection_id: int = Form(0),
 ):
     """Update playlist metadata."""
-    db.update_playlist_draft(playlist_id, title=title, description=description, is_public=bool(is_public))
-    return RedirectResponse(url=f"/apps/playlists?playlist_id={playlist_id}", status_code=303)
+    db.update_playlist_draft(playlist_id, title=title, description=description, is_public=bool(is_public), collection_id=collection_id or None)
+    return RedirectResponse(url=playlist_redirect_url(playlist_id), status_code=303)
 
 
 @app.post("/apps/playlists/{playlist_id}/items/add")
@@ -5138,7 +5186,7 @@ def add_playlist_item_form(
         title = parsed.get("title", title)
         artist = parsed.get("artist", artist)
     db.add_playlist_item(playlist_id, raw_text=raw_text or f"{title} by {artist}".strip(), title=title, artist=artist)
-    return RedirectResponse(url=f"/apps/playlists?playlist_id={playlist_id}", status_code=303)
+    return RedirectResponse(url=playlist_redirect_url(playlist_id), status_code=303)
 
 
 @app.post("/apps/playlists/items/{item_id}/update")
@@ -5151,14 +5199,14 @@ def update_playlist_item_form(
 ):
     """Edit one playlist song row."""
     db.update_playlist_item(item_id, title=title, artist=artist, position=position, match_status="unmatched", spotify_track_id="", spotify_uri="", spotify_url="")
-    return RedirectResponse(url=f"/apps/playlists?playlist_id={playlist_id}", status_code=303)
+    return RedirectResponse(url=playlist_redirect_url(playlist_id), status_code=303)
 
 
 @app.post("/apps/playlists/items/{item_id}/delete")
 def delete_playlist_item_form(item_id: int, playlist_id: int = Form(...)):
     """Delete one playlist song row."""
     db.delete_playlist_item(item_id)
-    return RedirectResponse(url=f"/apps/playlists?playlist_id={playlist_id}", status_code=303)
+    return RedirectResponse(url=playlist_redirect_url(playlist_id), status_code=303)
 
 
 @app.get("/apps/playlists/spotify/connect")
@@ -5226,7 +5274,7 @@ def match_playlist_tracks(playlist_id: int):
             match_status="matched" if best.get("uri") else "unmatched",
             candidates=candidates,
         )
-    return RedirectResponse(url=f"/apps/playlists?playlist_id={playlist_id}", status_code=303)
+    return RedirectResponse(url=playlist_redirect_url(playlist_id), status_code=303)
 
 
 @app.post("/apps/playlists/{playlist_id}/spotify/submit")
@@ -5252,7 +5300,7 @@ def submit_playlist_to_spotify(playlist_id: int):
         spotify_url=spotify_url,
         spotify_snapshot_id=snapshot_id,
     )
-    return RedirectResponse(url=f"/apps/playlists?playlist_id={playlist_id}&submitted=1", status_code=303)
+    return RedirectResponse(url=playlist_redirect_url(playlist_id, submitted=1), status_code=303)
 
 
 @app.get("/apps/trainer")

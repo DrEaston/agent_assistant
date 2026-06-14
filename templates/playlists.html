@@ -7,7 +7,7 @@
     <div class="section-header">
         <div>
             <h2>Dieter Music</h2>
-            <p class="section-subtitle">Dictate a playlist, edit the songs, match them to Spotify, and submit when ready.</p>
+            <p class="section-subtitle">Dictate playlists, organize visible repositories, edit songs, match them to Spotify, and submit when ready.</p>
         </div>
     </div>
 
@@ -39,6 +39,7 @@
             <h3>Dictate Playlist</h3>
             <p>Open Ask Dieter and say a playlist name plus songs, one per line. Example: make a playlist called Kitchen Dance; Cruel Summer by Taylor Swift; Levitating by Dua Lipa.</p>
             <form method="post" action="/apps/playlists/create">
+                <input type="hidden" name="collection_id" value="{{ selected_collection.id if selected_collection else '' }}">
                 <input type="text" name="title" placeholder="New playlist title" required>
                 <input type="text" name="description" placeholder="Description">
                 <label><input type="checkbox" name="is_public" value="1"> Public</label>
@@ -49,12 +50,34 @@
 
     <div class="playlists-grid">
         <aside class="playlist-card">
+            <span class="playlist-meta">Repositories</span>
+            <h3>Visible Playlists</h3>
+            {% if playlist_collections %}
+                <div class="playlist-list">
+                    {% for collection in playlist_collections %}
+                        <a href="/apps/playlists?collection_id={{ collection.id }}" class="{% if selected_collection and selected_collection.id == collection.id %}active{% endif %}">
+                            {{ collection.title }}
+                            <small>{{ collection.playlist_count or 0 }} playlist{% if collection.playlist_count != 1 %}s{% endif %} · {{ collection.visibility|title }}</small>
+                        </a>
+                    {% endfor %}
+                </div>
+            {% endif %}
+            <form method="post" action="/apps/playlists/collections/create">
+                <input type="text" name="title" placeholder="Repository name" value="{% if not playlist_collections %}Parrisa's Playlists{% endif %}" required>
+                <input type="text" name="description" placeholder="Description">
+                <select name="visibility" aria-label="Repository visibility">
+                    <option value="visible">Visible</option>
+                    <option value="private">Private</option>
+                </select>
+                <button type="submit" class="compact">Create Repository</button>
+            </form>
+
             <span class="playlist-meta">Drafts</span>
             <h3>Playlists</h3>
             {% if playlists %}
                 <div class="playlist-list">
                     {% for playlist in playlists %}
-                        <a href="/apps/playlists?playlist_id={{ playlist.id }}" class="{% if selected_playlist and selected_playlist.id == playlist.id %}active{% endif %}">
+                        <a href="/apps/playlists?collection_id={{ selected_collection.id if selected_collection else playlist.collection_id }}&playlist_id={{ playlist.id }}" class="{% if selected_playlist and selected_playlist.id == playlist.id %}active{% endif %}">
                             {{ playlist.title }}
                             <small>{{ playlist.item_count or 0 }} song{% if playlist.item_count != 1 %}s{% endif %}</small>
                         </a>
@@ -75,6 +98,11 @@
                 <form method="post" action="/apps/playlists/{{ selected_playlist.id }}/update">
                     <input type="text" name="title" value="{{ selected_playlist.title }}" required>
                     <input type="text" name="description" value="{{ selected_playlist.description or '' }}" placeholder="Description">
+                    <select name="collection_id" aria-label="Playlist repository">
+                        {% for collection in playlist_collections %}
+                            <option value="{{ collection.id }}" {% if selected_playlist.collection_id == collection.id %}selected{% endif %}>{{ collection.title }}</option>
+                        {% endfor %}
+                    </select>
                     <label><input type="checkbox" name="is_public" value="1" {% if selected_playlist.is_public %}checked{% endif %}> Public</label>
                     <button type="submit" class="compact">Save</button>
                 </form>
