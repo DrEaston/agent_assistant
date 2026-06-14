@@ -1897,6 +1897,58 @@
             line-height: 1.15;
         }
 
+        .trainer-mileage-card {
+            overflow-x: auto;
+        }
+
+        .trainer-mileage-chart {
+            align-items: end;
+            display: grid;
+            gap: 0.5rem;
+            grid-template-columns: repeat(13, minmax(2.2rem, 1fr));
+            min-height: 13rem;
+            padding-top: 0.25rem;
+        }
+
+        .trainer-mileage-bar-wrap {
+            align-items: center;
+            display: grid;
+            gap: 0.3rem;
+            min-width: 2.2rem;
+            text-align: center;
+        }
+
+        .trainer-mileage-bar-track {
+            align-items: end;
+            background: #ecfdf5;
+            border: 1px solid #bbf7d0;
+            border-radius: 999px 999px 6px 6px;
+            display: flex;
+            height: 8rem;
+            overflow: hidden;
+            padding: 0.18rem;
+        }
+
+        .trainer-mileage-bar {
+            background: linear-gradient(180deg, #34d399 0%, #059669 100%);
+            border-radius: 999px 999px 5px 5px;
+            min-height: 0.25rem;
+            width: 100%;
+        }
+
+        .trainer-mileage-bar-wrap strong {
+            color: #064e3b;
+            font-size: 0.86rem;
+            line-height: 1;
+        }
+
+        .trainer-mileage-bar-wrap small {
+            color: #047857;
+            font-size: 0.72rem;
+            font-weight: 800;
+            line-height: 1.05;
+        }
+
         .trainer-detail-list {
             display: grid;
             gap: 0.45rem;

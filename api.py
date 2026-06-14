@@ -4602,6 +4602,49 @@ def trainer_workout_week_dashboard(user_id=None, week_offset=0):
     }
 
 
+def trainer_weekly_mileage_chart(user_id=None, weeks=13):
+    """Build chronological weekly mileage bars for the last several months."""
+    today = datetime.now().date()
+    current_week_start = today - timedelta(days=today.weekday())
+    buckets = []
+    by_start = {}
+    for index in range(max(weeks, 1) - 1, -1, -1):
+        week_start = current_week_start - timedelta(days=7 * index)
+        item = {
+            "week_start": week_start.isoformat(),
+            "week_end": (week_start + timedelta(days=6)).isoformat(),
+            "label": week_start.strftime("%b %-d") if os.name != "nt" else week_start.strftime("%b %#d"),
+            "distance_miles": 0,
+            "run_count": 0,
+        }
+        buckets.append(item)
+        by_start[week_start] = item
+
+    earliest = buckets[0]["week_start"]
+    for row in dicts_from_rows(db.get_trainer_imported_workouts(user_id=user_id, limit=800)):
+        try:
+            started = datetime.strptime((row.get("started_at") or "")[:10], "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            continue
+        if started.isoformat() < earliest:
+            continue
+        week_start = started - timedelta(days=started.weekday())
+        bucket = by_start.get(week_start)
+        if not bucket:
+            continue
+        bucket["distance_miles"] += float(row.get("distance_meters") or 0) / 1609.344
+        bucket["run_count"] += 1
+
+    max_miles = max([bucket["distance_miles"] for bucket in buckets] or [0])
+    for bucket in buckets:
+        bucket["height_percent"] = round((bucket["distance_miles"] / max_miles) * 100, 1) if max_miles else 0
+    return {
+        "weeks": buckets,
+        "max_miles": max_miles,
+        "total_miles": sum(bucket["distance_miles"] for bucket in buckets),
+    }
+
+
 def trainer_weekly_workout_plan():
     """Pick a compact weekly menu from the Trainer catalog."""
     grouped = db.get_trainer_suggested_workouts_by_category(limit_per_category=2)
@@ -4759,6 +4802,7 @@ def trainer_context(request, active_tab="home", workout_type="", athlete_user_id
         "suggestion_groups": trainer_grouped_suggestions(),
         "weekly_workout_plan": trainer_weekly_workout_plan(),
         "week_dashboard": trainer_workout_week_dashboard(selected_athlete_id, week_offset),
+        "mileage_chart": trainer_weekly_mileage_chart(selected_athlete_id, weeks=13),
         "workouts": workouts,
         "run_workouts": [item for item in workouts if item["workout_type"] == "run"],
         "bike_workouts": [item for item in workouts if item["workout_type"] == "bike"],

@@ -163,6 +163,29 @@
     </article>
 {% endmacro %}
 
+{% macro mileage_chart_card(chart) %}
+    <article class="trainer-card trainer-mileage-card">
+        <div class="trainer-card-header">
+            <div>
+                <span class="trainer-card-meta">Last 3 Months</span>
+                <h3>Weekly Mileage</h3>
+                <p>{{ chart.total_miles|round(1) }} miles across {{ chart.weeks|length }} weeks</p>
+            </div>
+        </div>
+        <div class="trainer-mileage-chart" aria-label="Weekly mileage chart">
+            {% for week in chart.weeks %}
+                <div class="trainer-mileage-bar-wrap">
+                    <div class="trainer-mileage-bar-track">
+                        <div class="trainer-mileage-bar" style="height: {{ week.height_percent }}%;" title="{{ week.label }}: {{ week.distance_miles|round(1) }} miles"></div>
+                    </div>
+                    <strong>{{ week.distance_miles|round(1) }}</strong>
+                    <small>{{ week.label }}</small>
+                </div>
+            {% endfor %}
+        </div>
+    </article>
+{% endmacro %}
+
 {% block content %}
 <section class="detail-section trainer-home">
     <div class="section-header">
@@ -177,6 +200,7 @@
             {{ week_dashboard_card(week_dashboard, "/apps/trainer") }}
             {{ weekly_plan_card(weekly_workout_plan) }}
         </div>
+        {{ mileage_chart_card(mileage_chart) }}
         {% if trainer_profile and trainer_profile.mode == "coach" and coach_athletes %}
             <div class="trainer-card">
                 <h3>Coach View</h3>
@@ -306,6 +330,7 @@
                 </article>
             {% endif %}
             {{ week_dashboard_card(week_dashboard, "/apps/trainer/imports") }}
+            {{ mileage_chart_card(mileage_chart) }}
             {% if weekly_run_summaries %}
                 <article class="trainer-card">
                     <span class="trainer-card-meta">Recent Training Load</span>
