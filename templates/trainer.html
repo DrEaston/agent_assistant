@@ -87,7 +87,7 @@
     </article>
 {% endmacro %}
 
-{% macro week_dashboard_card(week, route) %}
+{% macro week_dashboard_card(week, route, chart=None) %}
     <article class="trainer-card trainer-week-card">
         <div class="trainer-card-header">
             <div>
@@ -105,36 +105,11 @@
         <div class="trainer-stat-grid">
             <div><span>{{ week.run_count }}</span><small>Runs</small></div>
             <div><span>{{ week.distance_miles|round(1) }}</span><small>Miles</small></div>
+            <div><span>{{ week.ride_count }}</span><small>Rides</small></div>
+            <div><span>{{ week.bike_distance_miles|round(1) }}</span><small>Bike Miles</small></div>
         </div>
-        {% if week.runs %}
-            <details class="trainer-run-dropdown">
-                <summary>
-                    <span class="trainer-card-meta">Completed Runs</span>
-                    <strong>{{ week.runs|length }} run{% if week.runs|length != 1 %}s{% endif %}</strong>
-                </summary>
-                <div class="trainer-run-dropdown-list">
-                    {% for run in week.runs %}
-                        <details class="trainer-run-detail">
-                            <summary>
-                                <strong>{{ run.started_at }} - {{ run.title or run.activity_type }}</strong>
-                                {% if run.distance_miles %}<span>{{ run.distance_miles|round(1) }} mi</span>{% endif %}
-                            </summary>
-                            <p>
-                                {% if run.moving_time_minutes %}{{ run.moving_time_minutes|round|int }} min{% endif %}
-                                {% if run.average_pace_min_per_mile %} - {{ run.average_pace_min_per_mile|round(1) }} min/mi{% endif %}
-                                {% if run.elevation_gain_meters %} - {{ run.elevation_gain_meters|round|int }} m gain{% endif %}
-                                {% if run.average_heartrate %} - HR {{ run.average_heartrate|round|int }}{% endif %}
-                                {% if run.gear_name %} - {{ run.gear_name }}{% endif %}
-                            </p>
-                            <div class="trainer-card-actions">
-                                <a class="button-link secondary-link compact-link" href="/apps/trainer/imports?workout_id={{ run.id }}">View detail</a>
-                            </div>
-                        </details>
-                    {% endfor %}
-                </div>
-            </details>
-        {% else %}
-            <p>No imported runs for this week yet.</p>
+        {% if chart %}
+            {{ mileage_chart_inner(chart) }}
         {% endif %}
         {% if week.scheduled_sessions %}
             <div>
@@ -147,6 +122,29 @@
             </div>
         {% endif %}
     </article>
+{% endmacro %}
+
+{% macro mileage_chart_inner(chart) %}
+    <div class="trainer-mileage-inline">
+        <div class="trainer-card-header">
+            <div>
+                <span class="trainer-card-meta">Last 3 Months</span>
+                <h3>Weekly Mileage</h3>
+                <p>{{ chart.total_miles|round(1) }} miles across {{ chart.weeks|length }} weeks</p>
+            </div>
+        </div>
+        <div class="trainer-mileage-chart" aria-label="Weekly mileage chart">
+            {% for week in chart.weeks %}
+                <div class="trainer-mileage-bar-wrap">
+                    <div class="trainer-mileage-bar-track">
+                        <div class="trainer-mileage-bar {% if week.distance_miles %}has-mileage{% endif %}" style="height: {{ week.height_percent }}%;" title="{{ week.label }}: {{ week.distance_miles|round(1) }} miles"></div>
+                    </div>
+                    <strong>{{ week.distance_miles|round(1) }}</strong>
+                    <small>{{ week.label }}</small>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
 {% endmacro %}
 
 {% macro weekly_plan_card(plan) %}
@@ -174,24 +172,7 @@
 
 {% macro mileage_chart_card(chart) %}
     <article class="trainer-card trainer-mileage-card">
-        <div class="trainer-card-header">
-            <div>
-                <span class="trainer-card-meta">Last 3 Months</span>
-                <h3>Weekly Mileage</h3>
-                <p>{{ chart.total_miles|round(1) }} miles across {{ chart.weeks|length }} weeks</p>
-            </div>
-        </div>
-        <div class="trainer-mileage-chart" aria-label="Weekly mileage chart">
-            {% for week in chart.weeks %}
-                <div class="trainer-mileage-bar-wrap">
-                    <div class="trainer-mileage-bar-track">
-                        <div class="trainer-mileage-bar {% if week.distance_miles %}has-mileage{% endif %}" style="height: {{ week.height_percent }}%;" title="{{ week.label }}: {{ week.distance_miles|round(1) }} miles"></div>
-                    </div>
-                    <strong>{{ week.distance_miles|round(1) }}</strong>
-                    <small>{{ week.label }}</small>
-                </div>
-            {% endfor %}
-        </div>
+        {{ mileage_chart_inner(chart) }}
     </article>
 {% endmacro %}
 
@@ -206,10 +187,9 @@
 
     {% if active_tab == "home" %}
         <div class="trainer-card-grid trainer-dashboard-grid">
-            {{ week_dashboard_card(week_dashboard, "/apps/trainer") }}
+            {{ week_dashboard_card(week_dashboard, "/apps/trainer", mileage_chart) }}
             {{ weekly_plan_card(weekly_workout_plan) }}
         </div>
-        {{ mileage_chart_card(mileage_chart) }}
         {% if trainer_profile and trainer_profile.mode == "coach" and coach_athletes %}
             <div class="trainer-card">
                 <h3>Coach View</h3>
@@ -338,8 +318,7 @@
                     {% endfor %}
                 </article>
             {% endif %}
-            {{ week_dashboard_card(week_dashboard, "/apps/trainer/imports") }}
-            {{ mileage_chart_card(mileage_chart) }}
+            {{ week_dashboard_card(week_dashboard, "/apps/trainer/imports", mileage_chart) }}
             {% if weekly_run_summaries %}
                 <article class="trainer-card">
                     <span class="trainer-card-meta">Recent Training Load</span>

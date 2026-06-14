@@ -4601,14 +4601,24 @@ def trainer_row_is_run(row):
     return activity_type in {"run", "trailrun", "virtualrun"} or category.startswith("run")
 
 
+def trainer_row_is_bike(row):
+    """Return true for imported activities that should count toward bike mileage."""
+    activity_type = (row.get("activity_type") or "").strip().lower()
+    category = (row.get("workout_category") or "").strip().lower()
+    return activity_type in {"ride", "virtualride", "ebikeride"} or category.startswith("bike")
+
+
 def trainer_workout_week_dashboard(user_id=None, week_offset=0):
     """Build a dashboard summary for one training week."""
     today = datetime.now().date()
     week_start = today - timedelta(days=today.weekday()) - timedelta(days=7 * max(week_offset, 0))
     week_end = week_start + timedelta(days=6)
     runs = []
+    rides = []
     for row in dicts_from_rows(db.get_trainer_imported_workouts(user_id=user_id, limit=500)):
-        if not trainer_row_is_run(row):
+        is_run = trainer_row_is_run(row)
+        is_bike = trainer_row_is_bike(row)
+        if not is_run and not is_bike:
             continue
         started = parse_trainer_started_date(row.get("started_at"))
         if not started:
@@ -4621,10 +4631,15 @@ def trainer_workout_week_dashboard(user_id=None, week_offset=0):
             item["distance_miles"] = distance_meters / 1609.344 if distance_meters else 0
             item["moving_time_minutes"] = moving_time_seconds / 60 if moving_time_seconds else 0
             item["average_pace_min_per_mile"] = 26.8224 / average_speed_mps if average_speed_mps else 0
-            runs.append(item)
+            if is_run:
+                runs.append(item)
+            elif is_bike:
+                rides.append(item)
 
     runs.sort(key=lambda item: item.get("started_at") or "", reverse=True)
+    rides.sort(key=lambda item: item.get("started_at") or "", reverse=True)
     total_distance = sum(float(run.get("distance_miles") or 0) for run in runs)
+    total_bike_distance = sum(float(ride.get("distance_miles") or 0) for ride in rides)
     total_seconds = sum(int(run.get("moving_time_seconds") or 0) for run in runs)
     total_gain = sum(float(run.get("elevation_gain_meters") or 0) for run in runs)
     total_load = sum(float(run.get("suffer_score") or 0) for run in runs)
@@ -4642,8 +4657,11 @@ def trainer_workout_week_dashboard(user_id=None, week_offset=0):
         "next_offset": max(week_offset - 1, 0),
         "previous_offset": week_offset + 1,
         "runs": runs,
+        "rides": rides,
         "run_count": len(runs),
         "distance_miles": total_distance,
+        "ride_count": len(rides),
+        "bike_distance_miles": total_bike_distance,
         "moving_time_hours": total_seconds / 3600 if total_seconds else 0,
         "elevation_gain_meters": total_gain,
         "load_score": total_load,
@@ -4671,7 +4689,7 @@ def trainer_weekly_mileage_chart(user_id=None, weeks=13):
         by_start[week_start] = item
 
     earliest = buckets[0]["week_start"]
-    for row in dicts_from_rows(db.get_trainer_imported_workouts(user_id=user_id, limit=800)):
+    for row in dicts_from_rows(db.get_trainer_imported_workouts(user_id=user_id, limit=5000)):
         if not trainer_row_is_run(row):
             continue
         started = parse_trainer_started_date(row.get("started_at"))
