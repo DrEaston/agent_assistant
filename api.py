@@ -4082,14 +4082,22 @@ def refresh_strava_profile_token(profile):
     return payload.get("access_token", "")
 
 
-def fetch_strava_activities(access_token, after_ts, before_ts=None, per_page=100):
+def fetch_strava_activities(access_token, after_ts, before_ts=None, per_page=100, max_pages=10):
     """Fetch Strava activities for the authenticated athlete."""
-    params = {"after": int(after_ts), "per_page": min(max(per_page, 1), 100)}
-    if before_ts:
-        params["before"] = int(before_ts)
-    url = f"{STRAVA_API_BASE}/athlete/activities?{urlencode(params)}"
-    result = strava_http_json(url, access_token=access_token)
-    return result if isinstance(result, list) else []
+    per_page = min(max(per_page, 1), 100)
+    activities = []
+    for page in range(1, max(max_pages, 1) + 1):
+        params = {"after": int(after_ts), "per_page": per_page, "page": page}
+        if before_ts:
+            params["before"] = int(before_ts)
+        url = f"{STRAVA_API_BASE}/athlete/activities?{urlencode(params)}"
+        result = strava_http_json(url, access_token=access_token)
+        if not isinstance(result, list) or not result:
+            break
+        activities.extend(result)
+        if len(result) < per_page:
+            break
+    return activities
 
 
 def fetch_strava_activity_detail(access_token, activity_id):
@@ -4169,6 +4177,20 @@ def import_recent_strava_runs(days=7):
         db.add_trainer_imported_workout(**strava_activity_import_payload(activity, detail))
         imported += 1
     return {"imported": imported, "skipped": skipped, "days": days}
+
+
+def import_single_strava_activity(activity_id):
+    """Import one Strava activity by id for the active athlete."""
+    profile = dict_from_row(db.get_trainer_profile())
+    if not strava_configured():
+        raise HTTPException(status_code=400, detail="Strava is not configured. Set STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET.")
+    access_token = refresh_strava_profile_token(profile)
+    detail = fetch_strava_activity_detail(access_token, activity_id)
+    activity_type = detail.get("type") or detail.get("sport_type") or ""
+    if activity_type not in {"Run", "TrailRun", "VirtualRun"}:
+        raise HTTPException(status_code=400, detail="That Strava activity is not a run.")
+    db.add_trainer_imported_workout(**strava_activity_import_payload(detail, detail))
+    return {"imported": 1, "skipped": 0, "activity_id": activity_id}
 
 def parse_trainer_reflection_target(page_url):
     """Find an imported workout id from the Trainer page URL."""
@@ -4282,6 +4304,28 @@ def trainer_reflection_prompt(workout, missing=None):
     ])
 
 
+def trainer_recent_load_context(user_id=None, weeks=4):
+    """Return a compact recent Strava load summary for Ask Dieter prompts."""
+    summaries = [
+        trainer_weekly_summary_view(row)
+        for row in db.get_trainer_weekly_run_summaries(user_id=user_id, weeks=weeks)
+    ]
+    lines = []
+    for week in summaries:
+        parts = [
+            week.get("week_label") or "week",
+            f"{int(week.get('run_count') or 0)} runs",
+        ]
+        if week.get("distance_miles"):
+            parts.append(f"{week['distance_miles']:.1f} mi")
+        if week.get("moving_time_hours"):
+            parts.append(f"{week['moving_time_hours']:.1f} hr")
+        if week.get("load_score"):
+            parts.append(f"load {week['load_score']:.0f}")
+        lines.append(" - ".join(parts))
+    return "\n".join(lines)
+
+
 def handle_trainer_reflection_request(message, page_url):
     """Prompt for or save subjective notes about an imported run."""
     target_id = parse_trainer_reflection_target(page_url)
@@ -4304,8 +4348,12 @@ def handle_trainer_reflection_request(message, page_url):
     fields = extract_trainer_reflection_fields(message.content)
     enough_to_save = fields["rpe"] is not None and (fields["feel"] or fields["body_flags"] or fields["context_flags"])
     if not enough_to_save:
+        recent_load = trainer_recent_load_context(workout.get("user_id"))
+        prompt = trainer_reflection_prompt(workout, fields["missing"])
+        if recent_load:
+            prompt = f"{prompt}\n\nRecent Strava load:\n{recent_load}"
         return {
-            "assistant_message": trainer_reflection_prompt(workout, fields["missing"]),
+            "assistant_message": prompt,
             "changed_fields": [],
             "trainer_context": True,
             "redirect_url": f"/apps/trainer/imports?reflection_workout_id={workout['id']}",
@@ -4351,6 +4399,23 @@ def trainer_grouped_suggestions():
     ]
 
 
+def trainer_weekly_summary_view(row):
+    """Format an imported Strava weekly summary for Trainer views."""
+    item = dict(row)
+    distance_meters = float(item.get("distance_meters") or 0)
+    moving_time_seconds = int(item.get("moving_time_seconds") or 0)
+    average_speed_mps = float(item.get("average_speed_mps") or 0)
+    suffer_score = float(item.get("suffer_score") or 0)
+    average_hr = float(item.get("average_heartrate") or 0)
+    minutes = moving_time_seconds / 60 if moving_time_seconds else 0
+    fallback_load = (minutes * average_hr / 100) if minutes and average_hr else 0
+    item["distance_miles"] = distance_meters / 1609.344 if distance_meters else 0
+    item["moving_time_hours"] = moving_time_seconds / 3600 if moving_time_seconds else 0
+    item["average_pace_min_per_mile"] = 26.8224 / average_speed_mps if average_speed_mps else 0
+    item["load_score"] = suffer_score or fallback_load
+    return item
+
+
 def trainer_context(request, active_tab="home", workout_type="", athlete_user_id=None):
     """Build shared Dieter Trainer template context."""
     current_user = request.state.current_user
@@ -4380,6 +4445,10 @@ def trainer_context(request, active_tab="home", workout_type="", athlete_user_id
         "upcoming_sessions": [trainer_workout_view(row) for row in db.get_trainer_sessions("upcoming", limit=40, user_id=selected_athlete_id)],
         "past_sessions": [trainer_workout_view(row) for row in db.get_trainer_sessions("done", limit=40, user_id=selected_athlete_id)],
         "imported_workouts": dicts_from_rows(db.get_trainer_imported_workouts(selected_athlete_id, limit=60)),
+        "weekly_run_summaries": [
+            trainer_weekly_summary_view(row)
+            for row in db.get_trainer_weekly_run_summaries(user_id=selected_athlete_id, weeks=8)
+        ],
         "run_reflections": dicts_from_rows(db.get_trainer_run_reflections(user_id=selected_athlete_id, limit=10)),
         "scheduler_due": scheduler_due_context(),
     }
@@ -4482,6 +4551,36 @@ def import_strava_last_week_runs():
     result = import_recent_strava_runs(days=7)
     return RedirectResponse(
         url=f"/apps/trainer/imports?imported={result['imported']}&skipped={result['skipped']}",
+        status_code=303,
+    )
+
+
+@app.post("/apps/trainer/imports/strava/recent-weeks-runs")
+def import_strava_recent_weeks_runs():
+    """Pull the active athlete's last four weeks of Strava runs."""
+    result = import_recent_strava_runs(days=28)
+    return RedirectResponse(
+        url=f"/apps/trainer/imports?imported={result['imported']}&skipped={result['skipped']}&days={result['days']}",
+        status_code=303,
+    )
+
+
+@app.post("/apps/trainer/imports/strava/six-month-runs")
+def import_strava_six_month_runs():
+    """Pull the active athlete's last six months of Strava runs."""
+    result = import_recent_strava_runs(days=183)
+    return RedirectResponse(
+        url=f"/apps/trainer/imports?imported={result['imported']}&skipped={result['skipped']}&days={result['days']}",
+        status_code=303,
+    )
+
+
+@app.post("/apps/trainer/imports/strava/activity")
+def import_strava_activity(activity_id: str = Form(...)):
+    """Pull one Strava run by activity id."""
+    result = import_single_strava_activity(activity_id.strip())
+    return RedirectResponse(
+        url=f"/apps/trainer/imports?imported={result['imported']}&skipped={result['skipped']}&activity_id={result['activity_id']}",
         status_code=303,
     )
 

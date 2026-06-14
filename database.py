@@ -3366,6 +3366,44 @@ class Database:
         self.close()
         return rows
 
+    def get_trainer_weekly_run_summaries(self, user_id=None, weeks=8):
+        """Summarize imported run load by Strava activity week."""
+        target_user_id = user_id or self._active_user_id()
+        if target_user_id and not self.can_view_trainer_user(target_user_id):
+            return []
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                strftime('%Y-W%W', started_at) AS week_label,
+                MIN(started_at) AS first_run_date,
+                MAX(started_at) AS last_run_date,
+                COUNT(*) AS run_count,
+                SUM(COALESCE(distance_meters, 0)) AS distance_meters,
+                SUM(COALESCE(moving_time_seconds, 0)) AS moving_time_seconds,
+                SUM(COALESCE(elevation_gain_meters, 0)) AS elevation_gain_meters,
+                AVG(NULLIF(average_heartrate, 0)) AS average_heartrate,
+                MAX(NULLIF(max_heartrate, 0)) AS max_heartrate,
+                AVG(NULLIF(average_speed_mps, 0)) AS average_speed_mps,
+                AVG(NULLIF(average_cadence, 0)) AS average_cadence,
+                SUM(COALESCE(suffer_score, 0)) AS suffer_score,
+                AVG(NULLIF(perceived_exertion, 0)) AS perceived_exertion
+            FROM trainer_imported_workouts
+            WHERE (? IS NULL OR user_id = ?)
+              AND lower(activity_type) IN ('run', 'trailrun', 'virtualrun')
+              AND started_at IS NOT NULL
+              AND started_at != ''
+            GROUP BY week_label
+            ORDER BY last_run_date DESC
+            LIMIT ?
+            """,
+            (target_user_id, target_user_id, weeks),
+        )
+        rows = cursor.fetchall()
+        self.close()
+        return rows
+
     def get_trainer_imported_workout(self, imported_workout_id):
         """Get one imported workout visible to the active user."""
         self.connect()

@@ -201,9 +201,19 @@
                     <p>Connect your Strava account to import recent runs into Dieter Trainer.</p>
                     <a class="button-link" href="/apps/trainer/strava/connect">Connect Strava</a>
                 {% elif is_viewing_own_trainer and strava_connected %}
-                    <p>Strava is connected. Pull your last 7 days of runs whenever you want to refresh this list.</p>
+                    <p>Strava is connected. Pull recent runs whenever you want to refresh training load.</p>
                     <form method="post" action="/apps/trainer/imports/strava/last-week-runs">
                         <button type="submit" class="compact">Pull last week of runs</button>
+                    </form>
+                    <form method="post" action="/apps/trainer/imports/strava/recent-weeks-runs">
+                        <button type="submit" class="secondary compact">Pull last 4 weeks</button>
+                    </form>
+                    <form method="post" action="/apps/trainer/imports/strava/six-month-runs">
+                        <button type="submit" class="secondary compact">Pull last 6 months</button>
+                    </form>
+                    <form method="post" action="/apps/trainer/imports/strava/activity">
+                        <input type="text" name="activity_id" placeholder="Strava activity id" required>
+                        <button type="submit" class="secondary compact">Pull one run</button>
                     </form>
                     <form method="post" action="/apps/trainer/strava/disconnect">
                         <button type="submit" class="secondary compact danger-button">Disconnect Strava</button>
@@ -225,6 +235,28 @@
                     </form>
                 {% endif %}
             </article>
+            {% if weekly_run_summaries %}
+                <article class="trainer-card">
+                    <span class="trainer-card-meta">Recent Training Load</span>
+                    {% for week in weekly_run_summaries %}
+                        <div>
+                            <h3>{{ week.week_label }}</h3>
+                            <p>
+                                {{ week.run_count }} run{% if week.run_count != 1 %}s{% endif %}
+                                {% if week.distance_miles %} - {{ week.distance_miles|round(1) }} mi{% endif %}
+                                {% if week.moving_time_hours %} - {{ week.moving_time_hours|round(1) }} hr{% endif %}
+                                {% if week.elevation_gain_meters %} - {{ week.elevation_gain_meters|round|int }} m gain{% endif %}
+                            </p>
+                            <p>
+                                {% if week.average_pace_min_per_mile %}avg {{ week.average_pace_min_per_mile|round(1) }} min/mi{% endif %}
+                                {% if week.average_heartrate %} - HR {{ week.average_heartrate|round|int }}{% endif %}
+                                {% if week.perceived_exertion %} - effort {{ week.perceived_exertion|round(1) }}/10{% endif %}
+                                {% if week.load_score %} - load {{ week.load_score|round|int }}{% endif %}
+                            </p>
+                        </div>
+                    {% endfor %}
+                </article>
+            {% endif %}
             {% if imported_workouts %}
                 {% for workout in imported_workouts %}
                     <article class="trainer-card">
