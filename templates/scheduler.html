@@ -47,12 +47,30 @@
                         {% if item.notes %}
                             <ul class="scheduler-note-list">
                                 {% for note in scheduler_note_tree(item.notes) %}
-                                    <li>
-                                        {{ note.text }}
+                                    <li class="{% if note.checked %}scheduler-note-checked{% endif %}">
+                                        {% if note.checkable %}
+                                            <form method="post" action="/scheduler/{{ item.id }}/notes/{{ note.line_index }}/toggle" class="scheduler-note-toggle">
+                                                <input type="hidden" name="next" value="{{ request.url.path }}">
+                                                <button type="submit" aria-label="{% if note.checked %}Mark note incomplete{% else %}Mark note done{% endif %}">{% if note.checked %}✓{% endif %}</button>
+                                                <span>{{ note.text }}</span>
+                                            </form>
+                                        {% else %}
+                                            {{ note.text }}
+                                        {% endif %}
                                         {% if note.children %}
                                             <ul>
                                                 {% for child in note.children %}
-                                                    <li>{{ child }}</li>
+                                                    <li class="{% if child.checked %}scheduler-note-checked{% endif %}">
+                                                        {% if child.checkable %}
+                                                            <form method="post" action="/scheduler/{{ item.id }}/notes/{{ child.line_index }}/toggle" class="scheduler-note-toggle">
+                                                                <input type="hidden" name="next" value="{{ request.url.path }}">
+                                                                <button type="submit" aria-label="{% if child.checked %}Mark note incomplete{% else %}Mark note done{% endif %}">{% if child.checked %}✓{% endif %}</button>
+                                                                <span>{{ child.text }}</span>
+                                                            </form>
+                                                        {% else %}
+                                                            {{ child.text }}
+                                                        {% endif %}
+                                                    </li>
                                                 {% endfor %}
                                             </ul>
                                         {% endif %}
@@ -101,12 +119,30 @@
                         {% if item.notes %}
                             <ul class="scheduler-note-list">
                                 {% for note in scheduler_note_tree(item.notes) %}
-                                    <li>
-                                        {{ note.text }}
+                                    <li class="{% if note.checked %}scheduler-note-checked{% endif %}">
+                                        {% if note.checkable %}
+                                            <form method="post" action="/scheduler/{{ item.id }}/notes/{{ note.line_index }}/toggle" class="scheduler-note-toggle">
+                                                <input type="hidden" name="next" value="{{ request.url.path }}">
+                                                <button type="submit" aria-label="{% if note.checked %}Mark note incomplete{% else %}Mark note done{% endif %}">{% if note.checked %}✓{% endif %}</button>
+                                                <span>{{ note.text }}</span>
+                                            </form>
+                                        {% else %}
+                                            {{ note.text }}
+                                        {% endif %}
                                         {% if note.children %}
                                             <ul>
                                                 {% for child in note.children %}
-                                                    <li>{{ child }}</li>
+                                                    <li class="{% if child.checked %}scheduler-note-checked{% endif %}">
+                                                        {% if child.checkable %}
+                                                            <form method="post" action="/scheduler/{{ item.id }}/notes/{{ child.line_index }}/toggle" class="scheduler-note-toggle">
+                                                                <input type="hidden" name="next" value="{{ request.url.path }}">
+                                                                <button type="submit" aria-label="{% if child.checked %}Mark note incomplete{% else %}Mark note done{% endif %}">{% if child.checked %}✓{% endif %}</button>
+                                                                <span>{{ child.text }}</span>
+                                                            </form>
+                                                        {% else %}
+                                                            {{ child.text }}
+                                                        {% endif %}
+                                                    </li>
                                                 {% endfor %}
                                             </ul>
                                         {% endif %}

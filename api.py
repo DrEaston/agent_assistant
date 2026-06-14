@@ -1844,6 +1844,11 @@ def extract_scheduler_detail_items(text, context_label=""):
 def clean_scheduler_note_line(line):
     """Normalize a scheduler note line and drop obvious prompt echoes."""
     cleaned = re.sub(r"^[-*]\s*", "", (line or "").strip())
+    checkbox_prefix = ""
+    checkbox_match = re.match(r"^\[( |x|X)\]\s*", cleaned)
+    if checkbox_match:
+        checkbox_prefix = f"[{checkbox_match.group(1).lower()}] "
+        cleaned = cleaned[checkbox_match.end():]
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
     if not cleaned:
         return ""
@@ -1863,7 +1868,7 @@ def clean_scheduler_note_line(line):
                 deduped_parts.append(part)
                 seen_parts.add(key)
         cleaned = ". ".join(deduped_parts)
-    return cleaned[:180]
+    return f"{checkbox_prefix}{cleaned[:180]}"
 
 def is_scheduler_child_note_line(line):
     """Detect indented markdown-ish child bullets."""
@@ -1915,25 +1920,50 @@ def merge_scheduler_notes(existing_notes, new_notes):
 def scheduler_note_tree(notes):
     """Build display-ready scheduler note parents with optional child bullets."""
     items = []
-    for raw_line in (notes or "").splitlines():
+    for line_index, raw_line in enumerate((notes or "").splitlines()):
         text = clean_scheduler_note_line(raw_line)
         if not text:
             continue
+        checkbox_match = re.match(r"^\[( |x)\]\s+", text, flags=re.IGNORECASE)
+        note = {
+            "text": re.sub(r"^\[( |x)\]\s+", "", text, flags=re.IGNORECASE),
+            "children": [],
+            "line_index": line_index,
+            "checkable": bool(checkbox_match),
+            "checked": bool(checkbox_match and checkbox_match.group(1).lower() == "x"),
+        }
         if is_scheduler_child_note_line(raw_line) and items:
-            items[-1]["children"].append(text)
+            items[-1]["children"].append(note)
         else:
-            items.append({"text": text, "children": []})
+            items.append(note)
     return items
 
 jinja_env.globals["scheduler_note_tree"] = scheduler_note_tree
 
-def find_open_scheduler_item_for_context(context_label, title=""):
+def toggle_scheduler_note_checkbox(notes, line_index):
+    """Toggle one markdown checkbox note line."""
+    lines = (notes or "").splitlines()
+    if line_index < 0 or line_index >= len(lines):
+        return notes or ""
+    line = lines[line_index]
+    match = re.match(r"^(\s*[-*]\s*)\[\s*([xX]?)\s*\](\s+.*)$", line)
+    if not match:
+        return notes or ""
+    next_marker = " " if match.group(2).lower() == "x" else "x"
+    lines[line_index] = f"{match.group(1)}[{next_marker}]{match.group(3)}"
+    return "\n".join(lines)
+
+def find_open_scheduler_item_for_context(context_label, title="", scheduled_for=""):
     """Find an existing open scheduler item by short context/title."""
     context_key = (context_label or "").strip().lower()
     title_key = (title or "").strip().lower()
+    scheduled_key = (scheduled_for or "").strip()
     if not context_key and not title_key:
         return None
     for item in dicts_from_rows(db.get_scheduler_items(status="open", limit=100)):
+        item_scheduled = (item.get("scheduled_for") or "").strip()
+        if (scheduled_key or item_scheduled) and scheduled_key != item_scheduled:
+            continue
         item_context = (item.get("context_label") or "").strip().lower()
         item_title = (item.get("title") or "").strip().lower()
         if context_key and context_key != "general" and context_key in {item_context, item_title}:
@@ -2077,6 +2107,14 @@ def synthesize_scheduler_operation(user_message, operation):
     bullet_additions = extract_scheduler_bullet_additions(original, context_label)
     agenda_items = bullet_additions or extract_scheduler_agenda_items(original)
     detail_items = extract_scheduler_detail_items(original, context_label)
+    chore_list_items = []
+    chore_list_detail = re.search(r"\b(?:chore|chores)\s+list\b.*?[:\-]\s*(.+)$", original, flags=re.IGNORECASE | re.DOTALL)
+    if chore_list_detail:
+        chore_list_items = [
+            item.strip(" .")
+            for item in re.split(r"\s*(?:,|;|\n|\band\b)\s*", chore_list_detail.group(1))
+            if item.strip(" .")
+        ][:8]
 
     text = original.lower()
     if not scheduled_for:
@@ -2109,7 +2147,9 @@ def synthesize_scheduler_operation(user_message, operation):
             title = "Scheduler reminder"
 
     note_lines = []
-    if agenda_items:
+    if chore_list_items:
+        note_lines = chore_list_items
+    elif agenda_items:
         note_lines = [
             item if re.match(r"^ask\s+about\b", item, flags=re.IGNORECASE) else f"Ask about {item}"
             for item in agenda_items
@@ -2121,6 +2161,11 @@ def synthesize_scheduler_operation(user_message, operation):
         normalized_detail = re.sub(r"[^a-z0-9]+", " ", detail_items[0].lower()).strip() if len(detail_items) == 1 else ""
         if not (normalized_title and normalized_title in normalized_detail and scheduler_text_implies_today(normalized_detail)):
             note_lines = detail_items
+    if note_lines and re.search(r"\b(chore|chores|to do|todo|checklist|list)\b", original, flags=re.IGNORECASE):
+        note_lines = [
+            line if re.match(r"^\[( |x|X)\]\s+", line) else f"[ ] {line}"
+            for line in note_lines
+        ]
 
     operation["title"] = title
     operation["context_label"] = context_label or "General"
@@ -2394,7 +2439,7 @@ def apply_planner_edit(user_message, page_url, proposal):
                     context_label = operation.get("context_label", "").strip()
                     scheduled_for = operation.get("scheduled_for", "").strip()
                     notes = operation.get("notes", "").strip()
-                    existing_item = find_open_scheduler_item_for_context(context_label, title) if notes else None
+                    existing_item = find_open_scheduler_item_for_context(context_label, title, scheduled_for) if notes else None
                     if existing_item:
                         item_id = int(existing_item["id"])
                         merged_notes = merge_scheduler_notes(existing_item.get("notes", ""), notes)
@@ -3734,6 +3779,20 @@ def complete_scheduler_item_form(item_id: int, next: str = Form("/apps/assistant
 def reopen_scheduler_item_form(item_id: int, next: str = Form("/apps/assistant/scheduler")):
     """Reopen a completed scheduler item from the planner UI."""
     db.reopen_scheduler_item(item_id)
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/scheduler"), status_code=303)
+
+@app.post("/scheduler/{item_id}/notes/{line_index}/toggle")
+def toggle_scheduler_note_form(
+    item_id: int,
+    line_index: int,
+    next: str = Form("/apps/assistant/scheduler"),
+):
+    """Toggle one scheduler note checkbox bullet."""
+    item = dict_from_row(db.get_scheduler_item(item_id))
+    if not item:
+        raise HTTPException(status_code=404, detail="Scheduler item not found")
+    notes = toggle_scheduler_note_checkbox(item.get("notes") or "", line_index)
+    db.update_scheduler_item(item_id, notes=notes)
     return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/scheduler"), status_code=303)
 
 @app.post("/scheduler/{item_id}/delete")
