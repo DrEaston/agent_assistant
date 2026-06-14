@@ -5331,6 +5331,12 @@
                                 {% endif %}
                             </div>
                             <div class="scheduler-item-actions">
+                                {% if item.notes and scheduler_notes_need_checklist(item.notes) %}
+                                    <form method="post" action="/scheduler/{{ item.id }}/notes/make-checklist" class="inline-form">
+                                        <input type="hidden" name="next" value="{{ request.url.path }}">
+                                        <button type="submit" class="secondary compact">Make checklist</button>
+                                    </form>
+                                {% endif %}
                                 <form method="post" action="/scheduler/{{ item.id }}/complete" class="inline-form">
                                     <input type="hidden" name="next" value="{{ request.url.path }}">
                                     <button type="submit" class="secondary compact">Done</button>
@@ -5404,6 +5410,12 @@
                                 {% endif %}
                             </div>
                             <div class="scheduler-item-actions">
+                                {% if item.notes and scheduler_notes_need_checklist(item.notes) %}
+                                    <form method="post" action="/scheduler/{{ item.id }}/notes/make-checklist" class="inline-form">
+                                        <input type="hidden" name="next" value="{{ request.url.path }}">
+                                        <button type="submit" class="secondary compact">Make checklist</button>
+                                    </form>
+                                {% endif %}
                                 <form method="post" action="/scheduler/{{ item.id }}/complete" class="inline-form">
                                     <input type="hidden" name="next" value="{{ request.url.path }}">
                                     <button type="submit" class="secondary compact">Done</button>

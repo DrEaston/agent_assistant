@@ -1954,6 +1954,28 @@ def toggle_scheduler_note_checkbox(notes, line_index):
     lines[line_index] = f"{match.group(1)}[{next_marker}]{match.group(3)}"
     return "\n".join(lines)
 
+def scheduler_notes_need_checklist(notes):
+    """Return true when a scheduler item has plain note lines."""
+    for raw_line in (notes or "").splitlines():
+        line = clean_scheduler_note_line(raw_line)
+        if line and not re.match(r"^\[( |x)\]\s+", line, flags=re.IGNORECASE):
+            return True
+    return False
+
+jinja_env.globals["scheduler_notes_need_checklist"] = scheduler_notes_need_checklist
+
+def make_scheduler_notes_checklist(notes):
+    """Convert existing scheduler notes into unchecked checklist bullets."""
+    converted = []
+    for raw_line in (notes or "").splitlines():
+        line = clean_scheduler_note_line(raw_line)
+        if not line:
+            continue
+        if not re.match(r"^\[( |x)\]\s+", line, flags=re.IGNORECASE):
+            line = f"[ ] {line}"
+        converted.append(f"  - {line}" if is_scheduler_child_note_line(raw_line) and converted else f"- {line}")
+    return "\n".join(converted[:20])
+
 def find_open_scheduler_item_for_context(context_label, title="", scheduled_for=""):
     """Find an existing open scheduler item by short context/title."""
     context_key = (context_label or "").strip().lower()
@@ -3963,6 +3985,18 @@ def toggle_scheduler_note_form(
         raise HTTPException(status_code=404, detail="Scheduler item not found")
     notes = toggle_scheduler_note_checkbox(item.get("notes") or "", line_index)
     db.update_scheduler_item(item_id, notes=notes)
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/scheduler"), status_code=303)
+
+@app.post("/scheduler/{item_id}/notes/make-checklist")
+def make_scheduler_notes_checklist_form(
+    item_id: int,
+    next: str = Form("/apps/assistant/scheduler"),
+):
+    """Convert scheduler note bullets into checkbox bullets."""
+    item = dict_from_row(db.get_scheduler_item(item_id))
+    if not item:
+        raise HTTPException(status_code=404, detail="Scheduler item not found")
+    db.update_scheduler_item(item_id, notes=make_scheduler_notes_checklist(item.get("notes") or ""))
     return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/scheduler"), status_code=303)
 
 @app.post("/scheduler/{item_id}/delete")
