@@ -2273,8 +2273,8 @@
 
         .complete-meal-controls {
             display: grid;
-            gap: 0.35rem;
-            grid-template-columns: minmax(9rem, 12rem) minmax(0, 1fr);
+            gap: 0.45rem;
+            grid-template-columns: minmax(0, 1fr);
             margin: 0.85rem 0;
         }
 
@@ -2288,6 +2288,10 @@
         .complete-meal-controls input,
         .complete-meal-controls select {
             width: 100%;
+        }
+
+        .complete-meal-controls select {
+            max-width: 13rem;
         }
 
         .complete-meal-filter-status {

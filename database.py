@@ -64,7 +64,9 @@ class Database:
     @staticmethod
     def _normalized_recipe_title(title):
         """Normalize recipe/component titles for duplicate detection."""
-        return re.sub(r"\s+", " ", (title or "").strip().lower())
+        normalized = (title or "").strip().lower().replace("&", " and ")
+        normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+        return re.sub(r"\s+", " ", normalized).strip()
 
     def init(self):
         """Initialize database schema."""

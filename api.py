@@ -370,12 +370,13 @@ def build_recipe_thumbnail_url(meal):
         candidate for candidate in (meal.get("thumbnail_candidates") or "").split("||")
         if candidate
     ]
-    if not candidates and meal.get("thumbnail_filename"):
-        candidates = [meal["thumbnail_filename"]]
+    primary_thumbnail = meal.get("thumbnail_filename")
+    if primary_thumbnail:
+        candidates = [primary_thumbnail] + [candidate for candidate in candidates if candidate != primary_thumbnail]
     if not candidates:
         return ""
 
-    cache_key = hashlib.sha1(("v3|" + "|".join(candidates)).encode("utf-8")).hexdigest()[:16]
+    cache_key = hashlib.sha1(("v4|" + "|".join(candidates)).encode("utf-8")).hexdigest()[:16]
     thumbnail_name = f"recipe_thumb_{meal.get('id', 'meal')}_{cache_key}.jpg"
     thumbnail_path = recipe_thumbnails_dir / thumbnail_name
     if thumbnail_path.exists():
@@ -395,6 +396,8 @@ def build_recipe_thumbnail_url(meal):
             with Image.open(image_path) as opened:
                 image = ImageOps.exif_transpose(opened).convert("RGB")
                 score = _recipe_thumbnail_score(image)
+                if filename == primary_thumbnail:
+                    score += 10
                 if not best or score > best[0]:
                     best = (score, filename, image.copy())
         except Exception:
