@@ -5485,6 +5485,7 @@
             let voiceRestartTimer = null;
             let voiceNeedsReview = false;
             let voiceReviewConfirmed = false;
+            let pendingActionConfirmation = null;
             const voiceRestartDelayMs = 60;
 
             const setVoiceStatus = (message = "") => {
@@ -5684,11 +5685,13 @@
 
                 const endpoint = "/api/dieter/action";
                 const requestBody = {
-                    content,
+                    content: pendingActionConfirmation?.content || content,
                     page_title: document.title,
                     page_url: `${window.location.pathname}${window.location.search}${window.location.hash}`,
+                    confirmation_token: pendingActionConfirmation?.token || "",
                     conversation_history: history.slice(-8),
                 };
+                const isConfirmingAction = Boolean(pendingActionConfirmation);
 
                 try {
                     const response = await fetch(endpoint, {
@@ -5699,6 +5702,18 @@
                     const data = await response.json();
                     const answer = data.assistant_message || data.response || data.detail || "I could not produce a response.";
                     addRecipeChatMessage("agent", answer);
+                    if (data.needs_confirmation && data.confirmation_token) {
+                        pendingActionConfirmation = {
+                            content,
+                            token: data.confirmation_token,
+                        };
+                        input.value = content;
+                        if (sendButton) {
+                            sendButton.textContent = "Confirm";
+                        }
+                    } else {
+                        pendingActionConfirmation = null;
+                    }
                     if (data.redirect_url && data.redirect_label) {
                         addRecipeChatAction(data.redirect_url, data.redirect_label);
                     }
@@ -5714,6 +5729,12 @@
                     addRecipeChatMessage("agent", `Chat request failed: ${error}`);
                 } finally {
                     input.disabled = false;
+                    if (!pendingActionConfirmation && sendButton) {
+                        sendButton.textContent = "Send";
+                    }
+                    if (isConfirmingAction) {
+                        input.value = "";
+                    }
                     input.focus();
                 }
             });

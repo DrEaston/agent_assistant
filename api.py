@@ -299,6 +299,7 @@ class DieterActionMessage(BaseModel):
     content: str
     page_url: str = ""
     page_title: str = ""
+    confirmation_token: str = ""
     conversation_history: Optional[List[dict]] = None
 
 
@@ -2728,6 +2729,51 @@ def handle_planner_action_request(message, page_url):
     result["planner_context"] = True
     return result
 
+def kitchen_cross_app_write_needs_confirmation(page_url):
+    """Require preview/confirm for planner writes initiated from the kitchen app."""
+    return (page_url or "").startswith("/apps/recipes")
+
+def dieter_action_confirmation_token(content, page_url, action_kind):
+    """Create a tamper-resistant confirmation token for one proposed write."""
+    user_id = get_current_user_id() or 0
+    payload = json.dumps(
+        {
+            "user_id": user_id,
+            "content": content or "",
+            "page_url": page_url or "",
+            "action_kind": action_kind,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    signature = hmac.new(
+        (os.getenv("SECRET_KEY") or REGISTRATION_CODE or "dieter-local-secret").encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{signature}:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
+
+def dieter_action_confirmed(message, page_url, action_kind):
+    """Return True when the client confirmed the exact proposed write."""
+    expected = dieter_action_confirmation_token(message.content, page_url, action_kind)
+    return bool(message.confirmation_token and hmac.compare_digest(message.confirmation_token, expected))
+
+def preview_dieter_write(message, page_url, action_kind, destination):
+    """Ask the user to confirm a cross-app write before applying it."""
+    token = dieter_action_confirmation_token(message.content, page_url, action_kind)
+    return {
+        "assistant_message": "\n".join([
+            "Before I write this, please confirm.",
+            f"Requested change: {message.content.strip()}",
+            f"Destination: {destination}",
+            "Press Confirm to apply it, or edit your message and send again.",
+        ]),
+        "changed_fields": [],
+        "needs_confirmation": True,
+        "confirmation_token": token,
+        "confirmation_action": action_kind,
+    }
+
 def build_recipe_extraction_stats(groups):
     """Summarize OCR progress for uploaded recipe card pairs."""
     total = len(groups)
@@ -3135,9 +3181,23 @@ def api_dieter_action(message: DieterActionMessage):
     page_url = message.page_url or ""
     recipe_kind, recipe_id = parse_recipe_target_from_url(page_url)
     if message_reports_app_feedback(message.content):
+        if kitchen_cross_app_write_needs_confirmation(page_url) and not dieter_action_confirmed(message, page_url, "app_feedback"):
+            return preview_dieter_write(
+                message,
+                page_url,
+                "app_feedback",
+                "Dieter App Feedback task list (/apps/assistant/planner)",
+            )
         return handle_app_feedback_request(message, page_url)
 
     if message_requests_planner_action(message.content):
+        if kitchen_cross_app_write_needs_confirmation(page_url) and not dieter_action_confirmed(message, page_url, "planner_action"):
+            return preview_dieter_write(
+                message,
+                page_url,
+                "planner_action",
+                "Planner/Scheduler (/apps/assistant/planner or /apps/assistant/scheduler)",
+            )
         try:
             return handle_planner_action_request(message, page_url)
         except Exception as exc:
