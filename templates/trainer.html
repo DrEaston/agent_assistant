@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block title %}Dieter Trainer{% endblock %}
+
+{% macro workout_card(workout, show_schedule=True) %}
+    <article class="trainer-card">
+        <div class="trainer-card-header">
+            <div>
+                <span class="trainer-card-meta">{{ workout.workout_type }}{% if workout.focus %} - {{ workout.focus }}{% endif %}</span>
+                <h3>{{ workout.title }}</h3>
+            </div>
+        </div>
+        {% if workout.summary %}
+            <p>{{ workout.summary }}</p>
+        {% endif %}
+        {% if workout.details %}
+            <ul class="trainer-detail-list">
+                {% for detail in workout.details %}
+                    <li><strong>{{ detail.label }}:</strong> {{ detail.text }}</li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+        <div class="trainer-card-actions">
+            {% if workout.source_url %}
+                <a class="trainer-source" href="{{ workout.source_url }}" target="_blank" rel="noreferrer">Source</a>
+            {% endif %}
+            {% if show_schedule %}
+                <form method="post" action="/apps/trainer/workouts/{{ workout.id }}/schedule">
+                    <input type="date" name="scheduled_for" aria-label="Workout date">
+                    <input type="text" name="notes" placeholder="Notes" aria-label="Workout notes">
+                    <button type="submit" class="compact">Schedule</button>
+                </form>
+            {% endif %}
+        </div>
+    </article>
+{% endmacro %}
+
+{% macro session_card(session, mode) %}
+    <article class="trainer-card">
+        <div class="trainer-card-header">
+            <div>
+                <span class="trainer-card-meta">{{ session.workout_type }}{% if session.focus %} - {{ session.focus }}{% endif %}</span>
+                <h3>{{ session.title }}</h3>
+            </div>
+        </div>
+        <p>
+            {% if mode == "past" %}
+                Completed {{ session.completed_at or "recently" }}
+            {% elif session.scheduled_for %}
+                Scheduled {{ session.scheduled_for }}
+            {% else %}
+                Unscheduled
+            {% endif %}
+        </p>
+        {% if session.notes %}
+            <p>{{ session.notes }}</p>
+        {% endif %}
+        {% if session.details %}
+            <ul class="trainer-detail-list">
+                {% for detail in session.details %}
+                    <li><strong>{{ detail.label }}:</strong> {{ detail.text }}</li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+        <div class="trainer-card-actions">
+            {% if mode == "past" %}
+                <form method="post" action="/apps/trainer/sessions/{{ session.id }}/reopen">
+                    <button type="submit" class="secondary compact">Move to upcoming</button>
+                </form>
+                <form method="post" action="/apps/trainer/sessions/{{ session.id }}/delete">
+                    <input type="hidden" name="next" value="/apps/trainer/past">
+                    <button type="submit" class="secondary compact danger-button">Delete</button>
+                </form>
+            {% else %}
+                <form method="post" action="/apps/trainer/sessions/{{ session.id }}/complete">
+                    <input type="text" name="notes" placeholder="Result notes" aria-label="Workout result notes">
+                    <button type="submit" class="compact">Complete</button>
+                </form>
+                <form method="post" action="/apps/trainer/sessions/{{ session.id }}/delete">
+                    <input type="hidden" name="next" value="/apps/trainer/upcoming">
+                    <button type="submit" class="secondary compact danger-button">Delete</button>
+                </form>
+            {% endif %}
+        </div>
+    </article>
+{% endmacro %}
+
+{% block content %}
+<section class="detail-section trainer-home">
+    <div class="section-header">
+        <div>
+            <h2>Dieter Trainer</h2>
+            <p class="section-subtitle">Workout catalog, upcoming sessions, and training history.</p>
+        </div>
+    </div>
+
+    <nav class="trainer-tabs" aria-label="Trainer views">
+        <a href="/apps/trainer" class="{% if active_tab == 'library' %}active{% endif %}">Workouts</a>
+        <a href="/apps/trainer/upcoming" class="{% if active_tab == 'upcoming' %}active{% endif %}">Upcoming</a>
+        <a href="/apps/trainer/past" class="{% if active_tab == 'past' %}active{% endif %}">Past</a>
+    </nav>
+
+    {% if active_tab == "library" %}
+        <div class="trainer-filter-row" aria-label="Workout type filters">
+            <a href="/apps/trainer" class="{% if not workout_type %}active{% endif %}">All</a>
+            <a href="/apps/trainer?workout_type=run" class="{% if workout_type == 'run' %}active{% endif %}">Run</a>
+            <a href="/apps/trainer?workout_type=bike" class="{% if workout_type == 'bike' %}active{% endif %}">Bike</a>
+            <a href="/apps/trainer?workout_type=strength" class="{% if workout_type == 'strength' %}active{% endif %}">Strength</a>
+        </div>
+        {% if workouts %}
+            <div class="trainer-card-grid">
+                {% for workout in workouts %}
+                    {{ workout_card(workout) }}
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <p>No workouts in this view yet.</p>
+            </div>
+        {% endif %}
+    {% elif active_tab == "upcoming" %}
+        {% if upcoming_sessions %}
+            <div class="trainer-card-grid">
+                {% for session in upcoming_sessions %}
+                    {{ session_card(session, "upcoming") }}
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <p>No upcoming workouts yet.</p>
+            </div>
+        {% endif %}
+    {% elif active_tab == "past" %}
+        {% if past_sessions %}
+            <div class="trainer-card-grid">
+                {% for session in past_sessions %}
+                    {{ session_card(session, "past") }}
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <p>No completed workouts yet.</p>
+            </div>
+        {% endif %}
+    {% endif %}
+</section>
+{% endblock %}

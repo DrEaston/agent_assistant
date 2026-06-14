@@ -31,5 +31,11 @@
             <small>No recipe app data is available yet.</small>
         </div>
     {% endif %}
+
+    <a class="app-launch-card trainer-launch-card" href="{{ trainer_url or '/apps/trainer' }}">
+        <span class="app-launch-kicker">Training</span>
+        <strong>Dieter Trainer</strong>
+        <small>Run, bike, strength, upcoming sessions, and workout history.</small>
+    </a>
 </section>
 {% endblock %}

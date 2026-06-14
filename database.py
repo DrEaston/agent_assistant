@@ -279,6 +279,37 @@ class Database:
         """)
 
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS trainer_workouts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                slug TEXT UNIQUE NOT NULL,
+                title TEXT NOT NULL,
+                workout_type TEXT NOT NULL,
+                focus TEXT DEFAULT '',
+                summary TEXT DEFAULT '',
+                details_json TEXT DEFAULT '[]',
+                source_url TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS trainer_workout_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workout_id INTEGER NOT NULL,
+                scheduled_for TEXT DEFAULT '',
+                completed_at TEXT DEFAULT '',
+                status TEXT DEFAULT 'upcoming',
+                notes TEXT DEFAULT '',
+                user_id INTEGER,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (workout_id) REFERENCES trainer_workouts(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+        """)
+
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS recipe_images (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NOT NULL,
@@ -497,10 +528,12 @@ class Database:
         self._ensure_column(cursor, "recipe_complete_meals", "visibility", "TEXT DEFAULT 'shared'")
         self._ensure_column(cursor, "recipe_components", "visibility", "TEXT DEFAULT 'shared'")
         self._ensure_column(cursor, "recipe_variations", "promotion_threshold", "INTEGER DEFAULT 2")
+        self._ensure_column(cursor, "trainer_workout_sessions", "user_id", "INTEGER")
         self._repair_sample_data_links(cursor)
         self._deprioritize_overlong_actions(cursor)
         self._ensure_recipe_import_steps(cursor)
         self._ensure_recipe_image_groups(cursor)
+        self._ensure_trainer_workouts(cursor)
 
         self._commit()
         self.close()
@@ -635,6 +668,7 @@ class Database:
             "recipe_grocery_lists",
             "planner_change_log",
             "chat_messages",
+            "trainer_workout_sessions",
         ]:
             cursor.execute(f"UPDATE {table} SET user_id = ? WHERE user_id IS NULL", (user_id,))
         self._commit()
@@ -821,6 +855,134 @@ class Database:
                         """,
                         (group_id, side, image["id"]),
                     )
+
+    def _ensure_trainer_workouts(self, cursor):
+        """Seed the starter Dieter Trainer workout catalog."""
+        workouts = [
+            {
+                "slug": "run-threshold-mile-repeats",
+                "title": "4-6 x 1 Mile Threshold",
+                "workout_type": "run",
+                "focus": "Threshold",
+                "summary": "Controlled mile repeats at threshold effort with short recoveries.",
+                "source_url": "",
+                "details": [
+                    {"label": "Warm up", "text": "10-20 minutes easy plus relaxed strides."},
+                    {"label": "Main set", "text": "4-6 x 1 mile at threshold effort."},
+                    {"label": "Recovery", "text": "60 seconds easy jog or walk between reps."},
+                    {"label": "Cool down", "text": "10-15 minutes easy."},
+                ],
+            },
+            {
+                "slug": "run-threshold-1k-repeats",
+                "title": "8-10 x 1K Threshold",
+                "workout_type": "run",
+                "focus": "Threshold",
+                "summary": "Shorter threshold repeats with very compact recovery.",
+                "source_url": "",
+                "details": [
+                    {"label": "Warm up", "text": "10-20 minutes easy plus 4 strides."},
+                    {"label": "Main set", "text": "8-10 x 1 kilometer at controlled threshold effort."},
+                    {"label": "Recovery", "text": "30 seconds easy jog between reps."},
+                    {"label": "Cool down", "text": "10-15 minutes easy."},
+                ],
+            },
+            {
+                "slug": "run-400m-volume-sets",
+                "title": "3-4 Sets of 8 x 400",
+                "workout_type": "run",
+                "focus": "Speed endurance",
+                "summary": "Grouped 400s for rhythm, turnover, and durable speed.",
+                "source_url": "",
+                "details": [
+                    {"label": "Warm up", "text": "15-20 minutes easy plus drills or strides."},
+                    {"label": "Main set", "text": "3-4 sets of 8 x 400 meters."},
+                    {"label": "Recovery", "text": "30 seconds between reps, 60 seconds between sets."},
+                    {"label": "Cool down", "text": "10-15 minutes easy."},
+                ],
+            },
+            {
+                "slug": "bike-aerobic-tempo-builder",
+                "title": "Bike Aerobic Tempo Builder",
+                "workout_type": "bike",
+                "focus": "Aerobic tempo",
+                "summary": "A simple bike workout to start the Trainer bike library.",
+                "source_url": "",
+                "details": [
+                    {"label": "Warm up", "text": "10 minutes easy spinning."},
+                    {"label": "Main set", "text": "3 x 8 minutes comfortably hard tempo."},
+                    {"label": "Recovery", "text": "3 minutes easy between efforts."},
+                    {"label": "Cool down", "text": "8-10 minutes easy."},
+                ],
+            },
+            {
+                "slug": "strength-glute-med-basics",
+                "title": "Glute Med Basics",
+                "workout_type": "strength",
+                "focus": "Glutes and hip stability",
+                "summary": "A PT-style foundation session for hip control and lateral glute strength.",
+                "source_url": "https://www.manhattanptandpain.com/physical-therapy-exercises-for-gluteus-medius-strength",
+                "details": [
+                    {"label": "Side-lying hip abduction", "text": "2-3 sets of 10-15 per side, slow lower."},
+                    {"label": "Clamshells", "text": "2-3 sets of 12-20 per side, keep hips stacked."},
+                    {"label": "Glute bridges", "text": "2-3 sets of 10-15, pause at the top."},
+                    {"label": "Lateral band walks", "text": "2-3 passes each direction, keep band tension."},
+                ],
+            },
+            {
+                "slug": "strength-runner-glute-activation",
+                "title": "Runner Glute Activation",
+                "workout_type": "strength",
+                "focus": "Pre-run activation",
+                "summary": "Short activation sequence for runners before easy or quality days.",
+                "source_url": "https://www.therapeuticassociates.com/glute-activation-for-runners-3-moves-beyond-the-basic-clamshell/",
+                "details": [
+                    {"label": "Runner's clam", "text": "2 sets of 10-15 per side."},
+                    {"label": "Banded lateral walk", "text": "2 sets of 10-15 steps each direction."},
+                    {"label": "Single-leg bridge", "text": "2 sets of 8-12 per side."},
+                ],
+            },
+            {
+                "slug": "strength-band-and-rdl-glutes",
+                "title": "Band + RDL Glute Builder",
+                "workout_type": "strength",
+                "focus": "Glutes, hamstrings, and single-leg control",
+                "summary": "Progressive glute work with bands and Romanian deadlift patterns.",
+                "source_url": "https://theprehabguys.com/the-best-exercises-for-the-glute-med/",
+                "details": [
+                    {"label": "Monster walks", "text": "2-3 sets of 8-12 steps forward and back."},
+                    {"label": "Banded glute bridge", "text": "3 sets of 10-15 reps."},
+                    {"label": "Romanian deadlift", "text": "3 sets of 8-10 controlled reps."},
+                    {"label": "Single-leg RDL reach", "text": "2 sets of 6-8 per side, light and precise."},
+                ],
+            },
+        ]
+
+        for workout in workouts:
+            cursor.execute(
+                """
+                INSERT INTO trainer_workouts
+                    (slug, title, workout_type, focus, summary, details_json, source_url, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(slug) DO UPDATE SET
+                    title = excluded.title,
+                    workout_type = excluded.workout_type,
+                    focus = excluded.focus,
+                    summary = excluded.summary,
+                    details_json = excluded.details_json,
+                    source_url = excluded.source_url,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    workout["slug"],
+                    workout["title"],
+                    workout["workout_type"],
+                    workout["focus"],
+                    workout["summary"],
+                    json.dumps(workout["details"]),
+                    workout["source_url"],
+                ),
+            )
 
     def populate_sample_data(self):
         """Populate database with sample projects."""
@@ -2713,6 +2875,147 @@ class Database:
         change_id = cursor.lastrowid
         self.close()
         return change_id
+
+    def get_trainer_workouts(self, workout_type=""):
+        """List workouts in the Dieter Trainer catalog."""
+        self.connect()
+        cursor = self.conn.cursor()
+        if workout_type:
+            cursor.execute(
+                """
+                SELECT * FROM trainer_workouts
+                WHERE workout_type = ?
+                ORDER BY
+                    CASE workout_type WHEN 'run' THEN 1 WHEN 'bike' THEN 2 WHEN 'strength' THEN 3 ELSE 4 END,
+                    title COLLATE NOCASE
+                """,
+                (workout_type,),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT * FROM trainer_workouts
+                ORDER BY
+                    CASE workout_type WHEN 'run' THEN 1 WHEN 'bike' THEN 2 WHEN 'strength' THEN 3 ELSE 4 END,
+                    title COLLATE NOCASE
+                """
+            )
+        rows = cursor.fetchall()
+        self.close()
+        return rows
+
+    def get_trainer_workout(self, workout_id):
+        """Get one Trainer catalog workout."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM trainer_workouts WHERE id = ?", (workout_id,))
+        row = cursor.fetchone()
+        self.close()
+        return row
+
+    def add_trainer_session(self, workout_id, scheduled_for="", notes=""):
+        """Schedule a Trainer workout session."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO trainer_workout_sessions
+                (workout_id, scheduled_for, notes, status, user_id, updated_at)
+            VALUES (?, ?, ?, 'upcoming', ?, CURRENT_TIMESTAMP)
+            """,
+            (workout_id, scheduled_for, notes, self._active_user_id()),
+        )
+        session_id = cursor.lastrowid
+        self._commit()
+        self.close()
+        return session_id
+
+    def get_trainer_sessions(self, status="upcoming", limit=50):
+        """List Trainer workout sessions for the active user."""
+        user_id = self._active_user_id()
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT trainer_workout_sessions.*, trainer_workouts.title, trainer_workouts.workout_type,
+                   trainer_workouts.focus, trainer_workouts.summary, trainer_workouts.details_json,
+                   trainer_workouts.source_url
+            FROM trainer_workout_sessions
+            JOIN trainer_workouts ON trainer_workouts.id = trainer_workout_sessions.workout_id
+            WHERE trainer_workout_sessions.status = ?
+              AND (? IS NULL OR trainer_workout_sessions.user_id = ?)
+            ORDER BY
+                CASE WHEN ? = 'upcoming' THEN trainer_workout_sessions.scheduled_for END ASC,
+                trainer_workout_sessions.created_at DESC
+            LIMIT ?
+            """,
+            (status, user_id, user_id, status, limit),
+        )
+        rows = cursor.fetchall()
+        self.close()
+        return rows
+
+    def get_trainer_session(self, session_id):
+        """Get one Trainer workout session."""
+        user_id = self._active_user_id()
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT trainer_workout_sessions.*, trainer_workouts.title, trainer_workouts.workout_type,
+                   trainer_workouts.focus, trainer_workouts.summary, trainer_workouts.details_json,
+                   trainer_workouts.source_url
+            FROM trainer_workout_sessions
+            JOIN trainer_workouts ON trainer_workouts.id = trainer_workout_sessions.workout_id
+            WHERE trainer_workout_sessions.id = ?
+              AND (? IS NULL OR trainer_workout_sessions.user_id = ?)
+            """,
+            (session_id, user_id, user_id),
+        )
+        row = cursor.fetchone()
+        self.close()
+        return row
+
+    def complete_trainer_session(self, session_id, notes=""):
+        """Mark a Trainer workout session complete."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE trainer_workout_sessions
+            SET status = 'done',
+                completed_at = CURRENT_TIMESTAMP,
+                notes = CASE WHEN ? != '' THEN ? ELSE notes END,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (notes, notes, session_id),
+        )
+        self._commit()
+        self.close()
+
+    def reopen_trainer_session(self, session_id):
+        """Move a completed Trainer session back to upcoming."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE trainer_workout_sessions
+            SET status = 'upcoming', completed_at = '', updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (session_id,),
+        )
+        self._commit()
+        self.close()
+
+    def delete_trainer_session(self, session_id):
+        """Delete a Trainer workout session."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM trainer_workout_sessions WHERE id = ?", (session_id,))
+        self._commit()
+        self.close()
 
     def create_priority_review(self, summary, model, raw_response, instructions):
         """Persist a priority review and its pending instructions."""

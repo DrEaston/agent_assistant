@@ -3860,6 +3860,7 @@ def render_apps_page(request: Request):
         "recipe_app_url": "/apps/recipes" if recipe_app["project"] else "",
         "recipe_app": recipe_app,
         "planner_url": "/apps/assistant/planner",
+        "trainer_url": "/apps/trainer",
         "planner": {
             "recommended_project": dashboard_context.get("recommended_project"),
             "next_action": dashboard_context.get("next_action"),
@@ -3871,6 +3872,96 @@ def render_apps_page(request: Request):
     template = jinja_env.get_template("apps.html")
     html = template.render(context)
     return HTMLResponse(html)
+
+
+def trainer_workout_view(row):
+    """Prepare a Trainer workout/session row for templates."""
+    item = dict(row)
+    try:
+        item["details"] = json.loads(item.get("details_json") or "[]")
+    except (TypeError, json.JSONDecodeError):
+        item["details"] = []
+    return item
+
+
+def trainer_context(request, active_tab="library", workout_type=""):
+    """Build shared Dieter Trainer template context."""
+    workouts = [trainer_workout_view(row) for row in db.get_trainer_workouts(workout_type)]
+    return {
+        "request": request,
+        "active_tab": active_tab,
+        "workout_type": workout_type,
+        "workouts": workouts,
+        "run_workouts": [item for item in workouts if item["workout_type"] == "run"],
+        "bike_workouts": [item for item in workouts if item["workout_type"] == "bike"],
+        "strength_workouts": [item for item in workouts if item["workout_type"] == "strength"],
+        "upcoming_sessions": [trainer_workout_view(row) for row in db.get_trainer_sessions("upcoming", limit=40)],
+        "past_sessions": [trainer_workout_view(row) for row in db.get_trainer_sessions("done", limit=40)],
+        "scheduler_due": scheduler_due_context(),
+    }
+
+
+@app.get("/apps/trainer")
+def trainer_app(request: Request, workout_type: str = ""):
+    """Dieter Trainer workout catalog."""
+    safe_type = workout_type if workout_type in {"run", "bike", "strength"} else ""
+    template = jinja_env.get_template("trainer.html")
+    return HTMLResponse(template.render(trainer_context(request, "library", safe_type)))
+
+
+@app.get("/apps/trainer/upcoming")
+def trainer_upcoming_app(request: Request):
+    """Upcoming Dieter Trainer workouts."""
+    template = jinja_env.get_template("trainer.html")
+    return HTMLResponse(template.render(trainer_context(request, "upcoming")))
+
+
+@app.get("/apps/trainer/past")
+def trainer_past_app(request: Request):
+    """Past Dieter Trainer workouts."""
+    template = jinja_env.get_template("trainer.html")
+    return HTMLResponse(template.render(trainer_context(request, "past")))
+
+
+@app.post("/apps/trainer/workouts/{workout_id}/schedule")
+def schedule_trainer_workout(
+    workout_id: int,
+    scheduled_for: str = Form(""),
+    notes: str = Form(""),
+):
+    """Schedule a workout from the Trainer catalog."""
+    workout = db.get_trainer_workout(workout_id)
+    if not workout:
+        raise HTTPException(status_code=404, detail="Workout not found")
+    db.add_trainer_session(workout_id, scheduled_for=scheduled_for, notes=notes)
+    return RedirectResponse(url="/apps/trainer/upcoming", status_code=303)
+
+
+@app.post("/apps/trainer/sessions/{session_id}/complete")
+def complete_trainer_session(session_id: int, notes: str = Form("")):
+    """Mark a Trainer workout done."""
+    if not db.get_trainer_session(session_id):
+        raise HTTPException(status_code=404, detail="Workout session not found")
+    db.complete_trainer_session(session_id, notes=notes)
+    return RedirectResponse(url="/apps/trainer/past", status_code=303)
+
+
+@app.post("/apps/trainer/sessions/{session_id}/reopen")
+def reopen_trainer_session(session_id: int):
+    """Move a past Trainer workout back to upcoming."""
+    if not db.get_trainer_session(session_id):
+        raise HTTPException(status_code=404, detail="Workout session not found")
+    db.reopen_trainer_session(session_id)
+    return RedirectResponse(url="/apps/trainer/upcoming", status_code=303)
+
+
+@app.post("/apps/trainer/sessions/{session_id}/delete")
+def delete_trainer_session(session_id: int, next: str = Form("/apps/trainer/upcoming")):
+    """Delete a Trainer workout session."""
+    if not db.get_trainer_session(session_id):
+        raise HTTPException(status_code=404, detail="Workout session not found")
+    db.delete_trainer_session(session_id)
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/trainer/upcoming"), status_code=303)
 
 
 @app.get("/projects")
