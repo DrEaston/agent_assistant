@@ -338,6 +338,22 @@ class Database:
                 distance_meters REAL,
                 moving_time_seconds INTEGER,
                 elapsed_time_seconds INTEGER,
+                elevation_gain_meters REAL,
+                average_speed_mps REAL,
+                max_speed_mps REAL,
+                average_heartrate REAL,
+                max_heartrate REAL,
+                average_cadence REAL,
+                average_watts REAL,
+                kilojoules REAL,
+                suffer_score REAL,
+                perceived_exertion REAL,
+                gear_id TEXT DEFAULT '',
+                gear_name TEXT DEFAULT '',
+                start_latlng_json TEXT DEFAULT '[]',
+                end_latlng_json TEXT DEFAULT '[]',
+                splits_metric_json TEXT DEFAULT '[]',
+                laps_json TEXT DEFAULT '[]',
                 raw_json TEXT DEFAULT '{}',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -625,6 +641,22 @@ class Database:
         self._ensure_column(cursor, "trainer_profiles", "strava_refresh_token", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_profiles", "strava_token_expires_at", "INTEGER DEFAULT 0")
         self._ensure_column(cursor, "trainer_profiles", "strava_scope", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "trainer_imported_workouts", "elevation_gain_meters", "REAL")
+        self._ensure_column(cursor, "trainer_imported_workouts", "average_speed_mps", "REAL")
+        self._ensure_column(cursor, "trainer_imported_workouts", "max_speed_mps", "REAL")
+        self._ensure_column(cursor, "trainer_imported_workouts", "average_heartrate", "REAL")
+        self._ensure_column(cursor, "trainer_imported_workouts", "max_heartrate", "REAL")
+        self._ensure_column(cursor, "trainer_imported_workouts", "average_cadence", "REAL")
+        self._ensure_column(cursor, "trainer_imported_workouts", "average_watts", "REAL")
+        self._ensure_column(cursor, "trainer_imported_workouts", "kilojoules", "REAL")
+        self._ensure_column(cursor, "trainer_imported_workouts", "suffer_score", "REAL")
+        self._ensure_column(cursor, "trainer_imported_workouts", "perceived_exertion", "REAL")
+        self._ensure_column(cursor, "trainer_imported_workouts", "gear_id", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "trainer_imported_workouts", "gear_name", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "trainer_imported_workouts", "start_latlng_json", "TEXT DEFAULT '[]'")
+        self._ensure_column(cursor, "trainer_imported_workouts", "end_latlng_json", "TEXT DEFAULT '[]'")
+        self._ensure_column(cursor, "trainer_imported_workouts", "splits_metric_json", "TEXT DEFAULT '[]'")
+        self._ensure_column(cursor, "trainer_imported_workouts", "laps_json", "TEXT DEFAULT '[]'")
         self._ensure_column(cursor, "trainer_run_reflections", "missing_fields_json", "TEXT DEFAULT '[]'")
         self._ensure_column(cursor, "recipe_complete_meals", "visibility", "TEXT DEFAULT 'shared'")
         self._ensure_column(cursor, "recipe_components", "visibility", "TEXT DEFAULT 'shared'")
@@ -3210,7 +3242,35 @@ class Database:
         self.close()
         return bool(row)
 
-    def add_trainer_imported_workout(self, external_id, activity_type="", workout_category="", title="", started_at="", distance_meters=None, moving_time_seconds=None, elapsed_time_seconds=None, raw=None, user_id=None):
+    def add_trainer_imported_workout(
+        self,
+        external_id,
+        activity_type="",
+        workout_category="",
+        title="",
+        started_at="",
+        distance_meters=None,
+        moving_time_seconds=None,
+        elapsed_time_seconds=None,
+        elevation_gain_meters=None,
+        average_speed_mps=None,
+        max_speed_mps=None,
+        average_heartrate=None,
+        max_heartrate=None,
+        average_cadence=None,
+        average_watts=None,
+        kilojoules=None,
+        suffer_score=None,
+        perceived_exertion=None,
+        gear_id="",
+        gear_name="",
+        start_latlng=None,
+        end_latlng=None,
+        splits_metric=None,
+        laps=None,
+        raw=None,
+        user_id=None,
+    ):
         """Store an imported Strava workout/activity for a user."""
         target_user_id = user_id or self._active_user_id()
         self.connect()
@@ -3219,8 +3279,11 @@ class Database:
             """
             INSERT INTO trainer_imported_workouts
                 (source, external_id, user_id, activity_type, workout_category, title, started_at,
-                 distance_meters, moving_time_seconds, elapsed_time_seconds, raw_json, updated_at)
-            VALUES ('strava', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 distance_meters, moving_time_seconds, elapsed_time_seconds, elevation_gain_meters,
+                 average_speed_mps, max_speed_mps, average_heartrate, max_heartrate, average_cadence,
+                 average_watts, kilojoules, suffer_score, perceived_exertion, gear_id, gear_name,
+                 start_latlng_json, end_latlng_json, splits_metric_json, laps_json, raw_json, updated_at)
+            VALUES ('strava', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(source, external_id, user_id) DO UPDATE SET
                 activity_type = excluded.activity_type,
                 workout_category = excluded.workout_category,
@@ -3229,6 +3292,22 @@ class Database:
                 distance_meters = excluded.distance_meters,
                 moving_time_seconds = excluded.moving_time_seconds,
                 elapsed_time_seconds = excluded.elapsed_time_seconds,
+                elevation_gain_meters = excluded.elevation_gain_meters,
+                average_speed_mps = excluded.average_speed_mps,
+                max_speed_mps = excluded.max_speed_mps,
+                average_heartrate = excluded.average_heartrate,
+                max_heartrate = excluded.max_heartrate,
+                average_cadence = excluded.average_cadence,
+                average_watts = excluded.average_watts,
+                kilojoules = excluded.kilojoules,
+                suffer_score = excluded.suffer_score,
+                perceived_exertion = excluded.perceived_exertion,
+                gear_id = excluded.gear_id,
+                gear_name = excluded.gear_name,
+                start_latlng_json = excluded.start_latlng_json,
+                end_latlng_json = excluded.end_latlng_json,
+                splits_metric_json = excluded.splits_metric_json,
+                laps_json = excluded.laps_json,
                 raw_json = excluded.raw_json,
                 updated_at = CURRENT_TIMESTAMP
             """,
@@ -3242,6 +3321,22 @@ class Database:
                 distance_meters,
                 moving_time_seconds,
                 elapsed_time_seconds,
+                elevation_gain_meters,
+                average_speed_mps,
+                max_speed_mps,
+                average_heartrate,
+                max_heartrate,
+                average_cadence,
+                average_watts,
+                kilojoules,
+                suffer_score,
+                perceived_exertion,
+                gear_id or "",
+                gear_name or "",
+                json.dumps(start_latlng or []),
+                json.dumps(end_latlng or []),
+                json.dumps(splits_metric or []),
+                json.dumps(laps or []),
                 json.dumps(raw or {}),
             ),
         )

@@ -231,6 +231,14 @@
                         <span class="trainer-card-meta">{{ trainer_category_labels.get(workout.workout_category, workout.workout_category or workout.activity_type) }}</span>
                         <h3>{{ workout.title or workout.activity_type }}</h3>
                         <p>{{ workout.started_at or "No date" }}{% if workout.distance_meters %} - {{ workout.distance_meters|round|int }} m{% endif %}</p>
+                        <p>
+                            {% if workout.moving_time_seconds %}{{ (workout.moving_time_seconds / 60)|round|int }} min{% endif %}
+                            {% if workout.average_speed_mps %} - {{ (26.8224 / workout.average_speed_mps)|round(1) }} min/mi{% endif %}
+                            {% if workout.elevation_gain_meters %} - {{ workout.elevation_gain_meters|round|int }} m gain{% endif %}
+                            {% if workout.average_heartrate %} - HR {{ workout.average_heartrate|round|int }}{% endif %}
+                            {% if workout.average_cadence %} - cadence {{ workout.average_cadence|round|int }}{% endif %}
+                            {% if workout.gear_name %} - {{ workout.gear_name }}{% endif %}
+                        </p>
                         {% if is_viewing_own_trainer %}
                             <a class="button-link secondary-link compact-link" href="/apps/trainer/imports?reflection_workout_id={{ workout.id }}">Reflect with Dieter</a>
                         {% endif %}

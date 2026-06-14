@@ -4092,6 +4092,60 @@ def fetch_strava_activities(access_token, after_ts, before_ts=None, per_page=100
     return result if isinstance(result, list) else []
 
 
+def fetch_strava_activity_detail(access_token, activity_id):
+    """Fetch detailed fields for one Strava activity."""
+    if not activity_id:
+        return {}
+    params = {"include_all_efforts": "true"}
+    url = f"{STRAVA_API_BASE}/activities/{activity_id}?{urlencode(params)}"
+    result = strava_http_json(url, access_token=access_token)
+    return result if isinstance(result, dict) else {}
+
+
+def strava_first_present(activity, detail, key):
+    """Prefer detailed Strava fields, falling back to the summary activity."""
+    value = (detail or {}).get(key)
+    if value is None or value == "":
+        value = (activity or {}).get(key)
+    return value
+
+
+def strava_activity_import_payload(activity, detail=None):
+    """Build the persisted metric payload for a Strava activity."""
+    detail = detail or {}
+    merged = {**(activity or {}), **detail}
+    activity_type = merged.get("sport_type") or merged.get("type") or ""
+    title = merged.get("name") or activity_type
+    gear = merged.get("gear") if isinstance(merged.get("gear"), dict) else {}
+    return {
+        "external_id": str(merged.get("id")),
+        "activity_type": activity_type,
+        "workout_category": classify_strava_workout(activity_type, title),
+        "title": title,
+        "started_at": (merged.get("start_date_local") or merged.get("start_date") or "")[:10],
+        "distance_meters": strava_first_present(activity, detail, "distance"),
+        "moving_time_seconds": strava_first_present(activity, detail, "moving_time"),
+        "elapsed_time_seconds": strava_first_present(activity, detail, "elapsed_time"),
+        "elevation_gain_meters": strava_first_present(activity, detail, "total_elevation_gain"),
+        "average_speed_mps": strava_first_present(activity, detail, "average_speed"),
+        "max_speed_mps": strava_first_present(activity, detail, "max_speed"),
+        "average_heartrate": strava_first_present(activity, detail, "average_heartrate"),
+        "max_heartrate": strava_first_present(activity, detail, "max_heartrate"),
+        "average_cadence": strava_first_present(activity, detail, "average_cadence"),
+        "average_watts": strava_first_present(activity, detail, "average_watts"),
+        "kilojoules": strava_first_present(activity, detail, "kilojoules"),
+        "suffer_score": strava_first_present(activity, detail, "suffer_score"),
+        "perceived_exertion": strava_first_present(activity, detail, "perceived_exertion"),
+        "gear_id": strava_first_present(activity, detail, "gear_id") or gear.get("id") or "",
+        "gear_name": gear.get("name") or "",
+        "start_latlng": strava_first_present(activity, detail, "start_latlng") or [],
+        "end_latlng": strava_first_present(activity, detail, "end_latlng") or [],
+        "splits_metric": detail.get("splits_metric") or [],
+        "laps": detail.get("laps") or [],
+        "raw": {"summary": activity or {}, "detail": detail or {}},
+    }
+
+
 def import_recent_strava_runs(days=7):
     """Import recent Strava run activities for the active athlete."""
     profile = dict_from_row(db.get_trainer_profile())
@@ -4108,19 +4162,11 @@ def import_recent_strava_runs(days=7):
         if activity_type not in {"Run", "TrailRun", "VirtualRun"}:
             skipped += 1
             continue
-        title = activity.get("name") or activity_type
-        category = classify_strava_workout(activity_type, title)
-        db.add_trainer_imported_workout(
-            external_id=str(activity.get("id")),
-            activity_type=activity_type,
-            workout_category=category,
-            title=title,
-            started_at=(activity.get("start_date_local") or activity.get("start_date") or "")[:10],
-            distance_meters=activity.get("distance"),
-            moving_time_seconds=activity.get("moving_time"),
-            elapsed_time_seconds=activity.get("elapsed_time"),
-            raw=activity,
-        )
+        try:
+            detail = fetch_strava_activity_detail(access_token, activity.get("id"))
+        except HTTPException:
+            detail = {}
+        db.add_trainer_imported_workout(**strava_activity_import_payload(activity, detail))
         imported += 1
     return {"imported": imported, "skipped": skipped, "days": days}
 
