@@ -2097,7 +2097,7 @@ def format_planner_write_destinations(operations):
 
 def scheduler_text_implies_today(text):
     """Detect casual same-day scheduler phrasing."""
-    return bool(re.search(r"\b(today|tonight|before bed|bedtime|this evening)\b", text or "", flags=re.IGNORECASE))
+    return bool(re.search(r"\b(today|tonight|before bed|bedtime|this evening|in an hour|in \d+ hours?)\b", text or "", flags=re.IGNORECASE))
 
 def scheduler_date_from_text(text):
     """Resolve simple relative scheduler dates from user text."""
@@ -2108,6 +2108,68 @@ def scheduler_date_from_text(text):
     if scheduler_text_implies_today(text):
         return today.isoformat()
     return ""
+
+def title_from_scheduler_note_line(line, fallback="Scheduler item"):
+    """Create a short card title from a standalone scheduler note."""
+    cleaned = clean_scheduler_note_line(line)
+    cleaned = re.sub(r"^\[( |x)\]\s+", "", cleaned, flags=re.IGNORECASE)
+    for _ in range(2):
+        cleaned = re.sub(r"^\s*(up\s+)?that\s+", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"^\s*in (an|\d+) hours?\s+", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"^\s*(i\s+)?(need to|have to|should|must)\s+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned.strip(" .")
+    if not cleaned:
+        return fallback
+    return cleaned[0].upper() + cleaned[1:80]
+
+def split_mixed_priority_scheduler_notes():
+    """Move obvious today-note lines out of future scheduler cards."""
+    today = datetime.now().date()
+    today_iso = today.isoformat()
+    for item in dicts_from_rows(db.get_scheduler_items(status="open", limit=250)):
+        scheduled_for = (item.get("scheduled_for") or "").strip()
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", scheduled_for or ""):
+            continue
+        try:
+            scheduled_date = datetime.strptime(scheduled_for, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if scheduled_date <= today or not (item.get("notes") or "").strip():
+            continue
+
+        keep_lines = []
+        move_lines = []
+        for raw_line in (item.get("notes") or "").splitlines():
+            line_date = scheduler_date_from_text(raw_line)
+            if line_date == today_iso:
+                move_lines.append(raw_line)
+            else:
+                keep_lines.append(raw_line)
+        if not move_lines:
+            continue
+
+        db.update_scheduler_item(item["id"], notes="\n".join(keep_lines))
+        title = (
+            title_from_scheduler_note_line(move_lines[0])
+            if len(move_lines) == 1
+            else item.get("context_label") or item.get("title") or "Today"
+        )
+        context_label = item.get("context_label") or "General"
+        notes = "" if len(move_lines) == 1 else normalize_scheduler_notes("\n".join(move_lines))
+        existing = find_open_scheduler_item_for_context(context_label, title, today_iso)
+        if existing:
+            merged_notes = merge_scheduler_notes(existing.get("notes", ""), notes or normalize_scheduler_notes("\n".join(move_lines)))
+            db.update_scheduler_item(existing["id"], notes=merged_notes)
+        else:
+            db.add_scheduler_item(
+                title,
+                context_label=context_label,
+                scheduled_for=today_iso,
+                notes=notes,
+                source="dieter-cleanup",
+                project_id=item.get("project_id"),
+                action_id=item.get("action_id"),
+            )
 
 def synthesize_scheduler_operation(user_message, operation):
     """Turn raw reminder text into a concise scheduler record."""
@@ -2227,6 +2289,7 @@ def enrich_scheduler_item_priority(item, today=None):
 def scheduler_due_context():
     """Build visible scheduler notifications for app entry pages."""
     today = datetime.now().date()
+    split_mixed_priority_scheduler_notes()
     open_items = dicts_from_rows(db.get_scheduler_items(status="open", limit=250))
     due_items = []
     upcoming_items = []
@@ -3716,6 +3779,7 @@ def assistant_planner_app(request: Request):
 @app.get("/apps/assistant/scheduler")
 def assistant_scheduler_app(request: Request):
     """Assistant scheduler page."""
+    split_mixed_priority_scheduler_notes()
     data = api_dashboard()
     data_json = json.dumps(data, default=str)
     data_clean = json.loads(data_json)
@@ -3732,6 +3796,7 @@ def assistant_scheduler_app(request: Request):
 
 def render_planner_app(request: Request):
     """Main dashboard view - renders HTML."""
+    split_mixed_priority_scheduler_notes()
     data = api_dashboard()
     # Convert to JSON and back to ensure all dicts are pure Python dicts
     data_json = json.dumps(data, default=str)
