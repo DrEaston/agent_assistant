@@ -2099,6 +2099,16 @@ def scheduler_text_implies_today(text):
     """Detect casual same-day scheduler phrasing."""
     return bool(re.search(r"\b(today|tonight|before bed|bedtime|this evening)\b", text or "", flags=re.IGNORECASE))
 
+def scheduler_date_from_text(text):
+    """Resolve simple relative scheduler dates from user text."""
+    text = text or ""
+    today = datetime.now().date()
+    if re.search(r"\btomorrow\b", text, flags=re.IGNORECASE):
+        return (today + timedelta(days=1)).isoformat()
+    if scheduler_text_implies_today(text):
+        return today.isoformat()
+    return ""
+
 def synthesize_scheduler_operation(user_message, operation):
     """Turn raw reminder text into a concise scheduler record."""
     original = (user_message or "").strip()
@@ -2119,11 +2129,7 @@ def synthesize_scheduler_operation(user_message, operation):
 
     text = original.lower()
     if not scheduled_for:
-        today = datetime.now().date()
-        if re.search(r"\btomorrow\b", text):
-            scheduled_for = (today + timedelta(days=1)).isoformat()
-        elif scheduler_text_implies_today(text):
-            scheduled_for = today.isoformat()
+        scheduled_for = scheduler_date_from_text(text)
 
     rawish_title = title.lower() == original.lower() or len(title) > 80
     chore_list_match = re.search(r"\b(chore|chores)\s+list\b", original, flags=re.IGNORECASE)
@@ -2162,7 +2168,10 @@ def synthesize_scheduler_operation(user_message, operation):
         normalized_detail = re.sub(r"[^a-z0-9]+", " ", detail_items[0].lower()).strip() if len(detail_items) == 1 else ""
         if not (normalized_title and normalized_title in normalized_detail and scheduler_text_implies_today(normalized_detail)):
             note_lines = detail_items
-    if note_lines and re.search(r"\b(chore|chores|to do|todo|checklist|list)\b", original, flags=re.IGNORECASE):
+    if note_lines and (
+        len(note_lines) > 1
+        or re.search(r"\b(chore|chores|to do|todo|checklist|list)\b", original, flags=re.IGNORECASE)
+    ):
         note_lines = [
             line if re.match(r"^\[( |x|X)\]\s+", line) else f"[ ] {line}"
             for line in note_lines
@@ -2484,6 +2493,9 @@ def apply_planner_edit(user_message, page_url, proposal):
                     item_id = int(operation["scheduler_item_id"])
                     existing_item = dict_from_row(db.get_scheduler_item(item_id))
                     notes = operation.get("notes")
+                    raw_operation_notes = notes
+                    requested_date = scheduler_date_from_text(user_message)
+                    existing_date = ((existing_item or {}).get("scheduled_for") or "").strip()
                     if notes is not None:
                         extracted_additions = extract_scheduler_bullet_additions(
                             user_message,
@@ -2491,6 +2503,34 @@ def apply_planner_edit(user_message, page_url, proposal):
                         )
                         addition_notes = format_scheduler_note_lines(extracted_additions)
                         notes = merge_scheduler_notes((existing_item or {}).get("notes", ""), addition_notes or notes)
+                    if (
+                        existing_item
+                        and notes is not None
+                        and requested_date
+                        and existing_date
+                        and requested_date != existing_date
+                    ):
+                        new_title = (operation.get("title") or "").strip() or existing_item.get("context_label") or existing_item.get("title") or "Scheduler item"
+                        new_context = (operation.get("context_label") or existing_item.get("context_label") or "").strip()
+                        new_notes = addition_notes or normalize_scheduler_notes(raw_operation_notes)
+                        item_id = db.add_scheduler_item(
+                            new_title,
+                            context_label=new_context,
+                            scheduled_for=requested_date,
+                            notes=new_notes,
+                            source="dieter",
+                            project_id=existing_item.get("project_id"),
+                            action_id=existing_item.get("action_id"),
+                        )
+                        applied.append({
+                            "op": "add_scheduler_item",
+                            "scheduler_item_id": item_id,
+                            "title": new_title,
+                            "context_label": new_context,
+                            "scheduled_for": requested_date,
+                            "notes": new_notes,
+                        })
+                        continue
                     db.update_scheduler_item(
                         item_id,
                         title=operation.get("title"),
@@ -2761,13 +2801,16 @@ def dieter_action_confirmed(message, page_url, action_kind):
 def preview_dieter_write(message, page_url, action_kind, destination):
     """Ask the user to confirm a cross-app write before applying it."""
     token = dieter_action_confirmation_token(message.content, page_url, action_kind)
+    lines = [
+        "Before I write this, please confirm.",
+        f"Requested change: {message.content.strip()}",
+        f"Destination: {destination}",
+    ]
+    if action_kind == "planner_action" and re.search(r"\b(chore|chores|to do|todo|checklist|list)\b|[,;\n]", message.content or "", flags=re.IGNORECASE):
+        lines.append("If this is a list, I will save separate bullets as checkboxes where possible.")
+    lines.append("Press Confirm to apply it, or edit your message and send again.")
     return {
-        "assistant_message": "\n".join([
-            "Before I write this, please confirm.",
-            f"Requested change: {message.content.strip()}",
-            f"Destination: {destination}",
-            "Press Confirm to apply it, or edit your message and send again.",
-        ]),
+        "assistant_message": "\n".join(lines),
         "changed_fields": [],
         "needs_confirmation": True,
         "confirmation_token": token,
