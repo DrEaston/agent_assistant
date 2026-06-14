@@ -95,17 +95,51 @@
     </div>
 
     <nav class="trainer-tabs" aria-label="Trainer views">
-        <a href="/apps/trainer" class="{% if active_tab == 'library' %}active{% endif %}">Workouts</a>
+        <a href="/apps/trainer" class="{% if active_tab == 'home' %}active{% endif %}">Home</a>
+        <a href="/apps/trainer/workouts" class="{% if active_tab == 'library' %}active{% endif %}">Workouts</a>
         <a href="/apps/trainer/upcoming" class="{% if active_tab == 'upcoming' %}active{% endif %}">Upcoming</a>
         <a href="/apps/trainer/past" class="{% if active_tab == 'past' %}active{% endif %}">Past</a>
+        <a href="/apps/trainer/imports" class="{% if active_tab == 'imports' %}active{% endif %}">Strava Imports</a>
+        <a href="/apps/trainer/settings" class="{% if active_tab == 'settings' %}active{% endif %}">Settings</a>
     </nav>
 
-    {% if active_tab == "library" %}
+    {% if active_tab == "home" %}
+        {% if trainer_profile and trainer_profile.mode == "coach" and coach_athletes %}
+            <div class="trainer-card">
+                <h3>Coach View</h3>
+                <div class="trainer-filter-row">
+                    {% for athlete in coach_athletes %}
+                        <a href="/apps/trainer/imports?athlete_user_id={{ athlete.athlete_user_id }}">{{ athlete.display_name or athlete.email }}</a>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+        {% if suggestion_groups %}
+            <div class="trainer-card-grid">
+                {% for group in suggestion_groups %}
+                    <article class="trainer-card">
+                        <span class="trainer-card-meta">{{ group.label }}</span>
+                        {% for workout in group.workouts %}
+                            <div>
+                                <h3>{{ workout.title }}</h3>
+                                <p>{{ workout.summary }}</p>
+                                <form method="post" action="/apps/trainer/workouts/{{ workout.id }}/schedule">
+                                    <input type="date" name="scheduled_for" aria-label="Workout date">
+                                    <input type="text" name="notes" placeholder="Notes" aria-label="Workout notes">
+                                    <button type="submit" class="compact">Schedule</button>
+                                </form>
+                            </div>
+                        {% endfor %}
+                    </article>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% elif active_tab == "library" %}
         <div class="trainer-filter-row" aria-label="Workout type filters">
-            <a href="/apps/trainer" class="{% if not workout_type %}active{% endif %}">All</a>
-            <a href="/apps/trainer?workout_type=run" class="{% if workout_type == 'run' %}active{% endif %}">Run</a>
-            <a href="/apps/trainer?workout_type=bike" class="{% if workout_type == 'bike' %}active{% endif %}">Bike</a>
-            <a href="/apps/trainer?workout_type=strength" class="{% if workout_type == 'strength' %}active{% endif %}">Strength</a>
+            <a href="/apps/trainer/workouts" class="{% if not workout_type %}active{% endif %}">All</a>
+            <a href="/apps/trainer/workouts?workout_type=run" class="{% if workout_type == 'run' %}active{% endif %}">Run</a>
+            <a href="/apps/trainer/workouts?workout_type=bike" class="{% if workout_type == 'bike' %}active{% endif %}">Bike</a>
+            <a href="/apps/trainer/workouts?workout_type=strength" class="{% if workout_type == 'strength' %}active{% endif %}">Strength</a>
         </div>
         {% if workouts %}
             <div class="trainer-card-grid">
@@ -142,6 +176,68 @@
                 <p>No completed workouts yet.</p>
             </div>
         {% endif %}
+    {% elif active_tab == "imports" %}
+        <div class="trainer-card-grid">
+            <article class="trainer-card">
+                <span class="trainer-card-meta">Strava</span>
+                <h3>Import Staging</h3>
+                <p>Strava OAuth will connect here. For now, imported activities are stored with source ids, activity types, dates, and Trainer categories.</p>
+                <form method="post" action="/apps/trainer/imports/strava/manual">
+                    <input type="text" name="external_id" placeholder="Strava activity id" required>
+                    <input type="text" name="activity_type" placeholder="Run, Ride, WeightTraining">
+                    <input type="text" name="title" placeholder="Activity title">
+                    <input type="date" name="started_at">
+                    <button type="submit" class="compact">Add import</button>
+                </form>
+            </article>
+            {% if imported_workouts %}
+                {% for workout in imported_workouts %}
+                    <article class="trainer-card">
+                        <span class="trainer-card-meta">{{ trainer_category_labels.get(workout.workout_category, workout.workout_category or workout.activity_type) }}</span>
+                        <h3>{{ workout.title or workout.activity_type }}</h3>
+                        <p>{{ workout.started_at or "No date" }}{% if workout.distance_meters %} - {{ workout.distance_meters|round|int }} m{% endif %}</p>
+                    </article>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">
+                    <p>No Strava imports yet.</p>
+                </div>
+            {% endif %}
+        </div>
+    {% elif active_tab == "settings" %}
+        <div class="trainer-card-grid">
+            <article class="trainer-card">
+                <span class="trainer-card-meta">Mode</span>
+                <h3>Trainer Mode</h3>
+                <form method="post" action="/apps/trainer/settings/mode">
+                    <select name="mode">
+                        <option value="athlete" {% if trainer_profile and trainer_profile.mode == "athlete" %}selected{% endif %}>Athlete</option>
+                        <option value="coach" {% if trainer_profile and trainer_profile.mode == "coach" %}selected{% endif %}>Coach</option>
+                    </select>
+                    <button type="submit" class="compact">Save</button>
+                </form>
+            </article>
+            <article class="trainer-card">
+                <span class="trainer-card-meta">Athlete Sharing</span>
+                <h3>Coach Permissions</h3>
+                <form method="post" action="/apps/trainer/settings/coaches/grant">
+                    <input type="email" name="email" placeholder="Coach email" required>
+                    <button type="submit" class="compact">Grant view access</button>
+                </form>
+                {% if coach_grants %}
+                    <ul class="trainer-detail-list">
+                        {% for grant in coach_grants %}
+                            <li>
+                                <strong>{{ grant.display_name or grant.email }}</strong>
+                                <form method="post" action="/apps/trainer/settings/coaches/{{ grant.id }}/revoke" class="inline-form">
+                                    <button type="submit" class="secondary compact danger-button">Revoke</button>
+                                </form>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+            </article>
+        </div>
     {% endif %}
 </section>
 {% endblock %}

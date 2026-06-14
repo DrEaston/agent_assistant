@@ -284,12 +284,61 @@ class Database:
                 slug TEXT UNIQUE NOT NULL,
                 title TEXT NOT NULL,
                 workout_type TEXT NOT NULL,
+                workout_category TEXT DEFAULT '',
                 focus TEXT DEFAULT '',
                 summary TEXT DEFAULT '',
                 details_json TEXT DEFAULT '[]',
                 source_url TEXT DEFAULT '',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS trainer_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL UNIQUE,
+                mode TEXT DEFAULT 'athlete',
+                strava_athlete_id TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS trainer_coach_grants (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                athlete_user_id INTEGER NOT NULL,
+                coach_user_id INTEGER NOT NULL,
+                permission TEXT DEFAULT 'view',
+                status TEXT DEFAULT 'active',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(athlete_user_id, coach_user_id),
+                FOREIGN KEY (athlete_user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (coach_user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS trainer_imported_workouts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source TEXT DEFAULT 'strava',
+                external_id TEXT NOT NULL,
+                user_id INTEGER,
+                activity_type TEXT DEFAULT '',
+                workout_category TEXT DEFAULT '',
+                title TEXT DEFAULT '',
+                started_at TEXT DEFAULT '',
+                distance_meters REAL,
+                moving_time_seconds INTEGER,
+                elapsed_time_seconds INTEGER,
+                raw_json TEXT DEFAULT '{}',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(source, external_id, user_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
             )
         """)
 
@@ -528,6 +577,7 @@ class Database:
         self._ensure_column(cursor, "recipe_complete_meals", "visibility", "TEXT DEFAULT 'shared'")
         self._ensure_column(cursor, "recipe_components", "visibility", "TEXT DEFAULT 'shared'")
         self._ensure_column(cursor, "recipe_variations", "promotion_threshold", "INTEGER DEFAULT 2")
+        self._ensure_column(cursor, "trainer_workouts", "workout_category", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_workout_sessions", "user_id", "INTEGER")
         self._repair_sample_data_links(cursor)
         self._deprioritize_overlong_actions(cursor)
@@ -863,6 +913,7 @@ class Database:
                 "slug": "run-threshold-mile-repeats",
                 "title": "4-6 x 1 Mile Threshold",
                 "workout_type": "run",
+                "workout_category": "run_threshold",
                 "focus": "Threshold",
                 "summary": "Controlled mile repeats at threshold effort with short recoveries.",
                 "source_url": "",
@@ -877,6 +928,7 @@ class Database:
                 "slug": "run-threshold-1k-repeats",
                 "title": "8-10 x 1K Threshold",
                 "workout_type": "run",
+                "workout_category": "run_threshold",
                 "focus": "Threshold",
                 "summary": "Shorter threshold repeats with very compact recovery.",
                 "source_url": "",
@@ -891,6 +943,7 @@ class Database:
                 "slug": "run-400m-volume-sets",
                 "title": "3-4 Sets of 8 x 400",
                 "workout_type": "run",
+                "workout_category": "run_speed",
                 "focus": "Speed endurance",
                 "summary": "Grouped 400s for rhythm, turnover, and durable speed.",
                 "source_url": "",
@@ -905,6 +958,7 @@ class Database:
                 "slug": "bike-aerobic-tempo-builder",
                 "title": "Bike Aerobic Tempo Builder",
                 "workout_type": "bike",
+                "workout_category": "bike_tempo",
                 "focus": "Aerobic tempo",
                 "summary": "A simple bike workout to start the Trainer bike library.",
                 "source_url": "",
@@ -919,6 +973,7 @@ class Database:
                 "slug": "strength-glute-med-basics",
                 "title": "Glute Med Basics",
                 "workout_type": "strength",
+                "workout_category": "strength_glutes",
                 "focus": "Glutes and hip stability",
                 "summary": "A PT-style foundation session for hip control and lateral glute strength.",
                 "source_url": "https://www.manhattanptandpain.com/physical-therapy-exercises-for-gluteus-medius-strength",
@@ -933,6 +988,7 @@ class Database:
                 "slug": "strength-runner-glute-activation",
                 "title": "Runner Glute Activation",
                 "workout_type": "strength",
+                "workout_category": "strength_glutes",
                 "focus": "Pre-run activation",
                 "summary": "Short activation sequence for runners before easy or quality days.",
                 "source_url": "https://www.therapeuticassociates.com/glute-activation-for-runners-3-moves-beyond-the-basic-clamshell/",
@@ -946,6 +1002,7 @@ class Database:
                 "slug": "strength-band-and-rdl-glutes",
                 "title": "Band + RDL Glute Builder",
                 "workout_type": "strength",
+                "workout_category": "strength_glutes",
                 "focus": "Glutes, hamstrings, and single-leg control",
                 "summary": "Progressive glute work with bands and Romanian deadlift patterns.",
                 "source_url": "https://theprehabguys.com/the-best-exercises-for-the-glute-med/",
@@ -962,11 +1019,12 @@ class Database:
             cursor.execute(
                 """
                 INSERT INTO trainer_workouts
-                    (slug, title, workout_type, focus, summary, details_json, source_url, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    (slug, title, workout_type, workout_category, focus, summary, details_json, source_url, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(slug) DO UPDATE SET
                     title = excluded.title,
                     workout_type = excluded.workout_type,
+                    workout_category = excluded.workout_category,
                     focus = excluded.focus,
                     summary = excluded.summary,
                     details_json = excluded.details_json,
@@ -977,6 +1035,7 @@ class Database:
                     workout["slug"],
                     workout["title"],
                     workout["workout_type"],
+                    workout["workout_category"],
                     workout["focus"],
                     workout["summary"],
                     json.dumps(workout["details"]),
@@ -2913,6 +2972,232 @@ class Database:
         self.close()
         return row
 
+    def get_trainer_profile(self, user_id=None):
+        """Get or create a Trainer profile for a user."""
+        target_user_id = user_id or self._active_user_id()
+        if not target_user_id:
+            return None
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM trainer_profiles WHERE user_id = ?", (target_user_id,))
+        row = cursor.fetchone()
+        if not row:
+            cursor.execute(
+                "INSERT INTO trainer_profiles (user_id, mode) VALUES (?, 'athlete')",
+                (target_user_id,),
+            )
+            self._commit()
+            cursor.execute("SELECT * FROM trainer_profiles WHERE user_id = ?", (target_user_id,))
+            row = cursor.fetchone()
+        self.close()
+        return row
+
+    def update_trainer_mode(self, mode):
+        """Set the active user's Trainer mode."""
+        user_id = self._active_user_id()
+        if not user_id:
+            return
+        mode = mode if mode in {"athlete", "coach"} else "athlete"
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO trainer_profiles (user_id, mode, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET mode = excluded.mode, updated_at = CURRENT_TIMESTAMP
+            """,
+            (user_id, mode),
+        )
+        self._commit()
+        self.close()
+
+    def grant_trainer_coach(self, coach_user_id, permission="view"):
+        """Allow another user to view the active athlete's Trainer data."""
+        athlete_user_id = self._active_user_id()
+        if not athlete_user_id or not coach_user_id or athlete_user_id == coach_user_id:
+            return
+        permission = permission if permission in {"view"} else "view"
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO trainer_coach_grants
+                (athlete_user_id, coach_user_id, permission, status, updated_at)
+            VALUES (?, ?, ?, 'active', CURRENT_TIMESTAMP)
+            ON CONFLICT(athlete_user_id, coach_user_id) DO UPDATE SET
+                permission = excluded.permission,
+                status = 'active',
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (athlete_user_id, coach_user_id, permission),
+        )
+        self._commit()
+        self.close()
+
+    def revoke_trainer_coach(self, grant_id):
+        """Remove a coach grant owned by the active athlete."""
+        athlete_user_id = self._active_user_id()
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE trainer_coach_grants SET status = 'revoked', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND athlete_user_id = ?",
+            (grant_id, athlete_user_id),
+        )
+        self._commit()
+        self.close()
+
+    def get_trainer_coach_grants_for_athlete(self):
+        """List active coach grants for the active athlete."""
+        athlete_user_id = self._active_user_id()
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT trainer_coach_grants.*, users.email, users.display_name
+            FROM trainer_coach_grants
+            JOIN users ON users.id = trainer_coach_grants.coach_user_id
+            WHERE trainer_coach_grants.athlete_user_id = ?
+              AND trainer_coach_grants.status = 'active'
+            ORDER BY trainer_coach_grants.updated_at DESC
+            """,
+            (athlete_user_id,),
+        )
+        rows = cursor.fetchall()
+        self.close()
+        return rows
+
+    def get_trainer_athletes_for_coach(self):
+        """List athletes who granted the active user coach visibility."""
+        coach_user_id = self._active_user_id()
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT trainer_coach_grants.*, users.email, users.display_name,
+                   trainer_profiles.mode
+            FROM trainer_coach_grants
+            JOIN users ON users.id = trainer_coach_grants.athlete_user_id
+            LEFT JOIN trainer_profiles ON trainer_profiles.user_id = users.id
+            WHERE trainer_coach_grants.coach_user_id = ?
+              AND trainer_coach_grants.status = 'active'
+            ORDER BY users.display_name COLLATE NOCASE, users.email COLLATE NOCASE
+            """,
+            (coach_user_id,),
+        )
+        rows = cursor.fetchall()
+        self.close()
+        return rows
+
+    def can_view_trainer_user(self, athlete_user_id):
+        """Return whether the active user can view another athlete's Trainer data."""
+        viewer_id = self._active_user_id()
+        if not viewer_id or viewer_id == athlete_user_id:
+            return True
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT 1
+            FROM trainer_coach_grants
+            WHERE athlete_user_id = ?
+              AND coach_user_id = ?
+              AND status = 'active'
+            """,
+            (athlete_user_id, viewer_id),
+        )
+        row = cursor.fetchone()
+        self.close()
+        return bool(row)
+
+    def add_trainer_imported_workout(self, external_id, activity_type="", workout_category="", title="", started_at="", distance_meters=None, moving_time_seconds=None, elapsed_time_seconds=None, raw=None, user_id=None):
+        """Store an imported Strava workout/activity for a user."""
+        target_user_id = user_id or self._active_user_id()
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO trainer_imported_workouts
+                (source, external_id, user_id, activity_type, workout_category, title, started_at,
+                 distance_meters, moving_time_seconds, elapsed_time_seconds, raw_json, updated_at)
+            VALUES ('strava', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(source, external_id, user_id) DO UPDATE SET
+                activity_type = excluded.activity_type,
+                workout_category = excluded.workout_category,
+                title = excluded.title,
+                started_at = excluded.started_at,
+                distance_meters = excluded.distance_meters,
+                moving_time_seconds = excluded.moving_time_seconds,
+                elapsed_time_seconds = excluded.elapsed_time_seconds,
+                raw_json = excluded.raw_json,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                str(external_id),
+                target_user_id,
+                activity_type,
+                workout_category,
+                title,
+                started_at,
+                distance_meters,
+                moving_time_seconds,
+                elapsed_time_seconds,
+                json.dumps(raw or {}),
+            ),
+        )
+        self._commit()
+        row_id = cursor.lastrowid
+        self.close()
+        return row_id
+
+    def get_trainer_imported_workouts(self, user_id=None, limit=50):
+        """List imported Strava workouts visible to the active user."""
+        target_user_id = user_id or self._active_user_id()
+        if target_user_id and not self.can_view_trainer_user(target_user_id):
+            return []
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT *
+            FROM trainer_imported_workouts
+            WHERE (? IS NULL OR user_id = ?)
+            ORDER BY started_at DESC, id DESC
+            LIMIT ?
+            """,
+            (target_user_id, target_user_id, limit),
+        )
+        rows = cursor.fetchall()
+        self.close()
+        return rows
+
+    def get_trainer_suggested_workouts_by_category(self, limit_per_category=3):
+        """Group catalog workouts for the Trainer home page."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT *
+            FROM trainer_workouts
+            ORDER BY
+                CASE workout_category
+                    WHEN 'run_threshold' THEN 1
+                    WHEN 'run_speed' THEN 2
+                    WHEN 'bike_tempo' THEN 3
+                    WHEN 'strength_glutes' THEN 4
+                    ELSE 9
+                END,
+                title COLLATE NOCASE
+            """
+        )
+        grouped = {}
+        for row in cursor.fetchall():
+            category = row["workout_category"] or row["workout_type"]
+            grouped.setdefault(category, [])
+            if len(grouped[category]) < limit_per_category:
+                grouped[category].append(row)
+        self.close()
+        return grouped
+
     def add_trainer_session(self, workout_id, scheduled_for="", notes=""):
         """Schedule a Trainer workout session."""
         self.connect()
@@ -2930,9 +3215,11 @@ class Database:
         self.close()
         return session_id
 
-    def get_trainer_sessions(self, status="upcoming", limit=50):
+    def get_trainer_sessions(self, status="upcoming", limit=50, user_id=None):
         """List Trainer workout sessions for the active user."""
-        user_id = self._active_user_id()
+        target_user_id = user_id or self._active_user_id()
+        if target_user_id and not self.can_view_trainer_user(target_user_id):
+            return []
         self.connect()
         cursor = self.conn.cursor()
         cursor.execute(
@@ -2949,7 +3236,7 @@ class Database:
                 trainer_workout_sessions.created_at DESC
             LIMIT ?
             """,
-            (status, user_id, user_id, status, limit),
+            (status, target_user_id, target_user_id, status, limit),
         )
         rows = cursor.fetchall()
         self.close()

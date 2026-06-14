@@ -3883,26 +3883,83 @@ def trainer_workout_view(row):
         item["details"] = []
     return item
 
+TRAINER_CATEGORY_LABELS = {
+    "run_threshold": "Run: Threshold",
+    "run_speed": "Run: Speed",
+    "bike_tempo": "Bike: Tempo",
+    "strength_glutes": "Strength: Glutes",
+    "run": "Run",
+    "bike": "Bike",
+    "strength": "Strength",
+}
 
-def trainer_context(request, active_tab="library", workout_type=""):
+jinja_env.globals["trainer_category_labels"] = TRAINER_CATEGORY_LABELS
+
+
+def classify_strava_workout(activity_type, title=""):
+    """Map a Strava activity into a Trainer bucket."""
+    kind = (activity_type or "").strip().lower()
+    text = f"{activity_type or ''} {title or ''}".lower()
+    if kind in {"run", "trailrun", "virtualrun"}:
+        if re.search(r"\b(threshold|tempo|mile|1k|cruise)\b", text):
+            return "run_threshold"
+        if re.search(r"\b(400|interval|speed|rep|track|fartlek)\b", text):
+            return "run_speed"
+        return "run"
+    if kind in {"ride", "virtualride", "ebikeride"}:
+        return "bike_tempo" if re.search(r"\b(tempo|threshold|interval)\b", text) else "bike"
+    if kind in {"weighttraining", "workout", "crossfit", "highintensityintervaltraining"}:
+        return "strength_glutes" if re.search(r"\b(glute|clam|rdl|deadlift|band|bridge|hip)\b", text) else "strength"
+    return kind or "workout"
+
+
+def trainer_grouped_suggestions():
+    """Return grouped Trainer catalog suggestions for the home page."""
+    grouped = db.get_trainer_suggested_workouts_by_category()
+    return [
+        {
+            "category": category,
+            "label": TRAINER_CATEGORY_LABELS.get(category, category.replace("_", " ").title()),
+            "workouts": [trainer_workout_view(row) for row in rows],
+        }
+        for category, rows in grouped.items()
+    ]
+
+
+def trainer_context(request, active_tab="home", workout_type="", athlete_user_id=None):
     """Build shared Dieter Trainer template context."""
+    current_user = request.state.current_user
+    selected_athlete_id = athlete_user_id or (current_user or {}).get("id")
     workouts = [trainer_workout_view(row) for row in db.get_trainer_workouts(workout_type)]
     return {
         "request": request,
         "active_tab": active_tab,
         "workout_type": workout_type,
+        "trainer_profile": dict_from_row(db.get_trainer_profile()),
+        "coach_grants": dicts_from_rows(db.get_trainer_coach_grants_for_athlete()),
+        "coach_athletes": dicts_from_rows(db.get_trainer_athletes_for_coach()),
+        "selected_athlete_id": selected_athlete_id,
+        "suggestion_groups": trainer_grouped_suggestions(),
         "workouts": workouts,
         "run_workouts": [item for item in workouts if item["workout_type"] == "run"],
         "bike_workouts": [item for item in workouts if item["workout_type"] == "bike"],
         "strength_workouts": [item for item in workouts if item["workout_type"] == "strength"],
-        "upcoming_sessions": [trainer_workout_view(row) for row in db.get_trainer_sessions("upcoming", limit=40)],
-        "past_sessions": [trainer_workout_view(row) for row in db.get_trainer_sessions("done", limit=40)],
+        "upcoming_sessions": [trainer_workout_view(row) for row in db.get_trainer_sessions("upcoming", limit=40, user_id=selected_athlete_id)],
+        "past_sessions": [trainer_workout_view(row) for row in db.get_trainer_sessions("done", limit=40, user_id=selected_athlete_id)],
+        "imported_workouts": dicts_from_rows(db.get_trainer_imported_workouts(selected_athlete_id, limit=60)),
         "scheduler_due": scheduler_due_context(),
     }
 
 
 @app.get("/apps/trainer")
-def trainer_app(request: Request, workout_type: str = ""):
+def trainer_app(request: Request):
+    """Dieter Trainer home."""
+    template = jinja_env.get_template("trainer.html")
+    return HTMLResponse(template.render(trainer_context(request, "home")))
+
+
+@app.get("/apps/trainer/workouts")
+def trainer_workouts_app(request: Request, workout_type: str = ""):
     """Dieter Trainer workout catalog."""
     safe_type = workout_type if workout_type in {"run", "bike", "strength"} else ""
     template = jinja_env.get_template("trainer.html")
@@ -3910,17 +3967,88 @@ def trainer_app(request: Request, workout_type: str = ""):
 
 
 @app.get("/apps/trainer/upcoming")
-def trainer_upcoming_app(request: Request):
+def trainer_upcoming_app(request: Request, athlete_user_id: int = 0):
     """Upcoming Dieter Trainer workouts."""
+    selected_athlete_id = athlete_user_id or (request.state.current_user or {}).get("id")
+    if selected_athlete_id and not db.can_view_trainer_user(selected_athlete_id):
+        raise HTTPException(status_code=403, detail="This athlete has not shared Trainer access with you.")
     template = jinja_env.get_template("trainer.html")
-    return HTMLResponse(template.render(trainer_context(request, "upcoming")))
+    return HTMLResponse(template.render(trainer_context(request, "upcoming", athlete_user_id=selected_athlete_id)))
 
 
 @app.get("/apps/trainer/past")
-def trainer_past_app(request: Request):
+def trainer_past_app(request: Request, athlete_user_id: int = 0):
     """Past Dieter Trainer workouts."""
+    selected_athlete_id = athlete_user_id or (request.state.current_user or {}).get("id")
+    if selected_athlete_id and not db.can_view_trainer_user(selected_athlete_id):
+        raise HTTPException(status_code=403, detail="This athlete has not shared Trainer access with you.")
     template = jinja_env.get_template("trainer.html")
-    return HTMLResponse(template.render(trainer_context(request, "past")))
+    return HTMLResponse(template.render(trainer_context(request, "past", athlete_user_id=selected_athlete_id)))
+
+
+@app.get("/apps/trainer/imports")
+def trainer_imports_app(request: Request, athlete_user_id: int = 0):
+    """Imported Strava workouts."""
+    selected_athlete_id = athlete_user_id or (request.state.current_user or {}).get("id")
+    if selected_athlete_id and not db.can_view_trainer_user(selected_athlete_id):
+        raise HTTPException(status_code=403, detail="This athlete has not shared Trainer access with you.")
+    template = jinja_env.get_template("trainer.html")
+    return HTMLResponse(template.render(trainer_context(request, "imports", athlete_user_id=selected_athlete_id)))
+
+
+@app.get("/apps/trainer/settings")
+def trainer_settings_app(request: Request):
+    """Trainer profile and coach permission settings."""
+    template = jinja_env.get_template("trainer.html")
+    return HTMLResponse(template.render(trainer_context(request, "settings")))
+
+
+@app.post("/apps/trainer/settings/mode")
+def update_trainer_mode(mode: str = Form("athlete")):
+    """Switch between athlete and coach mode."""
+    db.update_trainer_mode(mode)
+    return RedirectResponse(url="/apps/trainer/settings", status_code=303)
+
+
+@app.post("/apps/trainer/settings/coaches/grant")
+def grant_trainer_coach(email: str = Form(...)):
+    """Grant a coach permission to view the active athlete's workouts."""
+    coach = dict_from_row(db.get_user_by_email(email))
+    if not coach:
+        raise HTTPException(status_code=404, detail="No user with that email exists.")
+    db.grant_trainer_coach(coach["id"])
+    return RedirectResponse(url="/apps/trainer/settings", status_code=303)
+
+
+@app.post("/apps/trainer/settings/coaches/{grant_id}/revoke")
+def revoke_trainer_coach(grant_id: int):
+    """Revoke a coach's Trainer access."""
+    db.revoke_trainer_coach(grant_id)
+    return RedirectResponse(url="/apps/trainer/settings", status_code=303)
+
+
+@app.post("/apps/trainer/imports/strava/manual")
+def import_strava_workout_manual(
+    external_id: str = Form(...),
+    activity_type: str = Form("Run"),
+    title: str = Form(""),
+    started_at: str = Form(""),
+    distance_meters: str = Form(""),
+    moving_time_seconds: str = Form(""),
+):
+    """Manual Strava import placeholder until OAuth/webhooks are configured."""
+    category = classify_strava_workout(activity_type, title)
+    db.add_trainer_imported_workout(
+        external_id=external_id,
+        activity_type=activity_type,
+        workout_category=category,
+        title=title or activity_type,
+        started_at=started_at,
+        distance_meters=float(distance_meters) if distance_meters else None,
+        moving_time_seconds=int(moving_time_seconds) if moving_time_seconds else None,
+        raw={"manual_import": True},
+    )
+    return RedirectResponse(url="/apps/trainer/imports", status_code=303)
 
 
 @app.post("/apps/trainer/workouts/{workout_id}/schedule")
