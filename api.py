@@ -4224,6 +4224,16 @@ def parse_trainer_reflection_target(page_url):
         return None
 
 
+def parse_trainer_import_target(page_url):
+    """Find an imported workout id for opening Trainer run detail."""
+    try:
+        params = dict(parse_qsl(urlsplit(page_url or "").query, keep_blank_values=True))
+        target = params.get("workout_id") or params.get("reflection_workout_id") or params.get("shoe_workout_id")
+        return int(target) if target and str(target).isdigit() else None
+    except (TypeError, ValueError):
+        return None
+
+
 def parse_trainer_shoe_target(page_url):
     """Find an imported workout id for shoe logging from the Trainer page URL."""
     try:
@@ -4571,6 +4581,26 @@ def trainer_week_offset(request):
         return 0
 
 
+def parse_trainer_started_date(value):
+    """Parse an imported workout date from Strava/local storage."""
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw[:10]):
+            return datetime.strptime(raw[:10], "%Y-%m-%d").date()
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
+    except (TypeError, ValueError):
+        return None
+
+
+def trainer_row_is_run(row):
+    """Return true for imported activities that should count toward run mileage."""
+    activity_type = (row.get("activity_type") or "").strip().lower()
+    category = (row.get("workout_category") or "").strip().lower()
+    return activity_type in {"run", "trailrun", "virtualrun"} or category.startswith("run")
+
+
 def trainer_workout_week_dashboard(user_id=None, week_offset=0):
     """Build a dashboard summary for one training week."""
     today = datetime.now().date()
@@ -4578,9 +4608,10 @@ def trainer_workout_week_dashboard(user_id=None, week_offset=0):
     week_end = week_start + timedelta(days=6)
     runs = []
     for row in dicts_from_rows(db.get_trainer_imported_workouts(user_id=user_id, limit=500)):
-        try:
-            started = datetime.strptime((row.get("started_at") or "")[:10], "%Y-%m-%d").date()
-        except (TypeError, ValueError):
+        if not trainer_row_is_run(row):
+            continue
+        started = parse_trainer_started_date(row.get("started_at"))
+        if not started:
             continue
         if week_start <= started <= week_end:
             item = dict(row)
@@ -4641,9 +4672,10 @@ def trainer_weekly_mileage_chart(user_id=None, weeks=13):
 
     earliest = buckets[0]["week_start"]
     for row in dicts_from_rows(db.get_trainer_imported_workouts(user_id=user_id, limit=800)):
-        try:
-            started = datetime.strptime((row.get("started_at") or "")[:10], "%Y-%m-%d").date()
-        except (TypeError, ValueError):
+        if not trainer_row_is_run(row):
+            continue
+        started = parse_trainer_started_date(row.get("started_at"))
+        if not started:
             continue
         if started.isoformat() < earliest:
             continue
@@ -4800,6 +4832,7 @@ def trainer_context(request, active_tab="home", workout_type="", athlete_user_id
     week_offset = trainer_week_offset(request)
     workouts = [trainer_workout_view(row) for row in db.get_trainer_workouts(workout_type)]
     trainer_profile = dict_from_row(db.get_trainer_profile())
+    import_target_id = parse_trainer_import_target(str(request.url)) if request else None
     reflection_target_id = parse_trainer_reflection_target(str(request.url)) if request else None
     reflection_target = dict_from_row(db.get_trainer_imported_workout(reflection_target_id)) if reflection_target_id else None
     shoe_target_id = parse_trainer_shoe_target(str(request.url)) if request else None
@@ -4829,6 +4862,7 @@ def trainer_context(request, active_tab="home", workout_type="", athlete_user_id
         "upcoming_sessions": [trainer_workout_view(row) for row in db.get_trainer_sessions("upcoming", limit=40, user_id=selected_athlete_id)],
         "past_sessions": [trainer_workout_view(row) for row in db.get_trainer_sessions("done", limit=40, user_id=selected_athlete_id)],
         "imported_workouts": dicts_from_rows(db.get_trainer_imported_workouts(selected_athlete_id, limit=60)),
+        "selected_imported_workout_id": import_target_id,
         "weekly_run_summaries": [
             trainer_weekly_summary_view(row)
             for row in db.get_trainer_weekly_run_summaries(user_id=selected_athlete_id, weeks=8)

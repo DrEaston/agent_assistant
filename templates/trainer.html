@@ -105,25 +105,34 @@
         <div class="trainer-stat-grid">
             <div><span>{{ week.run_count }}</span><small>Runs</small></div>
             <div><span>{{ week.distance_miles|round(1) }}</span><small>Miles</small></div>
-            <div><span>{{ week.moving_time_hours|round(1) }}</span><small>Hours</small></div>
-            <div><span>{{ week.elevation_gain_meters|round|int }}</span><small>M gain</small></div>
-            <div><span>{{ week.load_score|round|int }}</span><small>Load</small></div>
-            <div><span>{% if week.average_heartrate %}{{ week.average_heartrate|round|int }}{% else %}-{% endif %}</span><small>Avg HR</small></div>
         </div>
         {% if week.runs %}
-            <div>
-                <span class="trainer-card-meta">Completed Runs</span>
-                <ul class="trainer-detail-list">
+            <details class="trainer-run-dropdown">
+                <summary>
+                    <span class="trainer-card-meta">Completed Runs</span>
+                    <strong>{{ week.runs|length }} run{% if week.runs|length != 1 %}s{% endif %}</strong>
+                </summary>
+                <div class="trainer-run-dropdown-list">
                     {% for run in week.runs %}
-                        <li>
-                            <strong>{{ run.started_at }} - {{ run.title or run.activity_type }}</strong>
-                            {% if run.distance_miles %} - {{ run.distance_miles|round(1) }} mi{% endif %}
-                            {% if run.average_pace_min_per_mile %} - {{ run.average_pace_min_per_mile|round(1) }} min/mi{% endif %}
-                            {% if run.average_heartrate %} - HR {{ run.average_heartrate|round|int }}{% endif %}
-                        </li>
+                        <details class="trainer-run-detail">
+                            <summary>
+                                <strong>{{ run.started_at }} - {{ run.title or run.activity_type }}</strong>
+                                {% if run.distance_miles %}<span>{{ run.distance_miles|round(1) }} mi</span>{% endif %}
+                            </summary>
+                            <p>
+                                {% if run.moving_time_minutes %}{{ run.moving_time_minutes|round|int }} min{% endif %}
+                                {% if run.average_pace_min_per_mile %} - {{ run.average_pace_min_per_mile|round(1) }} min/mi{% endif %}
+                                {% if run.elevation_gain_meters %} - {{ run.elevation_gain_meters|round|int }} m gain{% endif %}
+                                {% if run.average_heartrate %} - HR {{ run.average_heartrate|round|int }}{% endif %}
+                                {% if run.gear_name %} - {{ run.gear_name }}{% endif %}
+                            </p>
+                            <div class="trainer-card-actions">
+                                <a class="button-link secondary-link compact-link" href="/apps/trainer/imports?workout_id={{ run.id }}">View detail</a>
+                            </div>
+                        </details>
                     {% endfor %}
-                </ul>
-            </div>
+                </div>
+            </details>
         {% else %}
             <p>No imported runs for this week yet.</p>
         {% endif %}
@@ -176,7 +185,7 @@
             {% for week in chart.weeks %}
                 <div class="trainer-mileage-bar-wrap">
                     <div class="trainer-mileage-bar-track">
-                        <div class="trainer-mileage-bar" style="height: {{ week.height_percent }}%;" title="{{ week.label }}: {{ week.distance_miles|round(1) }} miles"></div>
+                        <div class="trainer-mileage-bar {% if week.distance_miles %}has-mileage{% endif %}" style="height: {{ week.height_percent }}%;" title="{{ week.label }}: {{ week.distance_miles|round(1) }} miles"></div>
                     </div>
                     <strong>{{ week.distance_miles|round(1) }}</strong>
                     <small>{{ week.label }}</small>
@@ -374,54 +383,71 @@
                 {% endif %}
             </article>
             {% if imported_workouts %}
-                {% for workout in imported_workouts %}
-                    <article class="trainer-card">
-                        <span class="trainer-card-meta">{{ trainer_category_labels.get(workout.workout_category, workout.workout_category or workout.activity_type) }}</span>
-                        <h3>{{ workout.title or workout.activity_type }}</h3>
-                        <p>{{ workout.started_at or "No date" }}{% if workout.distance_meters %} - {{ workout.distance_meters|round|int }} m{% endif %}</p>
-                        <p>
-                            {% if workout.moving_time_seconds %}{{ (workout.moving_time_seconds / 60)|round|int }} min{% endif %}
-                            {% if workout.average_speed_mps %} - {{ (26.8224 / workout.average_speed_mps)|round(1) }} min/mi{% endif %}
-                            {% if workout.elevation_gain_meters %} - {{ workout.elevation_gain_meters|round|int }} m gain{% endif %}
-                            {% if workout.average_heartrate %} - HR {{ workout.average_heartrate|round|int }}{% endif %}
-                            {% if workout.average_cadence %} - cadence {{ workout.average_cadence|round|int }}{% endif %}
-                            {% if workout.gear_name %} - {{ workout.gear_name }}{% endif %}
-                        </p>
-                        {% set shoe_logs = shoe_usage_by_workout.get(workout.id, []) %}
-                        {% if shoe_logs %}
-                            <ul class="trainer-detail-list">
-                                {% for log in shoe_logs %}
-                                    <li>
-                                        <strong>{{ log.shoe_name }}</strong>
-                                        {% if log.segment_label %} - {{ log.segment_label }}{% endif %}
-                                        {% if log.distance_meters %} - {{ (log.distance_meters / 1609.344)|round(1) }} mi{% endif %}
-                                        {% if is_viewing_own_trainer %}
-                                            <form method="post" action="/apps/trainer/imports/shoes/{{ log.id }}/delete" class="inline-form">
-                                                <button type="submit" class="secondary compact danger-button">Remove</button>
-                                            </form>
-                                        {% endif %}
-                                    </li>
-                                {% endfor %}
-                            </ul>
-                        {% endif %}
-                        {% if is_viewing_own_trainer %}
-                            <form method="post" action="/apps/trainer/imports/{{ workout.id }}/shoes">
-                                <select name="shoe_id" aria-label="Shoe">
-                                    <option value="0">Choose shoe</option>
-                                    {% for shoe in trainer_shoes %}
-                                        <option value="{{ shoe.id }}">{{ shoe.name }}{% if shoe.total_miles %} ({{ shoe.total_miles|round|int }} mi){% endif %}</option>
-                                    {% endfor %}
-                                </select>
-                                <input type="text" name="new_shoe_name" placeholder="Or new shoe">
-                                <input type="text" name="segment_label" placeholder="All, warmup, workout">
-                                <input type="number" name="distance_miles" step="0.1" min="0" placeholder="Miles">
-                                <button type="submit" class="secondary compact">Log shoes</button>
-                            </form>
-                            <a class="button-link secondary-link compact-link" href="/apps/trainer/imports?shoe_workout_id={{ workout.id }}">Log Shoes with Dieter</a>
-                            <a class="button-link secondary-link compact-link" href="/apps/trainer/imports?reflection_workout_id={{ workout.id }}">Reflect with Dieter</a>
-                        {% endif %}
-                    </article>
-                {% endfor %}
+                <article class="trainer-card">
+                    <details class="trainer-run-dropdown" {% if selected_imported_workout_id %}open{% endif %}>
+                        <summary>
+                            <span class="trainer-card-meta">Imported Runs</span>
+                            <strong>{{ imported_workouts|length }} recent activit{% if imported_workouts|length == 1 %}y{% else %}ies{% endif %}</strong>
+                        </summary>
+                        <div class="trainer-run-dropdown-list">
+                            {% for workout in imported_workouts %}
+                                <details class="trainer-run-detail" id="run-{{ workout.id }}" {% if selected_imported_workout_id == workout.id %}open{% endif %}>
+                                    <summary>
+                                        <strong>{{ workout.started_at or "No date" }} - {{ workout.title or workout.activity_type }}</strong>
+                                        {% if workout.distance_meters %}<span>{{ (workout.distance_meters / 1609.344)|round(1) }} mi</span>{% endif %}
+                                    </summary>
+                                    <p>
+                                        <span class="trainer-card-meta">{{ trainer_category_labels.get(workout.workout_category, workout.workout_category or workout.activity_type) }}</span>
+                                    </p>
+                                    <p>
+                                        {% if workout.moving_time_seconds %}{{ (workout.moving_time_seconds / 60)|round|int }} min{% endif %}
+                                        {% if workout.average_speed_mps %} - {{ (26.8224 / workout.average_speed_mps)|round(1) }} min/mi{% endif %}
+                                        {% if workout.elevation_gain_meters %} - {{ workout.elevation_gain_meters|round|int }} m gain{% endif %}
+                                        {% if workout.average_heartrate %} - HR {{ workout.average_heartrate|round|int }}{% endif %}
+                                        {% if workout.average_cadence %} - cadence {{ workout.average_cadence|round|int }}{% endif %}
+                                        {% if workout.gear_name %} - {{ workout.gear_name }}{% endif %}
+                                    </p>
+                                    {% set shoe_logs = shoe_usage_by_workout.get(workout.id, []) %}
+                                    {% if shoe_logs %}
+                                        <ul class="trainer-detail-list">
+                                            {% for log in shoe_logs %}
+                                                <li>
+                                                    <strong>{{ log.shoe_name }}</strong>
+                                                    {% if log.segment_label %} - {{ log.segment_label }}{% endif %}
+                                                    {% if log.distance_meters %} - {{ (log.distance_meters / 1609.344)|round(1) }} mi{% endif %}
+                                                    {% if is_viewing_own_trainer %}
+                                                        <form method="post" action="/apps/trainer/imports/shoes/{{ log.id }}/delete" class="inline-form">
+                                                            <button type="submit" class="secondary compact danger-button">Remove</button>
+                                                        </form>
+                                                    {% endif %}
+                                                </li>
+                                            {% endfor %}
+                                        </ul>
+                                    {% endif %}
+                                    {% if is_viewing_own_trainer %}
+                                        <form method="post" action="/apps/trainer/imports/{{ workout.id }}/shoes">
+                                            <select name="shoe_id" aria-label="Shoe">
+                                                <option value="0">Choose shoe</option>
+                                                {% for shoe in trainer_shoes %}
+                                                    <option value="{{ shoe.id }}">{{ shoe.name }}{% if shoe.total_miles %} ({{ shoe.total_miles|round|int }} mi){% endif %}</option>
+                                                {% endfor %}
+                                            </select>
+                                            <input type="text" name="new_shoe_name" placeholder="Or new shoe">
+                                            <input type="text" name="segment_label" placeholder="All, warmup, workout">
+                                            <input type="number" name="distance_miles" step="0.1" min="0" placeholder="Miles">
+                                            <button type="submit" class="secondary compact">Log shoes</button>
+                                        </form>
+                                        <div class="trainer-card-actions">
+                                            <a class="button-link secondary-link compact-link" href="/apps/trainer/imports?workout_id={{ workout.id }}">View detail</a>
+                                            <a class="button-link secondary-link compact-link" href="/apps/trainer/imports?shoe_workout_id={{ workout.id }}">Log Shoes with Dieter</a>
+                                            <a class="button-link secondary-link compact-link" href="/apps/trainer/imports?reflection_workout_id={{ workout.id }}">Reflect with Dieter</a>
+                                        </div>
+                                    {% endif %}
+                                </details>
+                            {% endfor %}
+                        </div>
+                    </details>
+                </article>
             {% else %}
                 <div class="empty-state">
                     <p>No Strava imports yet.</p>

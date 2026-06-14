@@ -2027,7 +2027,7 @@
         .trainer-stat-grid {
             display: grid;
             gap: 0.55rem;
-            grid-template-columns: repeat(6, minmax(0, 1fr));
+            grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
         .trainer-stat-grid div {
@@ -2088,8 +2088,11 @@
         .trainer-mileage-bar {
             background: linear-gradient(180deg, #34d399 0%, #059669 100%);
             border-radius: 999px 999px 5px 5px;
-            min-height: 0.25rem;
             width: 100%;
+        }
+
+        .trainer-mileage-bar.has-mileage {
+            min-height: 0.25rem;
         }
 
         .trainer-mileage-bar-wrap strong {
@@ -2114,6 +2117,59 @@
 
         .trainer-detail-list strong {
             color: #065f46;
+        }
+
+        .trainer-run-dropdown {
+            background: #f7fcf8;
+            border: 1px solid #bbf7d0;
+            border-radius: 8px;
+            display: grid;
+            gap: 0.65rem;
+            padding: 0.75rem;
+        }
+
+        .trainer-run-dropdown > summary {
+            align-items: center;
+            cursor: pointer;
+            display: flex;
+            gap: 0.75rem;
+            justify-content: space-between;
+            list-style: none;
+        }
+
+        .trainer-run-dropdown > summary::-webkit-details-marker,
+        .trainer-run-detail > summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .trainer-run-dropdown-list {
+            display: grid;
+            gap: 0.55rem;
+            margin-top: 0.65rem;
+        }
+
+        .trainer-run-detail {
+            background: #fff;
+            border: 1px solid #d1fae5;
+            border-radius: 6px;
+            display: grid;
+            gap: 0.5rem;
+            padding: 0.7rem;
+        }
+
+        .trainer-run-detail > summary {
+            align-items: center;
+            cursor: pointer;
+            display: flex;
+            gap: 0.75rem;
+            justify-content: space-between;
+            list-style: none;
+        }
+
+        .trainer-run-detail > summary span {
+            color: #047857;
+            font-weight: 900;
+            white-space: nowrap;
         }
 
         .trainer-card-actions {
