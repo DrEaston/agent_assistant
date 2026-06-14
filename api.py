@@ -1736,6 +1736,14 @@ def local_scheduler_proposal(user_message, target):
         "appointment",
         "agenda",
         "schedule",
+        "scheduler",
+        "tomorrow",
+        "chore",
+        "chores",
+        "card",
+        "task",
+        "to do",
+        "todo",
     ]
     if not any(cue in text.lower() for cue in scheduler_cues):
         return None
@@ -2049,16 +2057,20 @@ def synthesize_scheduler_operation(user_message, operation):
     if context_label and context_label != "General":
         title = context_label
     elif rawish_title:
+        chore_list_match = re.search(r"\b(chore|chores)\s+list\b", original, flags=re.IGNORECASE)
         cleaned = re.sub(
-            r"^\s*(please\s+)?(remind me|remember|add|put|schedule)\s+(to|about|that)?\s*",
+            r"^\s*(please\s+)?(remind me|remember|add|put|schedule|make|create)\s+(me\s+)?(a\s+|an\s+|the\s+)?(to|about|that)?\s*",
             "",
             original,
             flags=re.IGNORECASE,
         )
         cleaned = re.sub(r"\b(today|tomorrow|tonight|before bed|bedtime|this evening)\b", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\b(for|on|by)\s*$", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"\b(to|in|on)\s+(the\s+)?scheduler\b", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
-        if cleaned:
+        if chore_list_match:
+            title = "Chore list"
+        elif cleaned:
             title = cleaned[0].upper() + cleaned[1:]
         else:
             title = "Scheduler reminder"
@@ -2459,6 +2471,50 @@ def apply_planner_edit(user_message, page_url, proposal):
         "redirect_label": "View Scheduler" if scheduler_added else "",
         "reload_page": bool(scheduler_changed),
     }
+
+def message_requests_planner_action(text):
+    """Detect planner/scheduler commands even when sent from the kitchen drawer."""
+    normalized = (text or "").strip().lower()
+    if not normalized:
+        return False
+    planner_cues = [
+        "remind me",
+        "remember to",
+        "put this on",
+        "add this to",
+        "add to my",
+        "schedule",
+        "scheduler",
+        "calendar",
+        "appointment",
+        "agenda",
+        "due tomorrow",
+        "for tomorrow",
+        "tomorrow",
+        "tonight",
+        "before bed",
+        "bedtime",
+        "chore",
+        "chores",
+        "to do",
+        "todo",
+        "task",
+        "card",
+    ]
+    if any(cue in normalized for cue in planner_cues):
+        return True
+    return bool(re.search(r"\b(make|create|add|save)\b.+\b(list|card|task|reminder)\b", normalized))
+
+def handle_planner_action_request(message, page_url):
+    """Apply a planner/scheduler request and return the action response shape."""
+    proposal = propose_planner_edit(
+        message.content,
+        page_url=page_url,
+        conversation_history=message.conversation_history,
+    )
+    result = apply_planner_edit(message.content, page_url, proposal)
+    result["planner_context"] = True
+    return result
 
 def build_recipe_extraction_stats(groups):
     """Summarize OCR progress for uploaded recipe card pairs."""
@@ -2866,6 +2922,22 @@ def api_dieter_action(message: DieterActionMessage):
     """Route Ask Dieter requests to recipe edits, planner edits, or contextual chat."""
     page_url = message.page_url or ""
     recipe_kind, recipe_id = parse_recipe_target_from_url(page_url)
+    if message_requests_planner_action(message.content):
+        try:
+            return handle_planner_action_request(message, page_url)
+        except Exception as exc:
+            result = agent_service.chat(
+                user_message=f"Current page: {message.page_title}\nURL: {page_url}\n\n{message.content}",
+                project_context=agent_service.build_dashboard_context(),
+                conversation_history=message.conversation_history,
+            )
+            return {
+                "assistant_message": f"{result.get('response', '')}\n\nI could not safely apply a structured planner edit: {exc}",
+                "changed_fields": [],
+                "planner_context": True,
+                "model": "local-planner",
+            }
+
     if recipe_kind and recipe_id:
         recipe_message = RecipeEditMessage(
             content=message.content,
@@ -2893,14 +2965,7 @@ def api_dieter_action(message: DieterActionMessage):
 
     if page_url == "/" or re.search(r"/apps/assistant|/apps/planner|/dashboard|/projects|/apps\b", page_url):
         try:
-            proposal = propose_planner_edit(
-                message.content,
-                page_url=page_url,
-                conversation_history=message.conversation_history,
-            )
-            result = apply_planner_edit(message.content, page_url, proposal)
-            result["planner_context"] = True
-            return result
+            return handle_planner_action_request(message, page_url)
         except Exception as exc:
             result = agent_service.chat(
                 user_message=f"Current page: {message.page_title}\nURL: {page_url}\n\n{message.content}",
