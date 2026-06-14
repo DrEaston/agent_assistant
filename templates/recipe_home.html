@@ -5,6 +5,7 @@
 
 {% block content %}
 {% set is_guest = request.state.current_user and request.state.current_user.role == "guest" %}
+{% set favorite_meal_count = complete_meals|selectattr("is_favorite")|list|length %}
 {% if recipe_view != "create_meal" and not is_guest %}
 <section class="detail-section meal-plan-section" id="meal-plan">
     <div class="section-header">
@@ -82,7 +83,9 @@
         </div>
     {% endif %}
 </section>
+{% endif %}
 
+{% if recipe_view != "create_meal" %}
 <section class="detail-section recipe-browser meal-ideas-section">
     <div class="section-header">
         <div>
@@ -123,9 +126,9 @@
             <div class="complete-meal-controls">
                 <label for="complete-meal-search-input">Search complete meals</label>
                 <select id="complete-meal-scope-select" data-meal-scope-select aria-label="Recipe catalogue scope">
-                    <option value="favorites">Favorites</option>
+                    <option value="favorites" {% if not is_guest and favorite_meal_count > 0 %}selected{% endif %}>Favorites</option>
                     <option value="new">New</option>
-                    <option value="all">All Recipes</option>
+                    <option value="all" {% if is_guest or favorite_meal_count == 0 %}selected{% endif %}>All Recipes</option>
                 </select>
                 <input
                     id="complete-meal-search-input"

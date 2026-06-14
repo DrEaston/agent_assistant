@@ -1889,7 +1889,12 @@ class Database:
                 ON recipe_favorites.recipe_kind = 'meal'
                 AND recipe_favorites.recipe_id = recipe_complete_meals.id
                 AND recipe_favorites.user_id = ?
-            WHERE (? IS NULL OR recipe_complete_meals.user_id = ? OR recipe_shares.shared_with_user_id = ?)
+            WHERE (
+                ? IS NULL
+                OR COALESCE(recipe_complete_meals.visibility, 'shared') = 'shared'
+                OR recipe_complete_meals.user_id = ?
+                OR recipe_shares.shared_with_user_id = ?
+            )
               AND (COALESCE(recipe_complete_meals.visibility, 'shared') != 'private' OR recipe_complete_meals.user_id = ?)
             ORDER BY recipe_complete_meals.updated_at DESC, recipe_complete_meals.id DESC
             """
@@ -1938,7 +1943,12 @@ class Database:
                 AND recipe_favorites.recipe_id = recipe_complete_meals.id
                 AND recipe_favorites.user_id = ?
             WHERE recipe_complete_meals.id = ?
-              AND (? IS NULL OR recipe_complete_meals.user_id = ? OR recipe_shares.shared_with_user_id = ?)
+              AND (
+                ? IS NULL
+                OR COALESCE(recipe_complete_meals.visibility, 'shared') = 'shared'
+                OR recipe_complete_meals.user_id = ?
+                OR recipe_shares.shared_with_user_id = ?
+              )
               AND (COALESCE(recipe_complete_meals.visibility, 'shared') != 'private' OR recipe_complete_meals.user_id = ?)
             """,
             (user_id, user_id, user_id, meal_id, user_id, user_id, user_id, user_id),
@@ -2161,7 +2171,12 @@ class Database:
                 ON recipe_favorites.recipe_kind = 'component'
                 AND recipe_favorites.recipe_id = recipe_components.id
                 AND recipe_favorites.user_id = ?
-            WHERE (? IS NULL OR recipe_components.user_id = ? OR recipe_shares.shared_with_user_id = ?)
+            WHERE (
+                ? IS NULL
+                OR COALESCE(recipe_components.visibility, 'shared') = 'shared'
+                OR recipe_components.user_id = ?
+                OR recipe_shares.shared_with_user_id = ?
+            )
               AND (COALESCE(recipe_components.visibility, 'shared') != 'private' OR recipe_components.user_id = ?)
             ORDER BY recipe_components.updated_at DESC, recipe_components.id DESC
             """
@@ -2199,7 +2214,12 @@ class Database:
                 AND recipe_favorites.recipe_id = recipe_components.id
                 AND recipe_favorites.user_id = ?
             WHERE recipe_components.id = ?
-              AND (? IS NULL OR recipe_components.user_id = ? OR recipe_shares.shared_with_user_id = ?)
+              AND (
+                ? IS NULL
+                OR COALESCE(recipe_components.visibility, 'shared') = 'shared'
+                OR recipe_components.user_id = ?
+                OR recipe_shares.shared_with_user_id = ?
+              )
               AND (COALESCE(recipe_components.visibility, 'shared') != 'private' OR recipe_components.user_id = ?)
             """,
             (user_id, user_id, user_id, component_id, user_id, user_id, user_id, user_id),
