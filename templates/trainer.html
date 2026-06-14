@@ -190,6 +190,16 @@
             {{ week_dashboard_card(week_dashboard, "/apps/trainer", mileage_chart) }}
             {{ weekly_plan_card(weekly_workout_plan) }}
         </div>
+        {% if is_viewing_own_trainer and strava_connected %}
+            <div class="trainer-card">
+                <span class="trainer-card-meta">Strava Refresh</span>
+                <h3>Update Training History</h3>
+                <p>Refresh the last 6 months of Strava runs to fill the mileage chart and weekly summaries.</p>
+                <form method="post" action="/apps/trainer/imports/strava/six-month-runs">
+                    <button type="submit" class="compact">Pull Last 6 Months</button>
+                </form>
+            </div>
+        {% endif %}
         {% if trainer_profile and trainer_profile.mode == "coach" and coach_athletes %}
             <div class="trainer-card">
                 <h3>Coach View</h3>

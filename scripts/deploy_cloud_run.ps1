@@ -179,5 +179,5 @@ if ($RegistrationCode) {
     --concurrency 1 `
     --memory 1Gi `
     --cpu 1 `
-    --set-env-vars $envVars `
+    --update-env-vars $envVars `
     --set-secrets "OPENAI_API_KEY=$OpenAiSecretName`:latest"
