@@ -415,6 +415,25 @@ class Database:
         """)
 
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS trainer_audit_insights (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                signal_type TEXT NOT NULL,
+                signal_name TEXT NOT NULL,
+                bad_count INTEGER DEFAULT 0,
+                total_count INTEGER DEFAULT 0,
+                bad_rate REAL DEFAULT 0,
+                summary TEXT DEFAULT '',
+                evidence_json TEXT DEFAULT '[]',
+                status TEXT DEFAULT 'active',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, signal_type, signal_name),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS trainer_workout_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 workout_id INTEGER NOT NULL,
@@ -3659,6 +3678,113 @@ class Database:
               AND lower(trainer_imported_workouts.activity_type) IN ('run', 'trailrun', 'virtualrun')
               AND trainer_workout_shoes.id IS NULL
             ORDER BY trainer_imported_workouts.started_at DESC, trainer_imported_workouts.id DESC
+            LIMIT ?
+            """,
+            (target_user_id, target_user_id, limit),
+        )
+        rows = cursor.fetchall()
+        self.close()
+        return rows
+
+    def get_trainer_audit_rows(self, user_id=None, limit=500):
+        """Return reflection/workout rows for later pattern audits."""
+        target_user_id = user_id or self._active_user_id()
+        if target_user_id and not self.can_view_trainer_user(target_user_id):
+            return []
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                trainer_run_reflections.id AS reflection_id,
+                trainer_run_reflections.imported_workout_id,
+                trainer_run_reflections.user_id,
+                trainer_run_reflections.rpe,
+                trainer_run_reflections.feel,
+                trainer_run_reflections.body_flags_json,
+                trainer_run_reflections.context_flags_json,
+                trainer_run_reflections.notes,
+                trainer_run_reflections.created_at AS reflection_created_at,
+                trainer_imported_workouts.title AS workout_title,
+                trainer_imported_workouts.started_at,
+                trainer_imported_workouts.workout_category,
+                trainer_imported_workouts.distance_meters,
+                trainer_imported_workouts.moving_time_seconds,
+                trainer_imported_workouts.elevation_gain_meters,
+                trainer_imported_workouts.average_heartrate,
+                trainer_imported_workouts.suffer_score,
+                GROUP_CONCAT(DISTINCT trainer_shoes.name) AS shoe_names
+            FROM trainer_run_reflections
+            JOIN trainer_imported_workouts ON trainer_imported_workouts.id = trainer_run_reflections.imported_workout_id
+            LEFT JOIN trainer_workout_shoes ON trainer_workout_shoes.imported_workout_id = trainer_imported_workouts.id
+            LEFT JOIN trainer_shoes ON trainer_shoes.id = trainer_workout_shoes.shoe_id
+            WHERE (? IS NULL OR trainer_run_reflections.user_id = ?)
+            GROUP BY trainer_run_reflections.id
+            ORDER BY trainer_run_reflections.created_at DESC, trainer_run_reflections.id DESC
+            LIMIT ?
+            """,
+            (target_user_id, target_user_id, limit),
+        )
+        rows = cursor.fetchall()
+        self.close()
+        return rows
+
+    def upsert_trainer_audit_insight(self, signal_type, signal_name, bad_count, total_count, bad_rate, summary, evidence, user_id=None):
+        """Store a Trainer audit pattern candidate."""
+        target_user_id = user_id or self._active_user_id()
+        if not target_user_id:
+            return None
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO trainer_audit_insights
+                (user_id, signal_type, signal_name, bad_count, total_count, bad_rate, summary, evidence_json, status, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id, signal_type, signal_name) DO UPDATE SET
+                bad_count = excluded.bad_count,
+                total_count = excluded.total_count,
+                bad_rate = excluded.bad_rate,
+                summary = excluded.summary,
+                evidence_json = excluded.evidence_json,
+                status = 'active',
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                target_user_id,
+                signal_type,
+                signal_name,
+                bad_count,
+                total_count,
+                bad_rate,
+                summary,
+                json.dumps(evidence or []),
+            ),
+        )
+        insight_id = cursor.lastrowid
+        self._commit()
+        cursor.execute(
+            "SELECT id FROM trainer_audit_insights WHERE user_id = ? AND signal_type = ? AND signal_name = ?",
+            (target_user_id, signal_type, signal_name),
+        )
+        row = cursor.fetchone()
+        self.close()
+        return row["id"] if row else insight_id
+
+    def get_trainer_audit_insights(self, user_id=None, limit=20):
+        """List active Trainer audit insights visible to the active user."""
+        target_user_id = user_id or self._active_user_id()
+        if target_user_id and not self.can_view_trainer_user(target_user_id):
+            return []
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT *
+            FROM trainer_audit_insights
+            WHERE (? IS NULL OR user_id = ?)
+              AND status = 'active'
+            ORDER BY bad_rate DESC, bad_count DESC, updated_at DESC
             LIMIT ?
             """,
             (target_user_id, target_user_id, limit),

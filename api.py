@@ -4319,6 +4319,7 @@ def handle_trainer_shoe_log_request(message, page_url):
             miles_text = f" {miles:.1f} mi" if miles else ""
             segment_text = f" ({segment['segment_label']})" if segment["segment_label"] else ""
             saved.append(f"{segment['shoe_name']}{miles_text}{segment_text}")
+    scan_trainer_audit_insights(user_id=workout.get("user_id"))
     return {
         "assistant_message": f"Saved shoe usage for {workout.get('title') or 'this run'}: {', '.join(saved)}.",
         "changed_fields": ["trainer_workout_shoes"],
@@ -4495,6 +4496,7 @@ def handle_trainer_reflection_request(message, page_url):
         notes=message.content.strip(),
         missing_fields=fields["missing"],
     )
+    scan_trainer_audit_insights(user_id=workout.get("user_id"))
     missing_note = f"\nMissing detail for later: {', '.join(fields['missing'])}." if fields["missing"] else ""
     return {
         "assistant_message": "\n".join([
@@ -4559,6 +4561,97 @@ def miles_to_meters(value):
     return max(miles, 0) * 1609.344
 
 
+def parse_json_list(value):
+    """Parse a JSON list column defensively."""
+    try:
+        parsed = json.loads(value or "[]")
+    except (TypeError, ValueError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def trainer_bad_outcome(row):
+    """Classify a reflection as a bad/rough workout outcome."""
+    feel = (row.get("feel") or "").lower()
+    notes = (row.get("notes") or "").lower()
+    rpe = row.get("rpe")
+    rough_words = ["bad", "rough", "awful", "terrible", "flat", "sluggish", "heavy", "pain", "ache", "sore", "tired"]
+    return bool((rpe is not None and int(rpe or 0) >= 8) or feel in {"bad", "flat"} or any(word in notes for word in rough_words))
+
+
+def trainer_audit_signals(row):
+    """Build auditable candidate signals from one reflected run."""
+    signals = []
+    for shoe in (row.get("shoe_names") or "").split(","):
+        shoe = shoe.strip()
+        if shoe:
+            signals.append(("shoe", shoe))
+    for flag in parse_json_list(row.get("context_flags_json")):
+        signals.append(("context", str(flag)))
+    for flag in parse_json_list(row.get("body_flags_json")):
+        signals.append(("body", str(flag)))
+    title = (row.get("workout_title") or "").lower()
+    category = row.get("workout_category") or ""
+    if category:
+        signals.append(("workout_type", category))
+    distance_miles = float(row.get("distance_meters") or 0) / 1609.344
+    elevation_meters = float(row.get("elevation_gain_meters") or 0)
+    if "hill" in title or "hills" in title or (distance_miles and elevation_meters / distance_miles >= 30):
+        signals.append(("terrain", "hilly/elevation"))
+    if float(row.get("suffer_score") or 0) >= 80:
+        signals.append(("load", "high Strava suffer score"))
+    if float(row.get("average_heartrate") or 0) >= 165:
+        signals.append(("load", "high average HR"))
+    return signals
+
+
+def scan_trainer_audit_insights(user_id=None, minimum_total=2, minimum_bad=2):
+    """Scan logged Trainer data for auditable rough-workout patterns."""
+    target_user_id = user_id or get_current_user_id()
+    rows = [dict(row) for row in db.get_trainer_audit_rows(user_id=target_user_id, limit=500)]
+    buckets = {}
+    for row in rows:
+        bad = trainer_bad_outcome(row)
+        for signal_type, signal_name in trainer_audit_signals(row):
+            key = (signal_type, signal_name)
+            bucket = buckets.setdefault(key, {"bad": 0, "total": 0, "evidence": []})
+            bucket["total"] += 1
+            if bad:
+                bucket["bad"] += 1
+                bucket["evidence"].append({
+                    "reflection_id": row.get("reflection_id"),
+                    "workout_id": row.get("imported_workout_id"),
+                    "title": row.get("workout_title"),
+                    "date": row.get("started_at"),
+                    "rpe": row.get("rpe"),
+                    "feel": row.get("feel"),
+                    "notes": (row.get("notes") or "")[:180],
+                })
+
+    saved = []
+    for (signal_type, signal_name), bucket in buckets.items():
+        total = bucket["total"]
+        bad_count = bucket["bad"]
+        if total < minimum_total or bad_count < minimum_bad:
+            continue
+        bad_rate = bad_count / total if total else 0
+        if bad_rate < 0.5:
+            continue
+        summary = f"{signal_name} appears in {bad_count}/{total} rough logged run reflections."
+        db.upsert_trainer_audit_insight(
+            signal_type,
+            signal_name,
+            bad_count,
+            total,
+            bad_rate,
+            summary,
+            bucket["evidence"][:6],
+            user_id=target_user_id,
+        )
+        saved.append({"signal_type": signal_type, "signal_name": signal_name, "bad_count": bad_count, "total_count": total, "bad_rate": bad_rate})
+    return saved
+
+
 def trainer_context(request, active_tab="home", workout_type="", athlete_user_id=None):
     """Build shared Dieter Trainer template context."""
     current_user = request.state.current_user
@@ -4598,6 +4691,7 @@ def trainer_context(request, active_tab="home", workout_type="", athlete_user_id
         "trainer_shoes": dicts_from_rows(db.get_trainer_shoes(user_id=selected_athlete_id)),
         "shoe_usage_by_workout": trainer_shoe_usage_by_workout(selected_athlete_id),
         "runs_missing_shoes": dicts_from_rows(db.get_trainer_runs_missing_shoes(user_id=selected_athlete_id, limit=8)),
+        "trainer_audit_insights": dicts_from_rows(db.get_trainer_audit_insights(user_id=selected_athlete_id, limit=10)),
         "run_reflections": dicts_from_rows(db.get_trainer_run_reflections(user_id=selected_athlete_id, limit=10)),
         "scheduler_due": scheduler_due_context(),
     }
@@ -4776,6 +4870,8 @@ def add_trainer_workout_shoe(
         distance_meters=miles_to_meters(distance_miles) if distance_miles else default_meters,
         notes=notes,
     )
+    if workout:
+        scan_trainer_audit_insights(user_id=workout.get("user_id"))
     return RedirectResponse(url="/apps/trainer/imports", status_code=303)
 
 
@@ -4784,6 +4880,13 @@ def delete_trainer_workout_shoe(usage_id: int):
     """Remove a shoe usage row."""
     db.delete_trainer_workout_shoe(usage_id)
     return RedirectResponse(url="/apps/trainer/imports", status_code=303)
+
+
+@app.post("/apps/trainer/audit/scan")
+def scan_trainer_audit():
+    """Refresh Trainer audit insights from logged runs."""
+    scan_trainer_audit_insights()
+    return RedirectResponse(url="/apps/trainer/imports#audit-insights", status_code=303)
 
 
 @app.get("/apps/trainer/settings")

@@ -276,6 +276,26 @@
                     {% endfor %}
                 </article>
             {% endif %}
+            <article class="trainer-card" id="audit-insights">
+                <span class="trainer-card-meta">Training Audit</span>
+                <h3>Pattern Watch</h3>
+                {% if is_viewing_own_trainer %}
+                    <form method="post" action="/apps/trainer/audit/scan">
+                        <button type="submit" class="secondary compact">Scan logged runs</button>
+                    </form>
+                {% endif %}
+                {% if trainer_audit_insights %}
+                    {% for insight in trainer_audit_insights %}
+                        <div>
+                            <h3>{{ insight.signal_name }}</h3>
+                            <p>{{ insight.summary }}</p>
+                            <p>{{ insight.signal_type }} - {{ insight.bad_count }}/{{ insight.total_count }} rough - {{ (insight.bad_rate * 100)|round|int }}%</p>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <p>No recurring rough-workout patterns yet. Add reflections, shoes, and context; Dieter will scan for repeat signals.</p>
+                {% endif %}
+            </article>
             {% if imported_workouts %}
                 {% for workout in imported_workouts %}
                     <article class="trainer-card">
