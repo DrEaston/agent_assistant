@@ -100,6 +100,18 @@
             color: #fff;
         }
 
+        .playlists-shell-page nav button[data-recipe-chat-open] {
+            background: #9a3412;
+            border-color: #f97316;
+            color: #fff;
+        }
+
+        .playlists-shell-page nav button[data-recipe-chat-open]:hover {
+            background: #c2410c;
+            border-color: #fb923c;
+            color: #fff;
+        }
+
         .app-shell {
             --shell-bg: var(--page-theme-color);
             --shell-border: color-mix(in srgb, var(--page-theme-color) 78%, black);
@@ -730,6 +742,23 @@
 
         .planner-chat-button:hover {
             background: rgba(255, 255, 255, 0.16);
+        }
+
+        .playlists-chat-button {
+            background: rgba(255, 255, 255, 0.12);
+            border: 1px solid rgba(255, 237, 213, 0.42);
+            border-radius: 6px;
+            color: #fff;
+            cursor: pointer;
+            font: inherit;
+            font-style: italic;
+            font-weight: 800;
+            min-height: 2.5rem;
+            padding: 0.5rem 0.85rem;
+        }
+
+        .playlists-chat-button:hover {
+            background: rgba(255, 237, 213, 0.22);
         }
 
         .planner-app-heading p:last-child {
