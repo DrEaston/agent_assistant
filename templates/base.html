@@ -2117,6 +2117,114 @@
             line-height: 1.05;
         }
 
+        .trainer-mileage-toggle {
+            display: grid;
+            gap: 0.65rem;
+            grid-template-columns: auto auto minmax(0, 1fr);
+            overflow-x: auto;
+        }
+
+        .trainer-mileage-toggle input {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .trainer-mileage-toggle label {
+            background: #fff;
+            border: 1px solid #bbf7d0;
+            border-radius: 999px;
+            color: #065f46;
+            cursor: pointer;
+            font-weight: 900;
+            line-height: 1;
+            padding: 0.45rem 0.8rem;
+            text-align: center;
+        }
+
+        .trainer-mileage-toggle input:checked + label {
+            background: #065f46;
+            border-color: #022c22;
+            color: #fff;
+        }
+
+        .trainer-line-chart {
+            grid-column: 1 / -1;
+            min-width: 34rem;
+        }
+
+        .trainer-line-chart svg {
+            display: block;
+            height: auto;
+            max-width: 100%;
+            overflow: visible;
+            width: 100%;
+        }
+
+        .trainer-chart-grid-line {
+            stroke: #d1fae5;
+            stroke-width: 1;
+        }
+
+        .trainer-chart-axis {
+            stroke: #86efac;
+            stroke-width: 1.5;
+        }
+
+        .trainer-chart-axis-label,
+        .trainer-chart-week-label {
+            fill: #047857;
+            font-size: 0.72rem;
+            font-weight: 800;
+        }
+
+        .trainer-chart-week-label {
+            text-anchor: middle;
+        }
+
+        .trainer-chart-line {
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            stroke-width: 4;
+        }
+
+        .trainer-chart-run-line {
+            stroke: #059669;
+        }
+
+        .trainer-chart-bike-line {
+            stroke: #0891b2;
+        }
+
+        .trainer-chart-point circle {
+            fill: #fff;
+            stroke-width: 3;
+        }
+
+        .trainer-chart-run-point circle {
+            stroke: #059669;
+        }
+
+        .trainer-chart-bike-point circle {
+            stroke: #0891b2;
+        }
+
+        .trainer-chart-bike-line,
+        .trainer-chart-bike-point {
+            display: none;
+        }
+
+        #trainer-mileage-bike:checked ~ .trainer-line-chart .trainer-chart-run-line,
+        #trainer-mileage-bike:checked ~ .trainer-line-chart .trainer-chart-run-point {
+            display: none;
+        }
+
+        #trainer-mileage-bike:checked ~ .trainer-line-chart .trainer-chart-bike-line,
+        #trainer-mileage-bike:checked ~ .trainer-line-chart .trainer-chart-bike-point {
+            display: initial;
+        }
+
         .trainer-detail-list {
             display: grid;
             gap: 0.45rem;

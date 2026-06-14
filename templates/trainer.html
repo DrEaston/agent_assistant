@@ -130,19 +130,37 @@
             <div>
                 <span class="trainer-card-meta">Last 3 Months</span>
                 <h3>Weekly Mileage</h3>
-                <p>{{ chart.total_miles|round(1) }} miles across {{ chart.weeks|length }} weeks</p>
             </div>
         </div>
-        <div class="trainer-mileage-chart" aria-label="Weekly mileage chart">
-            {% for week in chart.weeks %}
-                <div class="trainer-mileage-bar-wrap">
-                    <div class="trainer-mileage-bar-track">
-                        <div class="trainer-mileage-bar {% if week.distance_miles %}has-mileage{% endif %}" style="height: {{ week.height_percent }}%;" title="{{ week.label }}: {{ week.distance_miles|round(1) }} miles"></div>
-                    </div>
-                    <strong>{{ week.distance_miles|round(1) }}</strong>
-                    <small>{{ week.label }}</small>
-                </div>
-            {% endfor %}
+        <div class="trainer-mileage-toggle" aria-label="Mileage chart mode">
+            <input type="radio" id="trainer-mileage-run" name="trainer-mileage-mode" value="run" checked>
+            <label for="trainer-mileage-run">Run</label>
+            <input type="radio" id="trainer-mileage-bike" name="trainer-mileage-mode" value="bike">
+            <label for="trainer-mileage-bike">Bike</label>
+            <div class="trainer-line-chart" aria-label="Weekly mileage line chart">
+                <svg viewBox="0 0 {{ chart.chart_width }} {{ chart.chart_height }}" role="img" aria-label="Weekly mileage over the last 3 months">
+                    {% for axis in chart.axis_labels %}
+                        <line class="trainer-chart-grid-line" x1="{{ chart.plot_left }}" y1="{{ axis.y }}" x2="{{ chart.plot_right }}" y2="{{ axis.y }}"></line>
+                        <text class="trainer-chart-axis-label" x="6" y="{{ axis.y + 4 }}">{{ axis.label }}</text>
+                    {% endfor %}
+                    <line class="trainer-chart-axis" x1="{{ chart.plot_left }}" y1="{{ chart.plot_bottom }}" x2="{{ chart.plot_right }}" y2="{{ chart.plot_bottom }}"></line>
+                    <polyline class="trainer-chart-line trainer-chart-run-line" points="{{ chart.run_points }}"></polyline>
+                    <polyline class="trainer-chart-line trainer-chart-bike-line" points="{{ chart.bike_points }}"></polyline>
+                    {% for week in chart.weeks %}
+                        <g class="trainer-chart-point trainer-chart-run-point" tabindex="0">
+                            <circle cx="{{ week.x }}" cy="{{ week.run_y }}" r="5"></circle>
+                            <title>{{ week.label }}: {{ week.distance_miles|round(1) }} run miles</title>
+                        </g>
+                        <g class="trainer-chart-point trainer-chart-bike-point" tabindex="0">
+                            <circle cx="{{ week.x }}" cy="{{ week.bike_y }}" r="5"></circle>
+                            <title>{{ week.label }}: {{ week.bike_distance_miles|round(1) }} bike miles</title>
+                        </g>
+                        {% if loop.first or loop.last or loop.index0 == 6 %}
+                            <text class="trainer-chart-week-label" x="{{ week.x }}" y="{{ chart.chart_height - 8 }}">{{ week.label }}</text>
+                        {% endif %}
+                    {% endfor %}
+                </svg>
+            </div>
         </div>
     </div>
 {% endmacro %}
@@ -194,7 +212,7 @@
             <div class="trainer-card">
                 <span class="trainer-card-meta">Strava Refresh</span>
                 <h3>Update Training History</h3>
-                <p>Refresh the last 6 months of Strava runs to fill the mileage chart and weekly summaries.</p>
+                <p>Refresh the last 6 months of Strava runs and rides to fill the mileage charts and weekly summaries.</p>
                 <form method="post" action="/apps/trainer/imports/strava/six-month-runs">
                     <button type="submit" class="compact">Pull Last 6 Months</button>
                 </form>
@@ -282,9 +300,9 @@
                     <p>Connect your Strava account to import recent runs into Dieter Trainer.</p>
                     <a class="button-link" href="/apps/trainer/strava/connect">Connect Strava</a>
                 {% elif is_viewing_own_trainer and strava_connected %}
-                    <p>Strava is connected. Pull recent runs whenever you want to refresh training load.</p>
+                    <p>Strava is connected. Pull recent runs and rides whenever you want to refresh training load.</p>
                     <form method="post" action="/apps/trainer/imports/strava/last-week-runs">
-                        <button type="submit" class="compact">Pull last week of runs</button>
+                        <button type="submit" class="compact">Pull last week</button>
                     </form>
                     <form method="post" action="/apps/trainer/imports/strava/recent-weeks-runs">
                         <button type="submit" class="secondary compact">Pull last 4 weeks</button>
@@ -303,7 +321,7 @@
                     <p>Viewing imported Strava activities shared by this athlete.</p>
                 {% endif %}
                 {% if request.query_params.get("imported") %}
-                    <p>{{ request.query_params.get("imported") }} run import{% if request.query_params.get("imported") != "1" %}s{% endif %} refreshed.</p>
+                    <p>{{ request.query_params.get("imported") }} Strava activit{% if request.query_params.get("imported") == "1" %}y{% else %}ies{% endif %} refreshed.</p>
                 {% endif %}
                 {% if request.query_params.get("shoe_prompt") and runs_missing_shoes %}
                     <p>Add shoe details for new runs below. Use multiple rows if you warmed up in one pair and did the workout in another.</p>

@@ -4176,8 +4176,14 @@ def strava_activity_import_payload(activity, detail=None):
     }
 
 
+def strava_activity_is_supported_training(activity_type):
+    """Return true for Strava activities Trainer currently summarizes."""
+    normalized = (activity_type or "").strip()
+    return normalized in {"Run", "TrailRun", "VirtualRun", "Ride", "VirtualRide", "EBikeRide"}
+
+
 def import_recent_strava_runs(days=7):
-    """Import recent Strava run activities for the active athlete."""
+    """Import recent Strava run and bike activities for the active athlete."""
     profile = dict_from_row(db.get_trainer_profile())
     if not strava_configured():
         raise HTTPException(status_code=400, detail="Strava is not configured. Set STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET.")
@@ -4189,7 +4195,7 @@ def import_recent_strava_runs(days=7):
     skipped = 0
     for activity in activities:
         activity_type = activity.get("type") or activity.get("sport_type") or ""
-        if activity_type not in {"Run", "TrailRun", "VirtualRun"}:
+        if not strava_activity_is_supported_training(activity_type):
             skipped += 1
             continue
         try:
@@ -4209,8 +4215,8 @@ def import_single_strava_activity(activity_id):
     access_token = refresh_strava_profile_token(profile)
     detail = fetch_strava_activity_detail(access_token, activity_id)
     activity_type = detail.get("type") or detail.get("sport_type") or ""
-    if activity_type not in {"Run", "TrailRun", "VirtualRun"}:
-        raise HTTPException(status_code=400, detail="That Strava activity is not a run.")
+    if not strava_activity_is_supported_training(activity_type):
+        raise HTTPException(status_code=400, detail="That Strava activity is not a supported run or bike activity.")
     db.add_trainer_imported_workout(**strava_activity_import_payload(detail, detail))
     return {"imported": 1, "skipped": 0, "activity_id": activity_id}
 
@@ -4671,7 +4677,7 @@ def trainer_workout_week_dashboard(user_id=None, week_offset=0):
 
 
 def trainer_weekly_mileage_chart(user_id=None, weeks=13):
-    """Build chronological weekly mileage bars for the last several months."""
+    """Build chronological weekly run/bike mileage for the last several months."""
     today = datetime.now().date()
     current_week_start = today - timedelta(days=today.weekday())
     buckets = []
@@ -4683,14 +4689,18 @@ def trainer_weekly_mileage_chart(user_id=None, weeks=13):
             "week_end": (week_start + timedelta(days=6)).isoformat(),
             "label": week_start.strftime("%b %-d") if os.name != "nt" else week_start.strftime("%b %#d"),
             "distance_miles": 0,
+            "bike_distance_miles": 0,
             "run_count": 0,
+            "ride_count": 0,
         }
         buckets.append(item)
         by_start[week_start] = item
 
     earliest = buckets[0]["week_start"]
     for row in dicts_from_rows(db.get_trainer_imported_workouts(user_id=user_id, limit=5000)):
-        if not trainer_row_is_run(row):
+        is_run = trainer_row_is_run(row)
+        is_bike = trainer_row_is_bike(row)
+        if not is_run and not is_bike:
             continue
         started = parse_trainer_started_date(row.get("started_at"))
         if not started:
@@ -4701,16 +4711,56 @@ def trainer_weekly_mileage_chart(user_id=None, weeks=13):
         bucket = by_start.get(week_start)
         if not bucket:
             continue
-        bucket["distance_miles"] += float(row.get("distance_meters") or 0) / 1609.344
-        bucket["run_count"] += 1
+        miles = float(row.get("distance_meters") or 0) / 1609.344
+        if is_run:
+            bucket["distance_miles"] += miles
+            bucket["run_count"] += 1
+        elif is_bike:
+            bucket["bike_distance_miles"] += miles
+            bucket["ride_count"] += 1
 
-    max_miles = max([bucket["distance_miles"] for bucket in buckets] or [0])
-    for bucket in buckets:
-        bucket["height_percent"] = round((bucket["distance_miles"] / max_miles) * 100, 1) if max_miles else 0
+    max_miles = max(
+        [bucket["distance_miles"] for bucket in buckets] +
+        [bucket["bike_distance_miles"] for bucket in buckets] +
+        [0]
+    )
+    chart_width = 560
+    chart_height = 220
+    left = 42
+    right = 14
+    top = 14
+    bottom = 32
+    plot_width = chart_width - left - right
+    plot_height = chart_height - top - bottom
+    scale_max = max_miles or 1
+    for index, bucket in enumerate(buckets):
+        x = left + (plot_width * index / max(len(buckets) - 1, 1))
+        run_y = top + (1 - (bucket["distance_miles"] / scale_max)) * plot_height
+        bike_y = top + (1 - (bucket["bike_distance_miles"] / scale_max)) * plot_height
+        bucket["x"] = round(x, 1)
+        bucket["run_y"] = round(run_y, 1)
+        bucket["bike_y"] = round(bike_y, 1)
+    run_points = " ".join(f"{bucket['x']},{bucket['run_y']}" for bucket in buckets)
+    bike_points = " ".join(f"{bucket['x']},{bucket['bike_y']}" for bucket in buckets)
+    axis_values = [scale_max, scale_max / 2, 0]
+    axis_labels = []
+    for value in axis_values:
+        y = top + (1 - (value / scale_max)) * plot_height
+        axis_labels.append({"value": value, "y": round(y, 1), "label": f"{value:.0f}"})
     return {
         "weeks": buckets,
         "max_miles": max_miles,
         "total_miles": sum(bucket["distance_miles"] for bucket in buckets),
+        "total_bike_miles": sum(bucket["bike_distance_miles"] for bucket in buckets),
+        "run_points": run_points,
+        "bike_points": bike_points,
+        "axis_labels": axis_labels,
+        "chart_width": chart_width,
+        "chart_height": chart_height,
+        "plot_left": left,
+        "plot_right": chart_width - right,
+        "plot_top": top,
+        "plot_bottom": chart_height - bottom,
     }
 
 
