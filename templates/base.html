@@ -24,6 +24,17 @@
             --page-theme-subtitle: color-mix(in srgb, var(--page-theme-color) 16%, white);
             --page-bg: color-mix(in srgb, var(--page-theme-color) 4%, white);
             --shell-border: color-mix(in srgb, var(--page-theme-color) 78%, black);
+            --app-button-bg: var(--page-theme-color);
+            --app-button-border: var(--shell-border);
+            --app-button-hover: var(--shell-border);
+            --app-button-text: #fff;
+            --app-button-secondary-bg: #fff;
+            --app-button-secondary-border: var(--page-theme-color);
+            --app-button-secondary-hover: var(--page-theme-hover);
+            --app-button-secondary-text: var(--page-theme-text);
+            --app-button-disabled-bg: var(--page-theme-panel-strong);
+            --app-button-disabled-border: var(--page-theme-border);
+            --app-button-disabled-text: var(--page-theme-text);
             color: #333;
             line-height: 1.6;
         }
@@ -231,6 +242,25 @@
             justify-content: center;
             min-height: 2.5rem;
             white-space: nowrap;
+        }
+
+        .app-themed-page .app-shell-actions button,
+        .app-themed-page .app-shell-actions .button-link {
+            background: rgba(255, 255, 255, 0.12);
+            border: 1px solid color-mix(in srgb, var(--page-theme-border) 70%, white);
+            border-radius: 6px;
+            color: #fff;
+            cursor: pointer;
+            font: inherit;
+            font-weight: 800;
+            padding: 0.5rem 0.85rem;
+            text-decoration: none;
+        }
+
+        .app-themed-page .app-shell-actions button:hover,
+        .app-themed-page .app-shell-actions .button-link:hover {
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
         }
 
         .app-shell-band {
@@ -1607,6 +1637,50 @@
 
         .secondary-link:hover {
             background: #7f8c8d;
+        }
+
+        .app-themed-page .container button:not(.recipe-chat-close),
+        .app-themed-page .container .button-link,
+        .app-themed-page .recipe-chat-form button,
+        .app-themed-page .recipe-chat-action {
+            background: var(--app-button-bg);
+            border: 1px solid var(--app-button-border);
+            color: var(--app-button-text);
+        }
+
+        .app-themed-page .container button:not(.recipe-chat-close):hover,
+        .app-themed-page .container .button-link:hover,
+        .app-themed-page .recipe-chat-form button:hover,
+        .app-themed-page .recipe-chat-action:hover {
+            background: var(--app-button-hover);
+            color: var(--app-button-text);
+        }
+
+        .app-themed-page .container button.secondary,
+        .app-themed-page .container .secondary-link,
+        .app-themed-page .container .secondary-button,
+        .app-themed-page .recipe-chat-action.secondary-link {
+            background: var(--app-button-secondary-bg);
+            border: 1px solid var(--app-button-secondary-border);
+            color: var(--app-button-secondary-text);
+        }
+
+        .app-themed-page .container button.secondary:hover,
+        .app-themed-page .container .secondary-link:hover,
+        .app-themed-page .container .secondary-button:hover,
+        .app-themed-page .recipe-chat-action.secondary-link:hover {
+            background: var(--app-button-secondary-hover);
+            border-color: var(--app-button-secondary-border);
+            color: var(--app-button-secondary-text);
+        }
+
+        .app-themed-page .container button:disabled,
+        .app-themed-page .container button:disabled:hover {
+            background: var(--app-button-disabled-bg);
+            border-color: var(--app-button-disabled-border);
+            color: var(--app-button-disabled-text);
+            cursor: not-allowed;
+            opacity: 0.72;
         }
 
         .app-handoff {
@@ -5697,7 +5771,7 @@
         "subtitle": "#e2e8f0"
     } %}
 {% endif %}
-<body class="{% if show_recipe_shell %}recipe-shell-page{% endif %}{% if show_planner_shell %} planner-shell-page{% endif %}{% if show_trainer_shell %} trainer-shell-page{% endif %}{% if show_playlists_shell %} playlists-shell-page{% endif %}{% if show_launcher_shell %} launcher-shell-page{% endif %}"{% if page_theme %} style="--page-theme-color: {{ page_theme.color }}; --page-theme-border: {{ page_theme.border }}; --page-theme-panel: {{ page_theme.panel }}; --page-theme-panel-strong: {{ page_theme.panel_strong }}; --page-theme-text: {{ page_theme.text }}; --page-theme-hover: {{ page_theme.hover }}; --page-theme-subtitle: {{ page_theme.subtitle }};"{% endif %}>
+<body class="{% if page_theme %}app-themed-page{% endif %}{% if show_recipe_shell %} recipe-shell-page{% endif %}{% if show_planner_shell %} planner-shell-page{% endif %}{% if show_trainer_shell %} trainer-shell-page{% endif %}{% if show_playlists_shell %} playlists-shell-page{% endif %}{% if show_launcher_shell %} launcher-shell-page{% endif %}"{% if page_theme %} style="--page-theme-color: {{ page_theme.color }}; --page-theme-border: {{ page_theme.border }}; --page-theme-panel: {{ page_theme.panel }}; --page-theme-panel-strong: {{ page_theme.panel_strong }}; --page-theme-text: {{ page_theme.text }}; --page-theme-hover: {{ page_theme.hover }}; --page-theme-subtitle: {{ page_theme.subtitle }};"{% endif %}>
     {% if show_global_nav %}
         <nav>
             <a href="/" style="font-size: 1.2rem; font-weight: bold;">Dieter</a>
