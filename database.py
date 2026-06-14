@@ -450,6 +450,61 @@ class Database:
         """)
 
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS playlist_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL UNIQUE,
+                spotify_user_id TEXT DEFAULT '',
+                spotify_display_name TEXT DEFAULT '',
+                spotify_access_token TEXT DEFAULT '',
+                spotify_refresh_token TEXT DEFAULT '',
+                spotify_token_expires_at INTEGER DEFAULT 0,
+                spotify_scope TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS playlist_drafts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                is_public INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'draft',
+                spotify_playlist_id TEXT DEFAULT '',
+                spotify_url TEXT DEFAULT '',
+                spotify_snapshot_id TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS playlist_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                playlist_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                position INTEGER DEFAULT 0,
+                raw_text TEXT DEFAULT '',
+                title TEXT DEFAULT '',
+                artist TEXT DEFAULT '',
+                spotify_track_id TEXT DEFAULT '',
+                spotify_uri TEXT DEFAULT '',
+                spotify_url TEXT DEFAULT '',
+                match_status TEXT DEFAULT 'unmatched',
+                candidates_json TEXT DEFAULT '[]',
+                notes TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (playlist_id) REFERENCES playlist_drafts(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS recipe_images (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NOT NULL,
@@ -3190,7 +3245,7 @@ class Database:
                 strava_token_expires_at = 0,
                 strava_scope = '',
                 updated_at = CURRENT_TIMESTAMP
-            WHERE user_id = ?
+            WHERE playlist_drafts.user_id = ?
             """,
             (user_id,),
         )
@@ -3820,6 +3875,246 @@ class Database:
                 grouped[category].append(row)
         self.close()
         return grouped
+
+    def get_playlist_profile(self, user_id=None):
+        """Get the active user's Spotify playlist profile."""
+        target_user_id = user_id or self._active_user_id()
+        if not target_user_id:
+            return None
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM playlist_profiles WHERE user_id = ?", (target_user_id,))
+        row = cursor.fetchone()
+        self.close()
+        return row
+
+    def update_playlist_spotify_tokens(self, spotify_user_id="", display_name="", access_token="", refresh_token="", expires_at=0, scope="", user_id=None):
+        """Save Spotify OAuth tokens for the active user."""
+        target_user_id = user_id or self._active_user_id()
+        if not target_user_id:
+            return None
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO playlist_profiles
+                (user_id, spotify_user_id, spotify_display_name, spotify_access_token,
+                 spotify_refresh_token, spotify_token_expires_at, spotify_scope, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET
+                spotify_user_id = COALESCE(NULLIF(excluded.spotify_user_id, ''), playlist_profiles.spotify_user_id),
+                spotify_display_name = COALESCE(NULLIF(excluded.spotify_display_name, ''), playlist_profiles.spotify_display_name),
+                spotify_access_token = excluded.spotify_access_token,
+                spotify_refresh_token = COALESCE(NULLIF(excluded.spotify_refresh_token, ''), playlist_profiles.spotify_refresh_token),
+                spotify_token_expires_at = excluded.spotify_token_expires_at,
+                spotify_scope = COALESCE(NULLIF(excluded.spotify_scope, ''), playlist_profiles.spotify_scope),
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (target_user_id, spotify_user_id, display_name, access_token, refresh_token, expires_at, scope),
+        )
+        self._commit()
+        self.close()
+        return target_user_id
+
+    def clear_playlist_spotify_tokens(self, user_id=None):
+        """Disconnect Spotify for the active playlist user."""
+        target_user_id = user_id or self._active_user_id()
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE playlist_profiles
+            SET spotify_access_token = '',
+                spotify_refresh_token = '',
+                spotify_token_expires_at = 0,
+                spotify_scope = '',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE playlist_drafts.user_id = ?
+            """,
+            (target_user_id,),
+        )
+        self._commit()
+        self.close()
+
+    def add_playlist_draft(self, title, description="", is_public=False, user_id=None):
+        """Create a playlist draft."""
+        target_user_id = user_id or self._active_user_id()
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO playlist_drafts (user_id, title, description, is_public, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (target_user_id, title.strip() or "New Playlist", description.strip(), 1 if is_public else 0),
+        )
+        draft_id = cursor.lastrowid
+        self._commit()
+        self.close()
+        return draft_id
+
+    def update_playlist_draft(self, playlist_id, title=None, description=None, is_public=None, status=None, spotify_playlist_id=None, spotify_url=None, spotify_snapshot_id=None):
+        """Update a playlist draft owned by the active user."""
+        active_user_id = self._active_user_id()
+        fields = []
+        params = []
+        for column, value in [
+            ("title", title),
+            ("description", description),
+            ("is_public", 1 if is_public else 0 if is_public is not None else None),
+            ("status", status),
+            ("spotify_playlist_id", spotify_playlist_id),
+            ("spotify_url", spotify_url),
+            ("spotify_snapshot_id", spotify_snapshot_id),
+        ]:
+            if value is not None:
+                fields.append(f"{column} = ?")
+                params.append(value)
+        if not fields:
+            return 0
+        fields.append("updated_at = CURRENT_TIMESTAMP")
+        params.extend([playlist_id, active_user_id])
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            f"UPDATE playlist_drafts SET {', '.join(fields)} WHERE id = ? AND user_id = ?",
+            params,
+        )
+        changed = cursor.rowcount
+        self._commit()
+        self.close()
+        return changed
+
+    def get_playlist_drafts(self, user_id=None, limit=50):
+        """List playlist drafts for a user."""
+        target_user_id = user_id or self._active_user_id()
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT playlist_drafts.*,
+                   COUNT(playlist_items.id) AS item_count,
+                   SUM(CASE WHEN playlist_items.spotify_uri != '' THEN 1 ELSE 0 END) AS matched_count
+            FROM playlist_drafts
+            LEFT JOIN playlist_items ON playlist_items.playlist_id = playlist_drafts.id
+            WHERE playlist_drafts.user_id = ?
+            GROUP BY playlist_drafts.id
+            ORDER BY playlist_drafts.updated_at DESC, playlist_drafts.id DESC
+            LIMIT ?
+            """,
+            (target_user_id, limit),
+        )
+        rows = cursor.fetchall()
+        self.close()
+        return rows
+
+    def get_playlist_draft(self, playlist_id):
+        """Get one playlist draft owned by the active user."""
+        active_user_id = self._active_user_id()
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM playlist_drafts WHERE id = ? AND user_id = ?", (playlist_id, active_user_id))
+        row = cursor.fetchone()
+        self.close()
+        return row
+
+    def add_playlist_item(self, playlist_id, raw_text="", title="", artist="", spotify_track_id="", spotify_uri="", spotify_url="", match_status="unmatched", candidates=None, notes="", position=None):
+        """Add a song row to a playlist draft."""
+        active_user_id = self._active_user_id()
+        playlist = self.get_playlist_draft(playlist_id)
+        if not playlist:
+            return None
+        self.connect()
+        cursor = self.conn.cursor()
+        if position is None:
+            cursor.execute("SELECT COALESCE(MAX(position), 0) + 1 AS next_position FROM playlist_items WHERE playlist_id = ?", (playlist_id,))
+            position = cursor.fetchone()["next_position"]
+        cursor.execute(
+            """
+            INSERT INTO playlist_items
+                (playlist_id, user_id, position, raw_text, title, artist, spotify_track_id,
+                 spotify_uri, spotify_url, match_status, candidates_json, notes, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                playlist_id,
+                active_user_id,
+                position,
+                raw_text.strip(),
+                title.strip(),
+                artist.strip(),
+                spotify_track_id,
+                spotify_uri,
+                spotify_url,
+                match_status,
+                json.dumps(candidates or []),
+                notes.strip(),
+            ),
+        )
+        item_id = cursor.lastrowid
+        self._commit()
+        self.close()
+        return item_id
+
+    def update_playlist_item(self, item_id, title=None, artist=None, position=None, spotify_track_id=None, spotify_uri=None, spotify_url=None, match_status=None, candidates=None, notes=None):
+        """Update one playlist item owned by the active user."""
+        active_user_id = self._active_user_id()
+        fields = []
+        params = []
+        for column, value in [
+            ("title", title),
+            ("artist", artist),
+            ("position", position),
+            ("spotify_track_id", spotify_track_id),
+            ("spotify_uri", spotify_uri),
+            ("spotify_url", spotify_url),
+            ("match_status", match_status),
+            ("candidates_json", json.dumps(candidates) if candidates is not None else None),
+            ("notes", notes),
+        ]:
+            if value is not None:
+                fields.append(f"{column} = ?")
+                params.append(value)
+        if not fields:
+            return 0
+        fields.append("updated_at = CURRENT_TIMESTAMP")
+        params.extend([item_id, active_user_id])
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(f"UPDATE playlist_items SET {', '.join(fields)} WHERE id = ? AND user_id = ?", params)
+        changed = cursor.rowcount
+        self._commit()
+        self.close()
+        return changed
+
+    def delete_playlist_item(self, item_id):
+        """Delete one playlist item owned by the active user."""
+        active_user_id = self._active_user_id()
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM playlist_items WHERE id = ? AND user_id = ?", (item_id, active_user_id))
+        changed = cursor.rowcount
+        self._commit()
+        self.close()
+        return changed
+
+    def get_playlist_items(self, playlist_id):
+        """List playlist items for a draft owned by the active user."""
+        active_user_id = self._active_user_id()
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT *
+            FROM playlist_items
+            WHERE playlist_id = ? AND user_id = ?
+            ORDER BY position ASC, id ASC
+            """,
+            (playlist_id, active_user_id),
+        )
+        rows = cursor.fetchall()
+        self.close()
+        return rows
 
     def add_trainer_session(self, workout_id, scheduled_for="", notes=""):
         """Schedule a Trainer workout session."""

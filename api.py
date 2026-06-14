@@ -23,6 +23,7 @@ import json
 import shutil
 import uuid
 import hashlib
+import base64
 import re
 import threading
 import mimetypes
@@ -111,6 +112,12 @@ STRAVA_API_BASE = "https://www.strava.com/api/v3"
 STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token"
 STRAVA_AUTHORIZE_URL = "https://www.strava.com/oauth/authorize"
 STRAVA_REDIRECT_URI = os.getenv("STRAVA_REDIRECT_URI", "")
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
+SPOTIFY_REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI", "")
+SPOTIFY_ACCOUNT_BASE = "https://accounts.spotify.com"
+SPOTIFY_API_BASE = "https://api.spotify.com/v1"
+SPOTIFY_SCOPES = "playlist-modify-private playlist-modify-public playlist-read-private user-read-private user-read-email"
 
 
 def hash_password(password):
@@ -3348,6 +3355,9 @@ def api_dieter_action(message: DieterActionMessage):
     if message_reports_app_feedback(message.content):
         return handle_app_feedback_request(message, page_url)
 
+    if message_requests_playlist_action(message.content, page_url):
+        return handle_playlist_action_request(message, page_url)
+
     if message_requests_trainer_shoe_log(message.content, page_url):
         return handle_trainer_shoe_log_request(message, page_url)
 
@@ -3947,6 +3957,7 @@ def render_apps_page(request: Request):
         "recipe_app": recipe_app,
         "planner_url": "/apps/assistant/planner",
         "trainer_url": "/apps/trainer",
+        "playlists_url": "/apps/playlists",
         "planner": {
             "recommended_project": dashboard_context.get("recommended_project"),
             "next_action": dashboard_context.get("next_action"),
@@ -4821,6 +4832,427 @@ def trainer_context(request, active_tab="home", workout_type="", athlete_user_id
         "run_reflections": dicts_from_rows(db.get_trainer_run_reflections(user_id=selected_athlete_id, limit=10)),
         "scheduler_due": scheduler_due_context(),
     }
+
+
+def spotify_configured():
+    """Return true when Spotify OAuth credentials are available."""
+    return bool(SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET)
+
+
+def spotify_callback_url(request):
+    """Build the Spotify OAuth callback URL."""
+    if SPOTIFY_REDIRECT_URI:
+        return SPOTIFY_REDIRECT_URI
+    return str(request.url_for("playlists_spotify_callback"))
+
+
+def spotify_oauth_state(user_id):
+    """Create a state token tied to the active Dieter user."""
+    payload = str(user_id or 0)
+    secret = (os.getenv("SECRET_KEY") or REGISTRATION_CODE or "dieter-local-secret").encode("utf-8")
+    signature = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{payload}:{signature}"
+
+
+def verify_spotify_oauth_state(state, user_id):
+    """Validate Spotify OAuth state."""
+    return bool(state and hmac.compare_digest(state, spotify_oauth_state(user_id)))
+
+
+def spotify_http_json(path_or_url, method="GET", access_token="", data=None, form=None):
+    """Call Spotify Accounts or Web API and return decoded JSON."""
+    url = path_or_url if str(path_or_url).startswith("http") else f"{SPOTIFY_API_BASE}{path_or_url}"
+    body = None
+    headers = {"Accept": "application/json"}
+    if access_token:
+        headers["Authorization"] = f"Bearer {access_token}"
+    if form is not None:
+        body = urlencode(form).encode("utf-8")
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+        credentials = f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}".encode("utf-8")
+        headers["Authorization"] = f"Basic {base64.b64encode(credentials).decode('ascii')}"
+    elif data is not None:
+        body = json.dumps(data).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(url, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = response.read().decode("utf-8")
+            return json.loads(payload) if payload else {}
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise HTTPException(status_code=502, detail=f"Spotify request failed: {exc.code} {detail[:300]}")
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach Spotify: {exc.reason}")
+
+
+def exchange_spotify_code(code, request):
+    """Exchange a Spotify authorization code for tokens."""
+    return spotify_http_json(
+        f"{SPOTIFY_ACCOUNT_BASE}/api/token",
+        method="POST",
+        form={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": spotify_callback_url(request),
+        },
+    )
+
+
+def refresh_playlist_spotify_token(profile):
+    """Refresh or return a valid Spotify access token."""
+    if not profile or not profile.get("spotify_refresh_token"):
+        raise HTTPException(status_code=400, detail="Connect Spotify before submitting playlists.")
+    expires_at = int(profile.get("spotify_token_expires_at") or 0)
+    if profile.get("spotify_access_token") and expires_at > int(time.time()) + 60:
+        return profile.get("spotify_access_token")
+    payload = spotify_http_json(
+        f"{SPOTIFY_ACCOUNT_BASE}/api/token",
+        method="POST",
+        form={
+            "grant_type": "refresh_token",
+            "refresh_token": profile.get("spotify_refresh_token"),
+        },
+    )
+    db.update_playlist_spotify_tokens(
+        access_token=payload.get("access_token", ""),
+        refresh_token=payload.get("refresh_token", profile.get("spotify_refresh_token", "")),
+        expires_at=int(time.time()) + int(payload.get("expires_in", 3600)),
+        scope=payload.get("scope", profile.get("spotify_scope", "")),
+    )
+    return payload.get("access_token", "")
+
+
+def spotify_current_user(access_token):
+    """Get the connected Spotify user profile."""
+    return spotify_http_json("/me", access_token=access_token)
+
+
+def spotify_search_track(access_token, title, artist=""):
+    """Search Spotify for the best track match."""
+    query = f'track:"{title}"'
+    if artist:
+        query += f' artist:"{artist}"'
+    params = urlencode({"q": query, "type": "track", "limit": 5})
+    result = spotify_http_json(f"/search?{params}", access_token=access_token)
+    items = (((result or {}).get("tracks") or {}).get("items") or [])
+    candidates = []
+    for track in items:
+        candidates.append({
+            "id": track.get("id", ""),
+            "uri": track.get("uri", ""),
+            "name": track.get("name", ""),
+            "artists": ", ".join(artist_item.get("name", "") for artist_item in track.get("artists", [])),
+            "url": ((track.get("external_urls") or {}).get("spotify") or ""),
+        })
+    return candidates
+
+
+def spotify_create_playlist(access_token, title, description="", is_public=False):
+    """Create an empty Spotify playlist for the current user."""
+    return spotify_http_json(
+        "/me/playlists",
+        method="POST",
+        access_token=access_token,
+        data={"name": title, "description": description, "public": bool(is_public)},
+    )
+
+
+def spotify_add_playlist_items(access_token, playlist_id, uris):
+    """Add tracks to a Spotify playlist in batches."""
+    snapshot = ""
+    for index in range(0, len(uris), 100):
+        payload = spotify_http_json(
+            f"/playlists/{playlist_id}/tracks",
+            method="POST",
+            access_token=access_token,
+            data={"uris": uris[index:index + 100]},
+        )
+        snapshot = payload.get("snapshot_id", snapshot)
+    return snapshot
+
+
+def parse_playlist_song_line(line):
+    """Parse a dictated song line into title/artist fields."""
+    text = re.sub(r"^\s*(?:\d+[\).\s-]*|[-*]\s*)", "", line or "").strip()
+    text = re.sub(r"\s+", " ", text)
+    if not text:
+        return None
+    for sep in [" by ", " - ", " -- ", " — "]:
+        if sep in text:
+            left, right = text.split(sep, 1)
+            return {"raw_text": text, "title": left.strip(), "artist": right.strip()}
+    return {"raw_text": text, "title": text, "artist": ""}
+
+
+def parse_playlist_dictation(text):
+    """Extract playlist title and song rows from free text."""
+    source = text or ""
+    title = ""
+    title_match = re.search(r"(?:playlist (?:called|named)|call it|title)\s+['\"]?([^'\"\n.;]+)", source, flags=re.IGNORECASE)
+    if title_match:
+        title = title_match.group(1).strip()
+    lines = [line.strip() for line in re.split(r"[\n;]+", source) if line.strip()]
+    songs = []
+    for line in lines:
+        cleaned = re.sub(r"^(?:add|include|song|songs|playlist|called|named)\b[:\s-]*", "", line, flags=re.IGNORECASE).strip()
+        if re.match(r"^(?:make|create|new)\s+(?:a\s+)?playlist\s+(?:called|named)\b", cleaned, flags=re.IGNORECASE):
+            continue
+        if title and title.lower() in cleaned.lower() and len(lines) > 1:
+            continue
+        if "," in cleaned and not re.search(r"\bby\b|\s-\s", cleaned, flags=re.IGNORECASE):
+            pieces = [piece.strip() for piece in cleaned.split(",") if piece.strip()]
+        else:
+            pieces = [cleaned]
+        for piece in pieces:
+            song = parse_playlist_song_line(piece)
+            if song and len(song["title"]) > 1 and not re.match(r"^(make|create|new)\s+playlist$", song["title"], flags=re.IGNORECASE):
+                songs.append(song)
+    return {"title": title or "Parrisa's Playlist", "songs": songs}
+
+
+def parse_playlist_target(page_url):
+    """Find a playlist id from the Playlists page URL."""
+    try:
+        params = dict(parse_qsl(urlsplit(page_url or "").query, keep_blank_values=True))
+        target = params.get("playlist_id")
+        return int(target) if target and str(target).isdigit() else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def message_requests_playlist_action(text, page_url=""):
+    """Detect Ask Dieter playlist dictation/edit requests."""
+    normalized = (text or "").lower()
+    if (page_url or "").startswith("/apps/playlists"):
+        return any(cue in normalized for cue in ["playlist", "song", "songs", "spotify", "add", "include", "called", "named"])
+    return any(cue in normalized for cue in ["parrisa playlist", "spotify playlist", "make a playlist", "create a playlist"])
+
+
+def add_songs_to_playlist_draft(playlist_id, songs):
+    """Add parsed song rows to a draft."""
+    added = 0
+    for song in songs:
+        db.add_playlist_item(
+            playlist_id,
+            raw_text=song.get("raw_text", ""),
+            title=song.get("title", ""),
+            artist=song.get("artist", ""),
+        )
+        added += 1
+    return added
+
+
+def handle_playlist_action_request(message, page_url):
+    """Create or edit playlist drafts from Ask Dieter."""
+    parsed = parse_playlist_dictation(message.content)
+    playlist_id = parse_playlist_target(page_url)
+    playlist = dict_from_row(db.get_playlist_draft(playlist_id)) if playlist_id else None
+    created = False
+    if not playlist:
+        playlist_id = db.add_playlist_draft(parsed["title"])
+        playlist = dict_from_row(db.get_playlist_draft(playlist_id))
+        created = True
+    elif parsed.get("title") and re.search(r"\b(rename|call it|title|named)\b", message.content or "", flags=re.IGNORECASE):
+        db.update_playlist_draft(playlist_id, title=parsed["title"])
+        playlist["title"] = parsed["title"]
+    added = add_songs_to_playlist_draft(playlist_id, parsed["songs"])
+    if not added and not created:
+        return {
+            "assistant_message": "I found the playlist, but I did not detect any new songs. Dictate songs like `Song Title by Artist`, one per line.",
+            "changed_fields": [],
+            "playlist_context": True,
+            "redirect_url": f"/apps/playlists?playlist_id={playlist_id}",
+            "redirect_label": "Open Playlist",
+        }
+    return {
+        "assistant_message": f"{'Created' if created else 'Updated'} {playlist.get('title') or parsed['title']} with {added} song{'s' if added != 1 else ''}. Review matches before submitting to Spotify.",
+        "changed_fields": ["playlist_draft", "playlist_items"],
+        "playlist_context": True,
+        "redirect_url": f"/apps/playlists?playlist_id={playlist_id}",
+        "redirect_label": "Open Playlist",
+    }
+
+
+def playlist_context(request, playlist_id=0):
+    """Build Parrisa's Playlists template context."""
+    profile = dict_from_row(db.get_playlist_profile())
+    playlists = dicts_from_rows(db.get_playlist_drafts(limit=50))
+    selected = None
+    if playlist_id:
+        selected = dict_from_row(db.get_playlist_draft(playlist_id))
+    if not selected and playlists:
+        selected = playlists[0]
+    items = dicts_from_rows(db.get_playlist_items(selected["id"])) if selected else []
+    return {
+        "request": request,
+        "spotify_configured": spotify_configured(),
+        "spotify_connected": bool(profile and profile.get("spotify_refresh_token")),
+        "playlist_profile": profile,
+        "playlists": playlists,
+        "selected_playlist": selected,
+        "playlist_items": items,
+    }
+
+
+@app.get("/apps/playlists")
+def playlists_app(request: Request, playlist_id: int = 0):
+    """Parrisa's Playlists home."""
+    template = jinja_env.get_template("playlists.html")
+    return HTMLResponse(template.render(playlist_context(request, playlist_id)))
+
+
+@app.post("/apps/playlists/create")
+def create_playlist_draft(
+    title: str = Form("Parrisa's Playlist"),
+    description: str = Form(""),
+    is_public: str = Form(""),
+):
+    """Create a playlist draft."""
+    playlist_id = db.add_playlist_draft(title, description=description, is_public=bool(is_public))
+    return RedirectResponse(url=f"/apps/playlists?playlist_id={playlist_id}", status_code=303)
+
+
+@app.post("/apps/playlists/{playlist_id}/update")
+def update_playlist_draft_form(
+    playlist_id: int,
+    title: str = Form(""),
+    description: str = Form(""),
+    is_public: str = Form(""),
+):
+    """Update playlist metadata."""
+    db.update_playlist_draft(playlist_id, title=title, description=description, is_public=bool(is_public))
+    return RedirectResponse(url=f"/apps/playlists?playlist_id={playlist_id}", status_code=303)
+
+
+@app.post("/apps/playlists/{playlist_id}/items/add")
+def add_playlist_item_form(
+    playlist_id: int,
+    title: str = Form(""),
+    artist: str = Form(""),
+    raw_text: str = Form(""),
+):
+    """Add one song to a playlist draft."""
+    if raw_text and not title:
+        parsed = parse_playlist_song_line(raw_text) or {}
+        title = parsed.get("title", title)
+        artist = parsed.get("artist", artist)
+    db.add_playlist_item(playlist_id, raw_text=raw_text or f"{title} by {artist}".strip(), title=title, artist=artist)
+    return RedirectResponse(url=f"/apps/playlists?playlist_id={playlist_id}", status_code=303)
+
+
+@app.post("/apps/playlists/items/{item_id}/update")
+def update_playlist_item_form(
+    item_id: int,
+    playlist_id: int = Form(...),
+    title: str = Form(""),
+    artist: str = Form(""),
+    position: int = Form(0),
+):
+    """Edit one playlist song row."""
+    db.update_playlist_item(item_id, title=title, artist=artist, position=position, match_status="unmatched", spotify_track_id="", spotify_uri="", spotify_url="")
+    return RedirectResponse(url=f"/apps/playlists?playlist_id={playlist_id}", status_code=303)
+
+
+@app.post("/apps/playlists/items/{item_id}/delete")
+def delete_playlist_item_form(item_id: int, playlist_id: int = Form(...)):
+    """Delete one playlist song row."""
+    db.delete_playlist_item(item_id)
+    return RedirectResponse(url=f"/apps/playlists?playlist_id={playlist_id}", status_code=303)
+
+
+@app.get("/apps/playlists/spotify/connect")
+def playlists_spotify_connect(request: Request):
+    """Send the active user to Spotify OAuth."""
+    if not spotify_configured():
+        raise HTTPException(status_code=400, detail="Spotify is not configured. Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET.")
+    user_id = get_current_user_id()
+    params = {
+        "client_id": SPOTIFY_CLIENT_ID,
+        "response_type": "code",
+        "redirect_uri": spotify_callback_url(request),
+        "scope": SPOTIFY_SCOPES,
+        "state": spotify_oauth_state(user_id),
+        "show_dialog": "false",
+    }
+    return RedirectResponse(url=f"{SPOTIFY_ACCOUNT_BASE}/authorize?{urlencode(params)}", status_code=303)
+
+
+@app.get("/apps/playlists/spotify/callback")
+def playlists_spotify_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    """Handle Spotify OAuth callback."""
+    user_id = get_current_user_id()
+    if error:
+        raise HTTPException(status_code=400, detail=f"Spotify authorization failed: {error}")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing Spotify authorization code.")
+    if not verify_spotify_oauth_state(state, user_id):
+        raise HTTPException(status_code=400, detail="Spotify authorization state did not match.")
+    payload = exchange_spotify_code(code, request)
+    access_token = payload.get("access_token", "")
+    spotify_user = spotify_current_user(access_token) if access_token else {}
+    db.update_playlist_spotify_tokens(
+        spotify_user_id=spotify_user.get("id", ""),
+        display_name=spotify_user.get("display_name", "") or spotify_user.get("email", ""),
+        access_token=access_token,
+        refresh_token=payload.get("refresh_token", ""),
+        expires_at=int(time.time()) + int(payload.get("expires_in", 3600)),
+        scope=payload.get("scope", SPOTIFY_SCOPES),
+    )
+    return RedirectResponse(url="/apps/playlists?spotify_connected=1", status_code=303)
+
+
+@app.post("/apps/playlists/spotify/disconnect")
+def playlists_spotify_disconnect():
+    """Disconnect Spotify."""
+    db.clear_playlist_spotify_tokens()
+    return RedirectResponse(url="/apps/playlists", status_code=303)
+
+
+@app.post("/apps/playlists/{playlist_id}/spotify/match")
+def match_playlist_tracks(playlist_id: int):
+    """Resolve playlist draft rows to Spotify track URIs."""
+    profile = dict_from_row(db.get_playlist_profile())
+    access_token = refresh_playlist_spotify_token(profile)
+    items = dicts_from_rows(db.get_playlist_items(playlist_id))
+    for item in items:
+        candidates = spotify_search_track(access_token, item.get("title", ""), item.get("artist", ""))
+        best = candidates[0] if candidates else {}
+        db.update_playlist_item(
+            item["id"],
+            spotify_track_id=best.get("id", ""),
+            spotify_uri=best.get("uri", ""),
+            spotify_url=best.get("url", ""),
+            match_status="matched" if best.get("uri") else "unmatched",
+            candidates=candidates,
+        )
+    return RedirectResponse(url=f"/apps/playlists?playlist_id={playlist_id}", status_code=303)
+
+
+@app.post("/apps/playlists/{playlist_id}/spotify/submit")
+def submit_playlist_to_spotify(playlist_id: int):
+    """Create the playlist in Spotify and add matched tracks."""
+    profile = dict_from_row(db.get_playlist_profile())
+    access_token = refresh_playlist_spotify_token(profile)
+    playlist = dict_from_row(db.get_playlist_draft(playlist_id))
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found.")
+    items = dicts_from_rows(db.get_playlist_items(playlist_id))
+    unmatched = [item for item in items if not item.get("spotify_uri")]
+    if unmatched:
+        raise HTTPException(status_code=400, detail="Match all songs to Spotify before submitting.")
+    created = spotify_create_playlist(access_token, playlist["title"], playlist.get("description", ""), bool(playlist.get("is_public")))
+    spotify_id = created.get("id", "")
+    snapshot_id = spotify_add_playlist_items(access_token, spotify_id, [item["spotify_uri"] for item in items]) if spotify_id and items else created.get("snapshot_id", "")
+    spotify_url = ((created.get("external_urls") or {}).get("spotify") or "")
+    db.update_playlist_draft(
+        playlist_id,
+        status="submitted",
+        spotify_playlist_id=spotify_id,
+        spotify_url=spotify_url,
+        spotify_snapshot_id=snapshot_id,
+    )
+    return RedirectResponse(url=f"/apps/playlists?playlist_id={playlist_id}&submitted=1", status_code=303)
 
 
 @app.get("/apps/trainer")

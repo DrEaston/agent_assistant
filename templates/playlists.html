@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}Parrisa's Playlists{% endblock %}
+
+{% block content %}
+<section class="detail-section playlists-home">
+    <div class="section-header">
+        <div>
+            <h2>Parrisa's Playlists</h2>
+            <p class="section-subtitle">Dictate a playlist, edit the songs, match them to Spotify, and submit when ready.</p>
+        </div>
+    </div>
+
+    <div class="playlists-grid">
+        <aside class="playlist-card">
+            <span class="playlist-meta">Spotify</span>
+            <h3>Connection</h3>
+            {% if not spotify_configured %}
+                <p>Spotify is not configured yet. Add `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, and `SPOTIFY_REDIRECT_URI` to enable playlist submission.</p>
+            {% elif spotify_connected %}
+                <p>Connected{% if playlist_profile.spotify_display_name %} as {{ playlist_profile.spotify_display_name }}{% endif %}.</p>
+                <form method="post" action="/apps/playlists/spotify/disconnect">
+                    <button type="submit" class="secondary compact danger-button">Disconnect Spotify</button>
+                </form>
+            {% else %}
+                <p>Connect Spotify so Dieter can create playlists on Parrisa's account.</p>
+                <a class="button-link" href="/apps/playlists/spotify/connect">Connect Spotify</a>
+            {% endif %}
+            {% if request.query_params.get("spotify_connected") %}
+                <p>Spotify connection saved.</p>
+            {% endif %}
+            {% if request.query_params.get("submitted") %}
+                <p>Playlist submitted to Spotify.</p>
+            {% endif %}
+        </aside>
+
+        <article class="playlist-card">
+            <span class="playlist-meta">Ask Dieter</span>
+            <h3>Dictate Playlist</h3>
+            <p>Open Ask Dieter and say a playlist name plus songs, one per line. Example: make a playlist called Kitchen Dance; Cruel Summer by Taylor Swift; Levitating by Dua Lipa.</p>
+            <form method="post" action="/apps/playlists/create">
+                <input type="text" name="title" placeholder="New playlist title" required>
+                <input type="text" name="description" placeholder="Description">
+                <label><input type="checkbox" name="is_public" value="1"> Public</label>
+                <button type="submit" class="compact">Create Draft</button>
+            </form>
+        </article>
+    </div>
+
+    <div class="playlists-grid">
+        <aside class="playlist-card">
+            <span class="playlist-meta">Drafts</span>
+            <h3>Playlists</h3>
+            {% if playlists %}
+                <div class="playlist-list">
+                    {% for playlist in playlists %}
+                        <a href="/apps/playlists?playlist_id={{ playlist.id }}" class="{% if selected_playlist and selected_playlist.id == playlist.id %}active{% endif %}">
+                            {{ playlist.title }}
+                            <small>{{ playlist.item_count or 0 }} song{% if playlist.item_count != 1 %}s{% endif %}</small>
+                        </a>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p>No playlist drafts yet.</p>
+            {% endif %}
+        </aside>
+
+        {% if selected_playlist %}
+            <article class="playlist-card">
+                <span class="playlist-meta">{{ selected_playlist.status }}</span>
+                <h3>{{ selected_playlist.title }}</h3>
+                {% if selected_playlist.spotify_url %}
+                    <p><a href="{{ selected_playlist.spotify_url }}" target="_blank" rel="noreferrer">Open in Spotify</a></p>
+                {% endif %}
+                <form method="post" action="/apps/playlists/{{ selected_playlist.id }}/update">
+                    <input type="text" name="title" value="{{ selected_playlist.title }}" required>
+                    <input type="text" name="description" value="{{ selected_playlist.description or '' }}" placeholder="Description">
+                    <label><input type="checkbox" name="is_public" value="1" {% if selected_playlist.is_public %}checked{% endif %}> Public</label>
+                    <button type="submit" class="compact">Save</button>
+                </form>
+
+                <form method="post" action="/apps/playlists/{{ selected_playlist.id }}/items/add">
+                    <input type="text" name="raw_text" placeholder="Song title by artist">
+                    <input type="text" name="title" placeholder="Title">
+                    <input type="text" name="artist" placeholder="Artist">
+                    <button type="submit" class="compact">Add Song</button>
+                </form>
+
+                <div>
+                    {% if playlist_items %}
+                        {% for item in playlist_items %}
+                            <div class="playlist-song-row">
+                                <form method="post" action="/apps/playlists/items/{{ item.id }}/update">
+                                    <input type="hidden" name="playlist_id" value="{{ selected_playlist.id }}">
+                                    <input type="number" name="position" value="{{ item.position }}" min="1" aria-label="Position">
+                                    <input type="text" name="title" value="{{ item.title }}" placeholder="Title">
+                                    <input type="text" name="artist" value="{{ item.artist }}" placeholder="Artist">
+                                    <button type="submit" class="secondary compact">Save Song</button>
+                                </form>
+                                <p>
+                                    {{ item.match_status|title }}
+                                    {% if item.spotify_url %} - <a href="{{ item.spotify_url }}" target="_blank" rel="noreferrer">Spotify match</a>{% endif %}
+                                </p>
+                                <div class="playlist-song-actions">
+                                    <form method="post" action="/apps/playlists/items/{{ item.id }}/delete">
+                                        <input type="hidden" name="playlist_id" value="{{ selected_playlist.id }}">
+                                        <button type="submit" class="secondary compact danger-button">Delete</button>
+                                    </form>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <p>No songs yet.</p>
+                    {% endif %}
+                </div>
+
+                <div class="playlist-song-actions">
+                    <form method="post" action="/apps/playlists/{{ selected_playlist.id }}/spotify/match">
+                        <button type="submit" class="secondary compact" {% if not spotify_connected %}disabled{% endif %}>Match Songs</button>
+                    </form>
+                    <form method="post" action="/apps/playlists/{{ selected_playlist.id }}/spotify/submit">
+                        <button type="submit" class="compact" {% if not spotify_connected or not playlist_items %}disabled{% endif %}>Submit to Spotify</button>
+                    </form>
+                </div>
+            </article>
+        {% else %}
+            <article class="playlist-card">
+                <p>Create a playlist draft or dictate one through Ask Dieter.</p>
+            </article>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}
