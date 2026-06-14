@@ -96,15 +96,6 @@
         </div>
     </div>
 
-    <nav class="trainer-tabs" aria-label="Trainer views">
-        <a href="/apps/trainer" class="{% if active_tab == 'home' %}active{% endif %}">Home</a>
-        <a href="/apps/trainer/workouts" class="{% if active_tab == 'library' %}active{% endif %}">Workouts</a>
-        <a href="/apps/trainer/upcoming" class="{% if active_tab == 'upcoming' %}active{% endif %}">Upcoming</a>
-        <a href="/apps/trainer/past" class="{% if active_tab == 'past' %}active{% endif %}">Past</a>
-        <a href="/apps/trainer/imports" class="{% if active_tab == 'imports' %}active{% endif %}">Strava Imports</a>
-        <a href="/apps/trainer/settings" class="{% if active_tab == 'settings' %}active{% endif %}">Settings</a>
-    </nav>
-
     {% if active_tab == "home" %}
         <div class="trainer-card">
             <span class="trainer-card-meta">Account</span>
