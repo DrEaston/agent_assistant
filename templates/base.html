@@ -1823,6 +1823,10 @@
             gap: 0.85rem;
         }
 
+        .trainer-dashboard-grid {
+            grid-template-columns: minmax(0, 1.45fr) minmax(18rem, 0.85fr);
+        }
+
         .trainer-card {
             background: #fff;
             border: 1px solid #a7f3d0;
@@ -1853,6 +1857,44 @@
             font-size: 0.88rem;
             font-weight: 800;
             text-transform: uppercase;
+        }
+
+        .trainer-week-card {
+            align-content: start;
+        }
+
+        .trainer-week-nav {
+            justify-content: flex-end;
+            margin: 0;
+        }
+
+        .trainer-stat-grid {
+            display: grid;
+            gap: 0.55rem;
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+        }
+
+        .trainer-stat-grid div {
+            background: #ecfdf5;
+            border: 1px solid #bbf7d0;
+            border-radius: 6px;
+            display: grid;
+            gap: 0.1rem;
+            min-height: 4.1rem;
+            padding: 0.55rem;
+        }
+
+        .trainer-stat-grid span {
+            color: #064e3b;
+            font-size: 1.35rem;
+            font-weight: 900;
+            line-height: 1;
+        }
+
+        .trainer-stat-grid small {
+            color: #047857;
+            font-weight: 800;
+            line-height: 1.15;
         }
 
         .trainer-detail-list {
@@ -5085,6 +5127,11 @@
             }
 
             .dashboard-two-column {
+                grid-template-columns: 1fr;
+            }
+
+            .trainer-dashboard-grid,
+            .trainer-stat-grid {
                 grid-template-columns: 1fr;
             }
 

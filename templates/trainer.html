@@ -87,6 +87,82 @@
     </article>
 {% endmacro %}
 
+{% macro week_dashboard_card(week, route) %}
+    <article class="trainer-card trainer-week-card">
+        <div class="trainer-card-header">
+            <div>
+                <span class="trainer-card-meta">Training Week</span>
+                <h3>{{ week.label }}</h3>
+                <p>{{ week.week_start }} to {{ week.week_end }}</p>
+            </div>
+            <div class="trainer-filter-row trainer-week-nav">
+                <a href="{{ route }}?week_offset={{ week.previous_offset }}">Past Week</a>
+                {% if week.week_offset > 0 %}
+                    <a href="{{ route }}?week_offset={{ week.next_offset }}">Newer Week</a>
+                {% endif %}
+            </div>
+        </div>
+        <div class="trainer-stat-grid">
+            <div><span>{{ week.run_count }}</span><small>Runs</small></div>
+            <div><span>{{ week.distance_miles|round(1) }}</span><small>Miles</small></div>
+            <div><span>{{ week.moving_time_hours|round(1) }}</span><small>Hours</small></div>
+            <div><span>{{ week.elevation_gain_meters|round|int }}</span><small>M gain</small></div>
+            <div><span>{{ week.load_score|round|int }}</span><small>Load</small></div>
+            <div><span>{% if week.average_heartrate %}{{ week.average_heartrate|round|int }}{% else %}-{% endif %}</span><small>Avg HR</small></div>
+        </div>
+        {% if week.runs %}
+            <div>
+                <span class="trainer-card-meta">Completed Runs</span>
+                <ul class="trainer-detail-list">
+                    {% for run in week.runs %}
+                        <li>
+                            <strong>{{ run.started_at }} - {{ run.title or run.activity_type }}</strong>
+                            {% if run.distance_miles %} - {{ run.distance_miles|round(1) }} mi{% endif %}
+                            {% if run.average_pace_min_per_mile %} - {{ run.average_pace_min_per_mile|round(1) }} min/mi{% endif %}
+                            {% if run.average_heartrate %} - HR {{ run.average_heartrate|round|int }}{% endif %}
+                        </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% else %}
+            <p>No imported runs for this week yet.</p>
+        {% endif %}
+        {% if week.scheduled_sessions %}
+            <div>
+                <span class="trainer-card-meta">Scheduled</span>
+                <ul class="trainer-detail-list">
+                    {% for session in week.scheduled_sessions %}
+                        <li><strong>{{ session.scheduled_for }}</strong> - {{ session.title }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+    </article>
+{% endmacro %}
+
+{% macro weekly_plan_card(plan) %}
+    <article class="trainer-card">
+        <span class="trainer-card-meta">This Week's Menu</span>
+        <h3>Workouts To Choose From</h3>
+        {% if plan %}
+            {% for item in plan %}
+                <div>
+                    <span class="trainer-card-meta">{{ item.label }}</span>
+                    <h3>{{ item.workout.title }}</h3>
+                    <p>{{ item.workout.summary }}</p>
+                    <form method="post" action="/apps/trainer/workouts/{{ item.workout.id }}/schedule">
+                        <input type="date" name="scheduled_for" aria-label="Workout date">
+                        <input type="text" name="notes" placeholder="Notes" aria-label="Workout notes">
+                        <button type="submit" class="compact">Schedule</button>
+                    </form>
+                </div>
+            {% endfor %}
+        {% else %}
+            <p>No weekly workout options are available yet.</p>
+        {% endif %}
+    </article>
+{% endmacro %}
+
 {% block content %}
 <section class="detail-section trainer-home">
     <div class="section-header">
@@ -97,10 +173,9 @@
     </div>
 
     {% if active_tab == "home" %}
-        <div class="trainer-card">
-            <span class="trainer-card-meta">Account</span>
-            <h3>{{ request.state.current_user.display_name or request.state.current_user.email }}</h3>
-            <p>{{ trainer_profile.mode|title if trainer_profile else "Athlete" }} mode. Recommended workouts are shared; workout summaries belong to the logged-in athlete unless coach access is granted.</p>
+        <div class="trainer-card-grid trainer-dashboard-grid">
+            {{ week_dashboard_card(week_dashboard, "/apps/trainer") }}
+            {{ weekly_plan_card(weekly_workout_plan) }}
         </div>
         {% if trainer_profile and trainer_profile.mode == "coach" and coach_athletes %}
             <div class="trainer-card">
@@ -112,26 +187,11 @@
                 </div>
             </div>
         {% endif %}
-        {% if suggestion_groups %}
-            <div class="trainer-card-grid">
-                {% for group in suggestion_groups %}
-                    <article class="trainer-card">
-                        <span class="trainer-card-meta">{{ group.label }}</span>
-                        {% for workout in group.workouts %}
-                            <div>
-                                <h3>{{ workout.title }}</h3>
-                                <p>{{ workout.summary }}</p>
-                                <form method="post" action="/apps/trainer/workouts/{{ workout.id }}/schedule">
-                                    <input type="date" name="scheduled_for" aria-label="Workout date">
-                                    <input type="text" name="notes" placeholder="Notes" aria-label="Workout notes">
-                                    <button type="submit" class="compact">Schedule</button>
-                                </form>
-                            </div>
-                        {% endfor %}
-                    </article>
-                {% endfor %}
-            </div>
-        {% endif %}
+        <div class="trainer-card">
+            <span class="trainer-card-meta">Account</span>
+            <h3>{{ request.state.current_user.display_name or request.state.current_user.email }}</h3>
+            <p>{{ trainer_profile.mode|title if trainer_profile else "Athlete" }} mode. Recommended workouts are shared; workout summaries belong to the logged-in athlete unless coach access is granted.</p>
+        </div>
     {% elif active_tab == "library" %}
         <div class="trainer-filter-row" aria-label="Workout type filters">
             <a href="/apps/trainer/workouts" class="{% if not workout_type %}active{% endif %}">All</a>
@@ -245,6 +305,7 @@
                     {% endfor %}
                 </article>
             {% endif %}
+            {{ week_dashboard_card(week_dashboard, "/apps/trainer/imports") }}
             {% if weekly_run_summaries %}
                 <article class="trainer-card">
                     <span class="trainer-card-meta">Recent Training Load</span>

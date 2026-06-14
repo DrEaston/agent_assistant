@@ -4544,6 +4544,85 @@ def trainer_weekly_summary_view(row):
     return item
 
 
+def trainer_week_offset(request):
+    """Read the selected week offset from the request."""
+    try:
+        return max(int(request.query_params.get("week_offset", 0)), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def trainer_workout_week_dashboard(user_id=None, week_offset=0):
+    """Build a dashboard summary for one training week."""
+    today = datetime.now().date()
+    week_start = today - timedelta(days=today.weekday()) - timedelta(days=7 * max(week_offset, 0))
+    week_end = week_start + timedelta(days=6)
+    runs = []
+    for row in dicts_from_rows(db.get_trainer_imported_workouts(user_id=user_id, limit=500)):
+        try:
+            started = datetime.strptime((row.get("started_at") or "")[:10], "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            continue
+        if week_start <= started <= week_end:
+            item = dict(row)
+            distance_meters = float(item.get("distance_meters") or 0)
+            moving_time_seconds = int(item.get("moving_time_seconds") or 0)
+            average_speed_mps = float(item.get("average_speed_mps") or 0)
+            item["distance_miles"] = distance_meters / 1609.344 if distance_meters else 0
+            item["moving_time_minutes"] = moving_time_seconds / 60 if moving_time_seconds else 0
+            item["average_pace_min_per_mile"] = 26.8224 / average_speed_mps if average_speed_mps else 0
+            runs.append(item)
+
+    runs.sort(key=lambda item: item.get("started_at") or "", reverse=True)
+    total_distance = sum(float(run.get("distance_miles") or 0) for run in runs)
+    total_seconds = sum(int(run.get("moving_time_seconds") or 0) for run in runs)
+    total_gain = sum(float(run.get("elevation_gain_meters") or 0) for run in runs)
+    total_load = sum(float(run.get("suffer_score") or 0) for run in runs)
+    hr_values = [float(run.get("average_heartrate") or 0) for run in runs if run.get("average_heartrate")]
+    sessions = [
+        session
+        for session in [trainer_workout_view(row) for row in db.get_trainer_sessions("upcoming", limit=80, user_id=user_id)]
+        if session.get("scheduled_for") and week_start.isoformat() <= session.get("scheduled_for") <= week_end.isoformat()
+    ]
+    return {
+        "week_offset": week_offset,
+        "week_start": week_start.isoformat(),
+        "week_end": week_end.isoformat(),
+        "label": "This week" if week_offset == 0 else f"{week_offset} week{'s' if week_offset != 1 else ''} ago",
+        "next_offset": max(week_offset - 1, 0),
+        "previous_offset": week_offset + 1,
+        "runs": runs,
+        "run_count": len(runs),
+        "distance_miles": total_distance,
+        "moving_time_hours": total_seconds / 3600 if total_seconds else 0,
+        "elevation_gain_meters": total_gain,
+        "load_score": total_load,
+        "average_heartrate": (sum(hr_values) / len(hr_values)) if hr_values else 0,
+        "scheduled_sessions": sessions,
+    }
+
+
+def trainer_weekly_workout_plan():
+    """Pick a compact weekly menu from the Trainer catalog."""
+    grouped = db.get_trainer_suggested_workouts_by_category(limit_per_category=2)
+    plan_order = [
+        ("run_threshold", "Threshold"),
+        ("run_speed", "Speed"),
+        ("strength_glutes", "Strength"),
+        ("bike_tempo", "Bike"),
+    ]
+    plan = []
+    for category, label in plan_order:
+        rows = grouped.get(category) or []
+        if rows:
+            plan.append({
+                "category": category,
+                "label": label,
+                "workout": trainer_workout_view(rows[0]),
+            })
+    return plan
+
+
 def trainer_shoe_usage_by_workout(user_id):
     """Group shoe usage rows by imported workout id for templates."""
     grouped = {}
@@ -4656,6 +4735,7 @@ def trainer_context(request, active_tab="home", workout_type="", athlete_user_id
     """Build shared Dieter Trainer template context."""
     current_user = request.state.current_user
     selected_athlete_id = athlete_user_id or (current_user or {}).get("id")
+    week_offset = trainer_week_offset(request)
     workouts = [trainer_workout_view(row) for row in db.get_trainer_workouts(workout_type)]
     trainer_profile = dict_from_row(db.get_trainer_profile())
     reflection_target_id = parse_trainer_reflection_target(str(request.url)) if request else None
@@ -4677,6 +4757,8 @@ def trainer_context(request, active_tab="home", workout_type="", athlete_user_id
         "selected_athlete_id": selected_athlete_id,
         "is_viewing_own_trainer": selected_athlete_id == (current_user or {}).get("id"),
         "suggestion_groups": trainer_grouped_suggestions(),
+        "weekly_workout_plan": trainer_weekly_workout_plan(),
+        "week_dashboard": trainer_workout_week_dashboard(selected_athlete_id, week_offset),
         "workouts": workouts,
         "run_workouts": [item for item in workouts if item["workout_type"] == "run"],
         "bike_workouts": [item for item in workouts if item["workout_type"] == "bike"],
