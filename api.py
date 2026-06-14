@@ -239,7 +239,7 @@ async def load_authenticated_user(request: Request, call_next):
         if (
             is_guest_user(user)
             and request.method not in READ_ONLY_METHODS
-            and not path.startswith(("/logout", "/guest-login"))
+            and not path.startswith(("/login", "/register", "/logout", "/guest-login"))
         ):
             return guest_read_only_response(request)
         response = await call_next(request)
@@ -3222,7 +3222,7 @@ def append_query_param(path, **params):
 @app.get("/login")
 def login_page(request: Request):
     """Show login form."""
-    if request.state.current_user:
+    if request.state.current_user and not is_guest_user(request.state.current_user):
         return RedirectResponse(url="/", status_code=303)
     return render_auth_page(request, "login")
 
@@ -3254,7 +3254,7 @@ def guest_login_form(next: str = Form("/apps/recipes")):
 @app.get("/register")
 def register_page(request: Request):
     """Show registration form."""
-    if request.state.current_user:
+    if request.state.current_user and not is_guest_user(request.state.current_user):
         return RedirectResponse(url="/", status_code=303)
     return render_auth_page(request, "register")
 
