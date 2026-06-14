@@ -19,6 +19,7 @@ from database import Database, set_current_user_id, reset_current_user_id, get_c
 from pathlib import Path
 from pydantic import BaseModel
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import json
 import shutil
 import uuid
@@ -1725,6 +1726,12 @@ def infer_scheduler_context_label(text):
     """Infer a short agenda context from common reminder wording."""
     text_lower = (text or "").lower()
     context_map = [
+        ("home", "Home"),
+        ("house", "Home"),
+        ("chore", "Home"),
+        ("chores", "Home"),
+        ("before bed", "Home"),
+        ("bedtime", "Home"),
         ("mechanic", "Mechanic"),
         ("doctor", "Doctor"),
         ("dentist", "Dentist"),
@@ -1738,6 +1745,18 @@ def infer_scheduler_context_label(text):
         if needle in text_lower:
             return label
     return "General"
+
+def app_now():
+    """Return the app-local time used for casual scheduling language."""
+    timezone_name = os.getenv("APP_TIMEZONE", "America/Phoenix")
+    try:
+        return datetime.now(ZoneInfo(timezone_name))
+    except Exception:
+        return datetime.now()
+
+def app_today():
+    """Return the app-local date used for scheduler priority."""
+    return app_now().date()
 
 def local_scheduler_proposal(user_message, target):
     """Build a conservative scheduler edit when no model is configured."""
@@ -1857,6 +1876,70 @@ def extract_scheduler_detail_items(text, context_label=""):
         if item and item.lower() not in {"it", "that", "this"}:
             items.append(item)
     return items[:5]
+
+def scheduler_list_request(text):
+    """Detect voice-style requests that should become checklist bullets."""
+    return bool(re.search(r"\b(chore|chores|to do|todo|checklist|list|tasks?)\b", text or "", flags=re.IGNORECASE))
+
+def scheduler_request_targets_existing_notes(text):
+    """Return true when the user explicitly wants to add details to an existing card."""
+    return bool(re.search(
+        r"\b(add|put|save)\b.+\b(to|under|in)\b.+\b(bullet|bullets|card|item|note|notes)\b",
+        text or "",
+        flags=re.IGNORECASE | re.DOTALL,
+    ))
+
+def extract_scheduler_list_items(text, context_label=""):
+    """Extract checklist items from dictated list requests."""
+    original = (text or "").strip()
+    if not original or not scheduler_list_request(original):
+        return []
+
+    list_text = ""
+    patterns = [
+        r"\b(?:make|create|build|add|put)(?:\s+me)?(?:\s+a|\s+an|\s+the)?\s+(?:(?:chore|chores|to do|todo|task|tasks|checklist)\s+)?list(?:\s+for\s+(?:today|tomorrow|tonight|this evening))?(?:\s+(?:of|with|that includes|including|for))?\s*:?\s*(.+)$",
+        r"\b(?:chores|tasks|to do|todo|checklist)(?:\s+for\s+(?:today|tomorrow|tonight|this evening))?\s*:?\s*(.+)$",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, original, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            list_text = match.group(1)
+            break
+    if not list_text:
+        list_text = original
+
+    list_text = re.sub(
+        r"^\s*(please\s+)?(?:make|create|build|add|put|remember|remind me)(?:\s+me)?(?:\s+a|\s+an|\s+the)?\s+",
+        "",
+        list_text,
+        flags=re.IGNORECASE,
+    )
+    list_text = re.sub(r"\b(?:chore|chores|to do|todo|task|tasks|checklist)\s+list\b", "", list_text, flags=re.IGNORECASE)
+    list_text = re.sub(r"\blist\s+(?:for|of|with|that includes|including)\b", "", list_text, flags=re.IGNORECASE)
+    list_text = re.sub(r"\bfor\s+(?:today|tomorrow|tonight|this evening)\b", "", list_text, flags=re.IGNORECASE)
+    list_text = re.sub(r"\b(?:today|tomorrow|tonight|this evening)\b", "", list_text, flags=re.IGNORECASE)
+    if context_label:
+        list_text = re.sub(rf"\b(my|the)?\s*{re.escape(context_label)}('?s)?\b", "", list_text, flags=re.IGNORECASE)
+    list_text = re.sub(r"\s+", " ", list_text).strip(" .:-")
+    if not list_text:
+        return []
+
+    raw_items = re.split(
+        r"\s*(?:,|;|\n|\band\s+then\b|\bthen\b|\balso\b|\bplus\b|\band\b)\s*",
+        list_text,
+        flags=re.IGNORECASE,
+    )
+    items = []
+    seen = set()
+    for raw_item in raw_items:
+        item = raw_item.strip(" .:-")
+        item = re.sub(r"^(that\s+)?(i\s+)?(?:also\s+)?(?:need to|have to|should|must|to)\s+", "", item, flags=re.IGNORECASE)
+        item = re.sub(r"^(a|an|the)\s+", "", item, flags=re.IGNORECASE).strip(" .:-")
+        key = re.sub(r"[^a-z0-9]+", " ", item.lower()).strip()
+        if key and key not in {"it", "that", "this", "list"} and key not in seen:
+            items.append(item[0].upper() + item[1:] if item else item)
+            seen.add(key)
+    return items[:12]
 
 def clean_scheduler_note_line(line):
     """Normalize a scheduler note line and drop obvious prompt echoes."""
@@ -2005,9 +2088,12 @@ def find_open_scheduler_item_for_context(context_label, title="", scheduled_for=
             continue
         item_context = (item.get("context_label") or "").strip().lower()
         item_title = (item.get("title") or "").strip().lower()
-        if context_key and context_key != "general" and context_key in {item_context, item_title}:
-            return item
         if title_key and title_key in {item_context, item_title}:
+            return item
+        generic_titles = {"", "scheduler reminder", "reminder", "scheduler item", context_key}
+        if title_key not in generic_titles:
+            continue
+        if context_key and context_key != "general" and context_key in {item_context, item_title}:
             return item
     return None
 
@@ -2140,7 +2226,7 @@ def scheduler_text_implies_today(text):
 def scheduler_date_from_text(text):
     """Resolve simple relative scheduler dates from user text."""
     text = text or ""
-    today = datetime.now().date()
+    today = app_today()
     if re.search(r"\btomorrow\b", text, flags=re.IGNORECASE):
         return (today + timedelta(days=1)).isoformat()
     if scheduler_text_implies_today(text):
@@ -2162,7 +2248,7 @@ def title_from_scheduler_note_line(line, fallback="Scheduler item"):
 
 def split_mixed_priority_scheduler_notes():
     """Move obvious today-note lines out of future scheduler cards."""
-    today = datetime.now().date()
+    today = app_today()
     today_iso = today.isoformat()
     for item in dicts_from_rows(db.get_scheduler_items(status="open", limit=250)):
         scheduled_for = (item.get("scheduled_for") or "").strip()
@@ -2217,24 +2303,21 @@ def synthesize_scheduler_operation(user_message, operation):
     scheduled_for = (operation.get("scheduled_for") or "").strip()
     bullet_additions = extract_scheduler_bullet_additions(original, context_label)
     agenda_items = bullet_additions or extract_scheduler_agenda_items(original)
-    detail_items = extract_scheduler_detail_items(original, context_label)
-    chore_list_items = []
-    chore_list_detail = re.search(r"\b(?:chore|chores)\s+list\b.*?[:\-]\s*(.+)$", original, flags=re.IGNORECASE | re.DOTALL)
-    if chore_list_detail:
-        chore_list_items = [
-            item.strip(" .")
-            for item in re.split(r"\s*(?:,|;|\n|\band\b)\s*", chore_list_detail.group(1))
-            if item.strip(" .")
-        ][:8]
+    list_items = extract_scheduler_list_items(original, context_label)
+    detail_items = [] if list_items else extract_scheduler_detail_items(original, context_label)
 
     text = original.lower()
     if not scheduled_for:
         scheduled_for = scheduler_date_from_text(text)
 
     rawish_title = title.lower() == original.lower() or len(title) > 80
-    chore_list_match = re.search(r"\b(chore|chores)\s+list\b", original, flags=re.IGNORECASE)
-    if context_label and context_label != "General":
-        title = context_label
+    is_list_request = scheduler_list_request(original)
+    chore_list_match = re.search(r"\b(chore|chores)\b", original, flags=re.IGNORECASE)
+    if context_label and context_label != "General" and not (context_label == "Home" and rawish_title and not list_items):
+        if list_items:
+            title = "Chore list" if chore_list_match else f"{context_label} checklist"
+        else:
+            title = context_label
     elif rawish_title:
         cleaned = re.sub(
             r"^\s*(please\s+)?(remind me|remember|add|put|schedule|make|create)\s+(me\s+)?(a\s+|an\s+|the\s+)?(to|about|that)?\s*",
@@ -2246,22 +2329,24 @@ def synthesize_scheduler_operation(user_message, operation):
         cleaned = re.sub(r"\b(for|on|by)\s*$", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"\b(to|in|on)\s+(the\s+)?scheduler\b", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
-        if chore_list_match:
+        if list_items and chore_list_match:
             title = "Chore list"
+        elif list_items:
+            title = "Checklist"
         elif cleaned:
             title = cleaned[0].upper() + cleaned[1:]
         else:
             title = "Scheduler reminder"
 
     note_lines = []
-    if chore_list_items:
-        note_lines = chore_list_items
+    if list_items:
+        note_lines = list_items
     elif agenda_items:
         note_lines = [
             item if re.match(r"^ask\s+about\b", item, flags=re.IGNORECASE) else f"Ask about {item}"
             for item in agenda_items
         ]
-    elif chore_list_match:
+    elif is_list_request:
         note_lines = []
     elif detail_items and not (len(detail_items) == 1 and detail_items[0].lower() == title.lower()):
         normalized_title = re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
@@ -2270,7 +2355,7 @@ def synthesize_scheduler_operation(user_message, operation):
             note_lines = detail_items
     if note_lines and (
         len(note_lines) > 1
-        or re.search(r"\b(chore|chores|to do|todo|checklist|list)\b", original, flags=re.IGNORECASE)
+        or is_list_request
     ):
         note_lines = [
             line if re.match(r"^\[( |x|X)\]\s+", line) else f"[ ] {line}"
@@ -2285,7 +2370,7 @@ def synthesize_scheduler_operation(user_message, operation):
 
 def enrich_scheduler_item_priority(item, today=None):
     """Add date priority fields used by scheduler cards."""
-    today = today or datetime.now().date()
+    today = today or app_today()
     scheduled_for = (item.get("scheduled_for") or "").strip()
     if not scheduled_for:
         combined_text = " ".join([
@@ -2326,7 +2411,7 @@ def enrich_scheduler_item_priority(item, today=None):
 
 def scheduler_due_context():
     """Build visible scheduler notifications for app entry pages."""
-    today = datetime.now().date()
+    today = app_today()
     split_mixed_priority_scheduler_notes()
     open_items = dicts_from_rows(db.get_scheduler_items(status="open", limit=250))
     due_items = []
@@ -2362,7 +2447,7 @@ def scheduler_due_context():
 
 def prepare_scheduler_items_for_display(items):
     """Add priority display fields to scheduler items."""
-    today = datetime.now().date()
+    today = app_today()
     enriched_items = [
         enrich_scheduler_item_priority(dict(item), today)
         for item in items
@@ -2399,7 +2484,7 @@ def propose_planner_edit(user_message, page_url="", conversation_history=None):
 
     prompt = (
         f"[Planner Context]\n{context}\n\n"
-        f"Current date: {datetime.now().strftime('%Y-%m-%d')}\n"
+        f"Current date: {app_today().isoformat()}\n"
         "Interpret relative dates like today, tomorrow, and next week from the current date.\n\n"
         f"User request:\n{user_message}"
     )
@@ -2641,6 +2726,62 @@ def apply_planner_edit(user_message, page_url, proposal):
                             "scheduled_for": requested_date,
                             "notes": new_notes,
                         })
+                        continue
+                    if (
+                        existing_item
+                        and scheduler_list_request(user_message)
+                        and not scheduler_request_targets_existing_notes(user_message)
+                    ):
+                        new_operation = synthesize_scheduler_operation(user_message, {
+                            "op": "add_scheduler_item",
+                            "title": user_message,
+                            "context_label": operation.get("context_label") or existing_item.get("context_label") or infer_scheduler_context_label(user_message),
+                            "scheduled_for": requested_date or (operation.get("scheduled_for") or "").strip(),
+                            "notes": operation.get("notes") or "",
+                            "project_id": existing_item.get("project_id"),
+                            "action_id": existing_item.get("action_id"),
+                        })
+                        title = new_operation.get("title", "").strip()
+                        context_label = new_operation.get("context_label", "").strip()
+                        scheduled_for = new_operation.get("scheduled_for", "").strip()
+                        new_notes = new_operation.get("notes", "").strip()
+                        matching_item = find_open_scheduler_item_for_context(context_label, title, scheduled_for) if new_notes else None
+                        if matching_item and int(matching_item["id"]) != int(existing_item["id"]):
+                            item_id = int(matching_item["id"])
+                            merged_notes = merge_scheduler_notes(matching_item.get("notes", ""), new_notes)
+                            db.update_scheduler_item(
+                                item_id,
+                                title=matching_item.get("title") or title,
+                                context_label=matching_item.get("context_label") or context_label,
+                                scheduled_for=matching_item.get("scheduled_for") or scheduled_for,
+                                notes=merged_notes,
+                            )
+                            applied.append({
+                                "op": "update_scheduler_item",
+                                "scheduler_item_id": item_id,
+                                "title": matching_item.get("title") or title,
+                                "context_label": matching_item.get("context_label") or context_label,
+                                "scheduled_for": matching_item.get("scheduled_for") or scheduled_for,
+                                "notes": merged_notes,
+                            })
+                        else:
+                            item_id = db.add_scheduler_item(
+                                title,
+                                context_label=context_label,
+                                scheduled_for=scheduled_for,
+                                notes=new_notes,
+                                source="dieter",
+                                project_id=existing_item.get("project_id"),
+                                action_id=existing_item.get("action_id"),
+                            )
+                            applied.append({
+                                "op": "add_scheduler_item",
+                                "scheduler_item_id": item_id,
+                                "title": title,
+                                "context_label": context_label,
+                                "scheduled_for": scheduled_for,
+                                "notes": new_notes,
+                            })
                         continue
                     db.update_scheduler_item(
                         item_id,
