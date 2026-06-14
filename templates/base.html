@@ -138,6 +138,17 @@
             --page-theme-subtitle: #cffafe;
         }
 
+        .trainer-shell-page,
+        .app-shell-trainer {
+            --page-theme-color: #065f46;
+            --page-theme-border: #a7f3d0;
+            --page-theme-panel: #ecfdf5;
+            --page-theme-panel-strong: #d1fae5;
+            --page-theme-text: #047857;
+            --page-theme-hover: #d1fae5;
+            --page-theme-subtitle: #bbf7d0;
+        }
+
         .launcher-shell-page,
         .app-shell-launcher {
             --page-theme-color: #334155;
@@ -369,6 +380,35 @@
             background: var(--shell-band-bg);
             border-color: var(--shell-control-hover-border);
             color: var(--shell-control-text);
+        }
+
+        .trainer-shell-page .app-shell-trainer .app-menu summary,
+        .trainer-shell-page .app-shell-trainer .app-menu .app-nav a,
+        .trainer-shell-page .app-shell-trainer .app-menu .app-nav button,
+        .trainer-shell-page .app-shell-trainer .app-shell-band a,
+        .trainer-shell-page .app-shell-trainer .app-shell-band button {
+            background: #fff;
+            border-color: #a7f3d0;
+            color: #047857;
+        }
+
+        .trainer-shell-page .app-shell-trainer .app-menu summary:hover,
+        .trainer-shell-page .app-shell-trainer .app-menu .app-nav a:hover,
+        .trainer-shell-page .app-shell-trainer .app-menu .app-nav button:hover,
+        .trainer-shell-page .app-shell-trainer .app-shell-band a:hover,
+        .trainer-shell-page .app-shell-trainer .app-shell-band button:hover {
+            background: #d1fae5;
+            border-color: #065f46;
+            color: #047857;
+        }
+
+        .trainer-shell-page .app-shell-trainer .app-menu .app-nav {
+            background: #065f46;
+            border-color: #065f46;
+        }
+
+        .trainer-shell-page .app-shell-trainer .app-menu-icon span {
+            background: #047857;
         }
 
         .planner-app-heading > .app-nav {
@@ -5423,11 +5463,11 @@
                     <h1><a href="/">Dieter Trainer</a></h1>
                     <p>Build workouts, schedule sessions, and track training history.</p>
                 </div>
-                <div class="app-shell-actions recipe-app-actions">
-                    <button type="button" class="planner-chat-button" data-recipe-chat-open>Ask Dieter</button>
-                    <details class="app-menu recipe-app-menu">
+                <div class="app-shell-actions trainer-app-actions">
+                    <button type="button" class="trainer-chat-button" data-recipe-chat-open>Ask Dieter</button>
+                    <details class="app-menu trainer-app-menu">
                         <summary aria-label="Open Trainer navigation">
-                            <span class="app-menu-icon recipe-app-menu-icon" aria-hidden="true">
+                            <span class="app-menu-icon trainer-app-menu-icon" aria-hidden="true">
                                 <span></span>
                                 <span></span>
                                 <span></span>
