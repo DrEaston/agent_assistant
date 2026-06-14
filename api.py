@@ -3938,7 +3938,9 @@ def trainer_context(request, active_tab="home", workout_type="", athlete_user_id
         "trainer_profile": dict_from_row(db.get_trainer_profile()),
         "coach_grants": dicts_from_rows(db.get_trainer_coach_grants_for_athlete()),
         "coach_athletes": dicts_from_rows(db.get_trainer_athletes_for_coach()),
+        "current_user_id": (current_user or {}).get("id"),
         "selected_athlete_id": selected_athlete_id,
+        "is_viewing_own_trainer": selected_athlete_id == (current_user or {}).get("id"),
         "suggestion_groups": trainer_grouped_suggestions(),
         "workouts": workouts,
         "run_workouts": [item for item in workouts if item["workout_type"] == "run"],
@@ -4068,8 +4070,11 @@ def schedule_trainer_workout(
 @app.post("/apps/trainer/sessions/{session_id}/complete")
 def complete_trainer_session(session_id: int, notes: str = Form("")):
     """Mark a Trainer workout done."""
-    if not db.get_trainer_session(session_id):
+    session = dict_from_row(db.get_trainer_session(session_id))
+    if not session:
         raise HTTPException(status_code=404, detail="Workout session not found")
+    if session.get("user_id") != get_current_user_id():
+        raise HTTPException(status_code=403, detail="Only the athlete can change this workout.")
     db.complete_trainer_session(session_id, notes=notes)
     return RedirectResponse(url="/apps/trainer/past", status_code=303)
 
@@ -4077,8 +4082,11 @@ def complete_trainer_session(session_id: int, notes: str = Form("")):
 @app.post("/apps/trainer/sessions/{session_id}/reopen")
 def reopen_trainer_session(session_id: int):
     """Move a past Trainer workout back to upcoming."""
-    if not db.get_trainer_session(session_id):
+    session = dict_from_row(db.get_trainer_session(session_id))
+    if not session:
         raise HTTPException(status_code=404, detail="Workout session not found")
+    if session.get("user_id") != get_current_user_id():
+        raise HTTPException(status_code=403, detail="Only the athlete can change this workout.")
     db.reopen_trainer_session(session_id)
     return RedirectResponse(url="/apps/trainer/upcoming", status_code=303)
 
@@ -4086,8 +4094,11 @@ def reopen_trainer_session(session_id: int):
 @app.post("/apps/trainer/sessions/{session_id}/delete")
 def delete_trainer_session(session_id: int, next: str = Form("/apps/trainer/upcoming")):
     """Delete a Trainer workout session."""
-    if not db.get_trainer_session(session_id):
+    session = dict_from_row(db.get_trainer_session(session_id))
+    if not session:
         raise HTTPException(status_code=404, detail="Workout session not found")
+    if session.get("user_id") != get_current_user_id():
+        raise HTTPException(status_code=403, detail="Only the athlete can change this workout.")
     db.delete_trainer_session(session_id)
     return RedirectResponse(url=safe_redirect_path(next, "/apps/trainer/upcoming"), status_code=303)
 

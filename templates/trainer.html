@@ -35,7 +35,7 @@
     </article>
 {% endmacro %}
 
-{% macro session_card(session, mode) %}
+{% macro session_card(session, mode, can_edit=True) %}
     <article class="trainer-card">
         <div class="trainer-card-header">
             <div>
@@ -62,26 +62,28 @@
                 {% endfor %}
             </ul>
         {% endif %}
-        <div class="trainer-card-actions">
-            {% if mode == "past" %}
-                <form method="post" action="/apps/trainer/sessions/{{ session.id }}/reopen">
-                    <button type="submit" class="secondary compact">Move to upcoming</button>
-                </form>
-                <form method="post" action="/apps/trainer/sessions/{{ session.id }}/delete">
-                    <input type="hidden" name="next" value="/apps/trainer/past">
-                    <button type="submit" class="secondary compact danger-button">Delete</button>
-                </form>
-            {% else %}
-                <form method="post" action="/apps/trainer/sessions/{{ session.id }}/complete">
-                    <input type="text" name="notes" placeholder="Result notes" aria-label="Workout result notes">
-                    <button type="submit" class="compact">Complete</button>
-                </form>
-                <form method="post" action="/apps/trainer/sessions/{{ session.id }}/delete">
-                    <input type="hidden" name="next" value="/apps/trainer/upcoming">
-                    <button type="submit" class="secondary compact danger-button">Delete</button>
-                </form>
-            {% endif %}
-        </div>
+        {% if can_edit %}
+            <div class="trainer-card-actions">
+                {% if mode == "past" %}
+                    <form method="post" action="/apps/trainer/sessions/{{ session.id }}/reopen">
+                        <button type="submit" class="secondary compact">Move to upcoming</button>
+                    </form>
+                    <form method="post" action="/apps/trainer/sessions/{{ session.id }}/delete">
+                        <input type="hidden" name="next" value="/apps/trainer/past">
+                        <button type="submit" class="secondary compact danger-button">Delete</button>
+                    </form>
+                {% else %}
+                    <form method="post" action="/apps/trainer/sessions/{{ session.id }}/complete">
+                        <input type="text" name="notes" placeholder="Result notes" aria-label="Workout result notes">
+                        <button type="submit" class="compact">Complete</button>
+                    </form>
+                    <form method="post" action="/apps/trainer/sessions/{{ session.id }}/delete">
+                        <input type="hidden" name="next" value="/apps/trainer/upcoming">
+                        <button type="submit" class="secondary compact danger-button">Delete</button>
+                    </form>
+                {% endif %}
+            </div>
+        {% endif %}
     </article>
 {% endmacro %}
 
@@ -104,6 +106,11 @@
     </nav>
 
     {% if active_tab == "home" %}
+        <div class="trainer-card">
+            <span class="trainer-card-meta">Account</span>
+            <h3>{{ request.state.current_user.display_name or request.state.current_user.email }}</h3>
+            <p>{{ trainer_profile.mode|title if trainer_profile else "Athlete" }} mode. Recommended workouts are shared; workout summaries belong to the logged-in athlete unless coach access is granted.</p>
+        </div>
         {% if trainer_profile and trainer_profile.mode == "coach" and coach_athletes %}
             <div class="trainer-card">
                 <h3>Coach View</h3>
@@ -156,7 +163,7 @@
         {% if upcoming_sessions %}
             <div class="trainer-card-grid">
                 {% for session in upcoming_sessions %}
-                    {{ session_card(session, "upcoming") }}
+                    {{ session_card(session, "upcoming", is_viewing_own_trainer) }}
                 {% endfor %}
             </div>
         {% else %}
@@ -168,7 +175,7 @@
         {% if past_sessions %}
             <div class="trainer-card-grid">
                 {% for session in past_sessions %}
-                    {{ session_card(session, "past") }}
+                    {{ session_card(session, "past", is_viewing_own_trainer) }}
                 {% endfor %}
             </div>
         {% else %}
@@ -182,13 +189,15 @@
                 <span class="trainer-card-meta">Strava</span>
                 <h3>Import Staging</h3>
                 <p>Strava OAuth will connect here. For now, imported activities are stored with source ids, activity types, dates, and Trainer categories.</p>
-                <form method="post" action="/apps/trainer/imports/strava/manual">
-                    <input type="text" name="external_id" placeholder="Strava activity id" required>
-                    <input type="text" name="activity_type" placeholder="Run, Ride, WeightTraining">
-                    <input type="text" name="title" placeholder="Activity title">
-                    <input type="date" name="started_at">
-                    <button type="submit" class="compact">Add import</button>
-                </form>
+                {% if is_viewing_own_trainer %}
+                    <form method="post" action="/apps/trainer/imports/strava/manual">
+                        <input type="text" name="external_id" placeholder="Strava activity id" required>
+                        <input type="text" name="activity_type" placeholder="Run, Ride, WeightTraining">
+                        <input type="text" name="title" placeholder="Activity title">
+                        <input type="date" name="started_at">
+                        <button type="submit" class="compact">Add import</button>
+                    </form>
+                {% endif %}
             </article>
             {% if imported_workouts %}
                 {% for workout in imported_workouts %}
