@@ -3957,7 +3957,7 @@ def render_apps_page(request: Request):
         "recipe_app": recipe_app,
         "planner_url": "/apps/assistant/planner",
         "trainer_url": "/apps/trainer",
-        "playlists_url": "/apps/playlists",
+        "playlists_url": "/apps/music/playlists",
         "planner": {
             "recommended_project": dashboard_context.get("recommended_project"),
             "next_action": dashboard_context.get("next_action"),
@@ -4843,7 +4843,7 @@ def spotify_callback_url(request):
     """Build the Spotify OAuth callback URL."""
     if SPOTIFY_REDIRECT_URI:
         return SPOTIFY_REDIRECT_URI
-    return str(request.url_for("playlists_spotify_callback"))
+    return str(request.url_for("music_spotify_callback"))
 
 
 def spotify_oauth_state(user_id):
@@ -5028,7 +5028,7 @@ def parse_playlist_target(page_url):
 def message_requests_playlist_action(text, page_url=""):
     """Detect Ask Dieter playlist dictation/edit requests."""
     normalized = (text or "").lower()
-    if (page_url or "").startswith("/apps/playlists"):
+    if (page_url or "").startswith(("/apps/music/playlists", "/apps/playlists")):
         return any(cue in normalized for cue in ["playlist", "song", "songs", "spotify", "add", "include", "called", "named"])
     return any(cue in normalized for cue in ["parrisa playlist", "spotify playlist", "make a playlist", "create a playlist"])
 
@@ -5058,7 +5058,7 @@ def playlist_redirect_url(playlist_id, **params):
     for key, value in params.items():
         if value:
             query[key] = value
-    return f"/apps/playlists?{urlencode(query)}" if query else "/apps/playlists"
+    return f"/apps/music/playlists?{urlencode(query)}" if query else "/apps/music/playlists"
 
 
 def handle_playlist_action_request(message, page_url):
@@ -5130,12 +5130,21 @@ def playlist_context(request, playlist_id=0, collection_id=0):
 
 
 @app.get("/apps/playlists")
+def legacy_playlists_app(request: Request):
+    """Redirect the old Dieter Music path to the canonical music route."""
+    query = request.url.query
+    suffix = f"?{query}" if query else ""
+    return RedirectResponse(url=f"/apps/music/playlists{suffix}", status_code=303)
+
+
+@app.get("/apps/music/playlists")
 def playlists_app(request: Request, playlist_id: int = 0, collection_id: int = 0):
     """Dieter Music home."""
     template = jinja_env.get_template("playlists.html")
     return HTMLResponse(template.render(playlist_context(request, playlist_id, collection_id)))
 
 
+@app.post("/apps/music/playlists/collections/create")
 @app.post("/apps/playlists/collections/create")
 def create_playlist_collection(
     title: str = Form("Parrisa's Playlists"),
@@ -5144,9 +5153,10 @@ def create_playlist_collection(
 ):
     """Create a visible playlist repository."""
     collection_id = db.add_playlist_collection(title, description=description, visibility=visibility)
-    return RedirectResponse(url=f"/apps/playlists?collection_id={collection_id}", status_code=303)
+    return RedirectResponse(url=f"/apps/music/playlists?collection_id={collection_id}", status_code=303)
 
 
+@app.post("/apps/music/playlists/create")
 @app.post("/apps/playlists/create")
 def create_playlist_draft(
     title: str = Form("Dieter Music Playlist"),
@@ -5160,6 +5170,7 @@ def create_playlist_draft(
     return RedirectResponse(url=playlist_redirect_url(playlist_id), status_code=303)
 
 
+@app.post("/apps/music/playlists/{playlist_id}/update")
 @app.post("/apps/playlists/{playlist_id}/update")
 def update_playlist_draft_form(
     playlist_id: int,
@@ -5173,6 +5184,7 @@ def update_playlist_draft_form(
     return RedirectResponse(url=playlist_redirect_url(playlist_id), status_code=303)
 
 
+@app.post("/apps/music/playlists/{playlist_id}/items/add")
 @app.post("/apps/playlists/{playlist_id}/items/add")
 def add_playlist_item_form(
     playlist_id: int,
@@ -5189,6 +5201,7 @@ def add_playlist_item_form(
     return RedirectResponse(url=playlist_redirect_url(playlist_id), status_code=303)
 
 
+@app.post("/apps/music/playlists/items/{item_id}/update")
 @app.post("/apps/playlists/items/{item_id}/update")
 def update_playlist_item_form(
     item_id: int,
@@ -5202,6 +5215,7 @@ def update_playlist_item_form(
     return RedirectResponse(url=playlist_redirect_url(playlist_id), status_code=303)
 
 
+@app.post("/apps/music/playlists/items/{item_id}/delete")
 @app.post("/apps/playlists/items/{item_id}/delete")
 def delete_playlist_item_form(item_id: int, playlist_id: int = Form(...)):
     """Delete one playlist song row."""
@@ -5209,6 +5223,7 @@ def delete_playlist_item_form(item_id: int, playlist_id: int = Form(...)):
     return RedirectResponse(url=playlist_redirect_url(playlist_id), status_code=303)
 
 
+@app.get("/apps/music/playlists/spotify/connect")
 @app.get("/apps/playlists/spotify/connect")
 def playlists_spotify_connect(request: Request):
     """Send the active user to Spotify OAuth."""
@@ -5226,7 +5241,8 @@ def playlists_spotify_connect(request: Request):
     return RedirectResponse(url=f"{SPOTIFY_ACCOUNT_BASE}/authorize?{urlencode(params)}", status_code=303)
 
 
-@app.get("/apps/playlists/spotify/callback")
+@app.get("/apps/music/playlists/spotify/callback", name="music_spotify_callback")
+@app.get("/apps/playlists/spotify/callback", name="playlists_spotify_callback")
 def playlists_spotify_callback(request: Request, code: str = "", state: str = "", error: str = ""):
     """Handle Spotify OAuth callback."""
     user_id = get_current_user_id()
@@ -5247,16 +5263,18 @@ def playlists_spotify_callback(request: Request, code: str = "", state: str = ""
         expires_at=int(time.time()) + int(payload.get("expires_in", 3600)),
         scope=payload.get("scope", SPOTIFY_SCOPES),
     )
-    return RedirectResponse(url="/apps/playlists?spotify_connected=1", status_code=303)
+    return RedirectResponse(url="/apps/music/playlists?spotify_connected=1", status_code=303)
 
 
+@app.post("/apps/music/playlists/spotify/disconnect")
 @app.post("/apps/playlists/spotify/disconnect")
 def playlists_spotify_disconnect():
     """Disconnect Spotify."""
     db.clear_playlist_spotify_tokens()
-    return RedirectResponse(url="/apps/playlists", status_code=303)
+    return RedirectResponse(url="/apps/music/playlists", status_code=303)
 
 
+@app.post("/apps/music/playlists/{playlist_id}/spotify/match")
 @app.post("/apps/playlists/{playlist_id}/spotify/match")
 def match_playlist_tracks(playlist_id: int):
     """Resolve playlist draft rows to Spotify track URIs."""
@@ -5277,6 +5295,7 @@ def match_playlist_tracks(playlist_id: int):
     return RedirectResponse(url=playlist_redirect_url(playlist_id), status_code=303)
 
 
+@app.post("/apps/music/playlists/{playlist_id}/spotify/submit")
 @app.post("/apps/playlists/{playlist_id}/spotify/submit")
 def submit_playlist_to_spotify(playlist_id: int):
     """Create the playlist in Spotify and add matched tracks."""

@@ -5584,7 +5584,7 @@
 {% set show_recipe_shell = recipe_app is defined and request is defined and request.url.path.startswith("/apps/recipes") %}
 {% set show_planner_shell = request is defined and (request.url.path.startswith("/apps/assistant") or request.url.path.startswith("/apps/planner") or request.url.path.startswith("/dashboard")) %}
 {% set show_trainer_shell = request is defined and request.url.path.startswith("/apps/trainer") %}
-{% set show_playlists_shell = request is defined and request.url.path.startswith("/apps/playlists") %}
+{% set show_playlists_shell = request is defined and (request.url.path.startswith("/apps/music/playlists") or request.url.path.startswith("/apps/playlists")) %}
 {% set show_launcher_shell = request is defined and (request.url.path == "/" or request.url.path == "/apps") %}
 {% set show_auth_shell = request is defined and (request.url.path.startswith("/login") or request.url.path.startswith("/register")) %}
 {% set show_global_nav = not show_recipe_shell and not show_planner_shell and not show_trainer_shell and not show_playlists_shell and not show_launcher_shell %}
@@ -5648,7 +5648,7 @@
             <a href="/apps/assistant/planner">Assistant</a>
             <a href="/apps/recipes">Kitchen</a>
             <a href="/apps/trainer">Trainer</a>
-            <a href="/apps/playlists">Music</a>
+            <a href="/apps/music/playlists">Music</a>
             {% if show_dieter_chat %}
                 <button type="button" data-recipe-chat-open>Ask Dieter</button>
             {% endif %}
@@ -5779,7 +5779,7 @@
                             </span>
                         </summary>
                         <div class="app-nav" aria-label="Music app navigation">
-                            <a href="/apps/playlists">Music</a>
+                            <a href="/apps/music/playlists">Music</a>
                             <a href="/">Home</a>
                         </div>
                     </details>
