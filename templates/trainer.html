@@ -192,6 +192,13 @@
                     <p>Open Ask Dieter and say how this run went. Dieter will ask for RPE, feel, body symptoms, and context if anything is missing.</p>
                 </article>
             {% endif %}
+            {% if shoe_target %}
+                <article class="trainer-card">
+                    <span class="trainer-card-meta">Shoe Log</span>
+                    <h3>{{ shoe_target.title }}</h3>
+                    <p>Open Ask Dieter and say which shoes you used. Mixed entries are fine, like trainers for warmup and spikes for the workout.</p>
+                </article>
+            {% endif %}
             <article class="trainer-card">
                 <span class="trainer-card-meta">Strava</span>
                 <h3>Strava Runs</h3>
@@ -224,6 +231,9 @@
                 {% if request.query_params.get("imported") %}
                     <p>{{ request.query_params.get("imported") }} run import{% if request.query_params.get("imported") != "1" %}s{% endif %} refreshed.</p>
                 {% endif %}
+                {% if request.query_params.get("shoe_prompt") and runs_missing_shoes %}
+                    <p>Add shoe details for new runs below. Use multiple rows if you warmed up in one pair and did the workout in another.</p>
+                {% endif %}
                 {% if is_viewing_own_trainer %}
                     <form method="post" action="/apps/trainer/imports/strava/manual">
                         <span class="trainer-card-meta">Manual fallback</span>
@@ -235,6 +245,15 @@
                     </form>
                 {% endif %}
             </article>
+            {% if runs_missing_shoes and is_viewing_own_trainer %}
+                <article class="trainer-card">
+                    <span class="trainer-card-meta">Shoes Needed</span>
+                    <h3>New Runs Need Shoe Details</h3>
+                    {% for run in runs_missing_shoes %}
+                        <p>{{ run.started_at or "No date" }} - {{ run.title or run.activity_type }}{% if run.distance_meters %} - {{ (run.distance_meters / 1609.344)|round(1) }} mi{% endif %}</p>
+                    {% endfor %}
+                </article>
+            {% endif %}
             {% if weekly_run_summaries %}
                 <article class="trainer-card">
                     <span class="trainer-card-meta">Recent Training Load</span>
@@ -271,7 +290,37 @@
                             {% if workout.average_cadence %} - cadence {{ workout.average_cadence|round|int }}{% endif %}
                             {% if workout.gear_name %} - {{ workout.gear_name }}{% endif %}
                         </p>
+                        {% set shoe_logs = shoe_usage_by_workout.get(workout.id, []) %}
+                        {% if shoe_logs %}
+                            <ul class="trainer-detail-list">
+                                {% for log in shoe_logs %}
+                                    <li>
+                                        <strong>{{ log.shoe_name }}</strong>
+                                        {% if log.segment_label %} - {{ log.segment_label }}{% endif %}
+                                        {% if log.distance_meters %} - {{ (log.distance_meters / 1609.344)|round(1) }} mi{% endif %}
+                                        {% if is_viewing_own_trainer %}
+                                            <form method="post" action="/apps/trainer/imports/shoes/{{ log.id }}/delete" class="inline-form">
+                                                <button type="submit" class="secondary compact danger-button">Remove</button>
+                                            </form>
+                                        {% endif %}
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% endif %}
                         {% if is_viewing_own_trainer %}
+                            <form method="post" action="/apps/trainer/imports/{{ workout.id }}/shoes">
+                                <select name="shoe_id" aria-label="Shoe">
+                                    <option value="0">Choose shoe</option>
+                                    {% for shoe in trainer_shoes %}
+                                        <option value="{{ shoe.id }}">{{ shoe.name }}{% if shoe.total_miles %} ({{ shoe.total_miles|round|int }} mi){% endif %}</option>
+                                    {% endfor %}
+                                </select>
+                                <input type="text" name="new_shoe_name" placeholder="Or new shoe">
+                                <input type="text" name="segment_label" placeholder="All, warmup, workout">
+                                <input type="number" name="distance_miles" step="0.1" min="0" placeholder="Miles">
+                                <button type="submit" class="secondary compact">Log shoes</button>
+                            </form>
+                            <a class="button-link secondary-link compact-link" href="/apps/trainer/imports?shoe_workout_id={{ workout.id }}">Log Shoes with Dieter</a>
                             <a class="button-link secondary-link compact-link" href="/apps/trainer/imports?reflection_workout_id={{ workout.id }}">Reflect with Dieter</a>
                         {% endif %}
                     </article>
@@ -327,6 +376,26 @@
                                     <button type="submit" class="secondary compact danger-button">Revoke</button>
                                 </form>
                             </li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+            </article>
+            <article class="trainer-card">
+                <span class="trainer-card-meta">Shoe Inventory</span>
+                <h3>Running Shoes</h3>
+                <form method="post" action="/apps/trainer/shoes">
+                    <input type="hidden" name="next" value="/apps/trainer/settings">
+                    <input type="text" name="name" placeholder="Shoe nickname" required>
+                    <input type="text" name="brand" placeholder="Brand">
+                    <input type="text" name="model" placeholder="Model">
+                    <input type="number" name="initial_miles" step="0.1" min="0" placeholder="Starting miles">
+                    <input type="text" name="notes" placeholder="Notes">
+                    <button type="submit" class="compact">Save shoe</button>
+                </form>
+                {% if trainer_shoes %}
+                    <ul class="trainer-detail-list">
+                        {% for shoe in trainer_shoes %}
+                            <li><strong>{{ shoe.name }}</strong>{% if shoe.brand or shoe.model %} - {{ shoe.brand }} {{ shoe.model }}{% endif %} - {{ shoe.total_miles|round|int }} mi</li>
                         {% endfor %}
                     </ul>
                 {% endif %}

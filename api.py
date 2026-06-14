@@ -3348,6 +3348,9 @@ def api_dieter_action(message: DieterActionMessage):
     if message_reports_app_feedback(message.content):
         return handle_app_feedback_request(message, page_url)
 
+    if message_requests_trainer_shoe_log(message.content, page_url):
+        return handle_trainer_shoe_log_request(message, page_url)
+
     if message_requests_trainer_reflection(message.content, page_url):
         return handle_trainer_reflection_request(message, page_url)
 
@@ -4202,6 +4205,129 @@ def parse_trainer_reflection_target(page_url):
         return None
 
 
+def parse_trainer_shoe_target(page_url):
+    """Find an imported workout id for shoe logging from the Trainer page URL."""
+    try:
+        params = dict(parse_qsl(urlsplit(page_url or "").query, keep_blank_values=True))
+        target = params.get("shoe_workout_id") or params.get("workout_id")
+        return int(target) if target and str(target).isdigit() else None
+    except (TypeError, ValueError):
+        return None
+
+
+def message_requests_trainer_shoe_log(text, page_url=""):
+    """Detect Ask Dieter requests for run shoe logging."""
+    if not (page_url or "").startswith("/apps/trainer"):
+        return False
+    if parse_trainer_shoe_target(page_url):
+        return True
+    normalized = (text or "").lower()
+    shoe_words = any(cue in normalized for cue in ["shoe", "shoes", "spike", "spikes", "trainers", "flats"])
+    log_words = any(cue in normalized for cue in ["log", "track", "mileage", "wore", "wearing", "used", "ran in", "warmup in", "workout in"])
+    return shoe_words and log_words
+
+
+def trainer_shoe_prompt(workout):
+    """Ask for shoe usage details on an imported run."""
+    title = workout.get("title") if workout else "that run"
+    date = workout.get("started_at") if workout else ""
+    shoes = dicts_from_rows(db.get_trainer_shoes())
+    shoe_names = ", ".join(shoe["name"] for shoe in shoes) or "no saved shoes yet"
+    return "\n".join([
+        f"Which shoes did you use for {title}{f' ({date})' if date else ''}?",
+        f"Saved shoes: {shoe_names}.",
+        "You can answer like: trainers 2 miles warmup, spikes 4 miles workout.",
+    ])
+
+
+def extract_trainer_shoe_segments(text, shoes, default_distance_meters=None):
+    """Extract shoe usage segments from simple free text."""
+    normalized = (text or "").lower()
+    segments = []
+    for shoe in shoes:
+        name = (shoe.get("name") or "").strip()
+        if not name:
+            continue
+        name_pattern = re.escape(name.lower())
+        if not re.search(rf"\b{name_pattern}\b", normalized):
+            continue
+        window_match = re.search(rf"(.{{0,35}}\b{name_pattern}\b.{{0,45}})", normalized)
+        window = window_match.group(1) if window_match else normalized
+        miles_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:mi|mile|miles)\b", window)
+        segment_label = ""
+        for label in ["warmup", "warm-up", "workout", "cooldown", "cool-down", "race", "strides", "all"]:
+            if label in window:
+                segment_label = label.replace("-", "")
+                break
+        distance_meters = miles_to_meters(miles_match.group(1)) if miles_match else default_distance_meters
+        segments.append({
+            "shoe_id": shoe["id"],
+            "shoe_name": name,
+            "segment_label": segment_label,
+            "distance_meters": distance_meters,
+        })
+    return segments
+
+
+def handle_trainer_shoe_log_request(message, page_url):
+    """Prompt for or save shoe usage against an imported run."""
+    target_id = parse_trainer_shoe_target(page_url) or parse_trainer_reflection_target(page_url)
+    workout = dict_from_row(db.get_trainer_imported_workout(target_id)) if target_id else None
+    if not workout:
+        workout = dict_from_row(db.get_latest_trainer_imported_workout())
+    if not workout:
+        return {
+            "assistant_message": "I do not see an imported run yet. Pull your Strava runs first, then I can log shoes.",
+            "changed_fields": [],
+            "trainer_context": True,
+        }
+    if workout.get("user_id") != get_current_user_id():
+        return {
+            "assistant_message": "Only the athlete can log shoe mileage on their own runs.",
+            "changed_fields": [],
+            "trainer_context": True,
+        }
+    shoes = dicts_from_rows(db.get_trainer_shoes())
+    if not shoes:
+        return {
+            "assistant_message": "Add at least one shoe in Trainer settings first, then I can log mileage against it.",
+            "changed_fields": [],
+            "trainer_context": True,
+            "redirect_url": "/apps/trainer/settings",
+            "redirect_label": "Open Shoe Inventory",
+        }
+    segments = extract_trainer_shoe_segments(message.content, shoes, workout.get("distance_meters"))
+    if not segments:
+        return {
+            "assistant_message": trainer_shoe_prompt(workout),
+            "changed_fields": [],
+            "trainer_context": True,
+            "redirect_url": f"/apps/trainer/imports?shoe_workout_id={workout['id']}",
+            "redirect_label": "Open Shoe Log",
+        }
+    saved = []
+    for segment in segments:
+        usage_id = db.add_trainer_workout_shoe(
+            workout["id"],
+            segment["shoe_id"],
+            segment_label=segment["segment_label"],
+            distance_meters=segment["distance_meters"],
+            notes=message.content.strip(),
+        )
+        if usage_id:
+            miles = (segment["distance_meters"] or 0) / 1609.344 if segment["distance_meters"] else 0
+            miles_text = f" {miles:.1f} mi" if miles else ""
+            segment_text = f" ({segment['segment_label']})" if segment["segment_label"] else ""
+            saved.append(f"{segment['shoe_name']}{miles_text}{segment_text}")
+    return {
+        "assistant_message": f"Saved shoe usage for {workout.get('title') or 'this run'}: {', '.join(saved)}.",
+        "changed_fields": ["trainer_workout_shoes"],
+        "trainer_context": True,
+        "redirect_url": f"/apps/trainer/imports?shoe_workout_id={workout['id']}",
+        "redirect_label": "Open Shoe Log",
+    }
+
+
 def message_requests_trainer_reflection(text, page_url=""):
     """Detect Ask Dieter requests that should become run reflections."""
     if not (page_url or "").startswith("/apps/trainer"):
@@ -4416,6 +4542,23 @@ def trainer_weekly_summary_view(row):
     return item
 
 
+def trainer_shoe_usage_by_workout(user_id):
+    """Group shoe usage rows by imported workout id for templates."""
+    grouped = {}
+    for row in dicts_from_rows(db.get_trainer_workout_shoes(user_id=user_id, limit=500)):
+        grouped.setdefault(row["imported_workout_id"], []).append(row)
+    return grouped
+
+
+def miles_to_meters(value):
+    """Convert a form mileage value to meters."""
+    try:
+        miles = float(value)
+    except (TypeError, ValueError):
+        return None
+    return max(miles, 0) * 1609.344
+
+
 def trainer_context(request, active_tab="home", workout_type="", athlete_user_id=None):
     """Build shared Dieter Trainer template context."""
     current_user = request.state.current_user
@@ -4424,6 +4567,8 @@ def trainer_context(request, active_tab="home", workout_type="", athlete_user_id
     trainer_profile = dict_from_row(db.get_trainer_profile())
     reflection_target_id = parse_trainer_reflection_target(str(request.url)) if request else None
     reflection_target = dict_from_row(db.get_trainer_imported_workout(reflection_target_id)) if reflection_target_id else None
+    shoe_target_id = parse_trainer_shoe_target(str(request.url)) if request else None
+    shoe_target = dict_from_row(db.get_trainer_imported_workout(shoe_target_id)) if shoe_target_id else None
     return {
         "request": request,
         "active_tab": active_tab,
@@ -4432,6 +4577,7 @@ def trainer_context(request, active_tab="home", workout_type="", athlete_user_id
         "strava_configured": strava_configured(),
         "strava_connected": bool(trainer_profile and trainer_profile.get("strava_refresh_token")),
         "reflection_target": reflection_target,
+        "shoe_target": shoe_target,
         "coach_grants": dicts_from_rows(db.get_trainer_coach_grants_for_athlete()),
         "coach_athletes": dicts_from_rows(db.get_trainer_athletes_for_coach()),
         "current_user_id": (current_user or {}).get("id"),
@@ -4449,6 +4595,9 @@ def trainer_context(request, active_tab="home", workout_type="", athlete_user_id
             trainer_weekly_summary_view(row)
             for row in db.get_trainer_weekly_run_summaries(user_id=selected_athlete_id, weeks=8)
         ],
+        "trainer_shoes": dicts_from_rows(db.get_trainer_shoes(user_id=selected_athlete_id)),
+        "shoe_usage_by_workout": trainer_shoe_usage_by_workout(selected_athlete_id),
+        "runs_missing_shoes": dicts_from_rows(db.get_trainer_runs_missing_shoes(user_id=selected_athlete_id, limit=8)),
         "run_reflections": dicts_from_rows(db.get_trainer_run_reflections(user_id=selected_athlete_id, limit=10)),
         "scheduler_due": scheduler_due_context(),
     }
@@ -4550,7 +4699,7 @@ def import_strava_last_week_runs():
     """Pull the active athlete's last week of Strava runs."""
     result = import_recent_strava_runs(days=7)
     return RedirectResponse(
-        url=f"/apps/trainer/imports?imported={result['imported']}&skipped={result['skipped']}",
+        url=f"/apps/trainer/imports?imported={result['imported']}&skipped={result['skipped']}&shoe_prompt=1",
         status_code=303,
     )
 
@@ -4560,7 +4709,7 @@ def import_strava_recent_weeks_runs():
     """Pull the active athlete's last four weeks of Strava runs."""
     result = import_recent_strava_runs(days=28)
     return RedirectResponse(
-        url=f"/apps/trainer/imports?imported={result['imported']}&skipped={result['skipped']}&days={result['days']}",
+        url=f"/apps/trainer/imports?imported={result['imported']}&skipped={result['skipped']}&days={result['days']}&shoe_prompt=1",
         status_code=303,
     )
 
@@ -4570,7 +4719,7 @@ def import_strava_six_month_runs():
     """Pull the active athlete's last six months of Strava runs."""
     result = import_recent_strava_runs(days=183)
     return RedirectResponse(
-        url=f"/apps/trainer/imports?imported={result['imported']}&skipped={result['skipped']}&days={result['days']}",
+        url=f"/apps/trainer/imports?imported={result['imported']}&skipped={result['skipped']}&days={result['days']}&shoe_prompt=1",
         status_code=303,
     )
 
@@ -4580,9 +4729,61 @@ def import_strava_activity(activity_id: str = Form(...)):
     """Pull one Strava run by activity id."""
     result = import_single_strava_activity(activity_id.strip())
     return RedirectResponse(
-        url=f"/apps/trainer/imports?imported={result['imported']}&skipped={result['skipped']}&activity_id={result['activity_id']}",
+        url=f"/apps/trainer/imports?imported={result['imported']}&skipped={result['skipped']}&activity_id={result['activity_id']}&shoe_prompt=1",
         status_code=303,
     )
+
+
+@app.post("/apps/trainer/shoes")
+def add_trainer_shoe(
+    name: str = Form(...),
+    brand: str = Form(""),
+    model: str = Form(""),
+    initial_miles: str = Form("0"),
+    notes: str = Form(""),
+    next: str = Form("/apps/trainer/settings"),
+):
+    """Add or update a shoe in the athlete inventory."""
+    try:
+        starting_miles = float(initial_miles or 0)
+    except ValueError:
+        starting_miles = 0
+    db.add_trainer_shoe(name, brand=brand, model=model, initial_miles=starting_miles, notes=notes)
+    return RedirectResponse(url=next or "/apps/trainer/settings", status_code=303)
+
+
+@app.post("/apps/trainer/imports/{workout_id}/shoes")
+def add_trainer_workout_shoe(
+    workout_id: int,
+    shoe_id: int = Form(0),
+    new_shoe_name: str = Form(""),
+    segment_label: str = Form(""),
+    distance_miles: str = Form(""),
+    notes: str = Form(""),
+):
+    """Log which shoe was used for all or part of an imported run."""
+    selected_shoe_id = shoe_id
+    if not selected_shoe_id and new_shoe_name.strip():
+        selected_shoe_id = db.add_trainer_shoe(new_shoe_name.strip())
+    if not selected_shoe_id:
+        raise HTTPException(status_code=400, detail="Choose a shoe or enter a new shoe name.")
+    workout = dict_from_row(db.get_trainer_imported_workout(workout_id))
+    default_meters = workout.get("distance_meters") if workout else None
+    db.add_trainer_workout_shoe(
+        workout_id,
+        selected_shoe_id,
+        segment_label=segment_label,
+        distance_meters=miles_to_meters(distance_miles) if distance_miles else default_meters,
+        notes=notes,
+    )
+    return RedirectResponse(url="/apps/trainer/imports", status_code=303)
+
+
+@app.post("/apps/trainer/imports/shoes/{usage_id}/delete")
+def delete_trainer_workout_shoe(usage_id: int):
+    """Remove a shoe usage row."""
+    db.delete_trainer_workout_shoe(usage_id)
+    return RedirectResponse(url="/apps/trainer/imports", status_code=303)
 
 
 @app.get("/apps/trainer/settings")

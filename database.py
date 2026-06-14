@@ -381,6 +381,40 @@ class Database:
         """)
 
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS trainer_shoes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                brand TEXT DEFAULT '',
+                model TEXT DEFAULT '',
+                initial_miles REAL DEFAULT 0,
+                retired INTEGER DEFAULT 0,
+                notes TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, name),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS trainer_workout_shoes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                imported_workout_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                shoe_id INTEGER NOT NULL,
+                segment_label TEXT DEFAULT '',
+                distance_meters REAL,
+                notes TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (imported_workout_id) REFERENCES trainer_imported_workouts(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (shoe_id) REFERENCES trainer_shoes(id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS trainer_workout_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 workout_id INTEGER NOT NULL,
@@ -3488,6 +3522,147 @@ class Database:
         query += " ORDER BY trainer_run_reflections.created_at DESC, trainer_run_reflections.id DESC LIMIT ?"
         params.append(limit)
         cursor.execute(query, params)
+        rows = cursor.fetchall()
+        self.close()
+        return rows
+
+    def add_trainer_shoe(self, name, brand="", model="", initial_miles=0, notes="", user_id=None):
+        """Create or update a Trainer shoe for the active athlete."""
+        target_user_id = user_id or self._active_user_id()
+        if not target_user_id:
+            return None
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO trainer_shoes (user_id, name, brand, model, initial_miles, notes, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id, name) DO UPDATE SET
+                brand = COALESCE(NULLIF(excluded.brand, ''), trainer_shoes.brand),
+                model = COALESCE(NULLIF(excluded.model, ''), trainer_shoes.model),
+                initial_miles = excluded.initial_miles,
+                notes = COALESCE(NULLIF(excluded.notes, ''), trainer_shoes.notes),
+                retired = 0,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (target_user_id, name.strip(), brand.strip(), model.strip(), initial_miles or 0, notes.strip()),
+        )
+        self._commit()
+        cursor.execute("SELECT id FROM trainer_shoes WHERE user_id = ? AND name = ?", (target_user_id, name.strip()))
+        row = cursor.fetchone()
+        self.close()
+        return row["id"] if row else None
+
+    def get_trainer_shoes(self, user_id=None, include_retired=False):
+        """List shoes with total logged mileage."""
+        target_user_id = user_id or self._active_user_id()
+        if target_user_id and not self.can_view_trainer_user(target_user_id):
+            return []
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT trainer_shoes.*,
+                   COALESCE(trainer_shoes.initial_miles, 0) + COALESCE(SUM(trainer_workout_shoes.distance_meters), 0) / 1609.344 AS total_miles,
+                   COUNT(trainer_workout_shoes.id) AS use_count
+            FROM trainer_shoes
+            LEFT JOIN trainer_workout_shoes ON trainer_workout_shoes.shoe_id = trainer_shoes.id
+            WHERE (? IS NULL OR trainer_shoes.user_id = ?)
+              AND (? OR trainer_shoes.retired = 0)
+            GROUP BY trainer_shoes.id
+            ORDER BY trainer_shoes.retired ASC, total_miles DESC, trainer_shoes.name ASC
+            """,
+            (target_user_id, target_user_id, bool(include_retired)),
+        )
+        rows = cursor.fetchall()
+        self.close()
+        return rows
+
+    def add_trainer_workout_shoe(self, imported_workout_id, shoe_id, segment_label="", distance_meters=None, notes=""):
+        """Attach a shoe usage segment to an imported run."""
+        workout = self.get_trainer_imported_workout(imported_workout_id)
+        active_user_id = self._active_user_id()
+        if not workout or workout["user_id"] != active_user_id:
+            return None
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM trainer_shoes WHERE id = ? AND user_id = ?", (shoe_id, active_user_id))
+        shoe = cursor.fetchone()
+        if not shoe:
+            self.close()
+            return None
+        cursor.execute(
+            """
+            INSERT INTO trainer_workout_shoes
+                (imported_workout_id, user_id, shoe_id, segment_label, distance_meters, notes, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (imported_workout_id, active_user_id, shoe_id, segment_label.strip(), distance_meters, notes.strip()),
+        )
+        log_id = cursor.lastrowid
+        self._commit()
+        self.close()
+        return log_id
+
+    def delete_trainer_workout_shoe(self, usage_id):
+        """Remove a shoe usage row owned by the active athlete."""
+        active_user_id = self._active_user_id()
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM trainer_workout_shoes WHERE id = ? AND user_id = ?", (usage_id, active_user_id))
+        changed = cursor.rowcount
+        self._commit()
+        self.close()
+        return changed
+
+    def get_trainer_workout_shoes(self, user_id=None, imported_workout_id=None, limit=200):
+        """List shoe usage rows visible to the active user."""
+        target_user_id = user_id or self._active_user_id()
+        if target_user_id and not self.can_view_trainer_user(target_user_id):
+            return []
+        self.connect()
+        cursor = self.conn.cursor()
+        query = """
+            SELECT trainer_workout_shoes.*, trainer_shoes.name AS shoe_name,
+                   trainer_imported_workouts.title AS workout_title,
+                   trainer_imported_workouts.started_at AS workout_started_at
+            FROM trainer_workout_shoes
+            JOIN trainer_shoes ON trainer_shoes.id = trainer_workout_shoes.shoe_id
+            JOIN trainer_imported_workouts ON trainer_imported_workouts.id = trainer_workout_shoes.imported_workout_id
+            WHERE (? IS NULL OR trainer_workout_shoes.user_id = ?)
+        """
+        params = [target_user_id, target_user_id]
+        if imported_workout_id:
+            query += " AND trainer_workout_shoes.imported_workout_id = ?"
+            params.append(imported_workout_id)
+        query += " ORDER BY trainer_imported_workouts.started_at DESC, trainer_workout_shoes.id DESC LIMIT ?"
+        params.append(limit)
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        self.close()
+        return rows
+
+    def get_trainer_runs_missing_shoes(self, user_id=None, limit=10):
+        """List imported runs without any Dieter shoe usage rows."""
+        target_user_id = user_id or self._active_user_id()
+        if target_user_id and not self.can_view_trainer_user(target_user_id):
+            return []
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT trainer_imported_workouts.*
+            FROM trainer_imported_workouts
+            LEFT JOIN trainer_workout_shoes
+              ON trainer_workout_shoes.imported_workout_id = trainer_imported_workouts.id
+            WHERE (? IS NULL OR trainer_imported_workouts.user_id = ?)
+              AND lower(trainer_imported_workouts.activity_type) IN ('run', 'trailrun', 'virtualrun')
+              AND trainer_workout_shoes.id IS NULL
+            ORDER BY trainer_imported_workouts.started_at DESC, trainer_imported_workouts.id DESC
+            LIMIT ?
+            """,
+            (target_user_id, target_user_id, limit),
+        )
         rows = cursor.fetchall()
         self.close()
         return rows
