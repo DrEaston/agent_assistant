@@ -156,7 +156,7 @@ if ($secretIamExitCode -ne 0) {
     throw "Failed to grant Cloud Run access to Secret Manager secret '$OpenAiSecretName'."
 }
 
-$envVars = "DB_PATH=/tmp/projects.db,UPLOADS_DIR=/tmp/uploads,GCS_BUCKET=$DataBucket,GCS_PREFIX=$DataPrefix,LLM_PROVIDER=$llmProvider,OPENAI_MODEL=$openAiModel"
+$envVars = "DB_PATH=/tmp/projects.db,UPLOADS_DIR=/tmp/uploads,GCS_BUCKET=$DataBucket,GCS_PREFIX=$DataPrefix,APP_TIMEZONE=America/Phoenix,LLM_PROVIDER=$llmProvider,OPENAI_MODEL=$openAiModel"
 if ($openAiReviewModel) {
     $envVars = "$envVars,OPENAI_REVIEW_MODEL=$openAiReviewModel"
 }

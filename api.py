@@ -1707,8 +1707,9 @@ Rules:
 - If adding records, use the current project/task target when appropriate.
 - Use scheduler items for contextual reminders, agenda questions, appointments, errands, and "next time I talk to/go to/call..." requests.
 - If the user asks to add bullets/details to an existing scheduler context, use update_scheduler_item for that existing item. Do not create a second item with the same title/context.
+- For action reminders like "call to have the AC serviced", use the topic/domain as the title and context_label ("AC"), and put the actual action as a short checkbox note ("- [ ] call to have AC serviced").
 - For scheduler scheduled_for, use YYYY-MM-DD when the user gives a clear date; otherwise use an empty string.
-- For scheduler context_label, use short labels like Mechanic, Doctor, Grocery, Insurance, Home, or Call.
+- For scheduler context_label, use short labels like AC, Mechanic, Doctor, Grocery, Insurance, Home, or Call.
 - For scheduler additions, do not invent or expand notes. Save only details the user explicitly gave.
 - For scheduler additions, keep notes as short bullets or an empty string. Never save "Original request:" text.
 - For scheduler note updates, never repeat the user's whole instruction. Keep or merge concise bullets only.
@@ -1726,6 +1727,12 @@ def infer_scheduler_context_label(text):
     """Infer a short agenda context from common reminder wording."""
     text_lower = (text or "").lower()
     context_map = [
+        ("air conditioner", "AC"),
+        ("air conditioning", "AC"),
+        ("hvac", "AC"),
+        ("a/c", "AC"),
+        (" ac ", "AC"),
+        ("ac ", "AC"),
         ("home", "Home"),
         ("house", "Home"),
         ("chore", "Home"),
@@ -1940,6 +1947,29 @@ def extract_scheduler_list_items(text, context_label=""):
             items.append(item[0].upper() + item[1:] if item else item)
             seen.add(key)
     return items[:12]
+
+def extract_scheduler_action_note(text, context_label=""):
+    """Extract the concrete action from a short action reminder."""
+    original = re.sub(r"\s+", " ", (text or "").strip())
+    if not original:
+        return ""
+    cleaned = re.sub(
+        r"^\s*(please\s+)?(?:remind me|remember|add|put|schedule)\s+(?:me\s+)?(?:to|about|that)?\s*",
+        "",
+        original,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\b(?:today|tomorrow|tonight|before bed|bedtime|this evening|next week)\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bon\s+\d{4}-\d{2}-\d{2}\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(for|on|by)\s*$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .:-")
+    if not re.match(r"^(call|email|text|message|schedule|book|buy|order|pay|pick up|drop off)\b", cleaned, flags=re.IGNORECASE):
+        return ""
+    cleaned = re.sub(r"\bthe\s+(AC|A/C|HVAC)\b", "AC", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bair\s+condition(?:er|ing)\b", "AC", cleaned, flags=re.IGNORECASE)
+    if context_label and context_label.upper() != "AC":
+        cleaned = re.sub(rf"\b(my|the)?\s*{re.escape(context_label)}('?s)?\b", context_label, cleaned, flags=re.IGNORECASE)
+    return cleaned[:180]
 
 def clean_scheduler_note_line(line):
     """Normalize a scheduler note line and drop obvious prompt echoes."""
@@ -2348,6 +2378,10 @@ def synthesize_scheduler_operation(user_message, operation):
         ]
     elif is_list_request:
         note_lines = []
+    elif context_label and context_label != "General":
+        action_note = extract_scheduler_action_note(original, context_label)
+        if action_note and action_note.lower() != title.lower():
+            note_lines = [f"[ ] {action_note}"]
     elif detail_items and not (len(detail_items) == 1 and detail_items[0].lower() == title.lower()):
         normalized_title = re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
         normalized_detail = re.sub(r"[^a-z0-9]+", " ", detail_items[0].lower()).strip() if len(detail_items) == 1 else ""
