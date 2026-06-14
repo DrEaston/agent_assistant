@@ -2547,6 +2547,131 @@ def message_requests_planner_action(text):
         return True
     return bool(re.search(r"\b(make|create|add|save)\b.+\b(list|card|task|reminder)\b", normalized))
 
+def message_reports_app_feedback(text):
+    """Detect bug reports and UX feedback that should become code-work backlog."""
+    normalized = (text or "").strip().lower()
+    if not normalized:
+        return False
+    feedback_cues = [
+        "bug",
+        "broken",
+        "doesn't work",
+        "does not work",
+        "isn't working",
+        "not working",
+        "wrong",
+        "confusing",
+        "hard to",
+        "can't",
+        "cannot",
+        "problem",
+        "issue",
+        "error",
+        "missing",
+        "should",
+        "needs to",
+        "need to fix",
+        "fix this",
+        "feedback",
+    ]
+    app_cues = [
+        "app",
+        "site",
+        "website",
+        "page",
+        "button",
+        "image",
+        "photo",
+        "picture",
+        "kitchen",
+        "scheduler",
+        "planner",
+        "login",
+        "guest",
+        "dieter",
+        "screen",
+    ]
+    return any(cue in normalized for cue in feedback_cues) and any(cue in normalized for cue in app_cues)
+
+def app_area_from_url(page_url):
+    """Infer the app area for a feedback report."""
+    if page_url.startswith("/apps/recipes"):
+        return "Kitchen / Recipes"
+    if page_url.startswith("/apps/assistant/scheduler"):
+        return "Scheduler"
+    if page_url.startswith("/apps/assistant") or page_url.startswith("/apps/planner") or page_url.startswith("/dashboard"):
+        return "Assistant / Planner"
+    if page_url.startswith("/login") or page_url.startswith("/register"):
+        return "Auth"
+    return "Dieter"
+
+def get_or_create_app_feedback_project():
+    """Return the current user's developer-feedback project."""
+    project = dict_from_row(db.get_project_by_name("Dieter App Feedback"))
+    if project:
+        return project
+    project_id = db.add_project(
+        "Dieter App Feedback",
+        "User-reported app bugs, UX issues, and code work to triage.",
+        5,
+    )
+    return dict_from_row(db.get_project_by_id(project_id))
+
+def share_app_feedback_project_with_admins(project_id):
+    """Give admins access to user-reported app feedback."""
+    active_user_id = get_current_user_id()
+    for admin in dicts_from_rows(db.get_users_by_role("admin")):
+        if admin.get("id") == active_user_id:
+            continue
+        db.share_project(project_id, admin["id"], "edit")
+
+def summarize_app_feedback_title(content, area):
+    """Create a concise task title for a feedback report."""
+    cleaned = re.sub(r"\s+", " ", (content or "").strip())
+    cleaned = re.sub(r"^(please\s+)?(note|save|record)\s+(that\s+)?", "", cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned.strip(" .")
+    if len(cleaned) > 92:
+        cleaned = cleaned[:89].rstrip() + "..."
+    return f"Fix {area}: {cleaned}" if cleaned else f"Review {area} feedback"
+
+def handle_app_feedback_request(message, page_url):
+    """Save app feedback as a developer-ready planner task."""
+    user = dict_from_row(db.get_user_by_id(get_current_user_id())) if get_current_user_id() else {}
+    reporter = user.get("display_name") or user.get("email") or "Unknown user"
+    reporter_email = user.get("email") or ""
+    area = app_area_from_url(page_url)
+    project = get_or_create_app_feedback_project()
+    share_app_feedback_project_with_admins(project["id"])
+    action = summarize_app_feedback_title(message.content, area)
+    action_id = db.add_recommended_action(project["id"], action, "medium")
+    note = "\n".join([
+        f"Reporter: {reporter}{f' <{reporter_email}>' if reporter_email and reporter_email != reporter else ''}",
+        f"Area: {area}",
+        f"Page: {page_url or 'unknown'}",
+        f"Source page title: {message.page_title or 'unknown'}",
+        "Raw feedback:",
+        message.content.strip(),
+    ])
+    db.add_note(project["id"], note)
+    operation = {"op": "add_task", "action_id": action_id}
+    return {
+        "changed_fields": ["add_task", "add_note"],
+        "summary": "Saved app feedback.",
+        "assistant_message": "\n".join([
+            "Saved app feedback for Curtis to implement.",
+            f"Project: Dieter App Feedback",
+            f"Task: {action}",
+            f"Reporter: {reporter}",
+            f"Page: {page_url or 'unknown'}",
+            "Wrote result to: Dieter App Feedback task list (/apps/assistant/planner).",
+        ]),
+        "operations": [operation, {"op": "add_note", "project_id": project["id"]}],
+        "app_feedback_context": True,
+        "redirect_url": f"/projects/{project['id']}/actions/{action_id}",
+        "redirect_label": "Open Feedback Task",
+        "reload_page": False,
+    }
+
 def handle_planner_action_request(message, page_url):
     """Apply a planner/scheduler request and return the action response shape."""
     proposal = propose_planner_edit(
@@ -2964,6 +3089,9 @@ def api_dieter_action(message: DieterActionMessage):
     """Route Ask Dieter requests to recipe edits, planner edits, or contextual chat."""
     page_url = message.page_url or ""
     recipe_kind, recipe_id = parse_recipe_target_from_url(page_url)
+    if message_reports_app_feedback(message.content):
+        return handle_app_feedback_request(message, page_url)
+
     if message_requests_planner_action(message.content):
         try:
             return handle_planner_action_request(message, page_url)

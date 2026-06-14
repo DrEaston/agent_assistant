@@ -559,6 +559,18 @@ class Database:
         self.close()
         return user
 
+    def get_users_by_role(self, role):
+        """Get active users by role."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT * FROM users WHERE role = ? AND status = 'active' ORDER BY id",
+            (role,),
+        )
+        users = cursor.fetchall()
+        self.close()
+        return users
+
     def create_session(self, user_id, token_hash, expires_at):
         """Persist a login session."""
         self.connect()
