@@ -5702,8 +5702,7 @@
             let voiceBaseValue = "";
             let voiceSessionText = "";
             let voiceRestartTimer = null;
-            let voiceNeedsReview = false;
-            let voiceReviewConfirmed = false;
+            let voiceSubmitAfterStop = false;
             let pendingActionConfirmation = null;
             const voiceRestartDelayMs = 60;
 
@@ -5717,10 +5716,11 @@
                 isListening = listening;
                 voiceButton?.classList.toggle("listening", listening);
                 if (voiceButton) {
-                    voiceButton.textContent = listening ? "Stop" : "Mic";
+                    voiceButton.textContent = listening ? "Send" : "Mic";
                     voiceButton.setAttribute("aria-pressed", listening ? "true" : "false");
+                    voiceButton.setAttribute("aria-label", listening ? "Send dictated message" : "Dictate message");
                 }
-                setVoiceStatus(listening ? "Listening..." : "");
+                setVoiceStatus(listening ? "Listening... tap Send when done." : "");
             };
 
             const addRecipeChatMessage = (role, content) => {
@@ -5752,19 +5752,40 @@
                 panel.classList.remove("open");
             });
 
-            const stopVoiceInput = () => {
+            const submitChatForm = () => {
+                if (form?.requestSubmit) {
+                    form.requestSubmit();
+                } else {
+                    form?.dispatchEvent(new Event("submit", {cancelable: true, bubbles: true}));
+                }
+            };
+
+            const stopVoiceInput = ({submit = false} = {}) => {
+                const activeRecognition = recognition;
                 keepVoiceOpen = false;
+                voiceSubmitAfterStop = submit;
                 window.clearTimeout(voiceRestartTimer);
                 voiceRestartTimer = null;
                 try {
-                    recognition?.abort();
+                    if (submit) {
+                        activeRecognition?.stop();
+                    } else {
+                        activeRecognition?.abort();
+                    }
                 } catch (error) {
-                    recognition?.stop();
+                    activeRecognition?.stop();
                 }
                 recognition = null;
                 setVoiceListening(false);
-                if (voiceNeedsReview) {
-                    setVoiceStatus("Review the dictated text before sending.");
+                if (submit && !activeRecognition && input.value.trim()) {
+                    window.setTimeout(submitChatForm, 120);
+                } else if (submit && activeRecognition) {
+                    window.setTimeout(() => {
+                        if (voiceSubmitAfterStop && input.value.trim() && !input.disabled) {
+                            voiceSubmitAfterStop = false;
+                            submitChatForm();
+                        }
+                    }, 900);
                 }
             };
 
@@ -5793,8 +5814,6 @@
                     voiceSessionText = phrase;
                     const spacer = voiceBaseValue && voiceSessionText ? " " : "";
                     input.value = `${voiceBaseValue}${spacer}${voiceSessionText}`;
-                    voiceNeedsReview = true;
-                    voiceReviewConfirmed = false;
                     if (sendButton) {
                         sendButton.textContent = "Send";
                     }
@@ -5812,6 +5831,10 @@
                     } else {
                         setVoiceListening(false);
                         input.focus();
+                        if (voiceSubmitAfterStop && input.value.trim()) {
+                            voiceSubmitAfterStop = false;
+                            window.setTimeout(submitChatForm, 60);
+                        }
                     }
                 });
 
@@ -5827,16 +5850,19 @@
                         return;
                     }
                     keepVoiceOpen = false;
+                    voiceSubmitAfterStop = false;
                     setVoiceListening(false);
                     setVoiceStatus(event.error === "not-allowed" ? "Microphone permission was blocked." : "Voice input stopped.");
                 });
 
                 try {
                     recognition.start();
+                    voiceSubmitAfterStop = false;
                     setVoiceListening(true);
                 } catch (error) {
                     recognition = null;
                     keepVoiceOpen = false;
+                    voiceSubmitAfterStop = false;
                     setVoiceListening(false);
                     setVoiceStatus("Voice input could not start.");
                 }
@@ -5855,14 +5881,13 @@
                 }
 
                 if (isListening || keepVoiceOpen) {
-                    stopVoiceInput();
+                    stopVoiceInput({submit: true});
                     return;
                 }
 
                 voiceBaseValue = input.value.trim();
                 voiceSessionText = "";
-                voiceNeedsReview = false;
-                voiceReviewConfirmed = false;
+                voiceSubmitAfterStop = false;
                 if (sendButton) {
                     sendButton.textContent = "Send";
                 }
@@ -5876,25 +5901,12 @@
                 if (!content) {
                     return;
                 }
-                if (voiceNeedsReview && !voiceReviewConfirmed) {
-                    if (isListening || keepVoiceOpen) {
-                        stopVoiceInput();
-                    }
-                    voiceReviewConfirmed = true;
-                    if (sendButton) {
-                        sendButton.textContent = "Confirm";
-                    }
-                    setVoiceStatus("Review the dictated text, edit if needed, then press Confirm.");
-                    input.focus();
-                    return;
-                }
 
                 addRecipeChatMessage("user", content);
                 history.push({role: "user", content});
                 input.value = "";
                 input.disabled = true;
-                voiceNeedsReview = false;
-                voiceReviewConfirmed = false;
+                voiceSubmitAfterStop = false;
                 if (sendButton) {
                     sendButton.textContent = "Send";
                 }
