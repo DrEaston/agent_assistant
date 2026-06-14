@@ -347,6 +347,24 @@ class Database:
         """)
 
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS trainer_run_reflections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                imported_workout_id INTEGER NOT NULL,
+                user_id INTEGER,
+                rpe INTEGER,
+                feel TEXT DEFAULT '',
+                body_flags_json TEXT DEFAULT '[]',
+                context_flags_json TEXT DEFAULT '[]',
+                notes TEXT DEFAULT '',
+                missing_fields_json TEXT DEFAULT '[]',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (imported_workout_id) REFERENCES trainer_imported_workouts(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+        """)
+
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS trainer_workout_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 workout_id INTEGER NOT NULL,
@@ -607,6 +625,7 @@ class Database:
         self._ensure_column(cursor, "trainer_profiles", "strava_refresh_token", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_profiles", "strava_token_expires_at", "INTEGER DEFAULT 0")
         self._ensure_column(cursor, "trainer_profiles", "strava_scope", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "trainer_run_reflections", "missing_fields_json", "TEXT DEFAULT '[]'")
         self._ensure_column(cursor, "recipe_complete_meals", "visibility", "TEXT DEFAULT 'shared'")
         self._ensure_column(cursor, "recipe_components", "visibility", "TEXT DEFAULT 'shared'")
         self._ensure_column(cursor, "recipe_variations", "promotion_threshold", "INTEGER DEFAULT 2")
@@ -3248,6 +3267,94 @@ class Database:
             """,
             (target_user_id, target_user_id, limit),
         )
+        rows = cursor.fetchall()
+        self.close()
+        return rows
+
+    def get_trainer_imported_workout(self, imported_workout_id):
+        """Get one imported workout visible to the active user."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM trainer_imported_workouts WHERE id = ?", (imported_workout_id,))
+        row = cursor.fetchone()
+        self.close()
+        if row and not self.can_view_trainer_user(row["user_id"]):
+            return None
+        return row
+
+    def get_latest_trainer_imported_workout(self, user_id=None):
+        """Get the newest imported workout for a user."""
+        target_user_id = user_id or self._active_user_id()
+        if target_user_id and not self.can_view_trainer_user(target_user_id):
+            return None
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT *
+            FROM trainer_imported_workouts
+            WHERE (? IS NULL OR user_id = ?)
+            ORDER BY started_at DESC, id DESC
+            LIMIT 1
+            """,
+            (target_user_id, target_user_id),
+        )
+        row = cursor.fetchone()
+        self.close()
+        return row
+
+    def add_trainer_run_reflection(self, imported_workout_id, rpe=None, feel="", body_flags=None, context_flags=None, notes="", missing_fields=None):
+        """Store a subjective reflection for an imported run."""
+        workout = self.get_trainer_imported_workout(imported_workout_id)
+        active_user_id = self._active_user_id()
+        if not workout or workout["user_id"] != active_user_id:
+            return None
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO trainer_run_reflections
+                (imported_workout_id, user_id, rpe, feel, body_flags_json, context_flags_json,
+                 notes, missing_fields_json, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                imported_workout_id,
+                active_user_id,
+                rpe,
+                feel,
+                json.dumps(body_flags or []),
+                json.dumps(context_flags or []),
+                notes,
+                json.dumps(missing_fields or []),
+            ),
+        )
+        reflection_id = cursor.lastrowid
+        self._commit()
+        self.close()
+        return reflection_id
+
+    def get_trainer_run_reflections(self, imported_workout_id=None, user_id=None, limit=50):
+        """List subjective run reflections visible to the active user."""
+        target_user_id = user_id or self._active_user_id()
+        if target_user_id and not self.can_view_trainer_user(target_user_id):
+            return []
+        self.connect()
+        cursor = self.conn.cursor()
+        query = """
+            SELECT trainer_run_reflections.*, trainer_imported_workouts.title AS workout_title,
+                   trainer_imported_workouts.started_at AS workout_started_at
+            FROM trainer_run_reflections
+            JOIN trainer_imported_workouts ON trainer_imported_workouts.id = trainer_run_reflections.imported_workout_id
+            WHERE (? IS NULL OR trainer_run_reflections.user_id = ?)
+        """
+        params = [target_user_id, target_user_id]
+        if imported_workout_id:
+            query += " AND trainer_run_reflections.imported_workout_id = ?"
+            params.append(imported_workout_id)
+        query += " ORDER BY trainer_run_reflections.created_at DESC, trainer_run_reflections.id DESC LIMIT ?"
+        params.append(limit)
+        cursor.execute(query, params)
         rows = cursor.fetchall()
         self.close()
         return rows

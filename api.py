@@ -3348,6 +3348,9 @@ def api_dieter_action(message: DieterActionMessage):
     if message_reports_app_feedback(message.content):
         return handle_app_feedback_request(message, page_url)
 
+    if message_requests_trainer_reflection(message.content, page_url):
+        return handle_trainer_reflection_request(message, page_url)
+
     if message_requests_planner_action(message.content):
         if kitchen_cross_app_write_needs_confirmation(page_url) and not dieter_action_confirmed(message, page_url, "planner_action"):
             return preview_dieter_write(
@@ -4121,6 +4124,173 @@ def import_recent_strava_runs(days=7):
         imported += 1
     return {"imported": imported, "skipped": skipped, "days": days}
 
+def parse_trainer_reflection_target(page_url):
+    """Find an imported workout id from the Trainer page URL."""
+    try:
+        params = dict(parse_qsl(urlsplit(page_url or "").query, keep_blank_values=True))
+        target = params.get("reflection_workout_id") or params.get("workout_id")
+        return int(target) if target and str(target).isdigit() else None
+    except (TypeError, ValueError):
+        return None
+
+
+def message_requests_trainer_reflection(text, page_url=""):
+    """Detect Ask Dieter requests that should become run reflections."""
+    if not (page_url or "").startswith("/apps/trainer"):
+        return False
+    if parse_trainer_reflection_target(page_url):
+        return True
+    normalized = (text or "").lower()
+    cues = [
+        "how the run went",
+        "run went",
+        "felt",
+        "rpe",
+        "legs",
+        "sore",
+        "pain",
+        "ache",
+        "inserts",
+        "shoes",
+        "bike",
+        "sleep",
+        "fuel",
+        "hydration",
+        "reflect",
+        "reflection",
+        "post-run",
+        "post run",
+    ]
+    return any(cue in normalized for cue in cues)
+
+
+def extract_trainer_reflection_fields(text):
+    """Extract lightweight subjective run-note fields from free text."""
+    source = text or ""
+    normalized = source.lower()
+    rpe = None
+    rpe_match = re.search(r"\b(?:rpe|effort|felt like)?\s*(10|[1-9])\s*(?:/10)?\b", normalized)
+    if rpe_match:
+        rpe = int(rpe_match.group(1))
+
+    feel = ""
+    for label, keywords in [
+        ("great", ["great", "excellent", "amazing", "smooth"]),
+        ("good", ["good", "solid", "fine"]),
+        ("normal", ["normal", "okay", "ok", "average"]),
+        ("flat", ["flat", "sluggish", "heavy", "tired"]),
+        ("bad", ["bad", "rough", "awful", "terrible", "poor"]),
+    ]:
+        if any(word in normalized for word in keywords):
+            feel = label
+            break
+
+    body_keywords = [
+        "foot", "feet", "arch", "calf", "calves", "achilles", "knee", "hip", "back",
+        "hamstring", "quad", "glute", "ankle", "shin", "plantar",
+    ]
+    context_keywords = [
+        "bike", "biked", "cycling", "inserts", "insert", "shoes", "shoe",
+        "sleep", "stress", "sick", "illness", "fuel", "fueling", "hydration",
+        "dehydrated", "heat", "hot", "travel", "work",
+    ]
+    body_flags = sorted({word for word in body_keywords if re.search(rf"\b{re.escape(word)}s?\b", normalized)})
+    context_flags = sorted({word for word in context_keywords if re.search(rf"\b{re.escape(word)}\b", normalized)})
+
+    missing = []
+    if rpe is None:
+        missing.append("RPE 1-10")
+    if not feel:
+        missing.append("how it felt")
+    if not body_flags:
+        missing.append("body/leg symptoms")
+    if not context_flags:
+        missing.append("context like bike load, inserts, shoes, sleep, fuel, stress")
+
+    return {
+        "rpe": rpe,
+        "feel": feel,
+        "body_flags": body_flags,
+        "context_flags": context_flags,
+        "missing": missing,
+    }
+
+
+def trainer_reflection_prompt(workout, missing=None):
+    """Ask for enough detail to save a useful run reflection."""
+    title = workout.get("title") if workout else "that run"
+    date = workout.get("started_at") if workout else ""
+    missing = missing or []
+    questions = [
+        "RPE 1-10?",
+        "How did it feel overall?",
+        "Anything notable in legs/feet/body?",
+        "Any context: bike load, new inserts/shoes, sleep, fueling, stress, weather?",
+    ]
+    if missing:
+        questions = [q for q in questions if any(key.lower() in q.lower() for key in missing)] or questions
+    return "\n".join([
+        f"Let's capture notes for {title}{f' ({date})' if date else ''}.",
+        "Answer in a sentence or two:",
+        *[f"- {question}" for question in questions],
+    ])
+
+
+def handle_trainer_reflection_request(message, page_url):
+    """Prompt for or save subjective notes about an imported run."""
+    target_id = parse_trainer_reflection_target(page_url)
+    workout = dict_from_row(db.get_trainer_imported_workout(target_id)) if target_id else None
+    if not workout:
+        workout = dict_from_row(db.get_latest_trainer_imported_workout())
+    if not workout:
+        return {
+            "assistant_message": "I do not see an imported run yet. Pull your Strava runs first, then I can ask how one went.",
+            "changed_fields": [],
+            "trainer_context": True,
+        }
+    if workout.get("user_id") != get_current_user_id():
+        return {
+            "assistant_message": "I can view shared athlete notes, but only the athlete can add reflections to their own run.",
+            "changed_fields": [],
+            "trainer_context": True,
+        }
+
+    fields = extract_trainer_reflection_fields(message.content)
+    enough_to_save = fields["rpe"] is not None and (fields["feel"] or fields["body_flags"] or fields["context_flags"])
+    if not enough_to_save:
+        return {
+            "assistant_message": trainer_reflection_prompt(workout, fields["missing"]),
+            "changed_fields": [],
+            "trainer_context": True,
+            "redirect_url": f"/apps/trainer/imports?reflection_workout_id={workout['id']}",
+            "redirect_label": "Open Run Reflection",
+        }
+
+    reflection_id = db.add_trainer_run_reflection(
+        workout["id"],
+        rpe=fields["rpe"],
+        feel=fields["feel"],
+        body_flags=fields["body_flags"],
+        context_flags=fields["context_flags"],
+        notes=message.content.strip(),
+        missing_fields=fields["missing"],
+    )
+    missing_note = f"\nMissing detail for later: {', '.join(fields['missing'])}." if fields["missing"] else ""
+    return {
+        "assistant_message": "\n".join([
+            f"Saved reflection #{reflection_id} for {workout.get('title') or 'this run'}.",
+            f"RPE: {fields['rpe']}/10",
+            f"Feel: {fields['feel'] or 'not specified'}",
+            f"Body flags: {', '.join(fields['body_flags']) or 'none noted'}",
+            f"Context flags: {', '.join(fields['context_flags']) or 'none noted'}",
+            missing_note.strip(),
+        ]).strip(),
+        "changed_fields": ["trainer_run_reflection"],
+        "trainer_context": True,
+        "redirect_url": f"/apps/trainer/imports?reflection_workout_id={workout['id']}",
+        "redirect_label": "Open Run Reflection",
+    }
+
 
 def trainer_grouped_suggestions():
     """Return grouped Trainer catalog suggestions for the home page."""
@@ -4141,6 +4311,8 @@ def trainer_context(request, active_tab="home", workout_type="", athlete_user_id
     selected_athlete_id = athlete_user_id or (current_user or {}).get("id")
     workouts = [trainer_workout_view(row) for row in db.get_trainer_workouts(workout_type)]
     trainer_profile = dict_from_row(db.get_trainer_profile())
+    reflection_target_id = parse_trainer_reflection_target(str(request.url)) if request else None
+    reflection_target = dict_from_row(db.get_trainer_imported_workout(reflection_target_id)) if reflection_target_id else None
     return {
         "request": request,
         "active_tab": active_tab,
@@ -4148,6 +4320,7 @@ def trainer_context(request, active_tab="home", workout_type="", athlete_user_id
         "trainer_profile": trainer_profile,
         "strava_configured": strava_configured(),
         "strava_connected": bool(trainer_profile and trainer_profile.get("strava_refresh_token")),
+        "reflection_target": reflection_target,
         "coach_grants": dicts_from_rows(db.get_trainer_coach_grants_for_athlete()),
         "coach_athletes": dicts_from_rows(db.get_trainer_athletes_for_coach()),
         "current_user_id": (current_user or {}).get("id"),
@@ -4161,6 +4334,7 @@ def trainer_context(request, active_tab="home", workout_type="", athlete_user_id
         "upcoming_sessions": [trainer_workout_view(row) for row in db.get_trainer_sessions("upcoming", limit=40, user_id=selected_athlete_id)],
         "past_sessions": [trainer_workout_view(row) for row in db.get_trainer_sessions("done", limit=40, user_id=selected_athlete_id)],
         "imported_workouts": dicts_from_rows(db.get_trainer_imported_workouts(selected_athlete_id, limit=60)),
+        "run_reflections": dicts_from_rows(db.get_trainer_run_reflections(user_id=selected_athlete_id, limit=10)),
         "scheduler_due": scheduler_due_context(),
     }
 

@@ -185,6 +185,13 @@
         {% endif %}
     {% elif active_tab == "imports" %}
         <div class="trainer-card-grid">
+            {% if reflection_target %}
+                <article class="trainer-card">
+                    <span class="trainer-card-meta">Run Reflection</span>
+                    <h3>{{ reflection_target.title }}</h3>
+                    <p>Open Ask Dieter and say how this run went. Dieter will ask for RPE, feel, body symptoms, and context if anything is missing.</p>
+                </article>
+            {% endif %}
             <article class="trainer-card">
                 <span class="trainer-card-meta">Strava</span>
                 <h3>Strava Runs</h3>
@@ -224,12 +231,31 @@
                         <span class="trainer-card-meta">{{ trainer_category_labels.get(workout.workout_category, workout.workout_category or workout.activity_type) }}</span>
                         <h3>{{ workout.title or workout.activity_type }}</h3>
                         <p>{{ workout.started_at or "No date" }}{% if workout.distance_meters %} - {{ workout.distance_meters|round|int }} m{% endif %}</p>
+                        {% if is_viewing_own_trainer %}
+                            <a class="button-link secondary-link compact-link" href="/apps/trainer/imports?reflection_workout_id={{ workout.id }}">Reflect with Dieter</a>
+                        {% endif %}
                     </article>
                 {% endfor %}
             {% else %}
                 <div class="empty-state">
                     <p>No Strava imports yet.</p>
                 </div>
+            {% endif %}
+            {% if run_reflections %}
+                <article class="trainer-card">
+                    <span class="trainer-card-meta">Recent Reflections</span>
+                    {% for reflection in run_reflections %}
+                        <div>
+                            <h3>{{ reflection.workout_title }}</h3>
+                            <p>
+                                {{ reflection.workout_started_at or "No date" }}
+                                {% if reflection.rpe %} - RPE {{ reflection.rpe }}/10{% endif %}
+                                {% if reflection.feel %} - {{ reflection.feel }}{% endif %}
+                            </p>
+                            <p>{{ reflection.notes }}</p>
+                        </div>
+                    {% endfor %}
+                </article>
             {% endif %}
         </div>
     {% elif active_tab == "settings" %}
