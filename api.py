@@ -2745,6 +2745,10 @@ def message_reports_app_feedback(text):
         "needs to",
         "need to fix",
         "fix this",
+        "developer feedback",
+        "feedback for the developer",
+        "tell curtis",
+        "tell codex",
         "feedback",
     ]
     app_cues = [
@@ -2759,6 +2763,9 @@ def message_reports_app_feedback(text):
         "kitchen",
         "scheduler",
         "planner",
+        "trainer",
+        "workout",
+        "strava",
         "login",
         "guest",
         "dieter",
@@ -2772,6 +2779,8 @@ def app_area_from_url(page_url):
         return "Kitchen / Recipes"
     if page_url.startswith("/apps/assistant/scheduler"):
         return "Scheduler"
+    if page_url.startswith("/apps/trainer"):
+        return "Trainer"
     if page_url.startswith("/apps/assistant") or page_url.startswith("/apps/planner") or page_url.startswith("/dashboard"):
         return "Assistant / Planner"
     if page_url.startswith("/login") or page_url.startswith("/register"):
@@ -2826,19 +2835,36 @@ def handle_app_feedback_request(message, page_url):
         message.content.strip(),
     ])
     db.add_note(project["id"], note)
+    report_id = db.add_app_feedback_report(
+        title=action,
+        area=area,
+        page_url=page_url or "",
+        page_title=message.page_title or "",
+        reporter_name=reporter,
+        reporter_email=reporter_email,
+        raw_feedback=message.content.strip(),
+        destination_project_id=project["id"],
+        destination_action_id=action_id,
+    )
     operation = {"op": "add_task", "action_id": action_id}
     return {
-        "changed_fields": ["add_task", "add_note"],
+        "changed_fields": ["add_task", "add_note", "add_app_feedback_report"],
         "summary": "Saved app feedback.",
         "assistant_message": "\n".join([
             "Saved app feedback for Curtis to implement.",
             f"Project: Dieter App Feedback",
             f"Task: {action}",
+            f"Feedback report: #{report_id}",
             f"Reporter: {reporter}",
             f"Page: {page_url or 'unknown'}",
             "Wrote result to: Dieter App Feedback task list (/apps/assistant/planner).",
+            "Codex inbox: app_feedback_reports table; export with /api/app-feedback/codex-inbox/save.",
         ]),
-        "operations": [operation, {"op": "add_note", "project_id": project["id"]}],
+        "operations": [
+            operation,
+            {"op": "add_note", "project_id": project["id"]},
+            {"op": "add_app_feedback_report", "report_id": report_id},
+        ],
         "app_feedback_context": True,
         "redirect_url": f"/projects/{project['id']}/actions/{action_id}",
         "redirect_label": "Open Feedback Task",
@@ -3311,13 +3337,6 @@ def api_dieter_action(message: DieterActionMessage):
     page_url = message.page_url or ""
     recipe_kind, recipe_id = parse_recipe_target_from_url(page_url)
     if message_reports_app_feedback(message.content):
-        if kitchen_cross_app_write_needs_confirmation(page_url) and not dieter_action_confirmed(message, page_url, "app_feedback"):
-            return preview_dieter_write(
-                message,
-                page_url,
-                "app_feedback",
-                "Dieter App Feedback task list (/apps/assistant/planner)",
-            )
         return handle_app_feedback_request(message, page_url)
 
     if message_requests_planner_action(message.content):
@@ -3446,6 +3465,58 @@ def api_codex_work_packet(review_id: Optional[int] = None):
 def api_save_codex_work_packet(review_id: Optional[int] = None):
     """Save the current Codex work packet to codex_work_packet.md."""
     return priority_review_service.save_codex_work_packet(review_id)
+
+def build_app_feedback_codex_inbox(limit=50, status="open"):
+    """Build a Markdown inbox of app feedback for Codex."""
+    reports = dicts_from_rows(db.get_app_feedback_reports(status=status, limit=limit))
+    if not reports:
+        return "# Dieter App Feedback Inbox\n\nNo matching feedback reports.\n"
+    lines = [
+        "# Dieter App Feedback Inbox",
+        "",
+        f"Status filter: {status or 'all'}",
+        "",
+    ]
+    for report in reports:
+        reporter = report.get("reporter_name") or "Unknown"
+        if report.get("reporter_email"):
+            reporter = f"{reporter} <{report['reporter_email']}>"
+        lines.extend([
+            f"## #{report['id']} {report['title']}",
+            "",
+            f"- Status: {report.get('status') or 'open'}",
+            f"- Area: {report.get('area') or 'Unknown'}",
+            f"- Page: {report.get('page_url') or 'unknown'}",
+            f"- Page title: {report.get('page_title') or 'unknown'}",
+            f"- Reporter: {reporter}",
+            f"- Planner task: {report.get('action_title') or 'not linked'}",
+            f"- Created: {report.get('created_at') or 'unknown'}",
+            "",
+            "Raw feedback:",
+            "",
+            "```",
+            report.get("raw_feedback") or "",
+            "```",
+            "",
+        ])
+    return "\n".join(lines)
+
+@app.get("/api/app-feedback/codex-inbox")
+def api_app_feedback_codex_inbox(limit: int = 50, status: str = "open"):
+    """Return developer feedback as a Markdown Codex inbox."""
+    safe_limit = min(max(limit, 1), 100)
+    safe_status = status if status in {"open", "triaged", "done", ""} else "open"
+    return {"markdown": build_app_feedback_codex_inbox(limit=safe_limit, status=safe_status)}
+
+@app.post("/api/app-feedback/codex-inbox/save")
+def api_save_app_feedback_codex_inbox(limit: int = 50, status: str = "open"):
+    """Save developer feedback to codex_feedback_inbox.md for local Codex triage."""
+    safe_limit = min(max(limit, 1), 100)
+    safe_status = status if status in {"open", "triaged", "done", ""} else "open"
+    markdown = build_app_feedback_codex_inbox(limit=safe_limit, status=safe_status)
+    output_path = Path("codex_feedback_inbox.md").resolve()
+    output_path.write_text(markdown, encoding="utf-8")
+    return {"status": "success", "path": str(output_path), "markdown": markdown}
 
 
 # ============================================================================

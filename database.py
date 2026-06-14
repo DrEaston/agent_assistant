@@ -480,6 +480,28 @@ class Database:
         """)
 
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS app_feedback_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                area TEXT DEFAULT '',
+                page_url TEXT DEFAULT '',
+                page_title TEXT DEFAULT '',
+                reporter_name TEXT DEFAULT '',
+                reporter_email TEXT DEFAULT '',
+                raw_feedback TEXT NOT NULL,
+                destination_project_id INTEGER,
+                destination_action_id INTEGER,
+                status TEXT DEFAULT 'open',
+                user_id INTEGER,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (destination_project_id) REFERENCES projects(id) ON DELETE SET NULL,
+                FOREIGN KEY (destination_action_id) REFERENCES recommended_actions(id) ON DELETE SET NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+        """)
+
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS recipe_grocery_lists (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT DEFAULT '',
@@ -574,6 +596,9 @@ class Database:
         self._ensure_column(cursor, "recipe_grocery_lists", "user_id", "INTEGER")
         self._ensure_column(cursor, "planner_change_log", "user_id", "INTEGER")
         self._ensure_column(cursor, "chat_messages", "user_id", "INTEGER")
+        self._ensure_column(cursor, "app_feedback_reports", "user_id", "INTEGER")
+        self._ensure_column(cursor, "app_feedback_reports", "destination_project_id", "INTEGER")
+        self._ensure_column(cursor, "app_feedback_reports", "destination_action_id", "INTEGER")
         self._ensure_column(cursor, "recipe_complete_meals", "visibility", "TEXT DEFAULT 'shared'")
         self._ensure_column(cursor, "recipe_components", "visibility", "TEXT DEFAULT 'shared'")
         self._ensure_column(cursor, "recipe_variations", "promotion_threshold", "INTEGER DEFAULT 2")
@@ -3385,6 +3410,82 @@ class Database:
             WHERE id = ?
             """,
             (status, result, instruction_id),
+        )
+        self._commit()
+        self.close()
+
+    def add_app_feedback_report(
+        self,
+        title,
+        area,
+        page_url,
+        page_title,
+        reporter_name,
+        reporter_email,
+        raw_feedback,
+        destination_project_id=None,
+        destination_action_id=None,
+    ):
+        """Store a developer feedback report for Codex triage."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO app_feedback_reports
+                (title, area, page_url, page_title, reporter_name, reporter_email, raw_feedback,
+                 destination_project_id, destination_action_id, user_id, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                title,
+                area,
+                page_url,
+                page_title,
+                reporter_name,
+                reporter_email,
+                raw_feedback,
+                destination_project_id,
+                destination_action_id,
+                self._active_user_id(),
+            ),
+        )
+        report_id = cursor.lastrowid
+        self._commit()
+        self.close()
+        return report_id
+
+    def get_app_feedback_reports(self, status="open", limit=50):
+        """List developer feedback reports for Codex."""
+        self.connect()
+        cursor = self.conn.cursor()
+        query = """
+            SELECT app_feedback_reports.*, projects.name AS project_name, recommended_actions.action AS action_title
+            FROM app_feedback_reports
+            LEFT JOIN projects ON projects.id = app_feedback_reports.destination_project_id
+            LEFT JOIN recommended_actions ON recommended_actions.id = app_feedback_reports.destination_action_id
+        """
+        params = []
+        if status:
+            query += " WHERE app_feedback_reports.status = ?"
+            params.append(status)
+        query += " ORDER BY app_feedback_reports.created_at DESC, app_feedback_reports.id DESC LIMIT ?"
+        params.append(limit)
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        self.close()
+        return rows
+
+    def update_app_feedback_report_status(self, report_id, status):
+        """Update a developer feedback report status."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE app_feedback_reports
+            SET status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (status, report_id),
         )
         self._commit()
         self.close()
