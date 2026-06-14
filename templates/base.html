@@ -4259,22 +4259,7 @@
             text-transform: uppercase;
         }
 
-        .scheduler-card-priority-due {
-            background: linear-gradient(180deg, #fff7ed 0%, #ffffff 100%);
-            border-color: #fed7aa;
-            border-left-color: #f97316;
-            box-shadow: 0 6px 18px rgba(249, 115, 22, 0.12);
-        }
-
-        .scheduler-card-priority-due .scheduler-card-title {
-            color: #9a3412;
-        }
-
-        .scheduler-card-priority-due .scheduler-card-meta,
-        .scheduler-card-priority-due .scheduler-note-list {
-            color: #9a3412;
-        }
-
+        .scheduler-card-priority-today,
         .scheduler-card-coming-up {
             background: #fdf2f8;
             border-color: #f9a8d4;
@@ -4282,17 +4267,41 @@
             box-shadow: 0 6px 18px rgba(219, 39, 119, 0.16);
         }
 
+        .scheduler-card-priority-today .scheduler-card-title,
         .scheduler-card-coming-up .scheduler-card-title {
             color: #9d174d;
         }
 
+        .scheduler-card-priority-today .scheduler-card-meta,
+        .scheduler-card-priority-today .scheduler-note-list,
         .scheduler-card-coming-up .scheduler-card-meta,
         .scheduler-card-coming-up .scheduler-note-list {
             color: #9d174d;
         }
 
+        .scheduler-card-priority-today .scheduler-note-toggle button,
         .scheduler-card-coming-up .scheduler-note-toggle button {
             background: #fff7fb;
+        }
+
+        .scheduler-card-priority-week {
+            background: #fff7ed;
+            border-color: #fed7aa;
+            border-left-color: #f97316;
+            box-shadow: 0 6px 18px rgba(249, 115, 22, 0.12);
+        }
+
+        .scheduler-card-priority-week .scheduler-card-title {
+            color: #9a3412;
+        }
+
+        .scheduler-card-priority-week .scheduler-card-meta,
+        .scheduler-card-priority-week .scheduler-note-list {
+            color: #9a3412;
+        }
+
+        .scheduler-card-priority-week .scheduler-note-toggle button {
+            background: #fffaf5;
         }
 
         .scheduler-card-priority-unscheduled {

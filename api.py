@@ -2216,10 +2216,12 @@ def enrich_scheduler_item_priority(item, today=None):
         return item
     is_today = scheduled_date == today
     is_due = scheduled_date < today
+    is_this_week = today < scheduled_date <= today + timedelta(days=6)
     item["scheduled_date"] = scheduled_date.isoformat()
     item["is_due"] = is_due
     item["is_today"] = is_today
-    item["scheduler_visual_priority"] = "today" if is_today else "due" if is_due else "upcoming"
+    item["is_this_week"] = is_this_week
+    item["scheduler_visual_priority"] = "today" if is_today or is_due else "week" if is_this_week else "upcoming"
     return item
 
 def scheduler_due_context():
@@ -2230,13 +2232,13 @@ def scheduler_due_context():
     upcoming_items = []
     for item in open_items:
         item = enrich_scheduler_item_priority(item, today)
-        if item["scheduler_visual_priority"] == "upcoming" or item["scheduler_visual_priority"] == "today":
-            upcoming_items.append(item)
-        elif item["scheduler_visual_priority"] == "due":
+        if item["is_due"]:
             due_items.append(item)
+        elif item["scheduler_visual_priority"] in {"upcoming", "week", "today"}:
+            upcoming_items.append(item)
     due_items.sort(key=lambda item: item.get("scheduled_date") or "")
     upcoming_items.sort(key=lambda item: (
-        0 if item.get("is_today") else 1,
+        0 if item.get("is_today") or item.get("is_due") else 1 if item.get("is_this_week") else 2,
         item.get("scheduled_date") or "",
         (item.get("title") or "").lower(),
     ))
@@ -2256,7 +2258,7 @@ def prepare_scheduler_items_for_display(items):
         enrich_scheduler_item_priority(dict(item), today)
         for item in items
     ]
-    priority_order = {"today": 0, "due": 1, "upcoming": 2, "unscheduled": 3}
+    priority_order = {"today": 0, "week": 1, "upcoming": 2, "unscheduled": 3}
     enriched_items.sort(key=lambda item: (
         priority_order.get(item.get("scheduler_visual_priority"), 4),
         item.get("scheduled_date") or "9999-12-31",
