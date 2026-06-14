@@ -2031,6 +2031,39 @@ def format_scheduler_confirmation(items):
         lines.append("You can review it at /apps/assistant/scheduler.")
     return "\n".join(lines)
 
+def format_planner_write_destinations(operations):
+    """Make it explicit where Dieter wrote structured planner results."""
+    destinations = []
+    for operation in operations or []:
+        op = operation.get("op", "")
+        if "scheduler_item" in op:
+            label = "Scheduler"
+            path = "/apps/assistant/scheduler"
+        elif op in {"add_task", "update_task", "complete_task", "reopen_task"}:
+            label = "Planner task list"
+            path = "/apps/assistant/planner"
+        elif op in {"add_step", "update_step", "complete_step", "reopen_step"}:
+            label = "Task checklist"
+            path = "/apps/assistant/planner"
+        elif op in {"add_project", "update_project"}:
+            label = "Planner projects"
+            path = "/apps/assistant/planner"
+        elif op in {"add_note"}:
+            label = "Project notes"
+            path = "/apps/assistant/planner"
+        elif op in {"add_blocker", "delete_blocker"}:
+            label = "Project blockers"
+            path = "/apps/assistant/planner"
+        elif op in {"add_goal", "complete_goal"}:
+            label = "Weekly goals"
+            path = "/apps/assistant/planner"
+        else:
+            continue
+        destination = f"Wrote result to: {label} ({path})."
+        if destination not in destinations:
+            destinations.append(destination)
+    return "\n".join(destinations)
+
 def scheduler_text_implies_today(text):
     """Detect casual same-day scheduler phrasing."""
     return bool(re.search(r"\b(today|tonight|before bed|bedtime|this evening)\b", text or "", flags=re.IGNORECASE))
@@ -2054,10 +2087,10 @@ def synthesize_scheduler_operation(user_message, operation):
             scheduled_for = today.isoformat()
 
     rawish_title = title.lower() == original.lower() or len(title) > 80
+    chore_list_match = re.search(r"\b(chore|chores)\s+list\b", original, flags=re.IGNORECASE)
     if context_label and context_label != "General":
         title = context_label
     elif rawish_title:
-        chore_list_match = re.search(r"\b(chore|chores)\s+list\b", original, flags=re.IGNORECASE)
         cleaned = re.sub(
             r"^\s*(please\s+)?(remind me|remember|add|put|schedule|make|create)\s+(me\s+)?(a\s+|an\s+|the\s+)?(to|about|that)?\s*",
             "",
@@ -2081,6 +2114,8 @@ def synthesize_scheduler_operation(user_message, operation):
             item if re.match(r"^ask\s+about\b", item, flags=re.IGNORECASE) else f"Ask about {item}"
             for item in agenda_items
         ]
+    elif chore_list_match:
+        note_lines = []
     elif detail_items and not (len(detail_items) == 1 and detail_items[0].lower() == title.lower()):
         normalized_title = re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
         normalized_detail = re.sub(r"[^a-z0-9]+", " ", detail_items[0].lower()).strip() if len(detail_items) == 1 else ""
@@ -2258,10 +2293,14 @@ def apply_planner_edit(user_message, page_url, proposal):
 
     if proposal.get("local_result"):
         updates = proposal["local_result"].get("updates", [])
+        destination_message = format_planner_write_destinations(updates)
+        assistant_message = proposal.get("assistant_message", "")
+        if destination_message:
+            assistant_message = f"{assistant_message}\n{destination_message}" if assistant_message else destination_message
         return {
             "changed_fields": [update.get("type", "planner_update") for update in updates],
             "summary": proposal.get("summary", "Updated planner."),
-            "assistant_message": proposal.get("assistant_message", ""),
+            "assistant_message": assistant_message,
             "operations": updates,
             "after": snapshot_planner_target(target),
         }
@@ -2457,6 +2496,9 @@ def apply_planner_edit(user_message, page_url, proposal):
     ]
     scheduler_confirmation = format_scheduler_confirmation(scheduler_added)
     assistant_message = scheduler_confirmation or proposal.get("assistant_message") or summary
+    destination_message = format_planner_write_destinations(applied)
+    if destination_message:
+        assistant_message = f"{assistant_message}\n{destination_message}" if assistant_message else destination_message
     if errors:
         assistant_message = f"{assistant_message}\nSkipped: {'; '.join(errors)}"
 
