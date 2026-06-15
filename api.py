@@ -4819,6 +4819,11 @@ def assistant_app(request: Request):
     """Dieter Assistant default page."""
     return RedirectResponse(url="/apps/assistant/planner", status_code=303)
 
+@app.get("/apps/issues")
+def issues_app(request: Request):
+    """Shortcut to the app feedback issue inbox."""
+    return RedirectResponse(url="/apps/assistant/feedback", status_code=303)
+
 
 @app.get("/apps/assistant/planner")
 def assistant_planner_app(request: Request):
