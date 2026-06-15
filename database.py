@@ -764,6 +764,7 @@ class Database:
         self._ensure_column(cursor, "app_feedback_reports", "audit_plan", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_reports", "audit_plan_updated_at", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_reports", "audit_answers_json", "TEXT DEFAULT '{}'")
+        self._ensure_column(cursor, "app_feedback_reports", "audit_plan_approved_at", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_reports", "implementation_note", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_reports", "implementation_note_updated_at", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_profiles", "strava_access_token", "TEXT DEFAULT ''")
@@ -4536,10 +4537,28 @@ class Database:
         cursor.execute(
             """
             UPDATE app_feedback_reports
-            SET audit_plan = ?, audit_plan_updated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            SET audit_plan = ?,
+                audit_plan_updated_at = CURRENT_TIMESTAMP,
+                audit_plan_approved_at = '',
+                updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
             (audit_plan, report_id),
+        )
+        self._commit()
+        self.close()
+
+    def mark_app_feedback_report_audit_plan_approved(self, report_id):
+        """Record that the current feedback audit plan was approved by the user."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE app_feedback_reports
+            SET audit_plan_approved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (report_id,),
         )
         self._commit()
         self.close()

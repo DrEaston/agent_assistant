@@ -5208,6 +5208,7 @@ def approve_app_feedback_plan_form(
     if not feedback_plan_approval_confirmed(report_id, markdown, confirmation_token):
         raise HTTPException(status_code=400, detail="Plan approval token did not match this draft.")
     _, stable_path, issue_path = save_feedback_issue_plan_markdown(report_id, markdown)
+    db.mark_app_feedback_report_audit_plan_approved(report_id)
     report = feedback_report_by_id(report_id)
     reports = dicts_from_rows(db.get_app_feedback_reports(status="in_progress", limit=100))
     visible_reports = filter_app_feedback_reports(reports, area)
