@@ -317,6 +317,7 @@ class DieterActionMessage(BaseModel):
     page_url: str = ""
     page_title: str = ""
     confirmation_token: str = ""
+    previous_action_plan: str = ""
     conversation_history: Optional[List[dict]] = None
 
 
@@ -3089,7 +3090,7 @@ def handle_planner_action_request(message, page_url):
     proposal = propose_planner_edit(
         message.content,
         page_url=page_url,
-        conversation_history=message.conversation_history,
+        conversation_history=planner_action_conversation_history(message),
     )
     result = apply_planner_edit(message.content, page_url, proposal)
     result["planner_context"] = True
@@ -3193,10 +3194,11 @@ def summarize_pending_planner_operation(user_message, operation):
 
 def preview_planner_action_write(message, page_url):
     """Preview the concrete planner/scheduler operation before writing."""
+    conversation_history = planner_action_conversation_history(message)
     proposal = propose_planner_edit(
         message.content,
         page_url=page_url,
-        conversation_history=message.conversation_history,
+        conversation_history=conversation_history,
     )
     token = dieter_action_confirmation_token(message.content, page_url, "planner_action")
     operations = proposal.get("operations") or []
@@ -3211,11 +3213,27 @@ def preview_planner_action_write(message, page_url):
     lines.append("\nPress Confirm to apply it, or revise the text with instructions like \"No, do the bullets like this...\" and send again.")
     return {
         "assistant_message": "\n".join(lines),
+        "action_plan": "\n".join(lines),
         "changed_fields": [],
         "needs_confirmation": True,
         "confirmation_token": token,
         "confirmation_action": "planner_action",
     }
+
+def planner_action_conversation_history(message):
+    """Carry a pending action plan forward when the user revises it."""
+    history = list(message.conversation_history or [])
+    previous_plan = (message.previous_action_plan or "").strip()
+    if previous_plan:
+        history.append({
+            "role": "assistant",
+            "content": (
+                "Previous proposed action plan, kept as reference for the user's revision. "
+                "Interpret the new user message relative to this plan, but follow the new instruction:\n"
+                f"{previous_plan}"
+            ),
+        })
+    return history
 
 def build_recipe_extraction_stats(groups):
     """Summarize OCR progress for uploaded recipe card pairs."""

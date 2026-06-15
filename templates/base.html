@@ -6609,6 +6609,11 @@
                     && content !== pendingActionConfirmation.content
                 );
                 const confirmationForRequest = isRevision ? null : pendingActionConfirmation;
+                const previousActionPlan = (
+                    isRevision
+                    ? pendingActionConfirmation?.plan
+                    : pendingActionConfirmation?.previousPlan
+                ) || "";
 
                 addRecipeChatMessage("user", content);
                 history.push({role: "user", content});
@@ -6628,6 +6633,7 @@
                     page_title: document.title,
                     page_url: `${window.location.pathname}${window.location.search}${window.location.hash}`,
                     confirmation_token: confirmationForRequest?.token || "",
+                    previous_action_plan: previousActionPlan,
                     conversation_history: history.slice(-8),
                 };
                 const isConfirmingAction = Boolean(confirmationForRequest);
@@ -6648,6 +6654,8 @@
                         pendingActionConfirmation = {
                             content,
                             token: data.confirmation_token,
+                            plan: data.action_plan || answer,
+                            previousPlan: previousActionPlan,
                         };
                         input.value = content;
                         if (sendButton) {
