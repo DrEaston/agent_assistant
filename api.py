@@ -1981,6 +1981,13 @@ def scheduler_generic_action_item_request(text):
     """Detect a dated but otherwise vague action-item request."""
     return bool(re.search(r"\b(?:new\s+)?action\s+item\b", text or "", flags=re.IGNORECASE))
 
+def scheduler_context_title(context_label, has_list=False):
+    """Create a useful visible scheduler card title from the context."""
+    context = (context_label or "").strip()
+    if not context or context == "General":
+        return "Checklist" if has_list else "Action item"
+    return f"{context} checklist" if has_list else context
+
 def scheduler_replaces_bullets(text):
     """Return true when the user is defining the complete bullet set."""
     return bool(re.search(
@@ -2476,7 +2483,7 @@ def synthesize_scheduler_operation(user_message, operation):
     chore_list_match = re.search(r"\b(chore|chores)\b", original, flags=re.IGNORECASE)
     if context_label and context_label != "General" and not (context_label == "Home" and rawish_title and not list_items):
         if list_items and scheduler_generic_action_item_request(original):
-            title = "Action item"
+            title = scheduler_context_title(context_label, has_list=True)
         elif list_items:
             title = "Chore list" if chore_list_match else f"{context_label} checklist"
         else:
@@ -2493,7 +2500,7 @@ def synthesize_scheduler_operation(user_message, operation):
         cleaned = re.sub(r"\b(to|in|on)\s+(the\s+)?scheduler\b", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
         if list_items and scheduler_generic_action_item_request(original):
-            title = "Action item"
+            title = scheduler_context_title(context_label, has_list=True)
         elif list_items and chore_list_match:
             title = "Chore list"
         elif list_items:
