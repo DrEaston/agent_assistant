@@ -91,12 +91,34 @@
                                         {% if report.audit_plan_has_open_questions %}
                                             <div class="feedback-plan-warning">
                                                 <strong>Open questions remain</strong>
-                                                <ul>
-                                                    {% for question in report.audit_plan_questions %}
-                                                        <li>{{ question }}</li>
+                                                <form method="post" action="/apps/assistant/feedback/{{ report.id }}/plan/answer-questions" class="feedback-inline-question-form">
+                                                    {% for question in report.audit_plan_unanswered_questions %}
+                                                        <div class="form-group feedback-question-item">
+                                                            <label for="feedback-card-question-{{ report.id }}-{{ loop.index }}">{{ question }}</label>
+                                                            <input type="hidden" name="questions" value="{{ question }}">
+                                                            <textarea
+                                                                id="feedback-card-question-{{ report.id }}-{{ loop.index }}"
+                                                                name="answers"
+                                                                placeholder="Answer this question..."
+                                                            ></textarea>
+                                                        </div>
                                                     {% endfor %}
-                                                </ul>
+                                                    <input type="hidden" name="area" value="{{ feedback_area }}">
+                                                    <textarea name="current_plan" hidden>{{ report.audit_plan }}</textarea>
+                                                    <button type="submit" class="secondary compact">Re-audit with answers</button>
+                                                </form>
                                             </div>
+                                        {% endif %}
+                                        {% if report.audit_plan_addressed_questions %}
+                                            <details class="feedback-addressed-questions">
+                                                <summary>Addressed questions</summary>
+                                                {% for item in report.audit_plan_addressed_questions %}
+                                                    <div class="feedback-addressed-question">
+                                                        <strong>{{ item.question }}</strong>
+                                                        <p>{{ item.answer }}</p>
+                                                    </div>
+                                                {% endfor %}
+                                            </details>
                                         {% endif %}
                                         <pre class="feedback-plan-text">{{ report.audit_plan }}</pre>
                                         <form method="post" action="/apps/assistant/feedback/{{ report.id }}/plan/revise" class="feedback-plan-card-form">

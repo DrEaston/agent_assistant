@@ -3266,8 +3266,21 @@ def prepare_app_feedback_reports_for_display(reports):
     for report in reports:
         item = dict(report)
         audit_plan = item.get("audit_plan") or ""
-        item["audit_plan_questions"] = extract_feedback_plan_questions(audit_plan)
-        item["audit_plan_has_open_questions"] = bool(item["audit_plan_questions"])
+        questions = extract_feedback_plan_questions(audit_plan)
+        answers = feedback_audit_answers_from_report(item)
+        addressed = []
+        unanswered = []
+        normalized_answers = {question.lower(): answer for question, answer in answers.items()}
+        for question in questions:
+            answer = normalized_answers.get(question.lower(), "")
+            if answer:
+                addressed.append({"question": question, "answer": answer})
+            else:
+                unanswered.append(question)
+        item["audit_plan_questions"] = questions
+        item["audit_plan_unanswered_questions"] = unanswered
+        item["audit_plan_addressed_questions"] = addressed
+        item["audit_plan_has_open_questions"] = bool(unanswered)
         prepared.append(item)
     return prepared
 
@@ -5352,7 +5365,9 @@ def approve_saved_app_feedback_plan_form(
     markdown = (report.get("audit_plan") or "").strip()
     if not markdown:
         raise HTTPException(status_code=400, detail="Audit this issue before approving a plan.")
-    if extract_feedback_plan_questions(markdown):
+    questions = extract_feedback_plan_questions(markdown)
+    answers = {question.lower(): answer for question, answer in feedback_audit_answers_from_report(report).items()}
+    if any(not answers.get(question.lower()) for question in questions):
         raise HTTPException(status_code=400, detail="Answer open questions and re-audit before approving this plan.")
     db.mark_app_feedback_report_audit_plan_approved(report_id)
     return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/feedback"), status_code=303)
@@ -5396,7 +5411,8 @@ def run_codex_app_feedback_form(
     if not (report.get("audit_plan_approved_at") or "").strip():
         raise HTTPException(status_code=400, detail="Approve the Codex plan before running Codex.")
     remaining_questions = extract_feedback_plan_questions(report.get("audit_plan") or "")
-    if remaining_questions:
+    answers = {question.lower(): answer for question, answer in feedback_audit_answers_from_report(report).items()}
+    if any(not answers.get(question.lower()) for question in remaining_questions):
         raise HTTPException(status_code=400, detail="Answer open questions and re-audit before running Codex.")
     db.add_app_feedback_codex_run(
         report_id,
