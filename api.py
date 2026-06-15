@@ -1709,7 +1709,7 @@ Rules:
 - If the user asks to add bullets/details to an existing scheduler context, use update_scheduler_item for that existing item. Do not create a second item with the same title/context.
 - For action reminders like "call to have the AC serviced", use the topic/domain as the title and context_label ("AC"), and put the actual action as a short checkbox note ("- [ ] call to have AC serviced").
 - For scheduler scheduled_for, use YYYY-MM-DD when the user gives a clear date; otherwise use an empty string.
-- For scheduler context_label, use short labels like AC, Mechanic, Doctor, Grocery, Insurance, Home, or Call.
+- For scheduler context_label, use short labels like AC, Pilates, Mechanic, Doctor, Grocery, Insurance, Home, or Call.
 - For scheduler additions, do not invent or expand notes. Save only details the user explicitly gave.
 - For scheduler additions, keep notes as short bullets or an empty string. Never save "Original request:" text.
 - For scheduler note updates, never repeat the user's whole instruction. Keep or merge concise bullets only.
@@ -1733,6 +1733,7 @@ def infer_scheduler_context_label(text):
         ("a/c", "AC"),
         (" ac ", "AC"),
         ("ac ", "AC"),
+        ("pilates", "Pilates"),
         ("home", "Home"),
         ("house", "Home"),
         ("chore", "Home"),
@@ -1752,6 +1753,15 @@ def infer_scheduler_context_label(text):
         if needle in text_lower:
             return label
     return "General"
+
+def refine_scheduler_context_label(text, proposed_context=""):
+    """Prefer a specific inferred scheduler context over a generic model label."""
+    proposed = (proposed_context or "").strip()
+    inferred = infer_scheduler_context_label(text)
+    generic_contexts = {"", "General", "Call", "Class", "Task", "Reminder", "Scheduler"}
+    if proposed in generic_contexts and inferred and inferred != "General":
+        return inferred
+    return proposed or inferred or "General"
 
 def app_now():
     """Return the app-local time used for casual scheduling language."""
@@ -1777,6 +1787,8 @@ def local_scheduler_proposal(user_message, target):
         "ask my",
         "ask the",
         "appointment",
+        "class",
+        "pilates",
         "agenda",
         "schedule",
         "scheduler",
@@ -2329,7 +2341,7 @@ def synthesize_scheduler_operation(user_message, operation):
     """Turn raw reminder text into a concise scheduler record."""
     original = (user_message or "").strip()
     title = (operation.get("title") or original).strip()
-    context_label = (operation.get("context_label") or infer_scheduler_context_label(original)).strip()
+    context_label = refine_scheduler_context_label(original, operation.get("context_label")).strip()
     scheduled_for = (operation.get("scheduled_for") or "").strip()
     bullet_additions = extract_scheduler_bullet_additions(original, context_label)
     agenda_items = bullet_additions or extract_scheduler_agenda_items(original)
@@ -2901,6 +2913,8 @@ def message_requests_planner_action(text):
         "scheduler",
         "calendar",
         "appointment",
+        "class",
+        "pilates",
         "agenda",
         "due tomorrow",
         "for tomorrow",
@@ -3127,6 +3141,80 @@ def preview_dieter_write(message, page_url, action_kind, destination):
         "needs_confirmation": True,
         "confirmation_token": token,
         "confirmation_action": action_kind,
+    }
+
+def summarize_pending_planner_operation(user_message, operation):
+    """Describe one proposed planner write before it is applied."""
+    op = operation.get("op") or ""
+    if op == "add_scheduler_item":
+        planned = synthesize_scheduler_operation(user_message, dict(operation))
+        lines = ["Plan: add a Scheduler item."]
+        lines.append(f"Title: {planned.get('title') or 'Untitled'}")
+        lines.append(f"Context: {planned.get('context_label') or 'General'}")
+        lines.append(f"When: {planned.get('scheduled_for') or 'no exact date'}")
+        if planned.get("notes"):
+            lines.append(f"Notes: {planned.get('notes')}")
+        return "\n".join(lines)
+    if op == "update_scheduler_item":
+        item_id = operation.get("scheduler_item_id")
+        existing = dict_from_row(db.get_scheduler_item(int(item_id))) if item_id else {}
+        if scheduler_list_request(user_message) and not scheduler_request_targets_existing_notes(user_message):
+            planned = synthesize_scheduler_operation(user_message, {
+                "op": "add_scheduler_item",
+                "title": user_message,
+                "context_label": operation.get("context_label") or (existing or {}).get("context_label") or infer_scheduler_context_label(user_message),
+                "scheduled_for": scheduler_date_from_text(user_message) or (operation.get("scheduled_for") or ""),
+                "notes": operation.get("notes") or "",
+            })
+            lines = ["Plan: create a separate Scheduler checklist instead of merging into an existing card."]
+            lines.append(f"Title: {planned.get('title') or 'Untitled'}")
+            lines.append(f"Context: {planned.get('context_label') or 'General'}")
+            lines.append(f"When: {planned.get('scheduled_for') or 'no exact date'}")
+            if planned.get("notes"):
+                lines.append(f"Notes: {planned.get('notes')}")
+            return "\n".join(lines)
+        lines = [f"Plan: update Scheduler item #{item_id}."]
+        if existing:
+            lines.append(f"Existing title: {existing.get('title') or 'Untitled'}")
+        for field in ["title", "context_label", "scheduled_for", "notes", "status"]:
+            value = operation.get(field)
+            if value is not None:
+                lines.append(f"{field}: {value or '(blank)'}")
+        return "\n".join(lines)
+    if op == "complete_scheduler_item":
+        return f"Plan: mark Scheduler item #{operation.get('scheduler_item_id')} done."
+    if op == "add_task":
+        return f"Plan: add Planner task: {operation.get('action') or 'Untitled task'}."
+    if op == "add_step":
+        return f"Plan: add checklist step: {operation.get('step') or 'Untitled step'}."
+    if op == "add_project":
+        return f"Plan: add Planner project: {operation.get('name') or 'Untitled project'}."
+    return f"Plan: {op.replace('_', ' ') or 'planner update'}."
+
+def preview_planner_action_write(message, page_url):
+    """Preview the concrete planner/scheduler operation before writing."""
+    proposal = propose_planner_edit(
+        message.content,
+        page_url=page_url,
+        conversation_history=message.conversation_history,
+    )
+    token = dieter_action_confirmation_token(message.content, page_url, "planner_action")
+    operations = proposal.get("operations") or []
+    lines = ["Before I write this, please confirm the action plan."]
+    if proposal.get("summary"):
+        lines.append(f"Summary: {proposal.get('summary')}")
+    if operations:
+        for index, operation in enumerate(operations, 1):
+            lines.append(f"\n{index}. {summarize_pending_planner_operation(message.content, operation)}")
+    else:
+        lines.append("Plan: no structured planner write was detected. Edit your message if you expected one.")
+    lines.append("\nPress Confirm to apply it, or edit your message and send again.")
+    return {
+        "assistant_message": "\n".join(lines),
+        "changed_fields": [],
+        "needs_confirmation": True,
+        "confirmation_token": token,
+        "confirmation_action": "planner_action",
     }
 
 def build_recipe_extraction_stats(groups):
@@ -3548,13 +3636,8 @@ def api_dieter_action(message: DieterActionMessage):
         return handle_trainer_reflection_request(message, page_url)
 
     if message_requests_planner_action(message.content):
-        if kitchen_cross_app_write_needs_confirmation(page_url) and not dieter_action_confirmed(message, page_url, "planner_action"):
-            return preview_dieter_write(
-                message,
-                page_url,
-                "planner_action",
-                "Planner/Scheduler (/apps/assistant/planner or /apps/assistant/scheduler)",
-            )
+        if not dieter_action_confirmed(message, page_url, "planner_action"):
+            return preview_planner_action_write(message, page_url)
         try:
             return handle_planner_action_request(message, page_url)
         except Exception as exc:
