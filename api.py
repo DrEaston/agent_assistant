@@ -1788,9 +1788,9 @@ def extract_scheduler_context_change(text):
     if not original:
         return ""
     patterns = [
-        r"\b(?:change|set|update|use|make)\s+(?:the\s+)?context(?:\s+(?:field|label))?\s+(?:to|as)\s+(.+)$",
-        r"\bcontext(?:\s+(?:field|label))?\s+(?:should\s+be|is|to|as)\s+(.+)$",
-        r"\b(?:put|file|categorize)\s+(?:it|this|the\s+card)?\s+(?:under|in)\s+(?:the\s+)?(?:context\s+)?(.+)$",
+        r"\b(?:no[, ]+)?(?:change|set|update|use|make)\s+(?:the\s+)?context(?:\s+(?:field|label))?\s+(?:to|as)\s+(.+)$",
+        r"\b(?:no[, ]+)?context(?:\s+(?:field|label))?\s+(?:should\s+be|is|to|as)\s+(.+)$",
+        r"\b(?:no[, ]+)?(?:put|file|categorize)\s+(?:it|this|the\s+card)?\s+(?:under|in)\s+(?:the\s+)?(?:context\s+)?(.+)$",
     ]
     for pattern in patterns:
         match = re.search(pattern, original, flags=re.IGNORECASE | re.DOTALL)
@@ -1819,8 +1819,8 @@ def strip_scheduler_context_change_text(text):
     """Remove context-field clauses before extracting note bullets."""
     cleaned = text or ""
     patterns = [
-        r"\b(?:change|set|update|use|make)\s+(?:the\s+)?context(?:\s+(?:field|label))?\s+(?:to|as)\s+.+?(?=\s+\band\s+(?:(?:make|do|use|set)\s+)?(?:the\s+)?bullets?\b|\s+\bwith\s+(?:the\s+)?bullets?\b|[,;.]|$)",
-        r"\bcontext(?:\s+(?:field|label))?\s+(?:should\s+be|is|to|as)\s+.+?(?=\s+\band\s+(?:(?:make|do|use|set)\s+)?(?:the\s+)?bullets?\b|\s+\bwith\s+(?:the\s+)?bullets?\b|[,;.]|$)",
+        r"\b(?:no[, ]+)?(?:change|set|update|use|make)\s+(?:the\s+)?context(?:\s+(?:field|label))?\s+(?:to|as)\s+.+?(?=\s+\band\s+(?:(?:make|do|use|set)\s+)?(?:the\s+)?bullets?\b|\s+\bwith\s+(?:the\s+)?bullets?\b|[,;.]|$)",
+        r"\b(?:no[, ]+)?context(?:\s+(?:field|label))?\s+(?:should\s+be|is|to|as)\s+.+?(?=\s+\band\s+(?:(?:make|do|use|set)\s+)?(?:the\s+)?bullets?\b|\s+\bwith\s+(?:the\s+)?bullets?\b|[,;.]|$)",
     ]
     for pattern in patterns:
         cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE | re.DOTALL)
@@ -2016,6 +2016,13 @@ def extract_scheduler_list_items(text, context_label=""):
     )
     list_text = re.sub(
         r"^(?:and\s+)?(?:the\s+)?bullets?\s+",
+        "",
+        list_text,
+        flags=re.IGNORECASE,
+    )
+    list_text = re.sub(r"^(?:no[, ]+)?and\s+", "", list_text, flags=re.IGNORECASE)
+    list_text = re.sub(
+        r"^(?:the\s+)?bullets?(?:\s+for\s+)?\s*(?:are|should\s+be|to|as)\s+",
         "",
         list_text,
         flags=re.IGNORECASE,
