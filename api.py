@@ -3215,6 +3215,30 @@ def app_area_from_url(page_url):
         return "Auth"
     return "Dieter"
 
+def app_area_from_feedback_text(text):
+    """Infer a feedback area from explicit app names in a home-screen/general report."""
+    normalized = (text or "").lower()
+    if any(token in normalized for token in ["trainer app", "dieter trainer", "strava", "workout", "run graph", "bike graph"]):
+        return "Trainer"
+    if any(token in normalized for token in ["recipe app", "kitchen app", "dieter kitchen", "grocery", "recipe", "bake mode"]):
+        return "Kitchen / Recipes"
+    if any(token in normalized for token in ["music app", "playlist", "spotify", "dieter music"]):
+        return "Music"
+    if any(token in normalized for token in ["scheduler", "agenda item", "coming up"]):
+        return "Scheduler"
+    if any(token in normalized for token in ["planner app", "assistant app", "dieter assistant"]):
+        return "Assistant / Planner"
+    if any(token in normalized for token in ["login", "guest account", "guest login", "auth"]):
+        return "Auth"
+    return "Dieter"
+
+def app_area_for_feedback(page_url, text=""):
+    """Use the current app as the feedback area, except home can honor explicit app names."""
+    page_area = app_area_from_url(page_url or "")
+    if page_area != "Dieter":
+        return page_area
+    return app_area_from_feedback_text(text) or "Dieter"
+
 def normalize_app_feedback_area(area, page_url=""):
     """Normalize model/user feedback area names for filtering."""
     allowed = {
@@ -3275,7 +3299,7 @@ def summarize_app_feedback_title(content, area):
 
 def model_app_feedback_summary(content, page_url="", page_title="", previous_action_plan=""):
     """Use the planner model to turn raw user feedback into a developer-facing report."""
-    fallback_area = app_area_from_url(page_url or "")
+    fallback_area = app_area_for_feedback(page_url or "", content or "")
     fallback_title = summarize_app_feedback_title(content, fallback_area)
     fallback = {
         "title": fallback_title,
@@ -3311,9 +3335,13 @@ def model_app_feedback_summary(content, page_url="", page_title="", previous_act
     severity = (parsed.get("severity") or "medium").strip().lower()
     if severity not in {"high", "medium", "low"}:
         severity = "medium"
+    parsed_area = normalize_app_feedback_area(parsed.get("area") or fallback_area, page_url or "")
+    page_area = app_area_from_url(page_url or "")
+    if page_area != "Dieter":
+        parsed_area = page_area
     return {
         "title": title,
-        "area": normalize_app_feedback_area(parsed.get("area") or fallback_area, page_url or ""),
+        "area": parsed_area,
         "summary": re.sub(r"\s+", " ", (parsed.get("summary") or fallback["summary"]).strip()),
         "severity": severity,
     }
@@ -3429,14 +3457,13 @@ def handle_app_feedback_request(message, page_url):
         "summary": "Saved app feedback.",
         "assistant_message": "\n".join([
             "Saved app feedback for Curtis to implement.",
-            f"Project: Dieter App Feedback",
-            f"Task: {action}",
             f"Feedback report: #{report_id}",
             f"Area: {area}",
+            f"Title: {action}",
             f"Reporter: {reporter}",
             f"Page: {page_url or 'unknown'}",
-            "Wrote result to: Dieter App Feedback task list (/apps/assistant/planner).",
-            "Visible feedback inbox: /apps/assistant/feedback.",
+            f"Visible feedback inbox: /apps/assistant/feedback?area={area.replace(' ', '%20').replace('/', '%2F')}.",
+            "Backlog mirror: Dieter App Feedback planner project.",
             "Codex inbox: app_feedback_reports table; export with /api/app-feedback/codex-inbox/save.",
         ]),
         "operations": [
@@ -3445,8 +3472,8 @@ def handle_app_feedback_request(message, page_url):
             {"op": "add_app_feedback_report", "report_id": report_id},
         ],
         "app_feedback_context": True,
-        "redirect_url": f"/projects/{project['id']}/actions/{action_id}",
-        "redirect_label": "Open Feedback Task",
+        "redirect_url": f"/apps/assistant/feedback?area={area.replace(' ', '%20').replace('/', '%2F')}",
+        "redirect_label": "Open Feedback Report",
         "reload_page": False,
     }
 
