@@ -764,6 +764,8 @@ class Database:
         self._ensure_column(cursor, "app_feedback_reports", "audit_plan", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_reports", "audit_plan_updated_at", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_reports", "audit_answers_json", "TEXT DEFAULT '{}'")
+        self._ensure_column(cursor, "app_feedback_reports", "implementation_note", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_reports", "implementation_note_updated_at", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_profiles", "strava_access_token", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_profiles", "strava_refresh_token", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_profiles", "strava_token_expires_at", "INTEGER DEFAULT 0")
@@ -4553,6 +4555,24 @@ class Database:
             WHERE id = ?
             """,
             (answers, report_id),
+        )
+        self._commit()
+        self.close()
+
+    def update_app_feedback_report_review_note(self, report_id, status, note):
+        """Mark a feedback issue ready for user testing with an implementation note."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE app_feedback_reports
+            SET status = ?,
+                implementation_note = ?,
+                implementation_note_updated_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (status, note, report_id),
         )
         self._commit()
         self.close()
