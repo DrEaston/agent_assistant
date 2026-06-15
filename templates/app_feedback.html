@@ -45,9 +45,9 @@
     </div>
 
     {% if feedback_reports %}
-        <div class="task-list">
+        <div class="task-list app-feedback-list">
             {% for report in feedback_reports %}
-                <article class="task-item">
+                <article class="task-item app-feedback-card">
                     <div class="task-copy">
                         <h3>{{ report.title }}</h3>
                         <small>
@@ -63,7 +63,7 @@
                             <small>Planner task: {{ report.action_title }}</small>
                         {% endif %}
                     </div>
-                    <div class="scheduler-item-actions">
+                    <div class="scheduler-item-actions app-feedback-actions">
                         <form method="post" action="/apps/assistant/feedback/{{ report.id }}/audit" class="inline-form">
                             <input type="hidden" name="status" value="{{ feedback_status or 'open' }}">
                             <input type="hidden" name="area" value="{{ feedback_area }}">
