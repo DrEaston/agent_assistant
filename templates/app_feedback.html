@@ -82,6 +82,39 @@
                                         {% endif %}
                                     </div>
                                 {% endif %}
+                                {% if report.audit_plan %}
+                                    <details class="feedback-plan-preview">
+                                        <summary>Codex plan{% if report.audit_plan_approved_at %} - approved{% endif %}</summary>
+                                        {% if report.audit_plan_has_open_questions %}
+                                            <div class="feedback-plan-warning">
+                                                <strong>Open questions remain</strong>
+                                                <ul>
+                                                    {% for question in report.audit_plan_questions %}
+                                                        <li>{{ question }}</li>
+                                                    {% endfor %}
+                                                </ul>
+                                            </div>
+                                        {% endif %}
+                                        <pre class="feedback-plan-text">{{ report.audit_plan }}</pre>
+                                        <form method="post" action="/apps/assistant/feedback/{{ report.id }}/plan/revise" class="feedback-plan-card-form">
+                                            <label for="feedback-plan-revision-{{ report.id }}">Suggest edits</label>
+                                            <textarea
+                                                id="feedback-plan-revision-{{ report.id }}"
+                                                name="revision_instructions"
+                                                placeholder="Tell Dieter how to revise this plan."
+                                            ></textarea>
+                                            <input type="hidden" name="area" value="{{ feedback_area }}">
+                                            <textarea name="current_plan" hidden>{{ report.audit_plan }}</textarea>
+                                            <button type="submit" class="secondary compact">Preview revised plan</button>
+                                        </form>
+                                        {% if not report.audit_plan_approved_at and not report.audit_plan_has_open_questions %}
+                                            <form method="post" action="/apps/assistant/feedback/{{ report.id }}/plan/approve-saved" class="inline-form">
+                                                <input type="hidden" name="next" value="{{ request.url.path }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
+                                                <button type="submit" class="compact">Approve plan</button>
+                                            </form>
+                                        {% endif %}
+                                    </details>
+                                {% endif %}
                                 <div class="scheduler-item-actions app-feedback-actions">
                                     {% if report.status != "ready_for_review" and report.status != "done" %}
                                         <form method="post" action="/apps/assistant/feedback/{{ report.id }}/audit" class="inline-form">

@@ -3260,6 +3260,17 @@ def group_app_feedback_reports_by_status(reports):
         grouped.append({"status": "other", "label": "Other", "reports": other})
     return grouped
 
+def prepare_app_feedback_reports_for_display(reports):
+    """Annotate feedback reports with saved-plan details needed by the issue UI."""
+    prepared = []
+    for report in reports:
+        item = dict(report)
+        audit_plan = item.get("audit_plan") or ""
+        item["audit_plan_questions"] = extract_feedback_plan_questions(audit_plan)
+        item["audit_plan_has_open_questions"] = bool(item["audit_plan_questions"])
+        prepared.append(item)
+    return prepared
+
 def extract_feedback_plan_questions(markdown):
     """Return clear user-answerable questions from a Codex audit plan."""
     text = markdown or ""
@@ -5065,7 +5076,7 @@ def assistant_feedback_app(
     """Visible inbox for user-reported app feedback."""
     safe_status = safe_app_feedback_status(status, default="active", allow_all=True)
     all_reports = get_app_feedback_reports_for_status(safe_status, limit=100)
-    visible_reports = filter_app_feedback_reports(all_reports, area)
+    visible_reports = prepare_app_feedback_reports_for_display(filter_app_feedback_reports(all_reports, area))
     context = {
         "request": request,
         "feedback_reports": visible_reports,
@@ -5097,7 +5108,7 @@ def synthesize_app_feedback_form(
     """Generate and save a Codex-readable implementation plan from feedback reports."""
     safe_status = safe_app_feedback_status(status, default="active", allow_all=True)
     reports = get_app_feedback_reports_for_status(safe_status, limit=100)
-    visible_reports = filter_app_feedback_reports(reports, area)
+    visible_reports = prepare_app_feedback_reports_for_display(filter_app_feedback_reports(reports, area))
     markdown = build_app_feedback_codex_plan(visible_reports, status=safe_status, area=area)
     output_path = Path("codex_feedback_plan.md").resolve()
     output_path.write_text(markdown, encoding="utf-8")
@@ -5156,7 +5167,7 @@ def audit_app_feedback_form(
     markdown, stable_path, issue_path = save_single_feedback_issue_plan(report)
     safe_status = "in_progress"
     reports = dicts_from_rows(db.get_app_feedback_reports(status=safe_status, limit=100))
-    visible_reports = filter_app_feedback_reports(reports, area)
+    visible_reports = prepare_app_feedback_reports_for_display(filter_app_feedback_reports(reports, area))
     context = {
         "request": request,
         "feedback_reports": visible_reports,
@@ -5199,7 +5210,7 @@ def revise_app_feedback_plan_form(
     markdown = revise_feedback_issue_plan(report, current_plan, revision_instructions)
     approval_token = feedback_plan_approval_token(report_id, markdown)
     reports = dicts_from_rows(db.get_app_feedback_reports(status="in_progress", limit=100))
-    visible_reports = filter_app_feedback_reports(reports, area)
+    visible_reports = prepare_app_feedback_reports_for_display(filter_app_feedback_reports(reports, area))
     context = {
         "request": request,
         "feedback_reports": visible_reports,
@@ -5252,7 +5263,7 @@ def answer_app_feedback_plan_questions_form(
     markdown = revise_feedback_issue_plan(report, current_plan, revision_instructions)
     approval_token = feedback_plan_approval_token(report_id, markdown)
     reports = dicts_from_rows(db.get_app_feedback_reports(status="in_progress", limit=100))
-    visible_reports = filter_app_feedback_reports(reports, area)
+    visible_reports = prepare_app_feedback_reports_for_display(filter_app_feedback_reports(reports, area))
     context = {
         "request": request,
         "feedback_reports": visible_reports,
@@ -5302,7 +5313,7 @@ def approve_app_feedback_plan_form(
     db.mark_app_feedback_report_audit_plan_approved(report_id)
     report = feedback_report_by_id(report_id)
     reports = dicts_from_rows(db.get_app_feedback_reports(status="in_progress", limit=100))
-    visible_reports = filter_app_feedback_reports(reports, area)
+    visible_reports = prepare_app_feedback_reports_for_display(filter_app_feedback_reports(reports, area))
     context = {
         "request": request,
         "feedback_reports": visible_reports,
@@ -5328,6 +5339,23 @@ def approve_app_feedback_plan_form(
     }
     template = jinja_env.get_template("app_feedback.html")
     return HTMLResponse(template.render(context))
+
+@app.post("/apps/assistant/feedback/{report_id}/plan/approve-saved")
+def approve_saved_app_feedback_plan_form(
+    report_id: int,
+    next: str = Form("/apps/assistant/feedback"),
+):
+    """Approve the current saved audit plan for an issue."""
+    report = feedback_report_by_id(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Feedback report not found")
+    markdown = (report.get("audit_plan") or "").strip()
+    if not markdown:
+        raise HTTPException(status_code=400, detail="Audit this issue before approving a plan.")
+    if extract_feedback_plan_questions(markdown):
+        raise HTTPException(status_code=400, detail="Answer open questions and re-audit before approving this plan.")
+    db.mark_app_feedback_report_audit_plan_approved(report_id)
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/feedback"), status_code=303)
 
 @app.post("/apps/assistant/feedback/{report_id}/status")
 def update_app_feedback_status_form(
