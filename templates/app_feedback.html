@@ -59,7 +59,10 @@
                                 <span class="feedback-status-pill status-{{ (report.status or 'open')|replace('_', '-') }}">{{ (report.status or "open")|replace("_", " ")|title }}</span>
                             </summary>
                             <div class="feedback-card-detail">
-                                <p>{{ report.raw_feedback }}</p>
+                                <details class="feedback-original-prompt">
+                                    <summary>Original prompt</summary>
+                                    <p>{{ report.raw_feedback }}</p>
+                                </details>
                                 <small>
                                     Page: {{ report.page_url or "unknown" }}
                                     {% if report.reporter_name %} - Reporter: {{ report.reporter_name }}{% endif %}

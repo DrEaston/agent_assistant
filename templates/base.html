@@ -1641,17 +1641,28 @@
             margin: 0.25rem 0;
         }
 
+        .feedback-original-prompt,
         .feedback-plan-preview {
             border: 1px solid #dbe4ee;
             border-radius: 8px;
             background: #f8fafc;
         }
 
+        .feedback-original-prompt > summary,
         .feedback-plan-preview > summary {
             cursor: pointer;
             padding: 0.65rem 0.75rem;
             color: #334155;
             font-weight: 800;
+        }
+
+        .feedback-original-prompt p {
+            margin: 0;
+            padding: 0.75rem;
+            border-top: 1px solid #e2e8f0;
+            background: #fff;
+            line-height: 1.5;
+            overflow-wrap: anywhere;
         }
 
         .feedback-plan-text {
