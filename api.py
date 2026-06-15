@@ -1718,6 +1718,14 @@ Rules:
 - If adding records, use the current project/task target when appropriate.
 - Use scheduler items for contextual reminders, agenda questions, appointments, errands, and "next time I talk to/go to/call..." requests.
 - Use scheduler items for dated action items, for example "make a new action item for tomorrow". If the request is vague, draft a card with the explicit date and a generic title like "Action item"; do not invent bullets.
+- Strongly prefer creating a scheduler list when the user says list, bullets, tasks, chores, agenda, action item with multiple parts, or gives several things joined by "and".
+- There are two list types:
+  1. Item/reference list: a list of things, ideas, options, supplies, names, or facts. Choose a short summary title/context_label for the group and save notes as plain bullets, for example "- Brush teeth". Do not use checkboxes.
+  2. Action checklist: a list of things the user intends to do, complete, schedule, buy, call, clean, pack, or otherwise check off. Choose a short summary title/context_label and save notes as checkbox bullets, for example "- [ ] Brush teeth".
+- If the user says a list/card/action item is "called", "named", "titled", or gives an obvious heading, use that as the card title/context_label and organize the rest of the content into bullets.
+- If the user asks for a regular list and not a checklist, default to plain bullets; the user can convert it to checkboxes later.
+- If the user explicitly says checklist, checkbox, to-do, chore, task, action item, or "things to do", use checkbox bullets.
+- If the user says "the bullets are..." or "with bullets...", everything after that phrase should become concise bullets, not part of the title/context.
 - If the user asks to add bullets/details to an existing scheduler context, use update_scheduler_item for that existing item. Do not create a second item with the same title/context.
 - For action reminders like "call to have the AC serviced", use the topic/domain as the title and context_label ("AC"), and put the actual action as a short checkbox note ("- [ ] call to have AC serviced").
 - If the user asks to change, set, update, or use a context, write that value to context_label. Do not store "change context..." as a note or bullet.
@@ -2469,9 +2477,10 @@ def synthesize_scheduler_operation(user_message, operation):
     explicit_context_label = extract_scheduler_context_change(original)
     context_label = (explicit_context_label or refine_scheduler_context_label(original, operation.get("context_label"))).strip()
     scheduled_for = (operation.get("scheduled_for") or "").strip()
+    raw_notes = (operation.get("notes") or "").strip()
     bullet_additions = extract_scheduler_bullet_additions(original, context_label)
     agenda_items = bullet_additions or extract_scheduler_agenda_items(original)
-    list_items = extract_scheduler_list_items(original, context_label)
+    list_items = [] if raw_notes else extract_scheduler_list_items(original, context_label)
     detail_items = [] if list_items else extract_scheduler_detail_items(original, context_label)
 
     text = original.lower()
@@ -2479,13 +2488,29 @@ def synthesize_scheduler_operation(user_message, operation):
         scheduled_for = scheduler_date_from_text(text)
 
     rawish_title = title.lower() == original.lower() or len(title) > 80
+    title_is_generic = title.strip().lower() in {
+        "",
+        "action item",
+        "checklist",
+        "list",
+        "scheduler item",
+        "scheduler reminder",
+        "reminder",
+    }
     is_list_request = scheduler_list_request(original)
     chore_list_match = re.search(r"\b(chore|chores)\b", original, flags=re.IGNORECASE)
-    if context_label and context_label != "General" and not (context_label == "Home" and rawish_title and not list_items):
+    if raw_notes and not rawish_title and not title_is_generic:
+        pass
+    elif context_label and context_label != "General" and not (context_label == "Home" and rawish_title and not list_items):
         if list_items and scheduler_generic_action_item_request(original):
             title = scheduler_context_title(context_label, has_list=True)
         elif list_items:
             title = "Chore list" if chore_list_match else f"{context_label} checklist"
+        elif raw_notes and title_is_generic:
+            title = scheduler_context_title(
+                context_label,
+                has_list=bool(re.search(r"^[-*]\s*\[ \]", raw_notes, flags=re.MULTILINE)),
+            )
         else:
             title = context_label
     elif rawish_title:
@@ -2511,7 +2536,9 @@ def synthesize_scheduler_operation(user_message, operation):
             title = "Scheduler reminder"
 
     note_lines = []
-    if list_items:
+    if raw_notes:
+        operation["notes"] = strip_scheduler_context_change_notes(normalize_scheduler_notes(raw_notes))
+    elif list_items:
         note_lines = list_items
     elif agenda_items:
         note_lines = [
@@ -2545,7 +2572,8 @@ def synthesize_scheduler_operation(user_message, operation):
     operation["title"] = title
     operation["context_label"] = context_label or "General"
     operation["scheduled_for"] = scheduled_for
-    operation["notes"] = strip_scheduler_context_change_notes(normalize_scheduler_notes(format_scheduler_note_lines(note_lines)))
+    if not raw_notes:
+        operation["notes"] = strip_scheduler_context_change_notes(normalize_scheduler_notes(format_scheduler_note_lines(note_lines)))
     return operation
 
 def enrich_scheduler_item_priority(item, today=None):
