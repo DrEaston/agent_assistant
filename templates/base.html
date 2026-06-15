@@ -6589,12 +6589,26 @@
                 startVoiceSegment();
             });
 
+            input?.addEventListener("input", () => {
+                if (!pendingActionConfirmation || !sendButton) {
+                    return;
+                }
+                const revised = input.value.trim() !== pendingActionConfirmation.content;
+                sendButton.textContent = revised ? "Send revision" : "Confirm";
+            });
+
             form?.addEventListener("submit", async (event) => {
                 event.preventDefault();
                 const content = input.value.trim();
                 if (!content) {
                     return;
                 }
+
+                const isRevision = Boolean(
+                    pendingActionConfirmation
+                    && content !== pendingActionConfirmation.content
+                );
+                const confirmationForRequest = isRevision ? null : pendingActionConfirmation;
 
                 addRecipeChatMessage("user", content);
                 history.push({role: "user", content});
@@ -6610,13 +6624,16 @@
 
                 const endpoint = "/api/dieter/action";
                 const requestBody = {
-                    content: pendingActionConfirmation?.content || content,
+                    content: confirmationForRequest?.content || content,
                     page_title: document.title,
                     page_url: `${window.location.pathname}${window.location.search}${window.location.hash}`,
-                    confirmation_token: pendingActionConfirmation?.token || "",
+                    confirmation_token: confirmationForRequest?.token || "",
                     conversation_history: history.slice(-8),
                 };
-                const isConfirmingAction = Boolean(pendingActionConfirmation);
+                const isConfirmingAction = Boolean(confirmationForRequest);
+                if (isRevision) {
+                    pendingActionConfirmation = null;
+                }
 
                 try {
                     const response = await fetch(endpoint, {

@@ -3134,7 +3134,7 @@ def preview_dieter_write(message, page_url, action_kind, destination):
     ]
     if action_kind == "planner_action" and re.search(r"\b(chore|chores|to do|todo|checklist|list)\b|[,;\n]", message.content or "", flags=re.IGNORECASE):
         lines.append("If this is a list, I will save separate bullets as checkboxes where possible.")
-    lines.append("Press Confirm to apply it, or edit your message and send again.")
+    lines.append("Press Confirm to apply it, or revise the text with instructions like \"No, do the bullets like this...\" and send again.")
     return {
         "assistant_message": "\n".join(lines),
         "changed_fields": [],
@@ -3208,7 +3208,7 @@ def preview_planner_action_write(message, page_url):
             lines.append(f"\n{index}. {summarize_pending_planner_operation(message.content, operation)}")
     else:
         lines.append("Plan: no structured planner write was detected. Edit your message if you expected one.")
-    lines.append("\nPress Confirm to apply it, or edit your message and send again.")
+    lines.append("\nPress Confirm to apply it, or revise the text with instructions like \"No, do the bullets like this...\" and send again.")
     return {
         "assistant_message": "\n".join(lines),
         "changed_fields": [],
