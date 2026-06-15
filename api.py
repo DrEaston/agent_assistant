@@ -39,6 +39,7 @@ from agent_service import AgentService
 from priority_review_service import PriorityReviewService
 from recipe_ocr_service import RecipeOCRService
 from cloud_persistence import CloudStoragePersistence
+from approval_flow import is_confirmed, preview_response
 from typing import Optional, List
 import tempfile
 
@@ -3181,6 +3182,7 @@ Rules:
 - Keep title short and implementation-facing, no more than 90 characters.
 - area must be one of: Kitchen / Recipes, Scheduler, Assistant / Planner, Trainer, Music, Auth, Dieter.
 - Use the page URL as a hint, but respect the user's actual complaint.
+- If a previous draft is provided, use it as context and apply the user's latest revision request to produce a new complete draft.
 - summary should preserve the user's meaning without inventing technical causes.
 - severity must be high, medium, or low.
 """
@@ -3271,7 +3273,7 @@ def summarize_app_feedback_title(content, area):
         cleaned = cleaned[:89].rstrip() + "..."
     return f"Fix {area}: {cleaned}" if cleaned else f"Review {area} feedback"
 
-def model_app_feedback_summary(content, page_url="", page_title=""):
+def model_app_feedback_summary(content, page_url="", page_title="", previous_action_plan=""):
     """Use the planner model to turn raw user feedback into a developer-facing report."""
     fallback_area = app_area_from_url(page_url or "")
     fallback_title = summarize_app_feedback_title(content, fallback_area)
@@ -3286,6 +3288,9 @@ def model_app_feedback_summary(content, page_url="", page_title=""):
     prompt = "\n".join([
         f"Page URL: {page_url or 'unknown'}",
         f"Page title: {page_title or 'unknown'}",
+        "",
+        "Previous draft, if any:",
+        previous_action_plan or "none",
         "",
         "Raw user feedback:",
         content or "",
@@ -3313,16 +3318,83 @@ def model_app_feedback_summary(content, page_url="", page_title=""):
         "severity": severity,
     }
 
+def propose_app_feedback_report(message, page_url):
+    """Draft a feedback report without writing it."""
+    return model_app_feedback_summary(
+        message.content,
+        page_url=page_url or "",
+        page_title=message.page_title or "",
+        previous_action_plan=message.previous_action_plan or "",
+    )
+
+def format_app_feedback_draft(message, page_url, proposal):
+    """Format the feedback report draft for approval."""
+    lines = [
+        "Before I save this feedback, please confirm the report.",
+        "",
+        "Plan: save app feedback.",
+        f"Title: {proposal.get('title') or 'Untitled feedback'}",
+        f"Area: {proposal.get('area') or app_area_from_url(page_url or '')}",
+        f"Severity: {proposal.get('severity') or 'medium'}",
+        f"Page: {page_url or 'unknown'}",
+        "Summary:",
+        proposal.get("summary") or message.content.strip(),
+        "",
+        "Raw feedback:",
+        message.content.strip(),
+        "",
+        "Destination: App Feedback inbox (/apps/assistant/feedback) and Dieter App Feedback planner project.",
+        "Press Approve plan to save it, revise the text to preview another draft, or Cancel.",
+    ]
+    return "\n".join(lines)
+
+def parse_app_feedback_draft(action_plan):
+    """Extract structured fields from an approved feedback draft."""
+    text = action_plan or ""
+    if "Plan: save app feedback." not in text:
+        return None
+    title_match = re.search(r"^Title:\s*(.+)$", text, flags=re.MULTILINE)
+    area_match = re.search(r"^Area:\s*(.+)$", text, flags=re.MULTILINE)
+    severity_match = re.search(r"^Severity:\s*(.+)$", text, flags=re.MULTILINE)
+    summary_match = re.search(
+        r"^Summary:\s*\n(.+?)(?=\n\nRaw feedback:)",
+        text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    title = (title_match.group(1).strip() if title_match else "") or ""
+    area = normalize_app_feedback_area(area_match.group(1).strip() if area_match else "")
+    severity = (severity_match.group(1).strip().lower() if severity_match else "medium")
+    if severity not in {"high", "medium", "low"}:
+        severity = "medium"
+    summary = re.sub(r"\s+", " ", (summary_match.group(1).strip() if summary_match else "")).strip()
+    if not title:
+        return None
+    return {
+        "title": title,
+        "area": area,
+        "summary": summary,
+        "severity": severity,
+    }
+
+def preview_app_feedback_write(message, page_url):
+    """Preview the feedback report before writing it."""
+    proposal = propose_app_feedback_report(message, page_url)
+    action_plan = format_app_feedback_draft(message, page_url, proposal)
+    return preview_response(
+        message.content,
+        page_url,
+        "app_feedback",
+        action_plan,
+        user_id=get_current_user_id() or 0,
+        secret=os.getenv("SECRET_KEY") or REGISTRATION_CODE or "dieter-local-secret",
+    )
+
 def handle_app_feedback_request(message, page_url):
     """Save app feedback as a developer-ready planner task."""
     user = dict_from_row(db.get_user_by_id(get_current_user_id())) if get_current_user_id() else {}
     reporter = user.get("display_name") or user.get("email") or "Unknown user"
     reporter_email = user.get("email") or ""
-    model_summary = model_app_feedback_summary(
-        message.content,
-        page_url=page_url or "",
-        page_title=message.page_title or "",
-    )
+    model_summary = parse_app_feedback_draft(message.previous_action_plan) or propose_app_feedback_report(message, page_url)
     area = model_summary["area"]
     project = get_or_create_app_feedback_project()
     share_app_feedback_project_with_admins(project["id"])
@@ -3396,28 +3468,25 @@ def kitchen_cross_app_write_needs_confirmation(page_url):
 
 def dieter_action_confirmation_token(content, page_url, action_kind):
     """Create a tamper-resistant confirmation token for one proposed write."""
-    user_id = get_current_user_id() or 0
-    payload = json.dumps(
-        {
-            "user_id": user_id,
-            "content": content or "",
-            "page_url": page_url or "",
-            "action_kind": action_kind,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    signature = hmac.new(
-        (os.getenv("SECRET_KEY") or REGISTRATION_CODE or "dieter-local-secret").encode("utf-8"),
-        payload.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-    return f"{signature}:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
+    return preview_response(
+        content,
+        page_url,
+        action_kind,
+        "",
+        user_id=get_current_user_id() or 0,
+        secret=os.getenv("SECRET_KEY") or REGISTRATION_CODE or "dieter-local-secret",
+    )["confirmation_token"]
 
 def dieter_action_confirmed(message, page_url, action_kind):
     """Return True when the client confirmed the exact proposed write."""
-    expected = dieter_action_confirmation_token(message.content, page_url, action_kind)
-    return bool(message.confirmation_token and hmac.compare_digest(message.confirmation_token, expected))
+    return is_confirmed(
+        message.content,
+        page_url,
+        action_kind,
+        message.confirmation_token,
+        user_id=get_current_user_id() or 0,
+        secret=os.getenv("SECRET_KEY") or REGISTRATION_CODE or "dieter-local-secret",
+    )
 
 def preview_dieter_write(message, page_url, action_kind, destination):
     """Ask the user to confirm a cross-app write before applying it."""
@@ -3517,7 +3586,6 @@ def preview_planner_action_write(message, page_url):
         conversation_history=conversation_history,
         previous_action_plan=message.previous_action_plan,
     )
-    token = dieter_action_confirmation_token(message.content, page_url, "planner_action")
     operations = proposal.get("operations") or []
     lines = ["Before I write this, please confirm the action plan."]
     if proposal.get("summary"):
@@ -3528,14 +3596,15 @@ def preview_planner_action_write(message, page_url):
     else:
         lines.append("Plan: no structured planner write was detected. Edit your message if you expected one.")
     lines.append("\nPress Approve plan to apply it, revise the text to preview another draft, or Cancel.")
-    return {
-        "assistant_message": "\n".join(lines),
-        "action_plan": "\n".join(lines),
-        "changed_fields": [],
-        "needs_confirmation": True,
-        "confirmation_token": token,
-        "confirmation_action": "planner_action",
-    }
+    action_plan = "\n".join(lines)
+    return preview_response(
+        message.content,
+        page_url,
+        "planner_action",
+        action_plan,
+        user_id=get_current_user_id() or 0,
+        secret=os.getenv("SECRET_KEY") or REGISTRATION_CODE or "dieter-local-secret",
+    )
 
 def planner_action_conversation_history(message):
     """Return normal chat history; previous action plans are passed as explicit prompt input."""
@@ -3977,7 +4046,13 @@ def api_dieter_action(message: DieterActionMessage):
     """Route Ask Dieter requests to recipe edits, planner edits, or contextual chat."""
     page_url = message.page_url or ""
     recipe_kind, recipe_id = parse_recipe_target_from_url(page_url)
-    if message_reports_app_feedback(message.content):
+    feedback_loop_active = (
+        message_reports_app_feedback(message.content)
+        or "Plan: save app feedback." in (message.previous_action_plan or "")
+    )
+    if feedback_loop_active:
+        if not dieter_action_confirmed(message, page_url, "app_feedback"):
+            return preview_app_feedback_write(message, page_url)
         return handle_app_feedback_request(message, page_url)
 
     if message_requests_playlist_action(message.content, page_url):

@@ -6732,7 +6732,9 @@
                 const previousActionPlan = (
                     isRevision
                     ? pendingActionConfirmation?.plan
-                    : pendingActionConfirmation?.previousPlan
+                    : pendingActionConfirmation?.action === "app_feedback"
+                        ? pendingActionConfirmation?.plan
+                        : pendingActionConfirmation?.previousPlan
                 ) || "";
 
                 addRecipeChatMessage("user", content);
@@ -6774,6 +6776,7 @@
                         setPendingActionConfirmation({
                             content,
                             token: data.confirmation_token,
+                            action: data.confirmation_action || "",
                             plan: data.action_plan || answer,
                             previousPlan: previousActionPlan,
                         });
