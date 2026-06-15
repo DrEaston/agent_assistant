@@ -6392,7 +6392,11 @@
             const voiceStatus = document.querySelector("[data-recipe-chat-voice-status]");
             const history = [];
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            const canRecordAudio = Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
             let recognition = null;
+            let mediaRecorder = null;
+            let voiceStream = null;
+            let voiceChunks = [];
             let isListening = false;
             let keepVoiceOpen = false;
             let voiceBaseValue = "";
@@ -6417,6 +6421,90 @@
                     voiceButton.setAttribute("aria-label", listening ? "Send dictated message" : "Dictate message");
                 }
                 setVoiceStatus(listening ? "Listening... tap Send when done." : "");
+            };
+
+            const preferredAudioMimeType = () => {
+                const candidates = [
+                    "audio/webm;codecs=opus",
+                    "audio/webm",
+                    "audio/mp4",
+                ];
+                return candidates.find((type) => window.MediaRecorder?.isTypeSupported?.(type)) || "";
+            };
+
+            const stopServerVoiceInput = ({submit = false} = {}) => {
+                voiceSubmitAfterStop = submit;
+                if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                    mediaRecorder.stop();
+                } else {
+                    setVoiceListening(false);
+                }
+            };
+
+            const startServerVoiceInput = async () => {
+                try {
+                    voiceStream = await navigator.mediaDevices.getUserMedia({audio: true});
+                    voiceChunks = [];
+                    const mimeType = preferredAudioMimeType();
+                    mediaRecorder = new MediaRecorder(voiceStream, mimeType ? {mimeType} : undefined);
+                    mediaRecorder.addEventListener("dataavailable", (event) => {
+                        if (event.data?.size) {
+                            voiceChunks.push(event.data);
+                        }
+                    });
+                    mediaRecorder.addEventListener("stop", async () => {
+                        const shouldSubmit = voiceSubmitAfterStop;
+                        voiceSubmitAfterStop = false;
+                        setVoiceListening(false);
+                        voiceStream?.getTracks().forEach((track) => track.stop());
+                        voiceStream = null;
+                        const blob = new Blob(voiceChunks, {type: mediaRecorder.mimeType || "audio/webm"});
+                        mediaRecorder = null;
+                        voiceChunks = [];
+                        if (!blob.size) {
+                            setVoiceStatus("No audio captured.");
+                            return;
+                        }
+                        setVoiceStatus("Transcribing...");
+                        voiceButton.disabled = true;
+                        try {
+                            const formData = new FormData();
+                            const extension = blob.type.includes("mp4") ? "mp4" : "webm";
+                            formData.append("audio", blob, `dieter-voice.${extension}`);
+                            const response = await fetch("/api/dieter/transcribe", {
+                                method: "POST",
+                                body: formData,
+                            });
+                            const data = await response.json();
+                            if (!response.ok) {
+                                throw new Error(data.detail || "Transcription failed.");
+                            }
+                            const transcript = (data.text || "").trim();
+                            if (!transcript) {
+                                setVoiceStatus("I did not catch any words.");
+                                return;
+                            }
+                            const spacer = input.value.trim() ? " " : "";
+                            input.value = `${input.value.trim()}${spacer}${transcript}`;
+                            input.dispatchEvent(new Event("input", {bubbles: true}));
+                            setVoiceStatus("Transcribed.");
+                            if (shouldSubmit) {
+                                window.setTimeout(submitChatForm, 60);
+                            }
+                        } catch (error) {
+                            setVoiceStatus(`Voice transcription failed: ${error.message || error}`);
+                        } finally {
+                            voiceButton.disabled = false;
+                            input.focus();
+                        }
+                    });
+                    mediaRecorder.start();
+                    voiceSubmitAfterStop = false;
+                    setVoiceListening(true);
+                } catch (error) {
+                    setVoiceListening(false);
+                    setVoiceStatus(error?.name === "NotAllowedError" ? "Microphone permission was blocked." : "Voice recording could not start.");
+                }
             };
 
             const addRecipeChatMessage = (role, content) => {
@@ -6581,13 +6669,22 @@
                 }
             };
 
-            if (!SpeechRecognition && voiceButton) {
+            if (!canRecordAudio && !SpeechRecognition && voiceButton) {
                 voiceButton.disabled = true;
                 voiceButton.title = "Voice input is not available in this browser";
                 setVoiceStatus("Voice input unavailable in this browser.");
             }
 
             voiceButton?.addEventListener("click", () => {
+                if (canRecordAudio) {
+                    if (isListening || mediaRecorder) {
+                        stopServerVoiceInput({submit: true});
+                        return;
+                    }
+                    startServerVoiceInput();
+                    return;
+                }
+
                 if (!SpeechRecognition) {
                     setVoiceStatus("Voice input unavailable in this browser.");
                     return;

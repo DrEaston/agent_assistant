@@ -40,6 +40,7 @@ from priority_review_service import PriorityReviewService
 from recipe_ocr_service import RecipeOCRService
 from cloud_persistence import CloudStoragePersistence
 from typing import Optional, List
+import tempfile
 
 # Initialize FastAPI
 app = FastAPI(title="Project Agent API", version="1.0")
@@ -121,6 +122,7 @@ STRAVA_API_BASE = "https://www.strava.com/api/v3"
 STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token"
 STRAVA_AUTHORIZE_URL = "https://www.strava.com/oauth/authorize"
 STRAVA_REDIRECT_URI = os.getenv("STRAVA_REDIRECT_URI", "")
+OPENAI_TRANSCRIPTION_MODEL = os.getenv("OPENAI_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe")
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
 SPOTIFY_REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI", "")
@@ -3791,6 +3793,36 @@ def api_recipe_edit(message: RecipeEditMessage):
     result["recipe_kind"] = recipe_kind
     result["recipe_id"] = recipe_id
     return result
+
+@app.post("/api/dieter/transcribe")
+async def api_dieter_transcribe(audio: UploadFile = File(...)):
+    """Transcribe dictated Ask Dieter audio using the server-side LLM provider."""
+    api_key = os.getenv("OPENAI_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Voice transcription is not configured.")
+    suffix = Path(audio.filename or "").suffix or ".webm"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+        tmp.write(await audio.read())
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+        with tmp_path.open("rb") as audio_file:
+            transcript = client.audio.transcriptions.create(
+                model=OPENAI_TRANSCRIPTION_MODEL,
+                file=audio_file,
+                prompt=(
+                    "This is a short Ask Dieter command for a planner or scheduler app. "
+                    "Prefer words like context, bullets, action item, hygiene, Pilates, AC, tomorrow, today. "
+                    "Preserve list items clearly."
+                ),
+            )
+        text = getattr(transcript, "text", "") or ""
+        return {"text": text.strip(), "model": OPENAI_TRANSCRIPTION_MODEL}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not transcribe audio: {exc}") from exc
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 @app.post("/api/dieter/action")
 def api_dieter_action(message: DieterActionMessage):

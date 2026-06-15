@@ -103,6 +103,13 @@ $recipeCleanupModel = $env:RECIPE_CLEANUP_MODEL
 if (-not $recipeCleanupModel) {
     $recipeCleanupModel = Get-DotEnvValue "RECIPE_CLEANUP_MODEL"
 }
+$openAiTranscriptionModel = $env:OPENAI_TRANSCRIPTION_MODEL
+if (-not $openAiTranscriptionModel) {
+    $openAiTranscriptionModel = Get-DotEnvValue "OPENAI_TRANSCRIPTION_MODEL"
+}
+if (-not $openAiTranscriptionModel) {
+    $openAiTranscriptionModel = "gpt-4o-mini-transcribe"
+}
 if (-not $RegistrationCode) {
     $RegistrationCode = Get-DotEnvValue "DIETER_REGISTRATION_CODE"
 }
@@ -175,6 +182,9 @@ if ($recipeOcrModel) {
 }
 if ($recipeCleanupModel) {
     $envVars = "$envVars,RECIPE_CLEANUP_MODEL=$recipeCleanupModel"
+}
+if ($openAiTranscriptionModel) {
+    $envVars = "$envVars,OPENAI_TRANSCRIPTION_MODEL=$openAiTranscriptionModel"
 }
 if ($RegistrationCode) {
     $envVars = "$envVars,DIETER_REGISTRATION_CODE=$RegistrationCode"
