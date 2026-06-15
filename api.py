@@ -34,6 +34,7 @@ import urllib.request
 from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 from jinja2 import Environment, FileSystemLoader
 from llm_service import LLMService
+from llm_provider import get_llm_provider
 from agent_service import AgentService
 from priority_review_service import PriorityReviewService
 from recipe_ocr_service import RecipeOCRService
@@ -93,6 +94,13 @@ try:
 except ValueError as e:
     llm_service = None
     print(f"Warning: LLM service not available - {e}")
+
+try:
+    planner_model = os.getenv("OPENAI_PLANNER_MODEL") or os.getenv("OPENAI_REVIEW_MODEL")
+    planner_llm_provider = get_llm_provider(model=planner_model) if planner_model else (llm_service.provider if llm_service else None)
+except ValueError as e:
+    planner_llm_provider = llm_service.provider if llm_service else None
+    print(f"Warning: Planner LLM provider not available - {e}")
 
 agent_service = AgentService(db, llm_service)
 priority_review_service = PriorityReviewService(db, agent_service)
@@ -2626,7 +2634,7 @@ def prepare_scheduler_items_for_display(items):
 def propose_planner_edit(user_message, page_url="", conversation_history=None, previous_action_plan=""):
     """Ask the model for a structured planner edit proposal."""
     target, context = build_planner_edit_context(page_url)
-    if not llm_service:
+    if not planner_llm_provider:
         scheduler_proposal = local_scheduler_proposal(user_message, target)
         if scheduler_proposal:
             return scheduler_proposal
@@ -2666,9 +2674,9 @@ def propose_planner_edit(user_message, page_url="", conversation_history=None, p
     )
     messages = list(conversation_history or [])[-6:]
     messages.append({"role": "user", "content": prompt})
-    raw_response = llm_service.provider.chat(messages, PLANNER_EDIT_SYSTEM_PROMPT)
+    raw_response = planner_llm_provider.chat(messages, PLANNER_EDIT_SYSTEM_PROMPT)
     parsed = extract_json_object(raw_response)
-    parsed["model"] = getattr(llm_service.provider, "model", "")
+    parsed["model"] = getattr(planner_llm_provider, "model", "")
     parsed["target"] = target
     return parsed
 

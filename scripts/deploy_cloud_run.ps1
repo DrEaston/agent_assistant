@@ -88,6 +88,13 @@ $openAiReviewModel = $env:OPENAI_REVIEW_MODEL
 if (-not $openAiReviewModel) {
     $openAiReviewModel = Get-DotEnvValue "OPENAI_REVIEW_MODEL"
 }
+$openAiPlannerModel = $env:OPENAI_PLANNER_MODEL
+if (-not $openAiPlannerModel) {
+    $openAiPlannerModel = Get-DotEnvValue "OPENAI_PLANNER_MODEL"
+}
+if (-not $openAiPlannerModel) {
+    $openAiPlannerModel = $openAiReviewModel
+}
 $recipeOcrModel = $env:RECIPE_OCR_MODEL
 if (-not $recipeOcrModel) {
     $recipeOcrModel = Get-DotEnvValue "RECIPE_OCR_MODEL"
@@ -159,6 +166,9 @@ if ($secretIamExitCode -ne 0) {
 $envVars = "DB_PATH=/tmp/projects.db,UPLOADS_DIR=/tmp/uploads,GCS_BUCKET=$DataBucket,GCS_PREFIX=$DataPrefix,APP_TIMEZONE=America/Phoenix,LLM_PROVIDER=$llmProvider,OPENAI_MODEL=$openAiModel"
 if ($openAiReviewModel) {
     $envVars = "$envVars,OPENAI_REVIEW_MODEL=$openAiReviewModel"
+}
+if ($openAiPlannerModel) {
+    $envVars = "$envVars,OPENAI_PLANNER_MODEL=$openAiPlannerModel"
 }
 if ($recipeOcrModel) {
     $envVars = "$envVars,RECIPE_OCR_MODEL=$recipeOcrModel"
