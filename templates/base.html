@@ -6346,6 +6346,7 @@
                 <form class="recipe-chat-form" data-recipe-chat-form>
                     <textarea data-recipe-chat-input placeholder="Example: Help me pick what to work on, or update this recipe note." required></textarea>
                     <button type="button" class="recipe-chat-voice-button" data-recipe-chat-voice aria-label="Dictate message" title="Dictate message">Mic</button>
+                    <button type="button" class="secondary compact" data-recipe-chat-cancel-plan hidden>Cancel</button>
                     <button type="submit">Send</button>
                     <small class="recipe-chat-voice-status" data-recipe-chat-voice-status aria-live="polite"></small>
                 </form>
@@ -6387,6 +6388,7 @@
             const openButtons = document.querySelectorAll("[data-recipe-chat-open]");
             const closeButton = document.querySelector("[data-recipe-chat-close]");
             const voiceButton = document.querySelector("[data-recipe-chat-voice]");
+            const cancelPlanButton = document.querySelector("[data-recipe-chat-cancel-plan]");
             const voiceStatus = document.querySelector("[data-recipe-chat-voice-status]");
             const history = [];
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -6435,6 +6437,16 @@
                 messages.scrollTop = messages.scrollHeight;
             };
 
+            const setPendingActionConfirmation = (pending) => {
+                pendingActionConfirmation = pending;
+                if (cancelPlanButton) {
+                    cancelPlanButton.hidden = !pending;
+                }
+                if (sendButton) {
+                    sendButton.textContent = pending ? "Approve plan" : "Send";
+                }
+            };
+
             openButtons.forEach((button) => {
                 button.addEventListener("click", () => {
                     panel.classList.add("open");
@@ -6444,6 +6456,13 @@
 
             closeButton?.addEventListener("click", () => {
                 panel.classList.remove("open");
+            });
+
+            cancelPlanButton?.addEventListener("click", () => {
+                setPendingActionConfirmation(null);
+                input.value = "";
+                addRecipeChatMessage("agent", "Canceled the pending plan. Nothing was written.");
+                input.focus();
             });
 
             const submitChatForm = () => {
@@ -6594,7 +6613,7 @@
                     return;
                 }
                 const revised = input.value.trim() !== pendingActionConfirmation.content;
-                sendButton.textContent = revised ? "Send revision" : "Confirm";
+                sendButton.textContent = revised ? "Preview revision" : "Approve plan";
             });
 
             form?.addEventListener("submit", async (event) => {
@@ -6651,18 +6670,15 @@
                     const answer = data.assistant_message || data.response || data.detail || "I could not produce a response.";
                     addRecipeChatMessage("agent", answer);
                     if (data.needs_confirmation && data.confirmation_token) {
-                        pendingActionConfirmation = {
+                        setPendingActionConfirmation({
                             content,
                             token: data.confirmation_token,
                             plan: data.action_plan || answer,
                             previousPlan: previousActionPlan,
-                        };
+                        });
                         input.value = content;
-                        if (sendButton) {
-                            sendButton.textContent = "Confirm";
-                        }
                     } else {
-                        pendingActionConfirmation = null;
+                        setPendingActionConfirmation(null);
                     }
                     if (data.redirect_url && data.redirect_label) {
                         addRecipeChatAction(data.redirect_url, data.redirect_label);

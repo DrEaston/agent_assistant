@@ -1923,6 +1923,7 @@ def extract_scheduler_list_items(text, context_label=""):
 
     list_text = ""
     patterns = [
+        r"\b(?:make|do|use|set)\s+(?:the\s+)?bullets?\s+(?:like\s+this\s*)?:?\s*(.+)$",
         r"\b(?:with|using|as)\s+bullets?\s*:?\s*(.+)$",
         r"\b(?:make|create|build|add|put)(?:\s+me)?(?:\s+a|\s+an|\s+the)?\s+(?:(?:chore|chores|to do|todo|task|tasks|checklist)\s+)?list(?:\s+for\s+(?:today|tomorrow|tonight|this evening))?(?:\s+(?:of|with|that includes|including|for))?\s*:?\s*(.+)$",
         r"\b(?:chores|tasks|to do|todo|checklist)(?:\s+for\s+(?:today|tomorrow|tonight|this evening))?\s*:?\s*(.+)$",
@@ -3165,7 +3166,7 @@ def preview_dieter_write(message, page_url, action_kind, destination):
     ]
     if action_kind == "planner_action" and re.search(r"\b(chore|chores|to do|todo|checklist|list)\b|[,;\n]", message.content or "", flags=re.IGNORECASE):
         lines.append("If this is a list, I will save separate bullets as checkboxes where possible.")
-    lines.append("Press Confirm to apply it, or revise the text with instructions like \"No, do the bullets like this...\" and send again.")
+    lines.append("Press Approve plan to apply it, revise the text to preview another draft, or Cancel.")
     return {
         "assistant_message": "\n".join(lines),
         "changed_fields": [],
@@ -3263,7 +3264,7 @@ def preview_planner_action_write(message, page_url):
             lines.append(f"\n{index}. {summarize_pending_planner_operation(message.content, operation)}")
     else:
         lines.append("Plan: no structured planner write was detected. Edit your message if you expected one.")
-    lines.append("\nPress Confirm to apply it, or revise the text with instructions like \"No, do the bullets like this...\" and send again.")
+    lines.append("\nPress Approve plan to apply it, revise the text to preview another draft, or Cancel.")
     return {
         "assistant_message": "\n".join(lines),
         "action_plan": "\n".join(lines),
@@ -3695,7 +3696,8 @@ def api_dieter_action(message: DieterActionMessage):
     if message_requests_trainer_reflection(message.content, page_url):
         return handle_trainer_reflection_request(message, page_url)
 
-    if message_requests_planner_action(message.content):
+    planner_loop_active = bool((message.previous_action_plan or "").strip()) or message_requests_planner_action(message.content)
+    if planner_loop_active:
         if not dieter_action_confirmed(message, page_url, "planner_action"):
             return preview_planner_action_write(message, page_url)
         try:
