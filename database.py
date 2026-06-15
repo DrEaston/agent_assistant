@@ -664,6 +664,24 @@ class Database:
         """)
 
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS app_feedback_codex_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_id INTEGER NOT NULL,
+                status TEXT DEFAULT 'queued',
+                plan TEXT DEFAULT '',
+                requested_by_user_id INTEGER,
+                worker_name TEXT DEFAULT '',
+                result_note TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                started_at TEXT DEFAULT '',
+                finished_at TEXT DEFAULT '',
+                FOREIGN KEY (report_id) REFERENCES app_feedback_reports(id) ON DELETE CASCADE,
+                FOREIGN KEY (requested_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+        """)
+
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS recipe_grocery_lists (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT DEFAULT '',
@@ -767,6 +785,10 @@ class Database:
         self._ensure_column(cursor, "app_feedback_reports", "audit_plan_approved_at", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_reports", "implementation_note", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_reports", "implementation_note_updated_at", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_codex_runs", "worker_name", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_codex_runs", "result_note", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_codex_runs", "started_at", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_codex_runs", "finished_at", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_profiles", "strava_access_token", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_profiles", "strava_refresh_token", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_profiles", "strava_token_expires_at", "INTEGER DEFAULT 0")
@@ -4499,7 +4521,30 @@ class Database:
         self.connect()
         cursor = self.conn.cursor()
         query = """
-            SELECT app_feedback_reports.*, projects.name AS project_name, recommended_actions.action AS action_title
+            SELECT app_feedback_reports.*,
+                   projects.name AS project_name,
+                   recommended_actions.action AS action_title,
+                   (
+                       SELECT app_feedback_codex_runs.id
+                       FROM app_feedback_codex_runs
+                       WHERE app_feedback_codex_runs.report_id = app_feedback_reports.id
+                       ORDER BY app_feedback_codex_runs.id DESC
+                       LIMIT 1
+                   ) AS codex_run_id,
+                   (
+                       SELECT app_feedback_codex_runs.status
+                       FROM app_feedback_codex_runs
+                       WHERE app_feedback_codex_runs.report_id = app_feedback_reports.id
+                       ORDER BY app_feedback_codex_runs.id DESC
+                       LIMIT 1
+                   ) AS codex_run_status,
+                   (
+                       SELECT app_feedback_codex_runs.created_at
+                       FROM app_feedback_codex_runs
+                       WHERE app_feedback_codex_runs.report_id = app_feedback_reports.id
+                       ORDER BY app_feedback_codex_runs.id DESC
+                       LIMIT 1
+                   ) AS codex_run_requested_at
             FROM app_feedback_reports
             LEFT JOIN projects ON projects.id = app_feedback_reports.destination_project_id
             LEFT JOIN recommended_actions ON recommended_actions.id = app_feedback_reports.destination_action_id
@@ -4514,6 +4559,116 @@ class Database:
         rows = cursor.fetchall()
         self.close()
         return rows
+
+    def add_app_feedback_codex_run(self, report_id, plan, requested_by_user_id=None):
+        """Queue an approved feedback issue plan for local Codex execution."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO app_feedback_codex_runs
+                (report_id, status, plan, requested_by_user_id, updated_at)
+            VALUES (?, 'queued', ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (report_id, plan, requested_by_user_id or self._active_user_id()),
+        )
+        run_id = cursor.lastrowid
+        self._commit()
+        self.close()
+        return run_id
+
+    def get_next_app_feedback_codex_run(self):
+        """Return the oldest queued feedback Codex run."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT app_feedback_codex_runs.*,
+                   app_feedback_reports.title AS report_title,
+                   app_feedback_reports.area AS report_area,
+                   app_feedback_reports.raw_feedback AS raw_feedback
+            FROM app_feedback_codex_runs
+            JOIN app_feedback_reports ON app_feedback_reports.id = app_feedback_codex_runs.report_id
+            WHERE app_feedback_codex_runs.status = 'queued'
+            ORDER BY app_feedback_codex_runs.created_at ASC, app_feedback_codex_runs.id ASC
+            LIMIT 1
+            """
+        )
+        row = cursor.fetchone()
+        self.close()
+        return row
+
+    def claim_app_feedback_codex_run(self, run_id, worker_name=""):
+        """Mark a queued feedback Codex run as running."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE app_feedback_codex_runs
+            SET status = 'running',
+                worker_name = ?,
+                started_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND status = 'queued'
+            """,
+            (worker_name, run_id),
+        )
+        changed = cursor.rowcount
+        self._commit()
+        cursor.execute(
+            """
+            SELECT app_feedback_codex_runs.*,
+                   app_feedback_reports.title AS report_title,
+                   app_feedback_reports.area AS report_area,
+                   app_feedback_reports.raw_feedback AS raw_feedback
+            FROM app_feedback_codex_runs
+            JOIN app_feedback_reports ON app_feedback_reports.id = app_feedback_codex_runs.report_id
+            WHERE app_feedback_codex_runs.id = ?
+            """,
+            (run_id,),
+        )
+        row = cursor.fetchone() if changed else None
+        self.close()
+        return row
+
+    def get_app_feedback_codex_run(self, run_id):
+        """Fetch one feedback Codex run."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT app_feedback_codex_runs.*,
+                   app_feedback_reports.title AS report_title,
+                   app_feedback_reports.area AS report_area,
+                   app_feedback_reports.raw_feedback AS raw_feedback
+            FROM app_feedback_codex_runs
+            JOIN app_feedback_reports ON app_feedback_reports.id = app_feedback_codex_runs.report_id
+            WHERE app_feedback_codex_runs.id = ?
+            """,
+            (run_id,),
+        )
+        row = cursor.fetchone()
+        self.close()
+        return row
+
+    def finish_app_feedback_codex_run(self, run_id, status, result_note):
+        """Record the result of a local Codex run."""
+        safe_status = status if status in {"ready_for_testing", "failed"} else "failed"
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE app_feedback_codex_runs
+            SET status = ?,
+                result_note = ?,
+                finished_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (safe_status, result_note, run_id),
+        )
+        self._commit()
+        self.close()
 
     def update_app_feedback_report_status(self, report_id, status):
         """Update a developer feedback report status."""

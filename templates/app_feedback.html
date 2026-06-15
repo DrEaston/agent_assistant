@@ -67,6 +67,9 @@
                         {% if report.audit_plan_approved_at %}
                             <small>Plan approved: {{ report.audit_plan_approved_at }}</small>
                         {% endif %}
+                        {% if report.codex_run_status %}
+                            <small>Codex run: {{ report.codex_run_status|replace("_", " ")|title }}{% if report.codex_run_requested_at %} - {{ report.codex_run_requested_at }}{% endif %}</small>
+                        {% endif %}
                         {% if report.implementation_note %}
                             <div class="feedback-review-note">
                                 <strong>Testing note</strong>
@@ -85,17 +88,12 @@
                                 </form>
                             {% endif %}
                             {% if report.audit_plan_approved_at and report.status != "ready_for_review" and report.status != "done" %}
-                                <details class="feedback-ready-details">
-                                    <summary>Ready for Testing</summary>
-                                    <form method="post" action="/apps/assistant/feedback/{{ report.id }}/ready-for-review" class="feedback-ready-form">
+                                {% if report.codex_run_status not in ["queued", "running"] %}
+                                    <form method="post" action="/apps/assistant/feedback/{{ report.id }}/run-codex" class="inline-form">
                                         <input type="hidden" name="next" value="{{ request.url.path }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
-                                        <textarea
-                                            name="implementation_note"
-                                            placeholder="What changed, commit/revision, how Curtis should test it, and anything still uncertain."
-                                        >{{ report.implementation_note or "" }}</textarea>
-                                        <button type="submit" class="secondary compact">Send to Testing</button>
+                                        <button type="submit" class="secondary compact">Run Codex</button>
                                     </form>
-                                </details>
+                                {% endif %}
                             {% endif %}
                             {% if report.status == "ready_for_review" %}
                                 <form method="post" action="/apps/assistant/feedback/{{ report.id }}/status" class="inline-form">

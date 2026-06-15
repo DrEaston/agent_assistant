@@ -130,6 +130,7 @@ SPOTIFY_REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI", "")
 SPOTIFY_ACCOUNT_BASE = "https://accounts.spotify.com"
 SPOTIFY_API_BASE = "https://api.spotify.com/v1"
 SPOTIFY_SCOPES = "playlist-modify-private playlist-modify-public playlist-read-private user-read-private user-read-email"
+CODEX_WORKER_TOKEN = os.getenv("CODEX_WORKER_TOKEN", "")
 
 
 def hash_password(password):
@@ -4553,6 +4554,11 @@ def feedback_plan_approval_confirmed(report_id, markdown, token):
         secret=os.getenv("SECRET_KEY") or REGISTRATION_CODE or "dieter-local-secret",
     )
 
+def codex_worker_token_valid(token):
+    """Validate the shared local-worker token for Codex run polling."""
+    expected = CODEX_WORKER_TOKEN or REGISTRATION_CODE or os.getenv("SECRET_KEY", "")
+    return bool(expected and token and hmac.compare_digest(str(token), str(expected)))
+
 def next_feedback_issue(status="open", area=""):
     """Pick the next feedback issue to audit."""
     safe_status = safe_app_feedback_status(status, allow_all=True)
@@ -4597,6 +4603,52 @@ def api_save_app_feedback_codex_plan(limit: int = 50, status: str = "open", area
     output_path = Path("codex_feedback_plan.md").resolve()
     output_path.write_text(markdown, encoding="utf-8")
     return {"status": "success", "path": str(output_path), "markdown": markdown}
+
+@app.post("/api/app-feedback/codex-runs/next")
+def api_claim_next_app_feedback_codex_run(token: str = "", worker: str = "local-codex"):
+    """Claim the next queued feedback issue for a trusted local Codex worker."""
+    if not codex_worker_token_valid(token):
+        raise HTTPException(status_code=403, detail="Invalid Codex worker token.")
+    queued = dict_from_row(db.get_next_app_feedback_codex_run())
+    if not queued:
+        return {"status": "empty"}
+    claimed = dict_from_row(db.claim_app_feedback_codex_run(queued["id"], worker_name=worker))
+    if not claimed:
+        return {"status": "empty"}
+    return {
+        "status": "claimed",
+        "run": {
+            "id": claimed["id"],
+            "report_id": claimed["report_id"],
+            "title": claimed.get("report_title") or "",
+            "area": claimed.get("report_area") or "",
+            "raw_feedback": claimed.get("raw_feedback") or "",
+            "plan": claimed.get("plan") or "",
+        },
+    }
+
+class CodexRunFinishIn(BaseModel):
+    token: str = ""
+    status: str = "ready_for_testing"
+    result_note: str = ""
+
+@app.post("/api/app-feedback/codex-runs/{run_id}/finish")
+def api_finish_app_feedback_codex_run(run_id: int, payload: CodexRunFinishIn):
+    """Record local Codex run output and move successful work to testing."""
+    if not codex_worker_token_valid(payload.token):
+        raise HTTPException(status_code=403, detail="Invalid Codex worker token.")
+    safe_status = payload.status if payload.status in {"ready_for_testing", "failed"} else "failed"
+    note = (payload.result_note or "").strip()
+    db.finish_app_feedback_codex_run(run_id, safe_status, note)
+    if safe_status == "ready_for_testing":
+        run = dict_from_row(db.get_app_feedback_codex_run(run_id))
+        if run:
+            db.update_app_feedback_report_review_note(
+                run["report_id"],
+                "ready_for_review",
+                note or "Codex reported this issue is ready for testing.",
+            )
+    return {"status": "success"}
 
 
 # ============================================================================
@@ -5182,7 +5234,7 @@ def answer_app_feedback_plan_questions_form(
         "active_feedback_report": report,
         "feedback_plan_pending_approval": True,
         "feedback_plan_approval_token": approval_token,
-        "feedback_revision_instructions": revision_instructions,
+        "feedback_revision_instructions": "",
         "feedback_questions_answered": True,
         "scheduler_due": scheduler_due_context(),
         **feedback_plan_question_context(report, markdown),
@@ -5261,6 +5313,30 @@ def ready_for_review_app_feedback_form(
         raise HTTPException(status_code=404, detail="Feedback report not found")
     note = (implementation_note or "").strip()
     db.update_app_feedback_report_review_note(report_id, "ready_for_review", note)
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/feedback"), status_code=303)
+
+@app.post("/apps/assistant/feedback/{report_id}/run-codex")
+def run_codex_app_feedback_form(
+    report_id: int,
+    next: str = Form("/apps/assistant/feedback"),
+):
+    """Queue an approved issue plan for local Codex execution."""
+    report = feedback_report_by_id(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Feedback report not found")
+    if not (report.get("audit_plan") or "").strip():
+        raise HTTPException(status_code=400, detail="Audit this issue before running Codex.")
+    if not (report.get("audit_plan_approved_at") or "").strip():
+        raise HTTPException(status_code=400, detail="Approve the Codex plan before running Codex.")
+    remaining_questions = extract_feedback_plan_questions(report.get("audit_plan") or "")
+    if remaining_questions:
+        raise HTTPException(status_code=400, detail="Answer open questions and re-audit before running Codex.")
+    db.add_app_feedback_codex_run(
+        report_id,
+        report.get("audit_plan") or "",
+        requested_by_user_id=get_current_user_id(),
+    )
+    db.update_app_feedback_report_status(report_id, "in_progress")
     return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/feedback"), status_code=303)
 
 @app.post("/apps/assistant/feedback/{report_id}/delete")
