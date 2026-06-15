@@ -1710,6 +1710,7 @@ Rules:
 - Use scheduler items for dated action items, for example "make a new action item for tomorrow". If the request is vague, draft a card with the explicit date and a generic title like "Action item"; do not invent bullets.
 - If the user asks to add bullets/details to an existing scheduler context, use update_scheduler_item for that existing item. Do not create a second item with the same title/context.
 - For action reminders like "call to have the AC serviced", use the topic/domain as the title and context_label ("AC"), and put the actual action as a short checkbox note ("- [ ] call to have AC serviced").
+- If the user asks to change, set, update, or use a context, write that value to context_label. Do not store "change context..." as a note or bullet.
 - For scheduler scheduled_for, use YYYY-MM-DD when the user gives a clear date; otherwise use an empty string.
 - For scheduler context_label, use short labels like AC, Pilates, Mechanic, Doctor, Grocery, Insurance, Home, or Call.
 - For scheduler additions, do not invent or expand notes. Save only details the user explicitly gave.
@@ -1764,6 +1765,66 @@ def refine_scheduler_context_label(text, proposed_context=""):
     if proposed in generic_contexts and inferred and inferred != "General":
         return inferred
     return proposed or inferred or "General"
+
+def scheduler_label_from_text(value):
+    """Normalize a short user-spoken scheduler label."""
+    cleaned = re.sub(r"\s+", " ", (value or "").strip(" .:-\"'"))
+    cleaned = re.sub(r"\b(?:instead|please|field|label|card|and|with|to|as)\b.*$", "", cleaned, flags=re.IGNORECASE).strip(" .:-")
+    if not cleaned:
+        return ""
+    inferred = infer_scheduler_context_label(cleaned)
+    if inferred != "General":
+        return inferred
+    if cleaned.upper() in {"AC", "A/C", "HVAC"}:
+        return "AC"
+    words = re.findall(r"[A-Za-z0-9]+", cleaned)
+    if not words:
+        return ""
+    return " ".join(word.upper() if word.upper() in {"AC", "HVAC"} else word.capitalize() for word in words[:4])
+
+def extract_scheduler_context_change(text):
+    """Extract an explicit request to change the scheduler context field."""
+    original = (text or "").strip()
+    if not original:
+        return ""
+    patterns = [
+        r"\b(?:change|set|update|use|make)\s+(?:the\s+)?context(?:\s+(?:field|label))?\s+(?:to|as)\s+(.+)$",
+        r"\bcontext(?:\s+(?:field|label))?\s+(?:should\s+be|is|to|as)\s+(.+)$",
+        r"\b(?:put|file|categorize)\s+(?:it|this|the\s+card)?\s+(?:under|in)\s+(?:the\s+)?(?:context\s+)?(.+)$",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, original, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            label = scheduler_label_from_text(match.group(1))
+            if label:
+                return label
+    return ""
+
+def scheduler_line_is_context_change(line):
+    """Return true if a note line is really a context-field instruction."""
+    cleaned = clean_scheduler_note_line(line)
+    cleaned = re.sub(r"^\[( |x|X)\]\s+", "", cleaned, flags=re.IGNORECASE)
+    return bool(extract_scheduler_context_change(cleaned))
+
+def strip_scheduler_context_change_notes(notes):
+    """Remove context-change instructions from scheduler notes."""
+    kept = []
+    for raw_line in (notes or "").splitlines():
+        if scheduler_line_is_context_change(raw_line):
+            continue
+        kept.append(raw_line)
+    return "\n".join(kept)
+
+def strip_scheduler_context_change_text(text):
+    """Remove context-field clauses before extracting note bullets."""
+    cleaned = text or ""
+    patterns = [
+        r"\b(?:change|set|update|use|make)\s+(?:the\s+)?context(?:\s+(?:field|label))?\s+(?:to|as)\s+.+?(?=\s+\band\s+(?:(?:make|do|use|set)\s+)?(?:the\s+)?bullets?\b|\s+\bwith\s+(?:the\s+)?bullets?\b|[,;.]|$)",
+        r"\bcontext(?:\s+(?:field|label))?\s+(?:should\s+be|is|to|as)\s+.+?(?=\s+\band\s+(?:(?:make|do|use|set)\s+)?(?:the\s+)?bullets?\b|\s+\bwith\s+(?:the\s+)?bullets?\b|[,;.]|$)",
+    ]
+    for pattern in patterns:
+        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+    return re.sub(r"\s+", " ", cleaned).strip(" .:-")
 
 def app_now():
     """Return the app-local time used for casual scheduling language."""
@@ -1921,6 +1982,7 @@ def extract_scheduler_list_items(text, context_label=""):
     if not original or not scheduler_list_request(original):
         return []
 
+    original = strip_scheduler_context_change_text(original)
     list_text = ""
     patterns = [
         r"\b(?:make|do|use|set)\s+(?:the\s+)?bullets?\s+(?:like\s+this\s*)?:?\s*(.+)$",
@@ -1946,6 +2008,18 @@ def extract_scheduler_list_items(text, context_label=""):
     list_text = re.sub(r"\blist\s+(?:for|of|with|that includes|including)\b", "", list_text, flags=re.IGNORECASE)
     list_text = re.sub(r"\bfor\s+(?:today|tomorrow|tonight|this evening)\b", "", list_text, flags=re.IGNORECASE)
     list_text = re.sub(r"\b(?:today|tomorrow|tonight|this evening)\b", "", list_text, flags=re.IGNORECASE)
+    list_text = re.sub(
+        r"^(?:and\s+)?(?:the\s+)?bullets?(?:\s+for\s+)?\s*(?:are|should\s+be|to|as)\s+",
+        "",
+        list_text,
+        flags=re.IGNORECASE,
+    )
+    list_text = re.sub(
+        r"^(?:and\s+)?(?:the\s+)?bullets?\s+",
+        "",
+        list_text,
+        flags=re.IGNORECASE,
+    )
     if context_label:
         list_text = re.sub(rf"\b(my|the)?\s*{re.escape(context_label)}('?s)?\b", "", list_text, flags=re.IGNORECASE)
     list_text = re.sub(r"\s+", " ", list_text).strip(" .:-")
@@ -1961,6 +2035,12 @@ def extract_scheduler_list_items(text, context_label=""):
     seen = set()
     for raw_item in raw_items:
         item = raw_item.strip(" .:-")
+        item = re.sub(
+            r"^(?:the\s+)?bullets?(?:\s+for\s+)?\s*(?:are|should\s+be|to|as)?\s*",
+            "",
+            item,
+            flags=re.IGNORECASE,
+        ).strip(" .:-")
         item = re.sub(r"^(that\s+)?(i\s+)?(?:also\s+)?(?:need to|have to|should|must|to)\s+", "", item, flags=re.IGNORECASE)
         item = re.sub(r"^(a|an|the)\s+", "", item, flags=re.IGNORECASE).strip(" .:-")
         key = re.sub(r"[^a-z0-9]+", " ", item.lower()).strip()
@@ -2350,7 +2430,8 @@ def synthesize_scheduler_operation(user_message, operation):
     """Turn raw reminder text into a concise scheduler record."""
     original = (user_message or "").strip()
     title = (operation.get("title") or original).strip()
-    context_label = refine_scheduler_context_label(original, operation.get("context_label")).strip()
+    explicit_context_label = extract_scheduler_context_change(original)
+    context_label = (explicit_context_label or refine_scheduler_context_label(original, operation.get("context_label"))).strip()
     scheduled_for = (operation.get("scheduled_for") or "").strip()
     bullet_additions = extract_scheduler_bullet_additions(original, context_label)
     agenda_items = bullet_additions or extract_scheduler_agenda_items(original)
@@ -2428,7 +2509,7 @@ def synthesize_scheduler_operation(user_message, operation):
     operation["title"] = title
     operation["context_label"] = context_label or "General"
     operation["scheduled_for"] = scheduled_for
-    operation["notes"] = normalize_scheduler_notes(format_scheduler_note_lines(note_lines))
+    operation["notes"] = strip_scheduler_context_change_notes(normalize_scheduler_notes(format_scheduler_note_lines(note_lines)))
     return operation
 
 def enrich_scheduler_item_priority(item, today=None):
@@ -2768,7 +2849,11 @@ def apply_planner_edit(user_message, page_url, proposal):
                     raw_operation_notes = notes
                     requested_date = scheduler_date_from_text(user_message)
                     existing_date = ((existing_item or {}).get("scheduled_for") or "").strip()
+                    explicit_context_label = extract_scheduler_context_change(user_message)
+                    if explicit_context_label:
+                        operation["context_label"] = explicit_context_label
                     if notes is not None:
+                        notes = strip_scheduler_context_change_notes(notes)
                         extracted_additions = extract_scheduler_bullet_additions(
                             user_message,
                             operation.get("context_label") or (existing_item or {}).get("context_label") or "",
