@@ -4254,6 +4254,13 @@ def build_app_feedback_codex_inbox(limit=50, status="open"):
             "```",
             "",
         ])
+        if report.get("audit_plan"):
+            lines.extend([
+                "Saved audit plan:",
+                "",
+                report.get("audit_plan") or "",
+                "",
+            ])
     return "\n".join(lines)
 
 def filter_app_feedback_reports(reports, area=""):
@@ -4330,18 +4337,48 @@ def build_app_feedback_codex_plan(reports, status="open", area=""):
     ])
     return "\n".join(lines)
 
+def feedback_report_by_id(report_id):
+    """Fetch one app feedback report by id from the existing report listing."""
+    for report in dicts_from_rows(db.get_app_feedback_reports(status="", limit=500)):
+        if int(report.get("id") or 0) == int(report_id):
+            return report
+    return None
+
+def build_single_feedback_issue_plan(report):
+    """Build a Codex plan for one feedback issue."""
+    if not report:
+        return "# Dieter Feedback Issue\n\nNo report found.\n"
+    return build_app_feedback_codex_plan([report], status=report.get("status") or "open", area=report.get("area") or "")
+
+def save_single_feedback_issue_plan(report):
+    """Save one issue plan to stable and issue-specific files for Codex."""
+    markdown = build_single_feedback_issue_plan(report)
+    db.update_app_feedback_report_audit_plan(report["id"], markdown)
+    stable_path = Path("codex_feedback_plan.md").resolve()
+    stable_path.write_text(markdown, encoding="utf-8")
+    issue_path = Path(f"codex_feedback_issue_{int(report['id'])}.md").resolve()
+    issue_path.write_text(markdown, encoding="utf-8")
+    return markdown, stable_path, issue_path
+
+def next_feedback_issue(status="open", area=""):
+    """Pick the next feedback issue to audit."""
+    safe_status = status if status in {"open", "triaged", "in_progress", "done", ""} else "open"
+    reports = dicts_from_rows(db.get_app_feedback_reports(status=safe_status, limit=100))
+    reports = filter_app_feedback_reports(reports, area)
+    return reports[-1] if reports else None
+
 @app.get("/api/app-feedback/codex-inbox")
 def api_app_feedback_codex_inbox(limit: int = 50, status: str = "open"):
     """Return developer feedback as a Markdown Codex inbox."""
     safe_limit = min(max(limit, 1), 100)
-    safe_status = status if status in {"open", "triaged", "done", ""} else "open"
+    safe_status = status if status in {"open", "triaged", "in_progress", "done", ""} else "open"
     return {"markdown": build_app_feedback_codex_inbox(limit=safe_limit, status=safe_status)}
 
 @app.post("/api/app-feedback/codex-inbox/save")
 def api_save_app_feedback_codex_inbox(limit: int = 50, status: str = "open"):
     """Save developer feedback to codex_feedback_inbox.md for local Codex triage."""
     safe_limit = min(max(limit, 1), 100)
-    safe_status = status if status in {"open", "triaged", "done", ""} else "open"
+    safe_status = status if status in {"open", "triaged", "in_progress", "done", ""} else "open"
     markdown = build_app_feedback_codex_inbox(limit=safe_limit, status=safe_status)
     output_path = Path("codex_feedback_inbox.md").resolve()
     output_path.write_text(markdown, encoding="utf-8")
@@ -4351,7 +4388,7 @@ def api_save_app_feedback_codex_inbox(limit: int = 50, status: str = "open"):
 def api_app_feedback_codex_plan(limit: int = 50, status: str = "open", area: str = ""):
     """Return synthesized developer feedback as a Markdown Codex plan."""
     safe_limit = min(max(limit, 1), 100)
-    safe_status = status if status in {"open", "triaged", "done", ""} else "open"
+    safe_status = status if status in {"open", "triaged", "in_progress", "done", ""} else "open"
     reports = dicts_from_rows(db.get_app_feedback_reports(status=safe_status, limit=safe_limit))
     reports = filter_app_feedback_reports(reports, area)
     return {"markdown": build_app_feedback_codex_plan(reports, status=safe_status, area=area)}
@@ -4360,7 +4397,7 @@ def api_app_feedback_codex_plan(limit: int = 50, status: str = "open", area: str
 def api_save_app_feedback_codex_plan(limit: int = 50, status: str = "open", area: str = ""):
     """Save synthesized developer feedback to codex_feedback_plan.md."""
     safe_limit = min(max(limit, 1), 100)
-    safe_status = status if status in {"open", "triaged", "done", ""} else "open"
+    safe_status = status if status in {"open", "triaged", "in_progress", "done", ""} else "open"
     reports = dicts_from_rows(db.get_app_feedback_reports(status=safe_status, limit=safe_limit))
     reports = filter_app_feedback_reports(reports, area)
     markdown = build_app_feedback_codex_plan(reports, status=safe_status, area=area)
@@ -4743,7 +4780,7 @@ def assistant_feedback_app(
     area: str = "",
 ):
     """Visible inbox for user-reported app feedback."""
-    safe_status = status if status in {"open", "triaged", "done", ""} else "open"
+    safe_status = status if status in {"open", "triaged", "in_progress", "done", ""} else "open"
     all_reports = dicts_from_rows(db.get_app_feedback_reports(status=safe_status, limit=100))
     visible_reports = filter_app_feedback_reports(all_reports, area)
     context = {
@@ -4773,7 +4810,7 @@ def synthesize_app_feedback_form(
     area: str = Form(""),
 ):
     """Generate and save a Codex-readable implementation plan from feedback reports."""
-    safe_status = status if status in {"open", "triaged", "done", ""} else "open"
+    safe_status = status if status in {"open", "triaged", "in_progress", "done", ""} else "open"
     reports = dicts_from_rows(db.get_app_feedback_reports(status=safe_status, limit=100))
     visible_reports = filter_app_feedback_reports(reports, area)
     markdown = build_app_feedback_codex_plan(visible_reports, status=safe_status, area=area)
@@ -4801,6 +4838,62 @@ def synthesize_app_feedback_form(
     template = jinja_env.get_template("app_feedback.html")
     return HTMLResponse(template.render(context))
 
+@app.post("/apps/assistant/feedback/audit-next")
+def audit_next_app_feedback_form(
+    request: Request,
+    status: str = Form("open"),
+    area: str = Form(""),
+):
+    """Open the next matching feedback issue for Codex-style audit."""
+    report = next_feedback_issue(status=status, area=area)
+    if not report:
+        return RedirectResponse(
+            url=f"/apps/assistant/feedback?status={status}&area={area}",
+            status_code=303,
+        )
+    return audit_app_feedback_form(report["id"], request=request, status=status, area=area)
+
+@app.post("/apps/assistant/feedback/{report_id}/audit")
+def audit_app_feedback_form(
+    report_id: int,
+    request: Request,
+    status: str = Form("open"),
+    area: str = Form(""),
+):
+    """Mark one feedback report in progress and create a Codex issue plan."""
+    report = feedback_report_by_id(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Feedback report not found")
+    db.update_app_feedback_report_status(report_id, "in_progress")
+    report = feedback_report_by_id(report_id)
+    markdown, stable_path, issue_path = save_single_feedback_issue_plan(report)
+    safe_status = "in_progress"
+    reports = dicts_from_rows(db.get_app_feedback_reports(status=safe_status, limit=100))
+    visible_reports = filter_app_feedback_reports(reports, area)
+    context = {
+        "request": request,
+        "feedback_reports": visible_reports,
+        "feedback_area_counts": app_feedback_area_counts(reports),
+        "feedback_status": safe_status,
+        "feedback_area": area,
+        "feedback_areas": [
+            "Kitchen / Recipes",
+            "Scheduler",
+            "Assistant / Planner",
+            "Trainer",
+            "Music",
+            "Auth",
+            "Dieter",
+        ],
+        "feedback_plan": markdown,
+        "feedback_plan_path": str(stable_path),
+        "feedback_issue_path": str(issue_path),
+        "active_feedback_report": report,
+        "scheduler_due": scheduler_due_context(),
+    }
+    template = jinja_env.get_template("app_feedback.html")
+    return HTMLResponse(template.render(context))
+
 @app.post("/apps/assistant/feedback/{report_id}/status")
 def update_app_feedback_status_form(
     report_id: int,
@@ -4808,7 +4901,7 @@ def update_app_feedback_status_form(
     next: str = Form("/apps/assistant/feedback"),
 ):
     """Update a feedback report status from the visible inbox."""
-    safe_status = status if status in {"open", "triaged", "done"} else "open"
+    safe_status = status if status in {"open", "triaged", "in_progress", "done"} else "open"
     db.update_app_feedback_report_status(report_id, safe_status)
     return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/feedback"), status_code=303)
 

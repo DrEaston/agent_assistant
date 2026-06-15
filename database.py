@@ -761,6 +761,8 @@ class Database:
         self._ensure_column(cursor, "app_feedback_reports", "user_id", "INTEGER")
         self._ensure_column(cursor, "app_feedback_reports", "destination_project_id", "INTEGER")
         self._ensure_column(cursor, "app_feedback_reports", "destination_action_id", "INTEGER")
+        self._ensure_column(cursor, "app_feedback_reports", "audit_plan", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_reports", "audit_plan_updated_at", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_profiles", "strava_access_token", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_profiles", "strava_refresh_token", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_profiles", "strava_token_expires_at", "INTEGER DEFAULT 0")
@@ -4520,6 +4522,21 @@ class Database:
             WHERE id = ?
             """,
             (status, report_id),
+        )
+        self._commit()
+        self.close()
+
+    def update_app_feedback_report_audit_plan(self, report_id, audit_plan):
+        """Persist the latest Codex audit plan for a feedback report."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE app_feedback_reports
+            SET audit_plan = ?, audit_plan_updated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (audit_plan, report_id),
         )
         self._commit()
         self.close()
