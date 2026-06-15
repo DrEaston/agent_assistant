@@ -3211,6 +3211,114 @@ Rules:
 - If a requested change is ambiguous, add it as an open question or assumption instead of guessing.
 """
 
+def extract_feedback_plan_questions(markdown):
+    """Return clear user-answerable questions from a Codex audit plan."""
+    text = markdown or ""
+    questions = []
+    seen = set()
+    in_question_section = False
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        heading = re.sub(r"^#+\s*", "", line).strip().lower()
+        if heading:
+            if any(token in heading for token in ["open question", "question", "clarification"]):
+                in_question_section = True
+            elif line.startswith("#"):
+                in_question_section = False
+        candidate = re.sub(r"^[-*]\s+(?:\[[ xX]\]\s*)?", "", line).strip()
+        candidate = re.sub(r"^\d+[.)]\s+", "", candidate).strip()
+        candidate = candidate.strip("` ")
+        if not candidate:
+            continue
+        is_question = candidate.endswith("?") and in_question_section
+        if not is_question and ":" in candidate:
+            label, detail = candidate.split(":", 1)
+            if label.strip().lower() in {"question", "q", "clarification"}:
+                candidate = detail.strip()
+                is_question = candidate.endswith("?") or bool(candidate)
+                if is_question and not candidate.endswith("?"):
+                    candidate = candidate.rstrip(".") + "?"
+        if not is_question and in_question_section:
+            question_starters = (
+                "what ",
+                "how ",
+                "which ",
+                "whether ",
+                "should ",
+                "do ",
+                "does ",
+                "is ",
+                "are ",
+                "can ",
+                "who ",
+                "when ",
+                "where ",
+            )
+            is_question = candidate.lower().startswith(question_starters)
+            if is_question and not candidate.endswith("?"):
+                candidate = candidate.rstrip(".") + "?"
+        if not is_question:
+            continue
+        normalized = re.sub(r"\s+", " ", candidate)
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        questions.append(normalized)
+    return questions[:8]
+
+def feedback_audit_answers_from_report(report):
+    """Decode stored audit answers for a feedback report."""
+    raw = (report or {}).get("audit_answers_json") or "{}"
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {
+        re.sub(r"\s+", " ", str(question)).strip(): str(answer).strip()
+        for question, answer in parsed.items()
+        if str(question).strip() and str(answer).strip()
+    }
+
+def merge_feedback_audit_answers(report, questions, answers):
+    """Merge submitted question answers with answers already stored on the issue."""
+    merged = feedback_audit_answers_from_report(report)
+    for question, answer in zip(questions or [], answers or []):
+        clean_question = re.sub(r"\s+", " ", (question or "").strip())
+        clean_answer = re.sub(r"\s+", " ", (answer or "").strip())
+        if clean_question and clean_answer:
+            merged[clean_question] = clean_answer
+    return merged
+
+def feedback_plan_question_context(report, markdown):
+    """Build template context for open questions and stored answers."""
+    questions = extract_feedback_plan_questions(markdown)
+    answers = feedback_audit_answers_from_report(report)
+    return {
+        "feedback_plan_questions": questions,
+        "feedback_plan_answers": answers,
+    }
+
+def format_feedback_audit_answer_instructions(answers):
+    """Turn answered audit questions into revision instructions for the model."""
+    lines = [
+        "Re-audit this issue using the user's answers to the open questions.",
+        "Replace resolved open questions with concrete assumptions or implementation choices.",
+        "Keep unresolved questions if they still need user input.",
+        "",
+        "User answers:",
+    ]
+    for question, answer in answers.items():
+        lines.extend([
+            f"- Question: {question}",
+            f"  Answer: {answer}",
+        ])
+    return "\n".join(lines)
+
 def app_area_from_url(page_url):
     """Infer the app area for a feedback report."""
     if page_url.startswith("/apps/recipes"):
@@ -4965,6 +5073,7 @@ def audit_app_feedback_form(
         "feedback_issue_path": str(issue_path),
         "active_feedback_report": report,
         "scheduler_due": scheduler_due_context(),
+        **feedback_plan_question_context(report, markdown),
     }
     template = jinja_env.get_template("app_feedback.html")
     return HTMLResponse(template.render(context))
@@ -5007,6 +5116,61 @@ def revise_app_feedback_plan_form(
         "feedback_plan_approval_token": approval_token,
         "feedback_revision_instructions": revision_instructions,
         "scheduler_due": scheduler_due_context(),
+        **feedback_plan_question_context(report, markdown),
+    }
+    template = jinja_env.get_template("app_feedback.html")
+    return HTMLResponse(template.render(context))
+
+@app.post("/apps/assistant/feedback/{report_id}/plan/answer-questions")
+def answer_app_feedback_plan_questions_form(
+    report_id: int,
+    request: Request,
+    current_plan: str = Form(""),
+    questions: List[str] = Form([]),
+    answers: List[str] = Form([]),
+    area: str = Form(""),
+):
+    """Draft a re-audited plan after the user answers open questions."""
+    report = feedback_report_by_id(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Feedback report not found")
+    merged_answers = merge_feedback_audit_answers(report, questions, answers)
+    if not merged_answers:
+        raise HTTPException(status_code=400, detail="At least one answer is required.")
+    db.update_app_feedback_report_audit_answers(
+        report_id,
+        json.dumps(merged_answers, ensure_ascii=False),
+    )
+    report = feedback_report_by_id(report_id)
+    revision_instructions = format_feedback_audit_answer_instructions(merged_answers)
+    markdown = revise_feedback_issue_plan(report, current_plan, revision_instructions)
+    approval_token = feedback_plan_approval_token(report_id, markdown)
+    reports = dicts_from_rows(db.get_app_feedback_reports(status="in_progress", limit=100))
+    visible_reports = filter_app_feedback_reports(reports, area)
+    context = {
+        "request": request,
+        "feedback_reports": visible_reports,
+        "feedback_area_counts": app_feedback_area_counts(reports),
+        "feedback_status": "in_progress",
+        "feedback_area": area,
+        "feedback_areas": [
+            "Kitchen / Recipes",
+            "Scheduler",
+            "Assistant / Planner",
+            "Trainer",
+            "Music",
+            "Auth",
+            "Dieter",
+        ],
+        "feedback_plan": markdown,
+        "feedback_plan_path": "pending approval",
+        "active_feedback_report": report,
+        "feedback_plan_pending_approval": True,
+        "feedback_plan_approval_token": approval_token,
+        "feedback_revision_instructions": revision_instructions,
+        "feedback_questions_answered": True,
+        "scheduler_due": scheduler_due_context(),
+        **feedback_plan_question_context(report, markdown),
     }
     template = jinja_env.get_template("app_feedback.html")
     return HTMLResponse(template.render(context))
@@ -5053,6 +5217,7 @@ def approve_app_feedback_plan_form(
         "active_feedback_report": report,
         "feedback_plan_saved": True,
         "scheduler_due": scheduler_due_context(),
+        **feedback_plan_question_context(report, markdown),
     }
     template = jinja_env.get_template("app_feedback.html")
     return HTMLResponse(template.render(context))

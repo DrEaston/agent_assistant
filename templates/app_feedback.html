@@ -137,6 +137,46 @@
                 </div>
             </div>
         {% endif %}
+        {% if feedback_questions_answered %}
+            <div class="success-panel">
+                <strong>Answers applied</strong>
+                <p>Dieter re-audited the issue with your answers. Approve the plan to save it, or keep revising.</p>
+            </div>
+        {% endif %}
+        {% if active_feedback_report and feedback_plan_questions %}
+            <form method="post" action="/apps/assistant/feedback/{{ active_feedback_report.id }}/plan/answer-questions" class="detail-section feedback-question-form">
+                <div class="section-header">
+                    <div>
+                        <h3>Open Questions</h3>
+                        <p class="section-subtitle">Answer these, then re-audit the plan with your answers included.</p>
+                    </div>
+                </div>
+                {% for question in feedback_plan_questions %}
+                    <div class="form-group feedback-question-item">
+                        <label for="feedback-question-{{ loop.index }}">{{ question }}</label>
+                        <input type="hidden" name="questions" value="{{ question }}">
+                        <div class="feedback-answer-row">
+                            <textarea
+                                id="feedback-question-{{ loop.index }}"
+                                name="answers"
+                                data-feedback-dictate-target
+                                placeholder="Answer this question..."
+                            >{{ feedback_plan_answers.get(question, "") if feedback_plan_answers else "" }}</textarea>
+                            <button
+                                type="button"
+                                class="secondary compact feedback-dictate-button"
+                                data-feedback-dictate
+                                aria-label="Dictate answer"
+                                title="Dictate answer"
+                            >Mic</button>
+                        </div>
+                    </div>
+                {% endfor %}
+                <input type="hidden" name="area" value="{{ feedback_area }}">
+                <textarea name="current_plan" hidden>{{ feedback_plan }}</textarea>
+                <button type="submit" class="secondary">Re-audit with answers</button>
+            </form>
+        {% endif %}
         <pre class="work-packet">{{ feedback_plan }}</pre>
         {% if active_feedback_report %}
             <form method="post" action="/apps/assistant/feedback/{{ active_feedback_report.id }}/plan/revise" class="detail-section">
@@ -155,4 +195,70 @@
         {% endif %}
     </section>
 {% endif %}
+<script>
+    (() => {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const buttons = document.querySelectorAll("[data-feedback-dictate]");
+        if (!buttons.length) {
+            return;
+        }
+        if (!SpeechRecognition) {
+            buttons.forEach((button) => {
+                button.disabled = true;
+                button.title = "Voice input is not available in this browser";
+            });
+            return;
+        }
+        let activeRecognition = null;
+        let activeButton = null;
+        buttons.forEach((button) => {
+            button.addEventListener("click", () => {
+                const row = button.closest(".feedback-answer-row");
+                const textarea = row?.querySelector("[data-feedback-dictate-target]");
+                if (!textarea) {
+                    return;
+                }
+                if (activeRecognition && activeButton === button) {
+                    activeRecognition.stop();
+                    return;
+                }
+                if (activeRecognition) {
+                    activeRecognition.stop();
+                }
+                const recognition = new SpeechRecognition();
+                activeRecognition = recognition;
+                activeButton = button;
+                const baseValue = textarea.value.trim();
+                recognition.continuous = false;
+                recognition.interimResults = true;
+                recognition.lang = "en-US";
+                button.textContent = "Stop";
+                button.classList.add("listening");
+                recognition.onresult = (event) => {
+                    const transcript = Array.from(event.results)
+                        .map((result) => result[0]?.transcript || "")
+                        .join(" ")
+                        .trim();
+                    const spacer = baseValue && transcript ? " " : "";
+                    textarea.value = `${baseValue}${spacer}${transcript}`.trim();
+                };
+                recognition.onend = () => {
+                    button.textContent = "Mic";
+                    button.classList.remove("listening");
+                    if (activeRecognition === recognition) {
+                        activeRecognition = null;
+                        activeButton = null;
+                    }
+                };
+                recognition.onerror = () => {
+                    button.textContent = "Mic";
+                    button.classList.remove("listening");
+                    activeRecognition = null;
+                    activeButton = null;
+                };
+                recognition.start();
+            });
+        });
+    })();
+</script>
 {% endblock %}

@@ -763,6 +763,7 @@ class Database:
         self._ensure_column(cursor, "app_feedback_reports", "destination_action_id", "INTEGER")
         self._ensure_column(cursor, "app_feedback_reports", "audit_plan", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_reports", "audit_plan_updated_at", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_reports", "audit_answers_json", "TEXT DEFAULT '{}'")
         self._ensure_column(cursor, "trainer_profiles", "strava_access_token", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_profiles", "strava_refresh_token", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_profiles", "strava_token_expires_at", "INTEGER DEFAULT 0")
@@ -4537,6 +4538,21 @@ class Database:
             WHERE id = ?
             """,
             (audit_plan, report_id),
+        )
+        self._commit()
+        self.close()
+
+    def update_app_feedback_report_audit_answers(self, report_id, answers):
+        """Persist user answers to open questions for a feedback audit."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE app_feedback_reports
+            SET audit_answers_json = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (answers, report_id),
         )
         self._commit()
         self.close()
