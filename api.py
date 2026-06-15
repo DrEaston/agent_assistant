@@ -1751,6 +1751,7 @@ def infer_scheduler_context_label(text):
         ("insurance", "Insurance"),
         ("call", "Call"),
         ("appointment", "Appointment"),
+        ("hygiene", "Hygiene"),
     ]
     for needle, label in context_map:
         if needle in text_lower:
@@ -1790,6 +1791,7 @@ def extract_scheduler_context_change(text):
     patterns = [
         r"\b(?:no[, ]+)?(?:change|set|update|use|make)\s+(?:the\s+)?context(?:\s+(?:field|label))?\s+(?:to|as)\s+(.+)$",
         r"\b(?:no[, ]+)?context(?:\s+(?:field|label))?\s+(?:should\s+be|is|to|as)\s+(.+)$",
+        r"\b(?:to\s+)?(?:the\s+)?(?:context|contact)\s+(?:should\s+be|is|to|as)\s+(.+)$",
         r"\b(?:no[, ]+)?(?:put|file|categorize)\s+(?:it|this|the\s+card)?\s+(?:under|in)\s+(?:the\s+)?(?:context\s+)?(.+)$",
     ]
     for pattern in patterns:
@@ -1821,6 +1823,7 @@ def strip_scheduler_context_change_text(text):
     patterns = [
         r"\b(?:no[, ]+)?(?:change|set|update|use|make)\s+(?:the\s+)?context(?:\s+(?:field|label))?\s+(?:to|as)\s+.+?(?=\s+\band\s+(?:(?:make|do|use|set)\s+)?(?:the\s+)?bullets?\b|\s+\bwith\s+(?:the\s+)?bullets?\b|[,;.]|$)",
         r"\b(?:no[, ]+)?context(?:\s+(?:field|label))?\s+(?:should\s+be|is|to|as)\s+.+?(?=\s+\band\s+(?:(?:make|do|use|set)\s+)?(?:the\s+)?bullets?\b|\s+\bwith\s+(?:the\s+)?bullets?\b|[,;.]|$)",
+        r"\b(?:to\s+)?(?:the\s+)?(?:context|contact)\s+(?:should\s+be|is|to|as)\s+.+?(?=\s+\band\s+(?:(?:make|do|use|set)\s+)?(?:the\s+)?bullets?\b|\s+\bwith\s+(?:the\s+)?bullets?\b|[,;.]|$)",
     ]
     for pattern in patterns:
         cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE | re.DOTALL)
@@ -1968,6 +1971,14 @@ def scheduler_generic_action_item_request(text):
     """Detect a dated but otherwise vague action-item request."""
     return bool(re.search(r"\b(?:new\s+)?action\s+item\b", text or "", flags=re.IGNORECASE))
 
+def scheduler_replaces_bullets(text):
+    """Return true when the user is defining the complete bullet set."""
+    return bool(re.search(
+        r"\b(?:the\s+)?bullets?\s+(?:are|should\s+be|to|as)\b|\b(?:make|do|use|set)\s+(?:the\s+)?bullets?\b",
+        text or "",
+        flags=re.IGNORECASE,
+    ))
+
 def scheduler_request_targets_existing_notes(text):
     """Return true when the user explicitly wants to add details to an existing card."""
     return bool(re.search(
@@ -1985,6 +1996,7 @@ def extract_scheduler_list_items(text, context_label=""):
     original = strip_scheduler_context_change_text(original)
     list_text = ""
     patterns = [
+        r"\b(?:new\s+)?action\s+item\b.*?\bbullets?\s+(?:are|should\s+be|to|as)\s+(.+)$",
         r"\b(?:make|do|use|set)\s+(?:the\s+)?bullets?\s+(?:like\s+this\s*)?:?\s*(.+)$",
         r"\b(?:with|using|as)\s+bullets?\s*:?\s*(.+)$",
         r"\b(?:make|create|build|add|put)(?:\s+me)?(?:\s+a|\s+an|\s+the)?\s+(?:(?:chore|chores|to do|todo|task|tasks|checklist)\s+)?list(?:\s+for\s+(?:today|tomorrow|tonight|this evening))?(?:\s+(?:of|with|that includes|including|for))?\s*:?\s*(.+)$",
@@ -2812,7 +2824,7 @@ def apply_planner_edit(user_message, page_url, proposal):
                     existing_item = find_open_scheduler_item_for_context(context_label, title, scheduled_for) if notes else None
                     if existing_item:
                         item_id = int(existing_item["id"])
-                        merged_notes = merge_scheduler_notes(existing_item.get("notes", ""), notes)
+                        merged_notes = notes if scheduler_replaces_bullets(user_message) else merge_scheduler_notes(existing_item.get("notes", ""), notes)
                         db.update_scheduler_item(
                             item_id,
                             title=existing_item.get("title") or title,
@@ -2866,7 +2878,8 @@ def apply_planner_edit(user_message, page_url, proposal):
                             operation.get("context_label") or (existing_item or {}).get("context_label") or "",
                         )
                         addition_notes = format_scheduler_note_lines(extracted_additions)
-                        notes = merge_scheduler_notes((existing_item or {}).get("notes", ""), addition_notes or notes)
+                        replacement_notes = addition_notes or notes
+                        notes = replacement_notes if scheduler_replaces_bullets(user_message) else merge_scheduler_notes((existing_item or {}).get("notes", ""), replacement_notes)
                     if (
                         existing_item
                         and notes is not None
@@ -3833,20 +3846,27 @@ def api_dieter_action(message: DieterActionMessage):
         }
 
     if page_url == "/" or re.search(r"/apps/assistant|/apps/planner|/dashboard|/projects|/apps\b", page_url):
-        try:
-            return handle_planner_action_request(message, page_url)
-        except Exception as exc:
-            result = agent_service.chat(
-                user_message=f"Current page: {message.page_title}\nURL: {page_url}\n\n{message.content}",
-                project_context=agent_service.build_dashboard_context(),
-                conversation_history=message.conversation_history,
-            )
-            return {
-                "assistant_message": f"{result.get('response', '')}\n\nI could not safely apply a structured planner edit: {exc}",
-                "changed_fields": [],
-                "planner_context": True,
-                "model": "local-planner",
-            }
+        messages = list(message.conversation_history or [])[-6:]
+        messages.append({
+            "role": "user",
+            "content": (
+                f"Current page: {message.page_title}\n"
+                f"URL: {page_url}\n\n"
+                f"{message.content}\n\n"
+                "Answer conversationally. Do not write planner or scheduler changes unless the user makes a clear action request that can go through the draft/approval flow."
+            ),
+        })
+        response = (
+            "I can help with that. If you want me to write a scheduler or planner item, "
+            "tell me the card title, date, context, and bullets, and I will draft a plan for approval first."
+        )
+        model = "local-chat"
+        return {
+            "assistant_message": response,
+            "changed_fields": [],
+            "planner_context": True,
+            "model": model,
+        }
 
     chat_payload = ChatMessage(
         content="\n".join([
