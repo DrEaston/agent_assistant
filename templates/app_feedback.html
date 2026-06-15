@@ -111,7 +111,44 @@
                 </p>
             </div>
         </div>
+        {% if feedback_plan_saved %}
+            <div class="success-panel">
+                <strong>Plan saved</strong>
+                <p>The approved plan was written for Codex access.</p>
+            </div>
+        {% endif %}
+        {% if feedback_plan_pending_approval and active_feedback_report %}
+            <div class="detail-section">
+                <div class="section-header">
+                    <div>
+                        <h3>Pending Approval</h3>
+                        <p class="section-subtitle">Approve this draft to write it, or suggest another revision below.</p>
+                    </div>
+                    <form method="post" action="/apps/assistant/feedback/{{ active_feedback_report.id }}/plan/approve" class="inline-form">
+                        <input type="hidden" name="area" value="{{ feedback_area }}">
+                        <input type="hidden" name="confirmation_token" value="{{ feedback_plan_approval_token }}">
+                        <textarea name="feedback_plan" hidden>{{ feedback_plan }}</textarea>
+                        <button type="submit">Approve plan</button>
+                    </form>
+                </div>
+            </div>
+        {% endif %}
         <pre class="work-packet">{{ feedback_plan }}</pre>
+        {% if active_feedback_report %}
+            <form method="post" action="/apps/assistant/feedback/{{ active_feedback_report.id }}/plan/revise" class="detail-section">
+                <div class="form-group">
+                    <label for="feedback-plan-revision">Suggest edits to this plan</label>
+                    <textarea
+                        id="feedback-plan-revision"
+                        name="revision_instructions"
+                        placeholder="Example: split this into frontend and backend work, and add a browser verification step."
+                    >{{ feedback_revision_instructions or "" }}</textarea>
+                </div>
+                <input type="hidden" name="area" value="{{ feedback_area }}">
+                <textarea name="current_plan" hidden>{{ feedback_plan }}</textarea>
+                <button type="submit" class="secondary">Preview revised plan</button>
+            </form>
+        {% endif %}
     </section>
 {% endif %}
 {% endblock %}

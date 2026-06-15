@@ -3199,6 +3199,18 @@ Write concise Markdown for a coding agent. Include:
 Do not invent facts beyond the feedback. If something is uncertain, mark it as an assumption or question.
 """
 
+APP_FEEDBACK_PLAN_REVISION_SYSTEM_PROMPT = """You revise Codex implementation plans based on user instructions.
+
+Return only the complete revised Markdown plan. Do not wrap it in code fences.
+
+Rules:
+- Start from the existing plan.
+- Apply the user's revision instructions.
+- Preserve useful context from the original feedback report.
+- Do not invent facts beyond the issue and revision instructions.
+- If a requested change is ambiguous, add it as an open question or assumption instead of guessing.
+"""
+
 def app_area_from_url(page_url):
     """Infer the app area for a feedback report."""
     if page_url.startswith("/apps/recipes"):
@@ -4353,12 +4365,70 @@ def build_single_feedback_issue_plan(report):
 def save_single_feedback_issue_plan(report):
     """Save one issue plan to stable and issue-specific files for Codex."""
     markdown = build_single_feedback_issue_plan(report)
-    db.update_app_feedback_report_audit_plan(report["id"], markdown)
+    return save_feedback_issue_plan_markdown(report["id"], markdown)
+
+def save_feedback_issue_plan_markdown(report_id, markdown):
+    """Persist edited issue-plan Markdown to the DB and Codex files."""
+    db.update_app_feedback_report_audit_plan(report_id, markdown)
     stable_path = Path("codex_feedback_plan.md").resolve()
     stable_path.write_text(markdown, encoding="utf-8")
-    issue_path = Path(f"codex_feedback_issue_{int(report['id'])}.md").resolve()
+    issue_path = Path(f"codex_feedback_issue_{int(report_id)}.md").resolve()
     issue_path.write_text(markdown, encoding="utf-8")
     return markdown, stable_path, issue_path
+
+def revise_feedback_issue_plan(report, current_plan, revision_instructions):
+    """Use the planner model to revise an issue plan from user instructions."""
+    base_plan = (current_plan or "").strip() or build_single_feedback_issue_plan(report)
+    instructions = (revision_instructions or "").strip()
+    if not instructions:
+        return base_plan
+    fallback = "\n\n## User Revision Notes\n\n" + instructions
+    if not planner_llm_provider:
+        return base_plan + fallback
+    prompt = "\n".join([
+        f"Feedback report #{report.get('id')}: {report.get('title') or 'Untitled'}",
+        f"Area: {report.get('area') or 'Dieter'}",
+        "",
+        "Raw feedback:",
+        report.get("raw_feedback") or "",
+        "",
+        "Current Codex plan:",
+        base_plan,
+        "",
+        "User revision instructions:",
+        instructions,
+    ])
+    try:
+        revised = planner_llm_provider.chat(
+            [{"role": "user", "content": prompt}],
+            APP_FEEDBACK_PLAN_REVISION_SYSTEM_PROMPT,
+            max_completion_tokens=2200,
+        ).strip()
+        return revised or (base_plan + fallback)
+    except Exception:
+        return base_plan + fallback
+
+def feedback_plan_approval_token(report_id, markdown):
+    """Create an approval token for one exact feedback issue plan draft."""
+    return preview_response(
+        markdown,
+        f"/apps/assistant/feedback/{int(report_id)}/plan",
+        "feedback_codex_plan",
+        markdown,
+        user_id=get_current_user_id() or 0,
+        secret=os.getenv("SECRET_KEY") or REGISTRATION_CODE or "dieter-local-secret",
+    )["confirmation_token"]
+
+def feedback_plan_approval_confirmed(report_id, markdown, token):
+    """Return true when a feedback issue plan draft was approved exactly."""
+    return is_confirmed(
+        markdown,
+        f"/apps/assistant/feedback/{int(report_id)}/plan",
+        "feedback_codex_plan",
+        token,
+        user_id=get_current_user_id() or 0,
+        secret=os.getenv("SECRET_KEY") or REGISTRATION_CODE or "dieter-local-secret",
+    )
 
 def next_feedback_issue(status="open", area=""):
     """Pick the next feedback issue to audit."""
@@ -4889,6 +4959,94 @@ def audit_app_feedback_form(
         "feedback_plan_path": str(stable_path),
         "feedback_issue_path": str(issue_path),
         "active_feedback_report": report,
+        "scheduler_due": scheduler_due_context(),
+    }
+    template = jinja_env.get_template("app_feedback.html")
+    return HTMLResponse(template.render(context))
+
+@app.post("/apps/assistant/feedback/{report_id}/plan/revise")
+def revise_app_feedback_plan_form(
+    report_id: int,
+    request: Request,
+    current_plan: str = Form(""),
+    revision_instructions: str = Form(""),
+    area: str = Form(""),
+):
+    """Draft a revised Codex plan from user instructions without saving it."""
+    report = feedback_report_by_id(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Feedback report not found")
+    markdown = revise_feedback_issue_plan(report, current_plan, revision_instructions)
+    approval_token = feedback_plan_approval_token(report_id, markdown)
+    reports = dicts_from_rows(db.get_app_feedback_reports(status="in_progress", limit=100))
+    visible_reports = filter_app_feedback_reports(reports, area)
+    context = {
+        "request": request,
+        "feedback_reports": visible_reports,
+        "feedback_area_counts": app_feedback_area_counts(reports),
+        "feedback_status": "in_progress",
+        "feedback_area": area,
+        "feedback_areas": [
+            "Kitchen / Recipes",
+            "Scheduler",
+            "Assistant / Planner",
+            "Trainer",
+            "Music",
+            "Auth",
+            "Dieter",
+        ],
+        "feedback_plan": markdown,
+        "feedback_plan_path": "pending approval",
+        "active_feedback_report": report,
+        "feedback_plan_pending_approval": True,
+        "feedback_plan_approval_token": approval_token,
+        "feedback_revision_instructions": revision_instructions,
+        "scheduler_due": scheduler_due_context(),
+    }
+    template = jinja_env.get_template("app_feedback.html")
+    return HTMLResponse(template.render(context))
+
+@app.post("/apps/assistant/feedback/{report_id}/plan/approve")
+def approve_app_feedback_plan_form(
+    report_id: int,
+    request: Request,
+    feedback_plan: str = Form(""),
+    confirmation_token: str = Form(""),
+    area: str = Form(""),
+):
+    """Persist an approved Codex plan for one feedback issue."""
+    report = feedback_report_by_id(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Feedback report not found")
+    markdown = feedback_plan.strip()
+    if not markdown:
+        raise HTTPException(status_code=400, detail="No plan was provided.")
+    if not feedback_plan_approval_confirmed(report_id, markdown, confirmation_token):
+        raise HTTPException(status_code=400, detail="Plan approval token did not match this draft.")
+    _, stable_path, issue_path = save_feedback_issue_plan_markdown(report_id, markdown)
+    report = feedback_report_by_id(report_id)
+    reports = dicts_from_rows(db.get_app_feedback_reports(status="in_progress", limit=100))
+    visible_reports = filter_app_feedback_reports(reports, area)
+    context = {
+        "request": request,
+        "feedback_reports": visible_reports,
+        "feedback_area_counts": app_feedback_area_counts(reports),
+        "feedback_status": "in_progress",
+        "feedback_area": area,
+        "feedback_areas": [
+            "Kitchen / Recipes",
+            "Scheduler",
+            "Assistant / Planner",
+            "Trainer",
+            "Music",
+            "Auth",
+            "Dieter",
+        ],
+        "feedback_plan": markdown,
+        "feedback_plan_path": str(stable_path),
+        "feedback_issue_path": str(issue_path),
+        "active_feedback_report": report,
+        "feedback_plan_saved": True,
         "scheduler_due": scheduler_due_context(),
     }
     template = jinja_env.get_template("app_feedback.html")
