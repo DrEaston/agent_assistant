@@ -3132,6 +3132,10 @@ def message_reports_app_feedback(text):
         "hard to",
         "can't",
         "cannot",
+        "won't connect",
+        "wont connect",
+        "can't connect",
+        "cannot connect",
         "problem",
         "issue",
         "error",
@@ -3161,6 +3165,9 @@ def message_reports_app_feedback(text):
         "trainer",
         "workout",
         "strava",
+        "music",
+        "playlist",
+        "spotify",
         "login",
         "guest",
         "dieter",
@@ -6485,8 +6492,42 @@ def parse_playlist_target(page_url):
 def message_requests_playlist_action(text, page_url=""):
     """Detect Ask Dieter playlist dictation/edit requests."""
     normalized = (text or "").lower()
+    issue_cues = [
+        "bug",
+        "broken",
+        "doesn't work",
+        "does not work",
+        "isn't working",
+        "not working",
+        "wrong",
+        "problem",
+        "issue",
+        "error",
+        "feedback",
+        "fix",
+        "won't connect",
+        "wont connect",
+        "can't connect",
+        "cannot connect",
+    ]
+    playlist_action_cues = [
+        "make a playlist",
+        "create a playlist",
+        "new playlist",
+        "add song",
+        "add songs",
+        "include song",
+        "include songs",
+        "call it",
+        "playlist called",
+        "playlist named",
+    ]
+    if any(cue in normalized for cue in issue_cues) and not any(cue in normalized for cue in playlist_action_cues):
+        return False
     if (page_url or "").startswith(("/apps/music/playlists", "/apps/playlists")):
-        return any(cue in normalized for cue in ["playlist", "song", "songs", "spotify", "add", "include", "called", "named"])
+        if any(cue in normalized for cue in playlist_action_cues):
+            return True
+        return bool(re.search(r"\b(song|songs)\b", normalized) and re.search(r"\b(add|include|remove|delete)\b", normalized))
     return any(cue in normalized for cue in ["parrisa playlist", "spotify playlist", "make a playlist", "create a playlist"])
 
 

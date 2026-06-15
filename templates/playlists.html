@@ -36,8 +36,9 @@
 
         <article class="playlist-card">
             <span class="playlist-meta">Ask Dieter</span>
-            <h3>Dictate Playlist</h3>
-            <p>Open Ask Dieter and say a playlist name plus songs, one per line. Example: make a playlist called Kitchen Dance; Cruel Summer by Taylor Swift; Levitating by Dua Lipa.</p>
+            <h3>Two Voice Options</h3>
+            <p>For playlists, say: make a playlist called Kitchen Dance; Cruel Summer by Taylor Swift; Levitating by Dua Lipa.</p>
+            <p>For app problems, say: make an issue for Dieter Music: Spotify will not connect.</p>
             <form method="post" action="/apps/music/playlists/create">
                 <input type="hidden" name="collection_id" value="{{ selected_collection.id if selected_collection else '' }}">
                 <input type="text" name="title" placeholder="New playlist title" required>
