@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}App Feedback - Dieter Assistant{% endblock %}
+
+{% block content %}
+<section class="detail-section">
+    <div class="section-header">
+        <div>
+            <h2>App Feedback</h2>
+            <p class="section-subtitle">User-reported bugs, UX issues, and suggested improvements for Codex triage.</p>
+        </div>
+        <form method="post" action="/apps/assistant/feedback/synthesize" class="inline-form">
+            <input type="hidden" name="status" value="{{ feedback_status }}">
+            <input type="hidden" name="area" value="{{ feedback_area }}">
+            <button type="submit">Synthesize</button>
+        </form>
+    </div>
+
+    <div class="filter-tabs" aria-label="Feedback status filters">
+        {% set status_options = [("open", "Open"), ("triaged", "Triaged"), ("done", "Done"), ("", "All")] %}
+        {% for value, label in status_options %}
+            <a
+                class="{% if feedback_status == value %}active{% endif %}"
+                href="/apps/assistant/feedback?status={{ value }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}"
+            >{{ label }}</a>
+        {% endfor %}
+    </div>
+
+    <div class="filter-tabs" aria-label="Feedback app filters">
+        <a
+            class="{% if not feedback_area %}active{% endif %}"
+            href="/apps/assistant/feedback?status={{ feedback_status }}"
+        >All apps</a>
+        {% for area in feedback_areas %}
+            <a
+                class="{% if feedback_area == area %}active{% endif %}"
+                href="/apps/assistant/feedback?status={{ feedback_status }}&area={{ area|urlencode }}"
+            >{{ area }}{% if feedback_area_counts.get(area) %} ({{ feedback_area_counts.get(area) }}){% endif %}</a>
+        {% endfor %}
+    </div>
+
+    {% if feedback_reports %}
+        <div class="task-list">
+            {% for report in feedback_reports %}
+                <article class="task-item">
+                    <div class="task-copy">
+                        <h3>{{ report.title }}</h3>
+                        <small>
+                            #{{ report.id }} - {{ report.area or "Dieter" }} - {{ report.status or "open" }}
+                            {% if report.created_at %} - {{ report.created_at }}{% endif %}
+                        </small>
+                        <p>{{ report.raw_feedback }}</p>
+                        <small>
+                            Page: {{ report.page_url or "unknown" }}
+                            {% if report.reporter_name %} - Reporter: {{ report.reporter_name }}{% endif %}
+                        </small>
+                        {% if report.action_title %}
+                            <small>Planner task: {{ report.action_title }}</small>
+                        {% endif %}
+                    </div>
+                    <div class="scheduler-item-actions">
+                        <form method="post" action="/apps/assistant/feedback/{{ report.id }}/status" class="inline-form">
+                            <input type="hidden" name="next" value="{{ request.url.path }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
+                            <input type="hidden" name="status" value="open">
+                            <button type="submit" class="secondary compact">Open</button>
+                        </form>
+                        <form method="post" action="/apps/assistant/feedback/{{ report.id }}/status" class="inline-form">
+                            <input type="hidden" name="next" value="{{ request.url.path }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
+                            <input type="hidden" name="status" value="triaged">
+                            <button type="submit" class="secondary compact">Triaged</button>
+                        </form>
+                        <form method="post" action="/apps/assistant/feedback/{{ report.id }}/status" class="inline-form">
+                            <input type="hidden" name="next" value="{{ request.url.path }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
+                            <input type="hidden" name="status" value="done">
+                            <button type="submit" class="secondary compact">Done</button>
+                        </form>
+                    </div>
+                </article>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="empty-state">
+            <p>No feedback reports match this view.</p>
+        </div>
+    {% endif %}
+</section>
+
+{% if feedback_plan %}
+    <section class="detail-section">
+        <div class="section-header">
+            <div>
+                <h2>Codex Plan</h2>
+                <p class="section-subtitle">Saved to {{ feedback_plan_path }}.</p>
+            </div>
+        </div>
+        <pre class="work-packet">{{ feedback_plan }}</pre>
+    </section>
+{% endif %}
+{% endblock %}

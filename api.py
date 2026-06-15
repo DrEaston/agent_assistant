@@ -3167,6 +3167,36 @@ def message_reports_app_feedback(text):
     ]
     return any(cue in normalized for cue in feedback_cues) and any(cue in normalized for cue in app_cues)
 
+APP_FEEDBACK_INTAKE_SYSTEM_PROMPT = """You organize user feedback about the Dieter web apps for a developer.
+
+Return only valid JSON:
+{
+  "title": "",
+  "area": "",
+  "summary": "",
+  "severity": "medium"
+}
+
+Rules:
+- Keep title short and implementation-facing, no more than 90 characters.
+- area must be one of: Kitchen / Recipes, Scheduler, Assistant / Planner, Trainer, Music, Auth, Dieter.
+- Use the page URL as a hint, but respect the user's actual complaint.
+- summary should preserve the user's meaning without inventing technical causes.
+- severity must be high, medium, or low.
+"""
+
+APP_FEEDBACK_SYNTHESIS_SYSTEM_PROMPT = """You are preparing a Codex implementation plan from user feedback reports.
+
+Write concise Markdown for a coding agent. Include:
+- High-level goal
+- Findings grouped by app area
+- Proposed implementation plan
+- Data/model/schema notes
+- Verification checklist
+
+Do not invent facts beyond the feedback. If something is uncertain, mark it as an assumption or question.
+"""
+
 def app_area_from_url(page_url):
     """Infer the app area for a feedback report."""
     if page_url.startswith("/apps/recipes"):
@@ -3175,11 +3205,42 @@ def app_area_from_url(page_url):
         return "Scheduler"
     if page_url.startswith("/apps/trainer"):
         return "Trainer"
+    if page_url.startswith("/apps/music") or page_url.startswith("/apps/playlists"):
+        return "Music"
     if page_url.startswith("/apps/assistant") or page_url.startswith("/apps/planner") or page_url.startswith("/dashboard"):
         return "Assistant / Planner"
     if page_url.startswith("/login") or page_url.startswith("/register"):
         return "Auth"
     return "Dieter"
+
+def normalize_app_feedback_area(area, page_url=""):
+    """Normalize model/user feedback area names for filtering."""
+    allowed = {
+        "Kitchen / Recipes",
+        "Scheduler",
+        "Assistant / Planner",
+        "Trainer",
+        "Music",
+        "Auth",
+        "Dieter",
+    }
+    cleaned = re.sub(r"\s+", " ", (area or "").strip())
+    if cleaned in allowed:
+        return cleaned
+    lower = cleaned.lower()
+    if any(token in lower for token in ["recipe", "kitchen", "grocery", "meal"]):
+        return "Kitchen / Recipes"
+    if "scheduler" in lower or "agenda" in lower:
+        return "Scheduler"
+    if "trainer" in lower or "workout" in lower or "strava" in lower:
+        return "Trainer"
+    if "music" in lower or "playlist" in lower or "spotify" in lower:
+        return "Music"
+    if "auth" in lower or "login" in lower or "guest" in lower:
+        return "Auth"
+    if "assistant" in lower or "planner" in lower:
+        return "Assistant / Planner"
+    return app_area_from_url(page_url)
 
 def get_or_create_app_feedback_project():
     """Return the current user's developer-feedback project."""
@@ -3210,21 +3271,71 @@ def summarize_app_feedback_title(content, area):
         cleaned = cleaned[:89].rstrip() + "..."
     return f"Fix {area}: {cleaned}" if cleaned else f"Review {area} feedback"
 
+def model_app_feedback_summary(content, page_url="", page_title=""):
+    """Use the planner model to turn raw user feedback into a developer-facing report."""
+    fallback_area = app_area_from_url(page_url or "")
+    fallback_title = summarize_app_feedback_title(content, fallback_area)
+    fallback = {
+        "title": fallback_title,
+        "area": fallback_area,
+        "summary": re.sub(r"\s+", " ", (content or "").strip()),
+        "severity": "medium",
+    }
+    if not planner_llm_provider:
+        return fallback
+    prompt = "\n".join([
+        f"Page URL: {page_url or 'unknown'}",
+        f"Page title: {page_title or 'unknown'}",
+        "",
+        "Raw user feedback:",
+        content or "",
+    ])
+    try:
+        raw_response = planner_llm_provider.chat(
+            [{"role": "user", "content": prompt}],
+            APP_FEEDBACK_INTAKE_SYSTEM_PROMPT,
+        )
+        parsed = extract_json_object(raw_response)
+    except Exception:
+        return fallback
+    title = re.sub(r"\s+", " ", (parsed.get("title") or "").strip())
+    if not title:
+        title = fallback_title
+    if len(title) > 92:
+        title = title[:89].rstrip() + "..."
+    severity = (parsed.get("severity") or "medium").strip().lower()
+    if severity not in {"high", "medium", "low"}:
+        severity = "medium"
+    return {
+        "title": title,
+        "area": normalize_app_feedback_area(parsed.get("area") or fallback_area, page_url or ""),
+        "summary": re.sub(r"\s+", " ", (parsed.get("summary") or fallback["summary"]).strip()),
+        "severity": severity,
+    }
+
 def handle_app_feedback_request(message, page_url):
     """Save app feedback as a developer-ready planner task."""
     user = dict_from_row(db.get_user_by_id(get_current_user_id())) if get_current_user_id() else {}
     reporter = user.get("display_name") or user.get("email") or "Unknown user"
     reporter_email = user.get("email") or ""
-    area = app_area_from_url(page_url)
+    model_summary = model_app_feedback_summary(
+        message.content,
+        page_url=page_url or "",
+        page_title=message.page_title or "",
+    )
+    area = model_summary["area"]
     project = get_or_create_app_feedback_project()
     share_app_feedback_project_with_admins(project["id"])
-    action = summarize_app_feedback_title(message.content, area)
+    action = model_summary["title"]
     action_id = db.add_recommended_action(project["id"], action, "medium")
     note = "\n".join([
         f"Reporter: {reporter}{f' <{reporter_email}>' if reporter_email and reporter_email != reporter else ''}",
         f"Area: {area}",
+        f"Severity: {model_summary['severity']}",
         f"Page: {page_url or 'unknown'}",
         f"Source page title: {message.page_title or 'unknown'}",
+        "Model summary:",
+        model_summary["summary"],
         "Raw feedback:",
         message.content.strip(),
     ])
@@ -3249,9 +3360,11 @@ def handle_app_feedback_request(message, page_url):
             f"Project: Dieter App Feedback",
             f"Task: {action}",
             f"Feedback report: #{report_id}",
+            f"Area: {area}",
             f"Reporter: {reporter}",
             f"Page: {page_url or 'unknown'}",
             "Wrote result to: Dieter App Feedback task list (/apps/assistant/planner).",
+            "Visible feedback inbox: /apps/assistant/feedback.",
             "Codex inbox: app_feedback_reports table; export with /api/app-feedback/codex-inbox/save.",
         ]),
         "operations": [
@@ -4041,6 +4154,80 @@ def build_app_feedback_codex_inbox(limit=50, status="open"):
         ])
     return "\n".join(lines)
 
+def filter_app_feedback_reports(reports, area=""):
+    """Filter feedback reports by app area for UI and synthesis."""
+    area = (area or "").strip()
+    if not area:
+        return reports
+    return [report for report in reports if (report.get("area") or "Dieter") == area]
+
+def app_feedback_area_counts(reports):
+    """Return area counts for the feedback inbox tabs."""
+    counts = {}
+    for report in reports:
+        area = report.get("area") or "Dieter"
+        counts[area] = counts.get(area, 0) + 1
+    return counts
+
+def build_app_feedback_codex_plan(reports, status="open", area=""):
+    """Build a synthesized Codex plan from visible app feedback reports."""
+    if not reports:
+        return "# Dieter App Feedback Plan\n\nNo feedback reports matched this view.\n"
+    lines = [
+        "# Dieter App Feedback Plan",
+        "",
+        f"Status filter: {status or 'all'}",
+        f"Area filter: {area or 'all'}",
+        f"Report count: {len(reports)}",
+        "",
+    ]
+    grouped = {}
+    for report in reports:
+        grouped.setdefault(report.get("area") or "Dieter", []).append(report)
+    for group_area, group_reports in sorted(grouped.items()):
+        lines.extend([f"## {group_area}", ""])
+        for report in group_reports:
+            lines.extend([
+                f"### #{report['id']} {report.get('title') or 'Untitled feedback'}",
+                f"- Status: {report.get('status') or 'open'}",
+                f"- Page: {report.get('page_url') or 'unknown'}",
+                f"- Reporter: {report.get('reporter_name') or 'Unknown'}",
+                f"- Created: {report.get('created_at') or 'unknown'}",
+                "",
+                "Feedback:",
+                "",
+                report.get("raw_feedback") or "",
+                "",
+            ])
+
+    if planner_llm_provider:
+        try:
+            prompt = "\n".join(lines)
+            synthesized = planner_llm_provider.chat(
+                [{"role": "user", "content": prompt}],
+                APP_FEEDBACK_SYNTHESIS_SYSTEM_PROMPT,
+                max_completion_tokens=1800,
+            ).strip()
+            if synthesized:
+                return synthesized
+        except Exception as exc:
+            lines.extend([
+                "## Synthesis Error",
+                "",
+                f"The model synthesis failed, so this file contains the raw grouped feedback. Error: {exc}",
+                "",
+            ])
+    lines.extend([
+        "## Proposed Implementation Plan",
+        "",
+        "1. Review each report above.",
+        "2. Reproduce the reported behavior in the matching app area.",
+        "3. Patch the smallest relevant route/template/service.",
+        "4. Verify with focused tests or browser checks.",
+        "",
+    ])
+    return "\n".join(lines)
+
 @app.get("/api/app-feedback/codex-inbox")
 def api_app_feedback_codex_inbox(limit: int = 50, status: str = "open"):
     """Return developer feedback as a Markdown Codex inbox."""
@@ -4055,6 +4242,27 @@ def api_save_app_feedback_codex_inbox(limit: int = 50, status: str = "open"):
     safe_status = status if status in {"open", "triaged", "done", ""} else "open"
     markdown = build_app_feedback_codex_inbox(limit=safe_limit, status=safe_status)
     output_path = Path("codex_feedback_inbox.md").resolve()
+    output_path.write_text(markdown, encoding="utf-8")
+    return {"status": "success", "path": str(output_path), "markdown": markdown}
+
+@app.get("/api/app-feedback/codex-plan")
+def api_app_feedback_codex_plan(limit: int = 50, status: str = "open", area: str = ""):
+    """Return synthesized developer feedback as a Markdown Codex plan."""
+    safe_limit = min(max(limit, 1), 100)
+    safe_status = status if status in {"open", "triaged", "done", ""} else "open"
+    reports = dicts_from_rows(db.get_app_feedback_reports(status=safe_status, limit=safe_limit))
+    reports = filter_app_feedback_reports(reports, area)
+    return {"markdown": build_app_feedback_codex_plan(reports, status=safe_status, area=area)}
+
+@app.post("/api/app-feedback/codex-plan/save")
+def api_save_app_feedback_codex_plan(limit: int = 50, status: str = "open", area: str = ""):
+    """Save synthesized developer feedback to codex_feedback_plan.md."""
+    safe_limit = min(max(limit, 1), 100)
+    safe_status = status if status in {"open", "triaged", "done", ""} else "open"
+    reports = dicts_from_rows(db.get_app_feedback_reports(status=safe_status, limit=safe_limit))
+    reports = filter_app_feedback_reports(reports, area)
+    markdown = build_app_feedback_codex_plan(reports, status=safe_status, area=area)
+    output_path = Path("codex_feedback_plan.md").resolve()
     output_path.write_text(markdown, encoding="utf-8")
     return {"status": "success", "path": str(output_path), "markdown": markdown}
 
@@ -4425,6 +4633,82 @@ def assistant_scheduler_app(request: Request):
     }
     template = jinja_env.get_template("scheduler.html")
     return HTMLResponse(template.render(context))
+
+@app.get("/apps/assistant/feedback")
+def assistant_feedback_app(
+    request: Request,
+    status: str = "open",
+    area: str = "",
+):
+    """Visible inbox for user-reported app feedback."""
+    safe_status = status if status in {"open", "triaged", "done", ""} else "open"
+    all_reports = dicts_from_rows(db.get_app_feedback_reports(status=safe_status, limit=100))
+    visible_reports = filter_app_feedback_reports(all_reports, area)
+    context = {
+        "request": request,
+        "feedback_reports": visible_reports,
+        "feedback_area_counts": app_feedback_area_counts(all_reports),
+        "feedback_status": safe_status,
+        "feedback_area": area,
+        "feedback_areas": [
+            "Kitchen / Recipes",
+            "Scheduler",
+            "Assistant / Planner",
+            "Trainer",
+            "Music",
+            "Auth",
+            "Dieter",
+        ],
+        "scheduler_due": scheduler_due_context(),
+    }
+    template = jinja_env.get_template("app_feedback.html")
+    return HTMLResponse(template.render(context))
+
+@app.post("/apps/assistant/feedback/synthesize")
+def synthesize_app_feedback_form(
+    request: Request,
+    status: str = Form("open"),
+    area: str = Form(""),
+):
+    """Generate and save a Codex-readable implementation plan from feedback reports."""
+    safe_status = status if status in {"open", "triaged", "done", ""} else "open"
+    reports = dicts_from_rows(db.get_app_feedback_reports(status=safe_status, limit=100))
+    visible_reports = filter_app_feedback_reports(reports, area)
+    markdown = build_app_feedback_codex_plan(visible_reports, status=safe_status, area=area)
+    output_path = Path("codex_feedback_plan.md").resolve()
+    output_path.write_text(markdown, encoding="utf-8")
+    context = {
+        "request": request,
+        "feedback_reports": visible_reports,
+        "feedback_area_counts": app_feedback_area_counts(reports),
+        "feedback_status": safe_status,
+        "feedback_area": area,
+        "feedback_areas": [
+            "Kitchen / Recipes",
+            "Scheduler",
+            "Assistant / Planner",
+            "Trainer",
+            "Music",
+            "Auth",
+            "Dieter",
+        ],
+        "feedback_plan": markdown,
+        "feedback_plan_path": str(output_path),
+        "scheduler_due": scheduler_due_context(),
+    }
+    template = jinja_env.get_template("app_feedback.html")
+    return HTMLResponse(template.render(context))
+
+@app.post("/apps/assistant/feedback/{report_id}/status")
+def update_app_feedback_status_form(
+    report_id: int,
+    status: str = Form("open"),
+    next: str = Form("/apps/assistant/feedback"),
+):
+    """Update a feedback report status from the visible inbox."""
+    safe_status = status if status in {"open", "triaged", "done"} else "open"
+    db.update_app_feedback_report_status(report_id, safe_status)
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/feedback"), status_code=303)
 
 
 def render_planner_app(request: Request):
