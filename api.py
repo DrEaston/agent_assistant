@@ -1707,6 +1707,7 @@ Rules:
 - Do not invent IDs; use IDs from context.
 - If adding records, use the current project/task target when appropriate.
 - Use scheduler items for contextual reminders, agenda questions, appointments, errands, and "next time I talk to/go to/call..." requests.
+- Use scheduler items for dated action items, for example "make a new action item for tomorrow". If the request is vague, draft a card with the explicit date and a generic title like "Action item"; do not invent bullets.
 - If the user asks to add bullets/details to an existing scheduler context, use update_scheduler_item for that existing item. Do not create a second item with the same title/context.
 - For action reminders like "call to have the AC serviced", use the topic/domain as the title and context_label ("AC"), and put the actual action as a short checkbox note ("- [ ] call to have AC serviced").
 - For scheduler scheduled_for, use YYYY-MM-DD when the user gives a clear date; otherwise use an empty string.
@@ -1794,6 +1795,7 @@ def local_scheduler_proposal(user_message, target):
         "schedule",
         "scheduler",
         "tomorrow",
+        "action item",
         "chore",
         "chores",
         "card",
@@ -1899,7 +1901,11 @@ def extract_scheduler_detail_items(text, context_label=""):
 
 def scheduler_list_request(text):
     """Detect voice-style requests that should become checklist bullets."""
-    return bool(re.search(r"\b(chore|chores|to do|todo|checklist|list|tasks?)\b", text or "", flags=re.IGNORECASE))
+    return bool(re.search(r"\b(chore|chores|to do|todo|checklist|list|tasks?|bullets?)\b", text or "", flags=re.IGNORECASE))
+
+def scheduler_generic_action_item_request(text):
+    """Detect a dated but otherwise vague action-item request."""
+    return bool(re.search(r"\b(?:new\s+)?action\s+item\b", text or "", flags=re.IGNORECASE))
 
 def scheduler_request_targets_existing_notes(text):
     """Return true when the user explicitly wants to add details to an existing card."""
@@ -1917,6 +1923,7 @@ def extract_scheduler_list_items(text, context_label=""):
 
     list_text = ""
     patterns = [
+        r"\b(?:with|using|as)\s+bullets?\s*:?\s*(.+)$",
         r"\b(?:make|create|build|add|put)(?:\s+me)?(?:\s+a|\s+an|\s+the)?\s+(?:(?:chore|chores|to do|todo|task|tasks|checklist)\s+)?list(?:\s+for\s+(?:today|tomorrow|tonight|this evening))?(?:\s+(?:of|with|that includes|including|for))?\s*:?\s*(.+)$",
         r"\b(?:chores|tasks|to do|todo|checklist)(?:\s+for\s+(?:today|tomorrow|tonight|this evening))?\s*:?\s*(.+)$",
     ]
@@ -2357,7 +2364,9 @@ def synthesize_scheduler_operation(user_message, operation):
     is_list_request = scheduler_list_request(original)
     chore_list_match = re.search(r"\b(chore|chores)\b", original, flags=re.IGNORECASE)
     if context_label and context_label != "General" and not (context_label == "Home" and rawish_title and not list_items):
-        if list_items:
+        if list_items and scheduler_generic_action_item_request(original):
+            title = "Action item"
+        elif list_items:
             title = "Chore list" if chore_list_match else f"{context_label} checklist"
         else:
             title = context_label
@@ -2372,7 +2381,9 @@ def synthesize_scheduler_operation(user_message, operation):
         cleaned = re.sub(r"\b(for|on|by)\s*$", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"\b(to|in|on)\s+(the\s+)?scheduler\b", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
-        if list_items and chore_list_match:
+        if list_items and scheduler_generic_action_item_request(original):
+            title = "Action item"
+        elif list_items and chore_list_match:
             title = "Chore list"
         elif list_items:
             title = "Checklist"
@@ -2395,7 +2406,11 @@ def synthesize_scheduler_operation(user_message, operation):
         action_note = extract_scheduler_action_note(original, context_label)
         if action_note and action_note.lower() != title.lower():
             note_lines = [f"[ ] {action_note}"]
-    elif detail_items and not (len(detail_items) == 1 and detail_items[0].lower() == title.lower()):
+    elif (
+        not scheduler_generic_action_item_request(original)
+        and detail_items
+        and not (len(detail_items) == 1 and detail_items[0].lower() == title.lower())
+    ):
         normalized_title = re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
         normalized_detail = re.sub(r"[^a-z0-9]+", " ", detail_items[0].lower()).strip() if len(detail_items) == 1 else ""
         if not (normalized_title and normalized_title in normalized_detail and scheduler_text_implies_today(normalized_detail)):
@@ -2507,7 +2522,7 @@ def prepare_scheduler_items_for_display(items):
     ))
     return enriched_items
 
-def propose_planner_edit(user_message, page_url="", conversation_history=None):
+def propose_planner_edit(user_message, page_url="", conversation_history=None, previous_action_plan=""):
     """Ask the model for a structured planner edit proposal."""
     target, context = build_planner_edit_context(page_url)
     if not llm_service:
@@ -2529,11 +2544,24 @@ def propose_planner_edit(user_message, page_url="", conversation_history=None):
             "target": target,
         }
 
+    previous_plan = (previous_action_plan or "").strip()
+    if previous_plan:
+        request_section = (
+            "[Previous drafted action plan]\n"
+            f"{previous_plan}\n\n"
+            "[User revision instructions]\n"
+            f"{user_message}\n\n"
+            "Create a revised structured plan that starts from the previous drafted action plan "
+            "and applies the user's revision instructions. Do not apply the old plan unchanged unless the revision asks for that."
+        )
+    else:
+        request_section = f"User request:\n{user_message}"
+
     prompt = (
         f"[Planner Context]\n{context}\n\n"
         f"Current date: {app_today().isoformat()}\n"
         "Interpret relative dates like today, tomorrow, and next week from the current date.\n\n"
-        f"User request:\n{user_message}"
+        f"{request_section}"
     )
     messages = list(conversation_history or [])[-6:]
     messages.append({"role": "user", "content": prompt})
@@ -2920,6 +2948,7 @@ def message_requests_planner_action(text):
         "due tomorrow",
         "for tomorrow",
         "tomorrow",
+        "action item",
         "tonight",
         "before bed",
         "bedtime",
@@ -3091,6 +3120,7 @@ def handle_planner_action_request(message, page_url):
         message.content,
         page_url=page_url,
         conversation_history=planner_action_conversation_history(message),
+        previous_action_plan=message.previous_action_plan,
     )
     result = apply_planner_edit(message.content, page_url, proposal)
     result["planner_context"] = True
@@ -3144,18 +3174,41 @@ def preview_dieter_write(message, page_url, action_kind, destination):
         "confirmation_action": action_kind,
     }
 
+def scheduler_preview_bullet_lines(notes):
+    """Return human-readable bullet text for a draft scheduler card."""
+    bullets = []
+    for raw_line in (notes or "").splitlines():
+        line = clean_scheduler_note_line(raw_line)
+        line = re.sub(r"^\[( |x|X)\]\s+", "", line, flags=re.IGNORECASE).strip()
+        if line:
+            bullets.append(line)
+    return bullets
+
+def format_scheduler_card_draft(title, context_label, scheduled_for, notes):
+    """Format a scheduler operation as the concrete draft card the user will approve."""
+    bullets = scheduler_preview_bullet_lines(notes)
+    lines = ["Plan: draft a Scheduler card."]
+    lines.append(f"Card title: {title or 'Untitled'}")
+    lines.append(f"Context: {context_label or 'General'}")
+    lines.append(f"Date: {scheduled_for or 'no exact date'}")
+    if bullets:
+        lines.append("Bullets:")
+        lines.extend(f"- {bullet}" for bullet in bullets)
+    else:
+        lines.append("Bullets: none")
+    return "\n".join(lines)
+
 def summarize_pending_planner_operation(user_message, operation):
     """Describe one proposed planner write before it is applied."""
     op = operation.get("op") or ""
     if op == "add_scheduler_item":
         planned = synthesize_scheduler_operation(user_message, dict(operation))
-        lines = ["Plan: add a Scheduler item."]
-        lines.append(f"Title: {planned.get('title') or 'Untitled'}")
-        lines.append(f"Context: {planned.get('context_label') or 'General'}")
-        lines.append(f"When: {planned.get('scheduled_for') or 'no exact date'}")
-        if planned.get("notes"):
-            lines.append(f"Notes: {planned.get('notes')}")
-        return "\n".join(lines)
+        return format_scheduler_card_draft(
+            planned.get("title") or "Untitled",
+            planned.get("context_label") or "General",
+            planned.get("scheduled_for") or "",
+            planned.get("notes") or "",
+        )
     if op == "update_scheduler_item":
         item_id = operation.get("scheduler_item_id")
         existing = dict_from_row(db.get_scheduler_item(int(item_id))) if item_id else {}
@@ -3167,16 +3220,15 @@ def summarize_pending_planner_operation(user_message, operation):
                 "scheduled_for": scheduler_date_from_text(user_message) or (operation.get("scheduled_for") or ""),
                 "notes": operation.get("notes") or "",
             })
-            lines = ["Plan: create a separate Scheduler checklist instead of merging into an existing card."]
-            lines.append(f"Title: {planned.get('title') or 'Untitled'}")
-            lines.append(f"Context: {planned.get('context_label') or 'General'}")
-            lines.append(f"When: {planned.get('scheduled_for') or 'no exact date'}")
-            if planned.get("notes"):
-                lines.append(f"Notes: {planned.get('notes')}")
-            return "\n".join(lines)
+            return format_scheduler_card_draft(
+                planned.get("title") or "Untitled",
+                planned.get("context_label") or "General",
+                planned.get("scheduled_for") or "",
+                planned.get("notes") or "",
+            )
         lines = [f"Plan: update Scheduler item #{item_id}."]
         if existing:
-            lines.append(f"Existing title: {existing.get('title') or 'Untitled'}")
+            lines.append(f"Existing card title: {existing.get('title') or 'Untitled'}")
         for field in ["title", "context_label", "scheduled_for", "notes", "status"]:
             value = operation.get(field)
             if value is not None:
@@ -3199,6 +3251,7 @@ def preview_planner_action_write(message, page_url):
         message.content,
         page_url=page_url,
         conversation_history=conversation_history,
+        previous_action_plan=message.previous_action_plan,
     )
     token = dieter_action_confirmation_token(message.content, page_url, "planner_action")
     operations = proposal.get("operations") or []
@@ -3221,19 +3274,8 @@ def preview_planner_action_write(message, page_url):
     }
 
 def planner_action_conversation_history(message):
-    """Carry a pending action plan forward when the user revises it."""
-    history = list(message.conversation_history or [])
-    previous_plan = (message.previous_action_plan or "").strip()
-    if previous_plan:
-        history.append({
-            "role": "assistant",
-            "content": (
-                "Previous proposed action plan, kept as reference for the user's revision. "
-                "Interpret the new user message relative to this plan, but follow the new instruction:\n"
-                f"{previous_plan}"
-            ),
-        })
-    return history
+    """Return normal chat history; previous action plans are passed as explicit prompt input."""
+    return list(message.conversation_history or [])
 
 def build_recipe_extraction_stats(groups):
     """Summarize OCR progress for uploaded recipe card pairs."""
