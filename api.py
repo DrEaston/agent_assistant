@@ -3220,12 +3220,45 @@ Rules:
 """
 
 APP_FEEDBACK_STATUS_VALUES = {"open", "triaged", "in_progress", "ready_for_review", "done"}
+APP_FEEDBACK_ACTIVE_STATUSES = ["ready_for_review", "in_progress", "open"]
 
 def safe_app_feedback_status(status, default="open", allow_all=False):
     """Normalize feedback issue status filters and updates."""
+    if status == "active":
+        return "active"
     if allow_all and status == "":
         return ""
     return status if status in APP_FEEDBACK_STATUS_VALUES else default
+
+def get_app_feedback_reports_for_status(status, limit=100):
+    """Fetch feedback reports for a status filter, including the active dashboard view."""
+    if status == "active":
+        rows = []
+        per_status_limit = max(limit, 100)
+        for issue_status in APP_FEEDBACK_ACTIVE_STATUSES:
+            rows.extend(dicts_from_rows(db.get_app_feedback_reports(status=issue_status, limit=per_status_limit)))
+        return rows[:limit]
+    return dicts_from_rows(db.get_app_feedback_reports(status=status, limit=limit))
+
+def group_app_feedback_reports_by_status(reports):
+    """Group reports into display sections for the feedback dashboard."""
+    labels = {
+        "ready_for_review": "Ready for Testing",
+        "in_progress": "In Progress",
+        "open": "Not Started",
+        "triaged": "Triaged",
+        "done": "Closed",
+    }
+    order = ["ready_for_review", "in_progress", "open", "triaged", "done"]
+    grouped = []
+    for status in order:
+        items = [report for report in reports if (report.get("status") or "open") == status]
+        if items:
+            grouped.append({"status": status, "label": labels.get(status, status.title()), "reports": items})
+    other = [report for report in reports if (report.get("status") or "open") not in order]
+    if other:
+        grouped.append({"status": "other", "label": "Other", "reports": other})
+    return grouped
 
 def extract_feedback_plan_questions(markdown):
     """Return clear user-answerable questions from a Codex audit plan."""
@@ -4562,7 +4595,7 @@ def codex_worker_token_valid(token):
 def next_feedback_issue(status="open", area=""):
     """Pick the next feedback issue to audit."""
     safe_status = safe_app_feedback_status(status, allow_all=True)
-    reports = dicts_from_rows(db.get_app_feedback_reports(status=safe_status, limit=100))
+    reports = get_app_feedback_reports_for_status(safe_status, limit=100)
     reports = filter_app_feedback_reports(reports, area)
     return reports[-1] if reports else None
 
@@ -4588,7 +4621,7 @@ def api_app_feedback_codex_plan(limit: int = 50, status: str = "open", area: str
     """Return synthesized developer feedback as a Markdown Codex plan."""
     safe_limit = min(max(limit, 1), 100)
     safe_status = safe_app_feedback_status(status, allow_all=True)
-    reports = dicts_from_rows(db.get_app_feedback_reports(status=safe_status, limit=safe_limit))
+    reports = get_app_feedback_reports_for_status(safe_status, limit=safe_limit)
     reports = filter_app_feedback_reports(reports, area)
     return {"markdown": build_app_feedback_codex_plan(reports, status=safe_status, area=area)}
 
@@ -4597,7 +4630,7 @@ def api_save_app_feedback_codex_plan(limit: int = 50, status: str = "open", area
     """Save synthesized developer feedback to codex_feedback_plan.md."""
     safe_limit = min(max(limit, 1), 100)
     safe_status = safe_app_feedback_status(status, allow_all=True)
-    reports = dicts_from_rows(db.get_app_feedback_reports(status=safe_status, limit=safe_limit))
+    reports = get_app_feedback_reports_for_status(safe_status, limit=safe_limit)
     reports = filter_app_feedback_reports(reports, area)
     markdown = build_app_feedback_codex_plan(reports, status=safe_status, area=area)
     output_path = Path("codex_feedback_plan.md").resolve()
@@ -5026,16 +5059,18 @@ def assistant_scheduler_app(request: Request):
 @app.get("/apps/assistant/feedback")
 def assistant_feedback_app(
     request: Request,
-    status: str = "open",
+    status: str = "active",
     area: str = "",
 ):
     """Visible inbox for user-reported app feedback."""
-    safe_status = safe_app_feedback_status(status, allow_all=True)
-    all_reports = dicts_from_rows(db.get_app_feedback_reports(status=safe_status, limit=100))
+    safe_status = safe_app_feedback_status(status, default="active", allow_all=True)
+    all_reports = get_app_feedback_reports_for_status(safe_status, limit=100)
     visible_reports = filter_app_feedback_reports(all_reports, area)
     context = {
         "request": request,
         "feedback_reports": visible_reports,
+        "feedback_report_groups": group_app_feedback_reports_by_status(visible_reports),
+        "feedback_report_groups": group_app_feedback_reports_by_status(visible_reports),
         "feedback_area_counts": app_feedback_area_counts(all_reports),
         "feedback_status": safe_status,
         "feedback_area": area,
@@ -5056,12 +5091,12 @@ def assistant_feedback_app(
 @app.post("/apps/assistant/feedback/synthesize")
 def synthesize_app_feedback_form(
     request: Request,
-    status: str = Form("open"),
+    status: str = Form("active"),
     area: str = Form(""),
 ):
     """Generate and save a Codex-readable implementation plan from feedback reports."""
-    safe_status = safe_app_feedback_status(status, allow_all=True)
-    reports = dicts_from_rows(db.get_app_feedback_reports(status=safe_status, limit=100))
+    safe_status = safe_app_feedback_status(status, default="active", allow_all=True)
+    reports = get_app_feedback_reports_for_status(safe_status, limit=100)
     visible_reports = filter_app_feedback_reports(reports, area)
     markdown = build_app_feedback_codex_plan(visible_reports, status=safe_status, area=area)
     output_path = Path("codex_feedback_plan.md").resolve()
@@ -5069,6 +5104,8 @@ def synthesize_app_feedback_form(
     context = {
         "request": request,
         "feedback_reports": visible_reports,
+        "feedback_report_groups": group_app_feedback_reports_by_status(visible_reports),
+        "feedback_report_groups": group_app_feedback_reports_by_status(visible_reports),
         "feedback_area_counts": app_feedback_area_counts(reports),
         "feedback_status": safe_status,
         "feedback_area": area,
@@ -5091,7 +5128,7 @@ def synthesize_app_feedback_form(
 @app.post("/apps/assistant/feedback/audit-next")
 def audit_next_app_feedback_form(
     request: Request,
-    status: str = Form("open"),
+    status: str = Form("active"),
     area: str = Form(""),
 ):
     """Open the next matching feedback issue for Codex-style audit."""
@@ -5123,6 +5160,8 @@ def audit_app_feedback_form(
     context = {
         "request": request,
         "feedback_reports": visible_reports,
+        "feedback_report_groups": group_app_feedback_reports_by_status(visible_reports),
+        "feedback_report_groups": group_app_feedback_reports_by_status(visible_reports),
         "feedback_area_counts": app_feedback_area_counts(reports),
         "feedback_status": safe_status,
         "feedback_area": area,
