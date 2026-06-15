@@ -4541,6 +4541,30 @@ class Database:
         self._commit()
         self.close()
 
+    def delete_app_feedback_report(self, report_id):
+        """Delete a feedback report opened in error for the active user."""
+        self.connect()
+        cursor = self.conn.cursor()
+        active_user_id = self._active_user_id()
+        cursor.execute(
+            "SELECT destination_action_id, user_id FROM app_feedback_reports WHERE id = ?",
+            (report_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            self.close()
+            return False
+        if active_user_id and row["user_id"] and row["user_id"] != active_user_id:
+            self.close()
+            return False
+        action_id = row["destination_action_id"]
+        cursor.execute("DELETE FROM app_feedback_reports WHERE id = ?", (report_id,))
+        if action_id:
+            cursor.execute("DELETE FROM recommended_actions WHERE id = ?", (action_id,))
+        self._commit()
+        self.close()
+        return True
+
     def add_chat_message(self, role, content, model=""):
         """Persist a chat message."""
         self.connect()

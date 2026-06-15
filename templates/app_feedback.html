@@ -89,6 +89,10 @@
                             <input type="hidden" name="status" value="done">
                             <button type="submit" class="secondary compact">Done</button>
                         </form>
+                        <form method="post" action="/apps/assistant/feedback/{{ report.id }}/delete" class="inline-form">
+                            <input type="hidden" name="next" value="{{ request.url.path }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
+                            <button type="submit" class="secondary compact danger-button">Delete</button>
+                        </form>
                     </div>
                 </article>
             {% endfor %}

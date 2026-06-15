@@ -5063,6 +5063,17 @@ def update_app_feedback_status_form(
     db.update_app_feedback_report_status(report_id, safe_status)
     return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/feedback"), status_code=303)
 
+@app.post("/apps/assistant/feedback/{report_id}/delete")
+def delete_app_feedback_form(
+    report_id: int,
+    next: str = Form("/apps/assistant/feedback"),
+):
+    """Delete a feedback issue opened in error."""
+    deleted = db.delete_app_feedback_report(report_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Feedback report not found")
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/feedback"), status_code=303)
+
 
 def render_planner_app(request: Request):
     """Main dashboard view - renders HTML."""
