@@ -47,13 +47,15 @@
     {% if feedback_reports %}
         <div class="task-list app-feedback-list">
             {% for report in feedback_reports %}
-                <article class="task-item app-feedback-card">
-                    <div class="task-copy">
-                        <h3>{{ report.title }}</h3>
-                        <small>
-                            #{{ report.id }} - {{ report.area or "Dieter" }} - {{ report.status or "open" }}
-                            {% if report.created_at %} - {{ report.created_at }}{% endif %}
-                        </small>
+                <details class="app-feedback-card">
+                    <summary>
+                        <span class="feedback-card-main">
+                            <strong>{{ report.title }}</strong>
+                            <small>#{{ report.id }} - {{ report.area or "Dieter" }}{% if report.created_at %} - {{ report.created_at }}{% endif %}</small>
+                        </span>
+                        <span class="feedback-status-pill status-{{ (report.status or 'open')|replace('_', '-') }}">{{ (report.status or "open")|replace("_", " ")|title }}</span>
+                    </summary>
+                    <div class="feedback-card-detail">
                         <p>{{ report.raw_feedback }}</p>
                         <small>
                             Page: {{ report.page_url or "unknown" }}
@@ -61,6 +63,9 @@
                         </small>
                         {% if report.action_title %}
                             <small>Planner task: {{ report.action_title }}</small>
+                        {% endif %}
+                        {% if report.audit_plan_approved_at %}
+                            <small>Plan approved: {{ report.audit_plan_approved_at }}</small>
                         {% endif %}
                         {% if report.implementation_note %}
                             <div class="feedback-review-note">
@@ -71,54 +76,41 @@
                                 {% endif %}
                             </div>
                         {% endif %}
-                    </div>
-                    <div class="scheduler-item-actions app-feedback-actions">
-                        <form method="post" action="/apps/assistant/feedback/{{ report.id }}/audit" class="inline-form">
-                            <input type="hidden" name="status" value="{{ feedback_status or 'open' }}">
-                            <input type="hidden" name="area" value="{{ feedback_area }}">
-                            <button type="submit" class="secondary compact">Audit</button>
-                        </form>
-                        <form method="post" action="/apps/assistant/feedback/{{ report.id }}/status" class="inline-form">
-                            <input type="hidden" name="next" value="{{ request.url.path }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
-                            <input type="hidden" name="status" value="open">
-                            <button type="submit" class="secondary compact">Open</button>
-                        </form>
-                        <form method="post" action="/apps/assistant/feedback/{{ report.id }}/status" class="inline-form">
-                            <input type="hidden" name="next" value="{{ request.url.path }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
-                            <input type="hidden" name="status" value="triaged">
-                            <button type="submit" class="secondary compact">Triaged</button>
-                        </form>
-                        <form method="post" action="/apps/assistant/feedback/{{ report.id }}/status" class="inline-form">
-                            <input type="hidden" name="next" value="{{ request.url.path }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
-                            <input type="hidden" name="status" value="in_progress">
-                            <button type="submit" class="secondary compact">In Progress</button>
-                        </form>
-                        {% if report.audit_plan_approved_at and report.status != "ready_for_review" and report.status != "done" %}
-                            <details class="feedback-ready-details">
-                                <summary>Ready for Testing</summary>
-                                <form method="post" action="/apps/assistant/feedback/{{ report.id }}/ready-for-review" class="feedback-ready-form">
-                                    <input type="hidden" name="next" value="{{ request.url.path }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
-                                    <textarea
-                                        name="implementation_note"
-                                        placeholder="What changed, commit/revision, how Curtis should test it, and anything still uncertain."
-                                    >{{ report.implementation_note or "" }}</textarea>
-                                    <button type="submit" class="secondary compact">Send to Testing</button>
+                        <div class="scheduler-item-actions app-feedback-actions">
+                            {% if report.status != "ready_for_review" and report.status != "done" %}
+                                <form method="post" action="/apps/assistant/feedback/{{ report.id }}/audit" class="inline-form">
+                                    <input type="hidden" name="status" value="{{ feedback_status or 'open' }}">
+                                    <input type="hidden" name="area" value="{{ feedback_area }}">
+                                    <button type="submit" class="secondary compact">Audit</button>
                                 </form>
-                            </details>
-                        {% endif %}
-                        {% if report.status == "ready_for_review" %}
-                            <form method="post" action="/apps/assistant/feedback/{{ report.id }}/status" class="inline-form">
+                            {% endif %}
+                            {% if report.audit_plan_approved_at and report.status != "ready_for_review" and report.status != "done" %}
+                                <details class="feedback-ready-details">
+                                    <summary>Ready for Testing</summary>
+                                    <form method="post" action="/apps/assistant/feedback/{{ report.id }}/ready-for-review" class="feedback-ready-form">
+                                        <input type="hidden" name="next" value="{{ request.url.path }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
+                                        <textarea
+                                            name="implementation_note"
+                                            placeholder="What changed, commit/revision, how Curtis should test it, and anything still uncertain."
+                                        >{{ report.implementation_note or "" }}</textarea>
+                                        <button type="submit" class="secondary compact">Send to Testing</button>
+                                    </form>
+                                </details>
+                            {% endif %}
+                            {% if report.status == "ready_for_review" %}
+                                <form method="post" action="/apps/assistant/feedback/{{ report.id }}/status" class="inline-form">
+                                    <input type="hidden" name="next" value="{{ request.url.path }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
+                                    <input type="hidden" name="status" value="done">
+                                    <button type="submit" class="secondary compact">Approve / Close</button>
+                                </form>
+                            {% endif %}
+                            <form method="post" action="/apps/assistant/feedback/{{ report.id }}/delete" class="inline-form">
                                 <input type="hidden" name="next" value="{{ request.url.path }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
-                                <input type="hidden" name="status" value="done">
-                                <button type="submit" class="secondary compact">Approve / Close</button>
+                                <button type="submit" class="secondary compact danger-button">Delete</button>
                             </form>
-                        {% endif %}
-                        <form method="post" action="/apps/assistant/feedback/{{ report.id }}/delete" class="inline-form">
-                            <input type="hidden" name="next" value="{{ request.url.path }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
-                            <button type="submit" class="secondary compact danger-button">Delete</button>
-                        </form>
+                        </div>
                     </div>
-                </article>
+                </details>
             {% endfor %}
         </div>
     {% else %}
