@@ -1,6 +1,13 @@
 .env
+*.db
+*.db-*
 codex_work_packet.md
+codex_feedback_issue_*.md
+codex_worker_status.json
+codex_worker_status.*.json
 __pycache__/
 *.pyc
 .venv/
 uploads/
+tmp/
+data/

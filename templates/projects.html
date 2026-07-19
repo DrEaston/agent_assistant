@@ -5,8 +5,82 @@
 {% block content %}
 <h1><span class="emoji">📂</span>Projects</h1>
 
+<section class="project-starter-panel" aria-labelledby="projects-starter-heading">
+    <div class="section-header">
+        <div>
+            <h2 id="projects-starter-heading">Quick Starts</h2>
+            <p class="section-subtitle">Pick a starter, edit the brief, and create a separate planner project.</p>
+        </div>
+    </div>
+    <div class="project-starter-grid">
+        <details class="project-starter-card" open>
+            <summary>
+                <strong>Start new project</strong>
+                <span>Kick off a new AI project</span>
+            </summary>
+            <form method="post" action="/projects/create">
+                <input type="hidden" name="project_type" value="general">
+                <input type="hidden" name="priority_score" value="3">
+                <input type="hidden" name="next" value="detail">
+                <div class="form-group">
+                    <label for="quick-general-name">Project Name</label>
+                    <input type="text" id="quick-general-name" name="name" value="New Project" required>
+                </div>
+                <div class="form-group">
+                    <label for="quick-general-description">Starter Brief</label>
+                    <textarea id="quick-general-description" name="description">Start a new project and help define the goal, scope, and next steps.</textarea>
+                </div>
+                <button type="submit">Create Project</button>
+            </form>
+        </details>
+
+        <details class="project-starter-card">
+            <summary>
+                <strong>Start research project</strong>
+                <span>Research a company</span>
+            </summary>
+            <form method="post" action="/projects/create">
+                <input type="hidden" name="project_type" value="research">
+                <input type="hidden" name="priority_score" value="3">
+                <input type="hidden" name="next" value="detail">
+                <div class="form-group">
+                    <label for="quick-research-name">Project Name</label>
+                    <input type="text" id="quick-research-name" name="name" value="Company Research" required>
+                </div>
+                <div class="form-group">
+                    <label for="quick-research-description">Starter Brief</label>
+                    <textarea id="quick-research-description" name="description">Research the company CCT. Explain what they do, what industry they are in, and any relevant business context.</textarea>
+                </div>
+                <button type="submit">Create Research Project</button>
+            </form>
+        </details>
+
+        <details class="project-starter-card">
+            <summary>
+                <strong>Start technical project</strong>
+                <span>Plan what needs to be built</span>
+            </summary>
+            <form method="post" action="/projects/create">
+                <input type="hidden" name="project_type" value="technical">
+                <input type="hidden" name="priority_score" value="3">
+                <input type="hidden" name="next" value="detail">
+                <div class="form-group">
+                    <label for="quick-technical-name">Project Name</label>
+                    <input type="text" id="quick-technical-name" name="name" value="Technical Scope" required>
+                </div>
+                <div class="form-group">
+                    <label for="quick-technical-description">Starter Brief</label>
+                    <textarea id="quick-technical-description" name="description">Based on the company CCT and its business, outline what I will probably need to build for them, including likely technical requirements, workflows, and risks.</textarea>
+                </div>
+                <button type="submit">Create Technical Project</button>
+            </form>
+        </details>
+    </div>
+</section>
+
 <form method="post" action="/projects/create">
     <h3>Create New Project</h3>
+    <input type="hidden" name="next" value="projects">
     <div class="form-group">
         <label for="name">Project Name</label>
         <input type="text" id="name" name="name" placeholder="e.g., New Feature" required>
@@ -14,6 +88,14 @@
     <div class="form-group">
         <label for="description">Description</label>
         <textarea id="description" name="description" placeholder="What is this project trying to accomplish?"></textarea>
+    </div>
+    <div class="form-group">
+        <label for="project_type">Project Type</label>
+        <select id="project_type" name="project_type">
+            <option value="general" selected>General</option>
+            <option value="research">Research</option>
+            <option value="technical">Technical</option>
+        </select>
     </div>
     <div class="form-group">
         <label for="priority_score">Priority</label>
@@ -37,6 +119,7 @@
                 {% if project.description %}
                     <p>{{ project.description }}</p>
                 {% endif %}
+                <p>Type: <strong>{{ (project.project_type or 'general')|title }}</strong></p>
                 <p>Priority: <strong>{{ project.priority_score }}/5</strong></p>
                 <p>Status: <strong>{{ project.status }}</strong></p>
                 <p>Created: <small>{{ project.created_at }}</small></p>
@@ -46,7 +129,7 @@
     </div>
 {% else %}
     <div class="empty-state">
-        <p>No projects yet. Create one above!</p>
+        <p>No projects yet. Use a quick start above to create the first one.</p>
     </div>
 {% endif %}
 {% endblock %}

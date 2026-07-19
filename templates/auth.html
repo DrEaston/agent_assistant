@@ -1,19 +1,25 @@
 {% extends "base.html" %}
 
-{% block title %}{% if mode == "register" %}Create Account{% else %}Log In{% endif %} - Dieter{% endblock %}
+{% block title %}{% if mode == "register" %}Create Account{% elif mode == "pending" %}Approval Pending{% else %}Log In{% endif %} - Dieter{% endblock %}
 
 {% block content %}
 <section class="detail-section auth-panel">
     <div class="section-header">
         <div>
-            <h2>{% if mode == "register" %}Create Account{% else %}Log In{% endif %}</h2>
+            <h2>{% if mode == "register" %}Create Account{% elif mode == "pending" %}Approval Pending{% else %}Log In{% endif %}</h2>
             <p class="section-subtitle">
                 {% if mode == "register" and not has_users %}
                     Create the first account to claim the existing Dieter data.
                 {% elif mode == "register" %}
-                    Create your own Dieter workspace.
+                    Request access to Dieter. An admin must approve new member accounts before login.
+                {% elif mode == "pending" %}
+                    Your account request has been saved and is waiting for admin approval.
                 {% else %}
-                    Open your private planner and recipe workspace.
+                    {% if demo_mode %}
+                        Open the read-only Dieter demo with sample recipes, scheduler cards, Studio issues, and trainer data.
+                    {% else %}
+                        Open your private planner and recipe workspace.
+                    {% endif %}
                 {% endif %}
             </p>
         </div>
@@ -25,6 +31,10 @@
         </div>
     {% endif %}
 
+    {% if mode == "pending" %}
+        <p class="section-subtitle">You can log in after your account is approved.</p>
+        <p class="section-subtitle"><a href="/login">Back to login</a></p>
+    {% else %}
     <form method="post" action="/{{ mode }}">
         {% if mode == "login" %}
             <input type="hidden" name="next" value="{{ request.query_params.get('next', '/') }}">
@@ -37,6 +47,14 @@
             <div class="form-group">
                 <label for="display-name">Display Name</label>
                 <input type="text" id="display-name" name="display_name" autocomplete="name">
+            </div>
+            <div class="form-group">
+                <label for="trainer-mode-request">Trainer Mode</label>
+                <select id="trainer-mode-request" name="trainer_mode_request">
+                    <option value="athlete">Athlete</option>
+                    <option value="coach">Coach</option>
+                </select>
+                <p class="section-subtitle">Coach mode requires admin approval.</p>
             </div>
         {% endif %}
         <div class="form-group">
@@ -51,13 +69,20 @@
         {% endif %}
         <button type="submit">{% if mode == "register" %}Create Account{% else %}Log In{% endif %}</button>
     </form>
+    {% endif %}
 
     {% if mode == "login" %}
         <form method="post" action="/guest-login" class="inline-form">
-            <input type="hidden" name="next" value="{{ request.query_params.get('next', '/apps/recipes') }}">
-            <button type="submit" class="secondary">Continue as Guest</button>
+            <input type="hidden" name="next" value="{{ request.query_params.get('next', '/apps' if demo_mode else '/apps/recipes') }}">
+            <button type="submit" class="secondary">{% if demo_mode %}Open Demo as Guest{% else %}Continue as Guest{% endif %}</button>
         </form>
-        <p class="section-subtitle">Read-only access to the shared recipe catalogue.</p>
+        <p class="section-subtitle">
+            {% if demo_mode %}
+                Read-only access to sample Kitchen, Scheduler, Studio, and Trainer workflows.
+            {% else %}
+                Read-only access to the shared recipe catalogue.
+            {% endif %}
+        </p>
     {% endif %}
 
     {% if mode == "register" and has_users %}

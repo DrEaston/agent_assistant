@@ -171,6 +171,9 @@ if ($secretIamExitCode -ne 0) {
 }
 
 $envVars = "DB_PATH=/tmp/projects.db,UPLOADS_DIR=/tmp/uploads,GCS_BUCKET=$DataBucket,GCS_PREFIX=$DataPrefix,APP_TIMEZONE=America/Phoenix,LLM_PROVIDER=$llmProvider,OPENAI_MODEL=$openAiModel"
+if ($env:DEMO_MODE) {
+    $envVars = "$envVars,DEMO_MODE=$($env:DEMO_MODE)"
+}
 if ($openAiReviewModel) {
     $envVars = "$envVars,OPENAI_REVIEW_MODEL=$openAiReviewModel"
 }

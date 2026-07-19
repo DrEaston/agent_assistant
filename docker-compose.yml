@@ -6,8 +6,10 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./projects.db:/app/projects.db
+      - ./data:/data
       - ./uploads:/app/uploads
     environment:
       - PYTHONUNBUFFERED=1
+      - DB_PATH=/data/projects.db
+      - UPLOADS_DIR=/app/uploads
     container_name: project-agent-web

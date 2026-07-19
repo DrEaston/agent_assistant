@@ -95,7 +95,7 @@
     </div>
         {% if complete_meals %}
             <div class="complete-meal-featured-grid" data-complete-meal-featured>
-                {% for meal in complete_meals[:3] %}
+                {% for meal in recipe_app.featured_complete_meals %}
                     <article
                         class="complete-meal-featured-card {% if meal.status != 'ready' %}needs-review{% endif %}"
                     >

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Dieter Demo{% endblock %}
+
+{% block content %}
+<section class="launcher-hero demo-landing-hero">
+    <span class="launcher-kicker">Read-only public preview</span>
+    <h1>Dieter</h1>
+    <p>
+        A modular personal assistant with Kitchen, Scheduler, Trainer, and Studio workflows.
+        This demo uses sample data, read-only guest access, and disabled external/Codex execution.
+    </p>
+    <div class="demo-landing-actions">
+        {% if request.state.current_user %}
+            <a class="button-link" href="/apps">Open App Launcher</a>
+        {% else %}
+            <form method="post" action="/guest-login" class="inline-form">
+                <input type="hidden" name="next" value="/apps">
+                <button type="submit">Open Guest Demo</button>
+            </form>
+        {% endif %}
+        <a class="button-link secondary-link compact-link" href="/login">Member Login</a>
+    </div>
+</section>
+
+<section class="apps-launcher-grid launcher-app-grid" aria-label="Demo highlights">
+    {% for launcher_app in demo_apps %}
+        <a class="app-launch-card {{ launcher_app.class }}" href="{{ launcher_app.url }}">
+            <span class="app-launch-kicker">{{ launcher_app.kicker }}</span>
+            <strong>{{ launcher_app.title }}</strong>
+            <small>{{ launcher_app.description }}</small>
+        </a>
+    {% endfor %}
+</section>
+
+<section class="detail-section">
+    <div class="section-header">
+        <div>
+            <h2>Demo Safety</h2>
+            <p class="section-subtitle">Guest mode blocks writes. Demo mode disables external integrations and Codex worker polling.</p>
+        </div>
+    </div>
+    <p>
+        Use the guest demo to browse the app, inspect workflows, and ask read-only questions.
+        Member login remains available for private deployments.
+    </p>
+</section>
+{% endblock %}

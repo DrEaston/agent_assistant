@@ -9,6 +9,8 @@
 
 <h1>{{ project.name }}</h1>
 
+<p><span class="badge badge-medium">{{ (project.project_type or 'general')|title }} Project</span></p>
+
 {% if project.description %}
     <p>{{ project.description }}</p>
 {% endif %}

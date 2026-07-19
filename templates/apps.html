@@ -8,46 +8,20 @@
 </section>
 
 <section class="apps-launcher-grid launcher-app-grid" aria-label="Dieter apps">
-    <a class="app-launch-card planner-launch-card" href="{{ planner_url or '/apps/assistant/planner' }}">
-        <span class="app-launch-kicker">Assistant</span>
-        <strong>Dieter Assistant</strong>
-        {% if planner.next_action %}
-            <small>Next: {{ planner.next_action.action }}</small>
+    {% for launcher_app in launcher_apps %}
+        {% if launcher_app.unavailable %}
+            <div class="app-launch-card {{ launcher_app.class }} unavailable">
+                <span class="app-launch-kicker">{{ launcher_app.kicker }}</span>
+                <strong>{{ launcher_app.title }}</strong>
+                <small>{{ launcher_app.description }}</small>
+            </div>
         {% else %}
-            <small>Planner, Scheduler, priorities, blockers, and task steps.</small>
+            <a class="app-launch-card {{ launcher_app.class }}" href="{{ launcher_app.url }}">
+                <span class="app-launch-kicker">{{ launcher_app.kicker }}</span>
+                <strong>{{ launcher_app.title }}</strong>
+                <small>{{ launcher_app.description }}</small>
+            </a>
         {% endif %}
-    </a>
-
-    {% if recipe_app_url %}
-        <a class="app-launch-card kitchen-launch-card" href="{{ recipe_app_url }}">
-            <span class="app-launch-kicker">Kitchen</span>
-            <strong>Dieter Kitchen</strong>
-            <small>Meal plans, grocery lists, recipe cards, and cooking feedback.</small>
-        </a>
-    {% else %}
-        <div class="app-launch-card kitchen-launch-card unavailable">
-            <span class="app-launch-kicker">Kitchen</span>
-            <strong>Dieter Kitchen</strong>
-            <small>No recipe app data is available yet.</small>
-        </div>
-    {% endif %}
-
-    <a class="app-launch-card trainer-launch-card" href="{{ trainer_url or '/apps/trainer' }}">
-        <span class="app-launch-kicker">Training</span>
-        <strong>Dieter Trainer</strong>
-        <small>Run, bike, strength, upcoming sessions, and workout history.</small>
-    </a>
-
-    <a class="app-launch-card playlists-launch-card" href="{{ playlists_url or '/apps/music/playlists' }}">
-        <span class="app-launch-kicker">Music</span>
-        <strong>Dieter Music</strong>
-        <small>Dictate playlists, edit songs, and submit them to Spotify.</small>
-    </a>
-
-    <a class="app-launch-card issues-launch-card" href="/apps/assistant/feedback">
-        <span class="app-launch-kicker">Issues</span>
-        <strong>Dieter Issues</strong>
-        <small>Review app feedback, audit issues, and approve Codex plans.</small>
-    </a>
+    {% endfor %}
 </section>
 {% endblock %}

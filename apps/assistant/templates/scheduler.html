@@ -45,7 +45,7 @@
                             {% if item.is_today %} - Coming Up{% endif %}
                         </small>
                         {% if item.notes %}
-                            <ul class="scheduler-note-list">
+                            <ul class="scheduler-note-list" data-scheduler-note-list="{{ item.id }}">
                                 {% for note in scheduler_note_tree(item.notes) %}
                                     <li class="{% if note.checked %}scheduler-note-checked{% endif %}">
                                         {% if note.checkable %}
@@ -77,8 +77,17 @@
                                     </li>
                                 {% endfor %}
                             </ul>
+                        {% else %}
+                            <ul class="scheduler-note-list" data-scheduler-note-list="{{ item.id }}" hidden></ul>
                         {% endif %}
                     </div>
+                    <form method="post" action="/scheduler/{{ item.id }}/notes/add" class="scheduler-quick-add" data-scheduler-quick-add>
+                        <input type="hidden" name="next" value="{{ request.url.path }}">
+                        <label class="sr-only" for="scheduler-quick-add-{{ item.id }}">Add item to {{ item.title }}</label>
+                        <input type="text" id="scheduler-quick-add-{{ item.id }}" name="note_text" placeholder="Add item" autocomplete="off" required>
+                        <button type="submit" class="compact">Add</button>
+                        <span class="scheduler-quick-add-status" data-scheduler-quick-add-status aria-live="polite"></span>
+                    </form>
                     <div class="scheduler-item-actions">
                         {% if item.notes and scheduler_notes_need_checklist(item.notes) %}
                             <form method="post" action="/scheduler/{{ item.id }}/notes/make-checklist" class="inline-form">
@@ -172,4 +181,85 @@
         </div>
     </section>
 {% endif %}
+<script>
+    (() => {
+        const buildNoteNode = (itemId, note) => {
+            const li = document.createElement("li");
+            if (note.checked) {
+                li.className = "scheduler-note-checked";
+            }
+            if (!note.checkable) {
+                li.textContent = note.text;
+                return li;
+            }
+            const toggleForm = document.createElement("form");
+            toggleForm.method = "post";
+            toggleForm.action = `/scheduler/${itemId}/notes/${note.line_index}/toggle`;
+            toggleForm.className = "scheduler-note-toggle";
+
+            const nextInput = document.createElement("input");
+            nextInput.type = "hidden";
+            nextInput.name = "next";
+            nextInput.value = window.location.pathname;
+
+            const button = document.createElement("button");
+            button.type = "submit";
+            button.setAttribute("aria-label", "Mark note done");
+
+            const span = document.createElement("span");
+            span.textContent = note.text;
+
+            toggleForm.append(nextInput, button, span);
+            li.appendChild(toggleForm);
+            return li;
+        };
+
+        document.querySelectorAll("[data-scheduler-quick-add]").forEach((form) => {
+            const input = form.querySelector('input[name="note_text"]');
+            const button = form.querySelector('button[type="submit"]');
+            const status = form.querySelector("[data-scheduler-quick-add-status]");
+            const itemId = form.action.match(/\/scheduler\/(\d+)\/notes\/add/)?.[1] || "";
+
+            form.addEventListener("submit", async (event) => {
+                if (!window.fetch || !itemId) {
+                    return;
+                }
+                event.preventDefault();
+                const value = input.value.trim();
+                if (!value) {
+                    status.textContent = "Enter an item.";
+                    input.focus();
+                    return;
+                }
+                button.disabled = true;
+                input.disabled = true;
+                status.textContent = "Adding...";
+                try {
+                    const response = await fetch(form.action, {
+                        method: "POST",
+                        headers: {"Accept": "application/json"},
+                        body: new FormData(form),
+                    });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        throw new Error(data.detail || "Could not add item.");
+                    }
+                    if (data.added && data.note) {
+                        const list = document.querySelector(`[data-scheduler-note-list="${itemId}"]`);
+                        list?.appendChild(buildNoteNode(itemId, data.note));
+                        list?.removeAttribute("hidden");
+                        input.value = "";
+                    }
+                    status.textContent = data.message || "Added.";
+                } catch (error) {
+                    status.textContent = error.message || "Could not add item.";
+                } finally {
+                    input.disabled = false;
+                    button.disabled = false;
+                    input.focus();
+                }
+            });
+        });
+    })();
+</script>
 {% endblock %}

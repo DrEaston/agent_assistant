@@ -26,13 +26,15 @@ import uuid
 import hashlib
 import base64
 import re
+import sqlite3
 import threading
 import mimetypes
 import time
 import urllib.error
 import urllib.request
-from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
-from jinja2 import Environment, FileSystemLoader
+from urllib.parse import quote, urlencode, urlsplit, urlunsplit, parse_qsl
+from types import SimpleNamespace
+from jinja2 import Environment, FileSystemLoader, pass_context
 from llm_service import LLMService
 from llm_provider import get_llm_provider
 from agent_service import AgentService
@@ -40,6 +42,21 @@ from priority_review_service import PriorityReviewService
 from recipe_ocr_service import RecipeOCRService
 from cloud_persistence import CloudStoragePersistence
 from approval_flow import is_confirmed, preview_response
+from apps.kitchen.stalled_issue_evaluation import (
+    KITCHEN_AREA,
+    build_evaluation_plan,
+    evaluate_observed_behavior,
+    existing_plan_matches,
+    stalled_eligibility,
+)
+from apps.registry import app_shell_for_path, global_nav_apps, launcher_cards
+from apps.pipeline import (
+    project_id_for_area,
+    project_label_for_id,
+    normalize_project_id,
+    studio_area_options,
+    studio_project_options,
+)
 from typing import Optional, List
 import tempfile
 
@@ -50,7 +67,20 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 # Setup templates
 templates_dir = Path(__file__).parent / "templates"
 templates_dir.mkdir(exist_ok=True)
-jinja_env = Environment(loader=FileSystemLoader(str(templates_dir)))
+app_template_dirs = sorted(Path(__file__).parent.glob("apps/*/templates"))
+jinja_env = Environment(loader=FileSystemLoader([str(templates_dir), *[str(path) for path in app_template_dirs]]))
+
+
+@pass_context
+def current_app_shell(template_context):
+    request = template_context.get("request")
+    if not request:
+        return None
+    return app_shell_for_path(request.url.path, template_context)
+
+
+jinja_env.globals["current_app_shell"] = current_app_shell
+jinja_env.globals["global_nav_apps"] = global_nav_apps
 db_path = Path(os.getenv("DB_PATH", "projects.db"))
 bundled_db_path = Path(__file__).parent / "projects.db"
 uploads_dir = Path(os.getenv("UPLOADS_DIR", str(Path(__file__).parent / "uploads")))
@@ -131,6 +161,9 @@ SPOTIFY_ACCOUNT_BASE = "https://accounts.spotify.com"
 SPOTIFY_API_BASE = "https://api.spotify.com/v1"
 SPOTIFY_SCOPES = "playlist-modify-private playlist-modify-public playlist-read-private user-read-private user-read-email"
 CODEX_WORKER_TOKEN = os.getenv("CODEX_WORKER_TOKEN", "")
+DEMO_MODE = os.getenv("DEMO_MODE", "").lower() in {"1", "true", "yes", "on"}
+CODEX_WORKER_ENABLED = os.getenv("CODEX_WORKER_ENABLED", "1").lower() in {"1", "true", "yes", "on"}
+jinja_env.globals["demo_mode"] = DEMO_MODE
 
 
 def hash_password(password):
@@ -209,6 +242,26 @@ def render_auth_page(request, mode="login", error=""):
     }))
 
 
+def current_user_is_admin(request):
+    """Return True when the current session belongs to an active admin."""
+    user = getattr(request.state, "current_user", None)
+    return bool(user and user.get("role") == "admin" and user.get("status") == "active")
+
+
+def current_user_id_is_admin():
+    """Return True when the active database-scoped user is an admin."""
+    user_id = get_current_user_id()
+    user = dict_from_row(db.get_user_by_id(user_id)) if user_id else {}
+    return bool(user and user.get("role") == "admin" and user.get("status") == "active")
+
+
+def require_admin(request):
+    """Block non-admin users from membership/admin screens."""
+    if not current_user_is_admin(request):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return request.state.current_user
+
+
 def redirect_or_unauthorized(request):
     """Return an auth challenge appropriate to browser or API requests."""
     if request.url.path.startswith("/api/"):
@@ -252,7 +305,20 @@ def get_or_create_guest_user_id():
 async def load_authenticated_user(request: Request, call_next):
     """Load the logged-in user and require authentication for app routes."""
     path = request.url.path
-    public_prefixes = ("/login", "/guest-login", "/register", "/logout", "/favicon.ico", "/apps/planner", "/dashboard")
+    public_prefixes = (
+        "/login",
+        "/guest-login",
+        "/register",
+        "/registration-pending",
+        "/logout",
+        "/favicon.ico",
+        "/public",
+        "/apps/planner",
+        "/dashboard",
+        "/api/app-feedback/codex-runs",
+        "/api/app-feedback/stalled",
+    )
+    public_exact_paths = {"/", "/demo"} if DEMO_MODE else set()
     token = request.cookies.get(SESSION_COOKIE_NAME, "")
     user = None
     if token:
@@ -261,7 +327,7 @@ async def load_authenticated_user(request: Request, call_next):
     request.state.current_user = dict(user) if user else None
     user_token = set_current_user_id(user["id"] if user else None)
     try:
-        if not user and not path.startswith(public_prefixes):
+        if not user and path not in public_exact_paths and not path.startswith(public_prefixes):
             if db.get_user_count() == 0:
                 return RedirectResponse(url="/register", status_code=303)
             return redirect_or_unauthorized(request)
@@ -269,6 +335,7 @@ async def load_authenticated_user(request: Request, call_next):
             is_guest_user(user)
             and request.method not in READ_ONLY_METHODS
             and not path.startswith(("/login", "/register", "/logout", "/guest-login"))
+            and path != "/api/dieter/action"
         ):
             return guest_read_only_response(request)
         response = await call_next(request)
@@ -285,6 +352,7 @@ class ProjectIn(BaseModel):
     name: str
     description: str = ""
     priority_score: int = 3
+    project_type: str = "general"
 
 class NoteIn(BaseModel):
     content: str
@@ -516,6 +584,12 @@ def prepare_recipe_complete_meals(meals):
         meal_data["display_title"] = meal_data.get("edited_title") or meal_data.get("title") or ""
         meal_data["display_ingredients_text"] = meal_data.get("edited_ingredients_text") or meal_data.get("ingredients_text") or ""
         meal_data["display_instructions_text"] = meal_data.get("edited_instructions_text") or meal_data.get("instructions_text") or ""
+        explicit_bake_section_count = sum(
+            1
+            for line in meal_data["display_ingredients_text"].splitlines()
+            if parse_baking_section_heading(line.strip())
+        )
+        meal_data["show_bake_mode"] = explicit_bake_section_count >= 2
         meal_data["has_dieter_edits"] = bool(
             meal_data.get("edited_title")
             or meal_data.get("edited_ingredients_text")
@@ -532,6 +606,61 @@ def prepare_recipe_complete_meals(meals):
             meal_data["is_new"] = False
         prepared.append(meal_data)
     return prepared
+
+def featured_recipe_meals(complete_meals, limit=3):
+    """Pick a varied, demo-friendly set of complete meals for the Kitchen homepage."""
+    selected = []
+    selected_ids = set()
+
+    def title_for(meal):
+        return (meal.get("display_title") or meal.get("title") or "").lower()
+
+    def add_first(predicate):
+        for meal in complete_meals:
+            meal_id = meal.get("id")
+            if meal_id in selected_ids:
+                continue
+            if predicate(meal, title_for(meal)):
+                selected.append(meal)
+                selected_ids.add(meal_id)
+                return True
+        return False
+
+    add_first(lambda meal, title: "cinnamon roll" in title)
+    added_couscous = add_first(lambda meal, title: "pork" in title and "couscous" in title and "soup" not in title)
+    if not added_couscous:
+        add_first(
+            lambda meal, title: (
+                "couscous" in title
+                and any(meat in title for meat in ["pork", "chicken", "beef", "turkey", "sausage"])
+                and "soup" not in title
+            )
+        )
+    added_soup = add_first(lambda meal, title: "hearty chicken" in title and "soup" in title)
+    if not added_soup:
+        add_first(lambda meal, title: "soup" in title and "couscous" not in title)
+
+    has_soup = any("soup" in title_for(meal) for meal in selected)
+
+    for meal in complete_meals:
+        if len(selected) >= limit:
+            break
+        meal_id = meal.get("id")
+        if meal_id in selected_ids:
+            continue
+        if has_soup and "soup" in title_for(meal):
+            continue
+        selected.append(meal)
+        selected_ids.add(meal_id)
+
+    for meal in complete_meals:
+        if len(selected) >= limit:
+            break
+        meal_id = meal.get("id")
+        if meal_id not in selected_ids:
+            selected.append(meal)
+            selected_ids.add(meal_id)
+    return selected[:limit]
 
 def filter_public_complete_meals(meals):
     """Show only properly imported meals in the user-facing recipe library."""
@@ -770,6 +899,10 @@ def baking_section_label_for_key(key):
     """Return a human label for a known or recipe-provided Bake Mode section."""
     return BAKING_SECTION_LABELS.get(key) or (key or "Section").replace("-", " ").title()
 
+def baking_text_calls_for_icing(text):
+    """Return true when recipe text explicitly calls for icing, frosting, or glaze."""
+    return bool(re.search(r"\b(icing|frosting|glaze|powdered sugar|confectioners'? sugar)\b", text or "", flags=re.IGNORECASE))
+
 def parse_baking_section_heading(line):
     """Return a Bake Mode section when a line is likely a section heading."""
     raw_heading = re.sub(r"^#+\s*", "", line or "").strip()
@@ -856,6 +989,8 @@ def parse_baking_ingredient_sections(ingredients_text):
             target_key = ""
             scored_keys = []
             for key, terms in BAKING_INGREDIENT_SECTION_TERMS.items():
+                if key == "icing" and not baking_text_calls_for_icing(lowered):
+                    continue
                 score = sum(len(term) for term in terms if term in lowered)
                 if score:
                     scored_keys.append((score, key))
@@ -1694,7 +1829,7 @@ Return only valid JSON with this shape:
 }
 
 Allowed operation shapes:
-- {"op":"add_project","name":"","description":"","priority_score":3}
+- {"op":"add_project","name":"","description":"","priority_score":3,"project_type":"general"}
 - {"op":"update_project","project_id":1,"name":null,"description":null,"priority_score":null,"focus_reason":null,"status":null}
 - {"op":"add_note","project_id":1,"content":""}
 - {"op":"add_task","project_id":1,"action":"","priority":"medium"}
@@ -1743,6 +1878,7 @@ Rules:
 - Use priority values only: high, medium, low.
 - Use severity values only: high, medium, low.
 - Use project status values only: active, paused, done, archived.
+- Use project_type values only: general, research, technical.
 - Use scheduler status values only: open, done, archived.
 """
 
@@ -2180,6 +2316,38 @@ def normalize_scheduler_notes(notes):
             seen.add(key)
     return "\n".join(lines[:20])
 
+def scheduler_note_line_meta(line):
+    """Return indentation and cleaned text for a markdown-ish note line."""
+    raw = line or ""
+    match = re.match(r"^(\s*)[-*]\s+", raw)
+    indent = len(match.group(1).replace("\t", "    ")) if match else 0
+    text = clean_scheduler_note_line(raw)
+    return {"indent": indent, "text": text, "is_bullet": bool(match)}
+
+def scheduler_leaf_note_lines(notes):
+    """Return only bullet lines that have no nested bullet children."""
+    nodes = []
+    stack = []
+    for raw_line in (notes or "").splitlines():
+        meta = scheduler_note_line_meta(raw_line)
+        if not meta["text"]:
+            continue
+        while stack and stack[-1]["indent"] >= meta["indent"]:
+            stack.pop()
+        if meta["is_bullet"] and stack:
+            stack[-1]["has_child"] = True
+        node = {**meta, "has_child": False}
+        nodes.append(node)
+        stack.append(node)
+    return [node["text"] for node in nodes if not node["has_child"]]
+
+def scheduler_notes_have_checkboxes(notes):
+    """Return true when any scheduler note line is already checklist-style."""
+    return any(
+        re.match(r"^\[( |x)\]\s+", clean_scheduler_note_line(raw_line), flags=re.IGNORECASE)
+        for raw_line in (notes or "").splitlines()
+    )
+
 def merge_scheduler_notes(existing_notes, new_notes):
     """Merge note bullets without duplicating existing content, preserving child bullets."""
     merged_lines = []
@@ -2241,16 +2409,58 @@ def scheduler_notes_need_checklist(notes):
 jinja_env.globals["scheduler_notes_need_checklist"] = scheduler_notes_need_checklist
 
 def make_scheduler_notes_checklist(notes):
-    """Convert existing scheduler notes into unchecked checklist bullets."""
+    """Convert existing scheduler notes into leaf-only unchecked checklist bullets."""
     converted = []
-    for raw_line in (notes or "").splitlines():
-        line = clean_scheduler_note_line(raw_line)
-        if not line:
-            continue
+    for line in scheduler_leaf_note_lines(notes):
         if not re.match(r"^\[( |x)\]\s+", line, flags=re.IGNORECASE):
             line = f"[ ] {line}"
-        converted.append(f"  - {line}" if is_scheduler_child_note_line(raw_line) and converted else f"- {line}")
+        converted.append(f"- {line}")
     return "\n".join(converted[:20])
+
+def normalize_scheduler_quick_add_item(text):
+    """Clean one quick-add scheduler note item."""
+    raw = re.sub(r"\s+", " ", (text or "").strip())
+    match = re.match(
+        r"^(?:please\s+)?(?:add|put)\s+(.+?)(?:\s+(?:to|in|under|on)\s+(?:this|the|my)?\s*(?:list|checklist|card|item))?$",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    line = clean_scheduler_note_line(match.group(1) if match else raw)
+    line = re.sub(r"\s+", " ", line).strip()
+    return line[:160]
+
+def scheduler_item_prefers_checklist(item):
+    """Return true when quick-added notes should be unchecked checklist items."""
+    notes = (item or {}).get("notes") or ""
+    if scheduler_notes_have_checkboxes(notes):
+        return True
+    title = ((item or {}).get("title") or "").lower()
+    return bool(re.search(r"\b(checklist|to[- ]?do|tasks?|chores?)\b", title))
+
+def append_scheduler_quick_add_note(item, text):
+    """Append one cleaned note to a scheduler card, deduping existing notes."""
+    clean_item = normalize_scheduler_quick_add_item(text)
+    if not clean_item:
+        return {"notes": (item or {}).get("notes") or "", "note": {}, "added": False}
+    if scheduler_item_prefers_checklist(item) and not re.match(r"^\[( |x)\]\s+", clean_item, flags=re.IGNORECASE):
+        clean_item = f"[ ] {clean_item}"
+    new_note = f"- {clean_item}"
+    existing_notes = (item or {}).get("notes") or ""
+    merged_notes = merge_scheduler_notes(existing_notes, new_note)
+    added = merged_notes != existing_notes
+    line_index = len(merged_notes.splitlines()) - 1 if added else -1
+    text_without_checkbox = re.sub(r"^\[( |x)\]\s+", "", clean_item, flags=re.IGNORECASE)
+    checkbox_match = re.match(r"^\[( |x)\]\s+", clean_item, flags=re.IGNORECASE)
+    return {
+        "notes": merged_notes,
+        "note": {
+            "text": text_without_checkbox,
+            "line_index": line_index,
+            "checkable": bool(checkbox_match),
+            "checked": False,
+        },
+        "added": added,
+    }
 
 def find_open_scheduler_item_for_context(context_label, title="", scheduled_for=""):
     """Find an existing open scheduler item by short context/title."""
@@ -2539,7 +2749,10 @@ def synthesize_scheduler_operation(user_message, operation):
 
     note_lines = []
     if raw_notes:
-        operation["notes"] = strip_scheduler_context_change_notes(normalize_scheduler_notes(raw_notes))
+        if scheduler_notes_have_checkboxes(raw_notes):
+            operation["notes"] = strip_scheduler_context_change_notes(make_scheduler_notes_checklist(raw_notes))
+        else:
+            operation["notes"] = strip_scheduler_context_change_notes(normalize_scheduler_notes(raw_notes))
     elif list_items:
         note_lines = list_items
     elif agenda_items:
@@ -2788,6 +3001,7 @@ def apply_planner_edit(user_message, page_url, proposal):
                         operation.get("name", "").strip(),
                         operation.get("description", "").strip(),
                         int(operation.get("priority_score") or 3),
+                        safe_project_type(operation.get("project_type") or "general"),
                     )
                     applied.append({"op": op, "project_id": project_id})
                 elif op == "update_project":
@@ -3116,66 +3330,6 @@ def message_requests_planner_action(text):
         return True
     return bool(re.search(r"\b(make|create|add|save)\b.+\b(list|card|task|reminder)\b", normalized))
 
-def message_reports_app_feedback(text):
-    """Detect bug reports and UX feedback that should become code-work backlog."""
-    normalized = (text or "").strip().lower()
-    if not normalized:
-        return False
-    feedback_cues = [
-        "bug",
-        "broken",
-        "doesn't work",
-        "does not work",
-        "isn't working",
-        "not working",
-        "wrong",
-        "confusing",
-        "hard to",
-        "can't",
-        "cannot",
-        "won't connect",
-        "wont connect",
-        "can't connect",
-        "cannot connect",
-        "problem",
-        "issue",
-        "error",
-        "missing",
-        "should",
-        "needs to",
-        "need to fix",
-        "fix this",
-        "developer feedback",
-        "feedback for the developer",
-        "tell curtis",
-        "tell codex",
-        "feedback",
-    ]
-    app_cues = [
-        "app",
-        "site",
-        "website",
-        "page",
-        "button",
-        "image",
-        "photo",
-        "picture",
-        "kitchen",
-        "scheduler",
-        "planner",
-        "trainer",
-        "workout",
-        "strava",
-        "music",
-        "playlist",
-        "spotify",
-        "login",
-        "guest",
-        "dieter",
-        "screen",
-    ]
-    return any(cue in normalized for cue in feedback_cues) and any(cue in normalized for cue in app_cues)
-
 APP_FEEDBACK_INTAKE_SYSTEM_PROMPT = """You organize user feedback about the Dieter web apps for a developer.
 
 Return only valid JSON:
@@ -3188,7 +3342,7 @@ Return only valid JSON:
 
 Rules:
 - Keep title short and implementation-facing, no more than 90 characters.
-- area must be one of: Kitchen / Recipes, Scheduler, Assistant / Planner, Trainer, Music, Auth, Dieter.
+- area must be one of the configured Studio areas, including Dieter app areas and external project areas such as EEG / Firmware and Calcium Imaging / Analysis.
 - Use the page URL as a hint, but respect the user's actual complaint.
 - If a previous draft is provided, use it as context and apply the user's latest revision request to produce a new complete draft.
 - summary should preserve the user's meaning without inventing technical causes.
@@ -3217,10 +3371,150 @@ Rules:
 - Preserve useful context from the original feedback report.
 - Do not invent facts beyond the issue and revision instructions.
 - If a requested change is ambiguous, add it as an open question or assumption instead of guessing.
+- If the user has just answered open questions, convert those answers into concrete plan details and do not introduce a fresh round of open questions unless execution would be unsafe without them.
 """
 
 APP_FEEDBACK_STATUS_VALUES = {"open", "triaged", "in_progress", "ready_for_review", "done"}
 APP_FEEDBACK_ACTIVE_STATUSES = ["ready_for_review", "in_progress", "open"]
+DEMO_STUDIO_REPORTS = [
+    {
+        "id": 910001,
+        "title": "Guest demo should land on the Dieter homepage",
+        "area": "Auth",
+        "page_url": "/guest-login",
+        "page_title": "Dieter Demo",
+        "reporter_name": "Demo reviewer",
+        "reporter_email": "",
+        "raw_feedback": "When I open the public demo as a guest, I should land on the Dieter homepage first instead of being dropped straight into Kitchen.",
+        "status": "ready_for_review",
+        "created_at": "2026-07-09 10:15:00",
+        "updated_at": "2026-07-09 11:05:00",
+        "audit_plan": """# Codex Plan
+
+## Goal
+Make the guest demo start at the app launcher so reviewers understand Dieter as a system before opening an individual app.
+
+## Implementation
+- Update guest-login fallback routing to use `/apps` in demo mode.
+- Keep private/non-demo guest login behavior pointed at recipes.
+- Add a regression test for the demo-mode redirect.
+
+## Verification
+- Confirm guest login redirects to `/apps`.
+- Confirm the logged-out public landing page still appears at `/`.
+- Run the demo guest-login tests.""",
+        "audit_plan_updated_at": "2026-07-09 10:28:00",
+        "audit_plan_history_json": "[]",
+        "audit_action_history_json": json.dumps([
+            {"action": "plan_generated", "summary": "Initial Codex plan generated for the issue.", "created_at": "2026-07-09 10:28:00"},
+            {"action": "codex_finished", "summary": "Implemented guest redirect and regression coverage.", "created_at": "2026-07-09 11:05:00"},
+        ]),
+        "audit_answers_json": "{}",
+        "audit_plan_approved_at": "2026-07-09 10:31:00",
+        "implementation_note": "Testing passed locally. Ready for reviewer smoke test on the public demo.",
+        "implementation_note_updated_at": "2026-07-09 11:05:00",
+        "codex_run_id": 810001,
+        "codex_run_status": "completed",
+        "codex_run_requested_at": "2026-07-09 10:31:00",
+    },
+    {
+        "id": 910002,
+        "title": "Kitchen homepage should feature varied complete meals",
+        "area": "Kitchen / Recipes",
+        "page_url": "/apps/recipes",
+        "page_title": "Dieter Kitchen",
+        "reporter_name": "Demo reviewer",
+        "reporter_email": "",
+        "raw_feedback": "The homepage is showing two soups. Feature one soup plus the pearled Israeli couscous and meat recipe.",
+        "status": "in_progress",
+        "created_at": "2026-07-10 16:40:00",
+        "updated_at": "2026-07-10 17:12:00",
+        "audit_plan": """# Codex Plan
+
+## Goal
+Make the Kitchen homepage read like a curated demo instead of whatever happens to be first in the database.
+
+## Implementation
+- Add a featured recipe selector that prefers cinnamon rolls, a couscous/meat recipe, and one soup.
+- Avoid selecting a second soup when a soup has already been chosen.
+- Keep fallback behavior deterministic when a preferred recipe is missing.
+
+## Verification
+- Add a unit test for the featured recipe ordering.
+- Smoke-check the live guest Kitchen page after deploy.""",
+        "audit_plan_updated_at": "2026-07-10 16:55:00",
+        "audit_plan_history_json": "[]",
+        "audit_action_history_json": json.dumps([
+            {"action": "plan_generated", "summary": "Codex plan drafted from homepage feedback.", "created_at": "2026-07-10 16:55:00"},
+            {"action": "codex_queued", "summary": "Approved plan queued for the Codex worker.", "created_at": "2026-07-10 17:00:00"},
+        ]),
+        "audit_answers_json": "{}",
+        "audit_plan_approved_at": "2026-07-10 17:00:00",
+        "implementation_note": "",
+        "implementation_note_updated_at": "",
+        "codex_run_id": 810002,
+        "codex_run_status": "running",
+        "codex_run_requested_at": "2026-07-10 17:00:00",
+    },
+    {
+        "id": 910003,
+        "title": "Guest Ask Dieter should explain the repository",
+        "area": "Studio",
+        "page_url": "/apps",
+        "page_title": "Dieter",
+        "reporter_name": "Demo reviewer",
+        "reporter_email": "",
+        "raw_feedback": "In guest mode, Ask Dieter should be available as a read-only guide that can explain Studio, issues, Codex runs, and app structure.",
+        "status": "open",
+        "created_at": "2026-07-11 09:20:00",
+        "updated_at": "2026-07-11 09:20:00",
+        "audit_plan": """# Codex Plan
+
+## Goal
+Turn Ask Dieter into a safe public guide for the demo while preserving write-capable chat for real users.
+
+## Implementation
+- Permit guest POSTs only to the Ask Dieter action endpoint.
+- Route guest chat to a read-only repository/app explainer.
+- Auto-open the drawer once on the guest launcher with Studio overview copy.
+- Keep planner, recipe, trainer, and Codex write paths blocked.
+
+## Verification
+- Add tests for guest Ask Dieter responses.
+- Run the full test suite before deployment.""",
+        "audit_plan_updated_at": "2026-07-11 09:32:00",
+        "audit_plan_history_json": "[]",
+        "audit_action_history_json": json.dumps([
+            {"action": "plan_generated", "summary": "Read-only guest chat plan generated.", "created_at": "2026-07-11 09:32:00"},
+        ]),
+        "audit_answers_json": "{}",
+        "audit_plan_approved_at": "",
+        "implementation_note": "",
+        "implementation_note_updated_at": "",
+        "codex_run_id": "",
+        "codex_run_status": "",
+        "codex_run_requested_at": "",
+    },
+]
+
+def demo_studio_reports_for_status(status, area="", limit=100):
+    """Return public, in-memory Studio examples for the guest demo."""
+    safe_status = safe_app_feedback_status(status, default="active", allow_all=True)
+    reports = [dict(report) for report in DEMO_STUDIO_REPORTS]
+    if safe_status == "active":
+        allowed = set(APP_FEEDBACK_ACTIVE_STATUSES)
+        reports = [report for report in reports if (report.get("status") or "open") in allowed]
+    elif safe_status:
+        reports = [report for report in reports if (report.get("status") or "open") == safe_status]
+    reports = filter_app_feedback_reports(reports, area)
+    return reports[:limit]
+
+def demo_studio_report_by_id(report_id):
+    """Fetch one public sample Studio report by id."""
+    for report in DEMO_STUDIO_REPORTS:
+        if int(report["id"]) == int(report_id):
+            return dict(report)
+    return None
 
 def safe_app_feedback_status(status, default="open", allow_all=False):
     """Normalize feedback issue status filters and updates."""
@@ -3266,8 +3560,18 @@ def prepare_app_feedback_reports_for_display(reports):
     for report in reports:
         item = dict(report)
         audit_plan = item.get("audit_plan") or ""
+        try:
+            item["audit_plan_history"] = json.loads(item.get("audit_plan_history_json") or "[]")
+        except (TypeError, json.JSONDecodeError):
+            item["audit_plan_history"] = []
+        try:
+            action_history = json.loads(item.get("audit_action_history_json") or "[]")
+        except (TypeError, json.JSONDecodeError):
+            action_history = []
+        item["audit_action_history"] = action_history if isinstance(action_history, list) else []
         questions = extract_feedback_plan_questions(audit_plan)
         answers = feedback_audit_answers_from_report(item)
+        item["audit_plan_answer_count"] = len(answers)
         addressed = []
         unanswered = []
         normalized_answers = {question.lower(): answer for question, answer in answers.items()}
@@ -3281,8 +3585,35 @@ def prepare_app_feedback_reports_for_display(reports):
         item["audit_plan_unanswered_questions"] = unanswered
         item["audit_plan_addressed_questions"] = addressed
         item["audit_plan_has_open_questions"] = bool(unanswered)
+        item["has_ready_to_test_feedback"] = app_feedback_has_ready_to_test_feedback(item)
+        item["can_approve_and_send_to_codex"] = app_feedback_can_queue_codex_for_current_plan(item)
+        item["can_submit_to_codex"] = app_feedback_can_submit_to_codex(item)
         prepared.append(item)
     return prepared
+
+def app_feedback_has_ready_to_test_feedback(report):
+    """Return true when persisted post-run revision input has been submitted."""
+    note = (report.get("implementation_note") or "").strip().lower()
+    return note.startswith("testing feedback submitted") or note.startswith("revision input submitted")
+
+def app_feedback_can_queue_codex_for_current_plan(report):
+    """Return true when the current issue plan may be queued for Codex."""
+    if not (report.get("audit_plan") or "").strip():
+        return False
+    run_status = report.get("codex_run_status") or ""
+    if run_status in {"queued", "running"}:
+        return False
+    if not (report.get("audit_plan_approved_at") or "").strip():
+        return True
+    if not run_status or run_status == "failed":
+        return True
+    return app_feedback_has_ready_to_test_feedback(report)
+
+def app_feedback_can_submit_to_codex(report):
+    """Gate Codex submission/resubmission from persisted issue state."""
+    if not (report.get("audit_plan_approved_at") or "").strip():
+        return False
+    return app_feedback_can_queue_codex_for_current_plan(report)
 
 def extract_feedback_plan_questions(markdown):
     """Return clear user-answerable questions from a Codex audit plan."""
@@ -3371,9 +3702,21 @@ def feedback_plan_question_context(report, markdown):
     """Build template context for open questions and stored answers."""
     questions = extract_feedback_plan_questions(markdown)
     answers = feedback_audit_answers_from_report(report)
+    normalized_answers = {question.lower(): answer for question, answer in answers.items()}
+    unanswered = [
+        question
+        for question in questions
+        if not normalized_answers.get(question.lower())
+    ]
+    addressed = [
+        {"question": question, "answer": normalized_answers.get(question.lower(), "")}
+        for question in questions
+        if normalized_answers.get(question.lower())
+    ]
     return {
-        "feedback_plan_questions": questions,
+        "feedback_plan_questions": unanswered,
         "feedback_plan_answers": answers,
+        "feedback_plan_addressed_questions": addressed,
     }
 
 def format_feedback_audit_answer_instructions(answers):
@@ -3381,7 +3724,8 @@ def format_feedback_audit_answer_instructions(answers):
     lines = [
         "Re-audit this issue using the user's answers to the open questions.",
         "Replace resolved open questions with concrete assumptions or implementation choices.",
-        "Keep unresolved questions if they still need user input.",
+        "Do not introduce a fresh round of open questions.",
+        "If uncertainty remains, state a reasonable assumption in the plan so the user can approve or suggest edits.",
         "",
         "User answers:",
     ]
@@ -3396,6 +3740,8 @@ def app_area_from_url(page_url):
     """Infer the app area for a feedback report."""
     if page_url.startswith("/apps/recipes"):
         return "Kitchen / Recipes"
+    if page_url.startswith("/apps/issues"):
+        return "Studio"
     if page_url.startswith("/apps/assistant/scheduler"):
         return "Scheduler"
     if page_url.startswith("/apps/trainer"):
@@ -3421,6 +3767,8 @@ def app_area_from_feedback_text(text):
         return "Scheduler"
     if any(token in normalized for token in ["planner app", "assistant app", "dieter assistant"]):
         return "Assistant / Planner"
+    if any(token in normalized for token in ["studio", "issues app", "dieter issues", "issue inbox", "codex worker"]):
+        return "Studio"
     if any(token in normalized for token in ["login", "guest account", "guest login", "auth"]):
         return "Auth"
     return "Dieter"
@@ -3434,19 +3782,23 @@ def app_area_for_feedback(page_url, text=""):
 
 def normalize_app_feedback_area(area, page_url=""):
     """Normalize model/user feedback area names for filtering."""
-    allowed = {
-        "Kitchen / Recipes",
-        "Scheduler",
-        "Assistant / Planner",
-        "Trainer",
-        "Music",
-        "Auth",
-        "Dieter",
-    }
+    allowed = set(studio_area_options())
     cleaned = re.sub(r"\s+", " ", (area or "").strip())
     if cleaned in allowed:
         return cleaned
     lower = cleaned.lower()
+    if "eeg" in lower or "headband" in lower or "firmware" in lower:
+        if "hardware" in lower or "pcb" in lower or "schematic" in lower:
+            return "EEG / Hardware"
+        if "signal" in lower or "analysis" in lower or "artifact" in lower:
+            return "EEG / Signal Processing"
+        return "EEG / Firmware"
+    if "calcium" in lower or "imaging" in lower:
+        if "visual" in lower or "plot" in lower or "dashboard" in lower:
+            return "Calcium Imaging / Visualization"
+        if "pipeline" in lower or "preprocess" in lower:
+            return "Calcium Imaging / Pipeline"
+        return "Calcium Imaging / Analysis"
     if any(token in lower for token in ["recipe", "kitchen", "grocery", "meal"]):
         return "Kitchen / Recipes"
     if "scheduler" in lower or "agenda" in lower:
@@ -3457,6 +3809,8 @@ def normalize_app_feedback_area(area, page_url=""):
         return "Music"
     if "auth" in lower or "login" in lower or "guest" in lower:
         return "Auth"
+    if "issue" in lower or "codex worker" in lower:
+        return "Studio"
     if "assistant" in lower or "planner" in lower:
         return "Assistant / Planner"
     return app_area_from_url(page_url)
@@ -3466,11 +3820,20 @@ def get_or_create_app_feedback_project():
     project = dict_from_row(db.get_project_by_name("Dieter App Feedback"))
     if project:
         return project
-    project_id = db.add_project(
-        "Dieter App Feedback",
-        "User-reported app bugs, UX issues, and code work to triage.",
-        5,
-    )
+    project = dict_from_row(db.get_any_project_by_name("Dieter App Feedback"))
+    if project:
+        return project
+    try:
+        project_id = db.add_project(
+            "Dieter App Feedback",
+            "User-reported app bugs, UX issues, and code work to triage.",
+            5,
+        )
+    except sqlite3.IntegrityError:
+        project = dict_from_row(db.get_any_project_by_name("Dieter App Feedback"))
+        if project:
+            return project
+        raise
     return dict_from_row(db.get_project_by_id(project_id))
 
 def share_app_feedback_project_with_admins(project_id):
@@ -3548,127 +3911,67 @@ def propose_app_feedback_report(message, page_url):
         previous_action_plan=message.previous_action_plan or "",
     )
 
-def format_app_feedback_draft(message, page_url, proposal):
-    """Format the feedback report draft for approval."""
-    lines = [
-        "Before I save this feedback, please confirm the report.",
-        "",
-        "Plan: save app feedback.",
-        f"Title: {proposal.get('title') or 'Untitled feedback'}",
-        f"Area: {proposal.get('area') or app_area_from_url(page_url or '')}",
-        f"Severity: {proposal.get('severity') or 'medium'}",
-        f"Page: {page_url or 'unknown'}",
-        "Summary:",
-        proposal.get("summary") or message.content.strip(),
-        "",
-        "Raw feedback:",
-        message.content.strip(),
-        "",
-        "Destination: App Feedback inbox (/apps/assistant/feedback) and Dieter App Feedback planner project.",
-        "Press Approve plan to save it, revise the text to preview another draft, or Cancel.",
-    ]
-    return "\n".join(lines)
-
-def parse_app_feedback_draft(action_plan):
-    """Extract structured fields from an approved feedback draft."""
-    text = action_plan or ""
-    if "Plan: save app feedback." not in text:
-        return None
-    title_match = re.search(r"^Title:\s*(.+)$", text, flags=re.MULTILINE)
-    area_match = re.search(r"^Area:\s*(.+)$", text, flags=re.MULTILINE)
-    severity_match = re.search(r"^Severity:\s*(.+)$", text, flags=re.MULTILINE)
-    summary_match = re.search(
-        r"^Summary:\s*\n(.+?)(?=\n\nRaw feedback:)",
-        text,
-        flags=re.MULTILINE | re.DOTALL,
-    )
-    title = (title_match.group(1).strip() if title_match else "") or ""
-    area = normalize_app_feedback_area(area_match.group(1).strip() if area_match else "")
-    severity = (severity_match.group(1).strip().lower() if severity_match else "medium")
-    if severity not in {"high", "medium", "low"}:
-        severity = "medium"
-    summary = re.sub(r"\s+", " ", (summary_match.group(1).strip() if summary_match else "")).strip()
-    if not title:
-        return None
-    return {
-        "title": title,
-        "area": area,
-        "summary": summary,
-        "severity": severity,
-    }
-
-def preview_app_feedback_write(message, page_url):
-    """Preview the feedback report before writing it."""
-    proposal = propose_app_feedback_report(message, page_url)
-    action_plan = format_app_feedback_draft(message, page_url, proposal)
-    return preview_response(
-        message.content,
-        page_url,
-        "app_feedback",
-        action_plan,
-        user_id=get_current_user_id() or 0,
-        secret=os.getenv("SECRET_KEY") or REGISTRATION_CODE or "dieter-local-secret",
-    )
-
-def handle_app_feedback_request(message, page_url):
-    """Save app feedback as a developer-ready planner task."""
+def save_app_feedback_report_from_form(
+    raw_feedback,
+    area="",
+    page_url="",
+    page_title="",
+    title="",
+    severity="medium",
+):
+    """Save a directly submitted issue report without Ask Dieter intent routing."""
+    content = (raw_feedback or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Describe the issue before submitting.")
     user = dict_from_row(db.get_user_by_id(get_current_user_id())) if get_current_user_id() else {}
     reporter = user.get("display_name") or user.get("email") or "Unknown user"
     reporter_email = user.get("email") or ""
-    model_summary = parse_app_feedback_draft(message.previous_action_plan) or propose_app_feedback_report(message, page_url)
-    area = model_summary["area"]
+    proposal = model_app_feedback_summary(content, page_url=page_url, page_title=page_title)
+    selected_area = normalize_app_feedback_area(area or proposal.get("area") or "Dieter", page_url or "")
+    selected_severity = (severity or proposal.get("severity") or "medium").strip().lower()
+    if selected_severity not in {"high", "medium", "low"}:
+        selected_severity = proposal.get("severity") or "medium"
+    selected_title = re.sub(r"\s+", " ", (title or proposal.get("title") or "").strip())
+    if not selected_title:
+        selected_title = summarize_app_feedback_title(content, selected_area)
+    if len(selected_title) > 92:
+        selected_title = selected_title[:89].rstrip() + "..."
+    duplicate = dict_from_row(db.find_recent_duplicate_app_feedback_report(content, selected_area))
+    if duplicate:
+        return duplicate["id"], selected_area
     project = get_or_create_app_feedback_project()
     share_app_feedback_project_with_admins(project["id"])
-    action = model_summary["title"]
-    action_id = db.add_recommended_action(project["id"], action, "medium")
+    action_id = db.add_recommended_action(project["id"], selected_title, "medium")
     note = "\n".join([
         f"Reporter: {reporter}{f' <{reporter_email}>' if reporter_email and reporter_email != reporter else ''}",
-        f"Area: {area}",
-        f"Severity: {model_summary['severity']}",
-        f"Page: {page_url or 'unknown'}",
-        f"Source page title: {message.page_title or 'unknown'}",
+        f"Area: {selected_area}",
+        f"Severity: {selected_severity}",
+        f"Page: {page_url or 'direct issue form'}",
+        f"Source page title: {page_title or 'Issue form'}",
         "Model summary:",
-        model_summary["summary"],
+        proposal.get("summary") or content,
         "Raw feedback:",
-        message.content.strip(),
+        content,
     ])
     db.add_note(project["id"], note)
     report_id = db.add_app_feedback_report(
-        title=action,
-        area=area,
+        title=selected_title,
+        area=selected_area,
         page_url=page_url or "",
-        page_title=message.page_title or "",
+        page_title=page_title or "Issue form",
         reporter_name=reporter,
         reporter_email=reporter_email,
-        raw_feedback=message.content.strip(),
+        raw_feedback=content,
         destination_project_id=project["id"],
         destination_action_id=action_id,
     )
-    operation = {"op": "add_task", "action_id": action_id}
-    return {
-        "changed_fields": ["add_task", "add_note", "add_app_feedback_report"],
-        "summary": "Saved app feedback.",
-        "assistant_message": "\n".join([
-            "Saved app feedback for Curtis to implement.",
-            f"Feedback report: #{report_id}",
-            f"Area: {area}",
-            f"Title: {action}",
-            f"Reporter: {reporter}",
-            f"Page: {page_url or 'unknown'}",
-            f"Visible feedback inbox: /apps/assistant/feedback?area={area.replace(' ', '%20').replace('/', '%2F')}.",
-            "Backlog mirror: Dieter App Feedback planner project.",
-            "Codex inbox: app_feedback_reports table; export with /api/app-feedback/codex-inbox/save.",
-        ]),
-        "operations": [
-            operation,
-            {"op": "add_note", "project_id": project["id"]},
-            {"op": "add_app_feedback_report", "report_id": report_id},
-        ],
-        "app_feedback_context": True,
-        "redirect_url": f"/apps/assistant/feedback?area={area.replace(' ', '%20').replace('/', '%2F')}",
-        "redirect_label": "Open Feedback Report",
-        "reload_page": False,
-    }
+    db.append_app_feedback_report_action(
+        report_id,
+        "issue_created",
+        "Issue created from the Issues form.",
+        {"area": selected_area, "page": page_url or "direct issue form"},
+    )
+    return report_id, selected_area
 
 def handle_planner_action_request(message, page_url):
     """Apply a planner/scheduler request and return the action response shape."""
@@ -3963,6 +4266,7 @@ def get_recipe_app_context(include_library=True, run_maintenance=True):
         "import_url": "/apps/recipes/import",
         "groups": groups,
         "complete_meals": complete_meals,
+        "featured_complete_meals": featured_recipe_meals(complete_meals),
         "components": components,
         "component_sections": component_sections,
         "available_grocery_items": available_grocery_items,
@@ -4261,19 +4565,53 @@ async def api_dieter_transcribe(audio: UploadFile = File(...)):
     finally:
         tmp_path.unlink(missing_ok=True)
 
+def current_user_is_guest_session():
+    """Return true when the active request belongs to the shared guest account."""
+    user_id = get_current_user_id()
+    if not user_id:
+        return False
+    return is_guest_user(dict_from_row(db.get_user_by_id(user_id)))
+
+GUEST_APP_OVERVIEW = (
+    "Dieter is a FastAPI personal assistant with Kitchen, Scheduler, Trainer, Music, and Studio. "
+    "Studio is the agentic development layer: feedback becomes issues, plans, Codex runs, and test loops. "
+    "Guest mode is read-only; app menus show demo issue intake without saving."
+)
+
+def guest_repository_chat_response(content, page_url=""):
+    """Answer guest Ask Dieter questions without touching private integrations or data."""
+    question = (content or "").lower()
+    page_hint = (page_url or "").lower()
+    studio = "Studio captures feedback, classifies it by app area, drafts a plan, and tracks Codex/test status."
+    structure = "Repo map: `apps/` owns app shells/templates; `api.py` owns routes/chat; `database.py` owns SQLite persistence."
+    guest = "Guest mode is read-only. The demo issue form shows the normal path but does not save or run Codex."
+    if any(token in question for token in ["studio", "issue", "codex", "feedback", "development"]):
+        return f"{studio}\n\n{guest}"
+    if any(token in question for token in ["structure", "repo", "repository", "code", "folder", "architecture", "routes"]):
+        return f"{structure}\n\n{studio}"
+    if any(token in question for token in ["guest", "demo", "password", "login", "locked", "read only", "read-only"]):
+        return f"{guest}\n\n{GUEST_APP_OVERVIEW}"
+    if any(token in question for token in ["kitchen", "recipe", "scheduler", "trainer", "music", "apps"]):
+        return (
+            "Apps: Kitchen handles recipes/groceries, Scheduler handles agenda cards, Trainer shows frozen run/ride data, "
+            "Music is a playlist prototype, and Studio turns app feedback into planned development work."
+        )
+    if "/apps/issues" in page_hint:
+        return f"{studio}\n\nSample reports show the issue-to-Codex pipeline without exposing real repo access."
+    return GUEST_APP_OVERVIEW
+
 @app.post("/api/dieter/action")
 def api_dieter_action(message: DieterActionMessage):
     """Route Ask Dieter requests to recipe edits, planner edits, or contextual chat."""
     page_url = message.page_url or ""
+    if current_user_is_guest_session():
+        return {
+            "assistant_message": guest_repository_chat_response(message.content, page_url),
+            "changed_fields": [],
+            "guest_context": True,
+            "model": "local-guest-repository",
+        }
     recipe_kind, recipe_id = parse_recipe_target_from_url(page_url)
-    feedback_loop_active = (
-        message_reports_app_feedback(message.content)
-        or "Plan: save app feedback." in (message.previous_action_plan or "")
-    )
-    if feedback_loop_active:
-        if not dieter_action_confirmed(message, page_url, "app_feedback"):
-            return preview_app_feedback_write(message, page_url)
-        return handle_app_feedback_request(message, page_url)
 
     if message_requests_playlist_action(message.content, page_url):
         return handle_playlist_action_request(message, page_url)
@@ -4471,6 +4809,213 @@ def app_feedback_area_counts(reports):
         counts[area] = counts.get(area, 0) + 1
     return counts
 
+def app_feedback_board_overview(reports, worker_context=None):
+    """Build a compact at-a-glance Studio board visualization."""
+    worker_context = worker_context or {}
+    reports = [dict(report) for report in reports]
+    counts = {
+        "open": 0,
+        "in_progress": 0,
+        "ready_for_review": 0,
+        "done": 0,
+        "queued": 0,
+        "running": 0,
+        "failed": 0,
+    }
+    active_issue = None
+    ready_issue = None
+    failed_issue = None
+    queued_issue = None
+    for report in reports:
+        status = report.get("status") or "open"
+        if status in counts:
+            counts[status] += 1
+        run_status = report.get("codex_run_status") or ""
+        if run_status in {"queued", "running", "failed"}:
+            counts[run_status] += 1
+        if run_status == "running" and not active_issue:
+            active_issue = report
+        elif run_status == "queued" and not queued_issue:
+            queued_issue = report
+        elif run_status == "failed" and not failed_issue:
+            failed_issue = report
+        if status == "ready_for_review" and not ready_issue:
+            ready_issue = report
+    if not active_issue:
+        active_runs = worker_context.get("feedback_worker_runs") or []
+        running_run = next((run for run in active_runs if (run.get("status") or "") == "running"), None)
+        queued_run = next((run for run in active_runs if (run.get("status") or "") == "queued"), None)
+        run = running_run or queued_run
+        if run:
+            active_issue = {
+                "id": run.get("report_id"),
+                "title": run.get("report_title") or "Untitled issue",
+                "area": run.get("report_area") or "Dieter",
+                "codex_run_status": run.get("status") or "",
+            }
+    if not queued_issue:
+        queued_issue = next((report for report in reports if (report.get("codex_run_status") or "") == "queued"), None)
+    stages = [
+        {"key": "open", "label": "Open", "count": counts["open"]},
+        {"key": "in_progress", "label": "Planning", "count": counts["in_progress"]},
+        {"key": "queued", "label": "Queued", "count": counts["queued"]},
+        {"key": "running", "label": "Running", "count": counts["running"]},
+        {"key": "ready_for_review", "label": "Test", "count": counts["ready_for_review"]},
+        {"key": "done", "label": "Closed", "count": counts["done"]},
+    ]
+    worker_recent = bool(worker_context.get("worker_listener_recent"))
+    heartbeats = worker_context.get("worker_heartbeats") or []
+    worker_message = "No recent worker check-in."
+    if worker_recent and heartbeats:
+        worker_message = f"{heartbeats[0].get('worker_name') or 'Worker'} checked in {heartbeats[0].get('age_label') or 'recently'}."
+    elif worker_recent:
+        worker_message = "Worker listener is active."
+    return {
+        "counts": counts,
+        "stages": stages,
+        "active_issue": active_issue,
+        "queued_issue": queued_issue,
+        "ready_issue": ready_issue,
+        "failed_issue": failed_issue,
+        "worker_recent": worker_recent,
+        "worker_message": worker_message,
+    }
+
+def app_feedback_codex_run_project_id(run):
+    """Resolve a Codex queue/run row to its Studio project lane."""
+    return project_id_for_area(run.get("report_area") or run.get("area") or "")
+
+def select_next_codex_run_for_project(runs, project_id="dieter"):
+    """Return the oldest queued run owned by the requested Studio project lane."""
+    safe_project = normalize_project_id(project_id)
+    for run in runs:
+        if app_feedback_codex_run_project_id(run) == safe_project:
+            return run
+    return None
+
+def app_feedback_lane_overview(reports, worker_context=None):
+    """Build per-project Studio lane status for the board visualization."""
+    worker_context = worker_context or {}
+    lanes = {
+        project.id: {
+            "id": project.id,
+            "label": project.label,
+            "description": project.description,
+            "repo_env": project.repo_env,
+            "repo_configured": True if not project.repo_env else bool(os.getenv(project.repo_env, "").strip()),
+            "worker_status": "quiet",
+            "worker_recent": False,
+            "worker_message": "No recent worker check-in.",
+            "active_issue": None,
+            "counts": {"queued": 0, "running": 0, "ready_for_testing": 0, "failed": 0},
+        }
+        for project in studio_project_options()
+    }
+    for report in reports:
+        lane = lanes.get(project_id_for_area(report.get("area") or ""))
+        if not lane:
+            continue
+        run_status = report.get("codex_run_status") or ""
+        if run_status in lane["counts"]:
+            lane["counts"][run_status] += 1
+        if run_status == "running" and not lane["active_issue"]:
+            lane["active_issue"] = report
+    for run in worker_context.get("feedback_worker_recent_runs") or []:
+        lane = lanes.get(app_feedback_codex_run_project_id(run))
+        if not lane:
+            continue
+        status = run.get("status") or ""
+        if status in lane["counts"] and not any((report.get("codex_run_id") or "") == run.get("id") for report in reports):
+            lane["counts"][status] += 1
+        if status == "running" and not lane["active_issue"]:
+            lane["active_issue"] = {
+                "id": run.get("report_id"),
+                "title": run.get("report_title") or run.get("title") or "Untitled issue",
+                "area": run.get("report_area") or run.get("area") or "Dieter",
+            }
+    for heartbeat in worker_context.get("worker_heartbeats") or []:
+        lane = lanes.get(normalize_project_id(heartbeat.get("project_id") or "dieter"))
+        if not lane:
+            continue
+        lane["worker_status"] = heartbeat.get("status") or "listening"
+        lane["worker_recent"] = bool(heartbeat.get("is_recent"))
+        lane["worker_message"] = f"{heartbeat.get('worker_name') or 'Worker'} checked in {heartbeat.get('age_label') or 'recently'}."
+    for lane in lanes.values():
+        if lane["worker_status"] == "quiet" and lane["repo_env"] and not lane["repo_configured"]:
+            lane["worker_message"] = f"Set {lane['repo_env']} before this lane can run."
+    return list(lanes.values())
+
+def app_feedback_worker_runs(limit=8):
+    """Return active Codex worker runs for the feedback dashboard."""
+    runs = [
+        run
+        for run in dicts_from_rows(db.get_recent_app_feedback_codex_runs(limit=limit * 2))
+        if (run.get("report_status") or "") != "done"
+        and (run.get("status") or "") in {"queued", "running"}
+    ][:limit]
+    for run in runs:
+        note = (run.get("result_note") or "").strip()
+        run["result_note_preview"] = note[:700]
+        run["is_active"] = run.get("status") in {"queued", "running"}
+    return runs
+
+
+def app_feedback_worker_dashboard_context(limit=12):
+    """Build deployable Codex worker dashboard data from shared queue state."""
+    now = datetime.utcnow()
+    heartbeats = []
+    for heartbeat in dicts_from_rows(db.get_app_feedback_codex_worker_heartbeats(limit=8)):
+        seen = (heartbeat.get("last_seen_at") or "").strip()
+        seen_dt = None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%SZ"):
+            try:
+                seen_dt = datetime.strptime(seen, fmt)
+                break
+            except (TypeError, ValueError):
+                pass
+        age_seconds = int((now - seen_dt).total_seconds()) if seen_dt else None
+        heartbeat["age_seconds"] = age_seconds
+        heartbeat["is_recent"] = age_seconds is not None and age_seconds <= 120
+        if age_seconds is None:
+            heartbeat["age_label"] = "unknown"
+        elif age_seconds < 60:
+            heartbeat["age_label"] = f"{age_seconds}s ago"
+        else:
+            heartbeat["age_label"] = f"{age_seconds // 60}m ago"
+        heartbeat["project_id"] = normalize_project_id(heartbeat.get("project_id") or "dieter")
+        heartbeat["project_label"] = project_label_for_id(heartbeat["project_id"])
+        heartbeats.append(heartbeat)
+    recent_runs = []
+    for run in dicts_from_rows(db.get_recent_app_feedback_codex_runs(limit=limit)):
+        note = (run.get("result_note") or "").strip()
+        run["result_note_preview"] = note[:1000]
+        run["is_active"] = (run.get("status") or "") in {"queued", "running"}
+        run["project_id"] = app_feedback_codex_run_project_id(run)
+        run["project_label"] = project_label_for_id(run["project_id"])
+        recent_runs.append(run)
+    active_runs = [run for run in recent_runs if run["is_active"]]
+    return {
+        "worker_heartbeats": heartbeats,
+        "feedback_worker_runs": active_runs,
+        "feedback_worker_recent_runs": recent_runs,
+        "worker_listener_recent": any(item.get("is_recent") for item in heartbeats),
+    }
+
+
+def feedback_redirect_url(status="active", area=""):
+    """Build a stable app feedback redirect URL."""
+    url = f"/apps/issues?status={status or 'active'}"
+    if area:
+        url += f"&area={quote(area)}"
+    return url
+
+def issue_pipeline_url(report_id, status="in_progress", area=""):
+    """Build the canonical issue pipeline URL."""
+    url = f"/apps/issues/{int(report_id)}?status={status or 'in_progress'}"
+    if area:
+        url += f"&area={quote(area)}"
+    return url
+
 def build_app_feedback_codex_plan(reports, status="open", area=""):
     """Build a synthesized Codex plan from visible app feedback reports."""
     if not reports:
@@ -4532,6 +5077,8 @@ def build_app_feedback_codex_plan(reports, status="open", area=""):
 
 def feedback_report_by_id(report_id):
     """Fetch one app feedback report by id from the existing report listing."""
+    if current_user_is_guest_session():
+        return demo_studio_report_by_id(report_id)
     for report in dicts_from_rows(db.get_app_feedback_reports(status="", limit=500)):
         if int(report.get("id") or 0) == int(report_id):
             return report
@@ -4593,7 +5140,7 @@ def feedback_plan_approval_token(report_id, markdown):
     """Create an approval token for one exact feedback issue plan draft."""
     return preview_response(
         markdown,
-        f"/apps/assistant/feedback/{int(report_id)}/plan",
+        f"/apps/issues/{int(report_id)}/plan",
         "feedback_codex_plan",
         markdown,
         user_id=get_current_user_id() or 0,
@@ -4604,15 +5151,59 @@ def feedback_plan_approval_confirmed(report_id, markdown, token):
     """Return true when a feedback issue plan draft was approved exactly."""
     return is_confirmed(
         markdown,
-        f"/apps/assistant/feedback/{int(report_id)}/plan",
+        f"/apps/issues/{int(report_id)}/plan",
         "feedback_codex_plan",
         token,
         user_id=get_current_user_id() or 0,
         secret=os.getenv("SECRET_KEY") or REGISTRATION_CODE or "dieter-local-secret",
     )
 
+def ensure_feedback_plan_ready_for_approval(report):
+    """Validate that an issue plan is ready to approve and send."""
+    markdown = (report.get("audit_plan") or "").strip()
+    if not markdown:
+        raise HTTPException(status_code=400, detail="Audit this issue before approving a plan.")
+    questions = extract_feedback_plan_questions(markdown)
+    answers = {question.lower(): answer for question, answer in feedback_audit_answers_from_report(report).items()}
+    if any(not answers.get(question.lower()) for question in questions):
+        raise HTTPException(status_code=400, detail="Answer open questions and re-audit before sending this plan to Codex.")
+    return markdown
+
+def approve_feedback_plan_and_queue_codex(report_id, next_url="/apps/issues", area=""):
+    """Single approval path for saved issue plans."""
+    report = feedback_report_by_id(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Feedback report not found")
+    ensure_feedback_plan_ready_for_approval(report)
+    if not app_feedback_can_queue_codex_for_current_plan(report):
+        redirect_url = feedback_redirect_url(status="in_progress", area=area) if area else safe_redirect_path(next_url, "/apps/issues")
+        return RedirectResponse(url=redirect_url, status_code=303)
+    db.mark_app_feedback_report_audit_plan_approved(report_id)
+    db.append_app_feedback_report_action(
+        report_id,
+        "plan_approved",
+        "Current plan approved for Codex.",
+    )
+    report = feedback_report_by_id(report_id)
+    run_id = db.add_app_feedback_codex_run(
+        report_id,
+        report.get("audit_plan") or "",
+        requested_by_user_id=get_current_user_id(),
+    )
+    db.append_app_feedback_report_action(
+        report_id,
+        "codex_queued",
+        "Approved plan queued for the Codex worker.",
+        {"run_id": run_id},
+    )
+    db.update_app_feedback_report_status(report_id, "in_progress")
+    redirect_url = feedback_redirect_url(status="in_progress", area=area) if area else safe_redirect_path(next_url, "/apps/issues")
+    return RedirectResponse(url=redirect_url, status_code=303)
+
 def codex_worker_token_valid(token):
     """Validate the shared local-worker token for Codex run polling."""
+    if not CODEX_WORKER_ENABLED:
+        return False
     expected = CODEX_WORKER_TOKEN or REGISTRATION_CODE or os.getenv("SECRET_KEY", "")
     return bool(expected and token and hmac.compare_digest(str(token), str(expected)))
 
@@ -4621,7 +5212,100 @@ def next_feedback_issue(status="open", area=""):
     safe_status = safe_app_feedback_status(status, allow_all=True)
     reports = get_app_feedback_reports_for_status(safe_status, limit=100)
     reports = filter_app_feedback_reports(reports, area)
+    reports = [report for report in reports if not (report.get("audit_plan") or "").strip()]
     return reports[-1] if reports else None
+
+def kitchen_stalled_issue_candidates(limit=25, inactivity_days=3, recent_issue_days=1, now=None):
+    """Return Kitchen issues eligible for stalled automated evaluation."""
+    reports = get_app_feedback_reports_for_status("active", limit=max(limit * 3, 50))
+    candidates = []
+    for report in filter_app_feedback_reports(reports, KITCHEN_AREA):
+        eligibility = stalled_eligibility(
+            report,
+            now=now,
+            inactivity_days=inactivity_days,
+            recent_issue_days=recent_issue_days,
+        )
+        if eligibility.get("eligible"):
+            candidates.append({"report": report, "eligibility": eligibility})
+        if len(candidates) >= limit:
+            break
+    return candidates
+
+def generate_kitchen_stalled_issue_plan(report, eligibility):
+    """Create or refresh one Kitchen stalled evaluation plan."""
+    plan = build_evaluation_plan(report, eligibility=eligibility)
+    db.update_app_feedback_auto_evaluation_plan(
+        report["id"],
+        plan["plan"],
+        plan["inferred_objective"],
+        eligibility.get("reason") or "",
+    )
+    db.append_app_feedback_report_action(
+        report["id"],
+        "auto_evaluation_plan_generated",
+        "Automated stalled-issue evaluation plan generated for review.",
+        {"reason": eligibility.get("reason") or ""},
+    )
+    return plan
+
+def scan_kitchen_stalled_issues(limit=10, inactivity_days=3, recent_issue_days=1):
+    """Generate reviewable plans for stale Kitchen issues without running tests."""
+    generated = []
+    skipped = []
+    for item in kitchen_stalled_issue_candidates(
+        limit=limit,
+        inactivity_days=inactivity_days,
+        recent_issue_days=recent_issue_days,
+    ):
+        report = item["report"]
+        if existing_plan_matches(report):
+            skipped.append({"id": report.get("id"), "reason": "Existing plan matches current issue history."})
+            continue
+        plan = generate_kitchen_stalled_issue_plan(report, item["eligibility"])
+        generated.append({
+            "id": report.get("id"),
+            "title": report.get("title") or "Untitled issue",
+            "inferred_objective": plan["inferred_objective"],
+        })
+    return {"generated": generated, "skipped": skipped}
+
+def kitchen_observation_check(route):
+    """Run one non-destructive Kitchen page observation inside the app."""
+    path = route if str(route or "").startswith("/apps/recipes") else "/apps/recipes"
+    current_user = dict_from_row(db.get_user_by_id(get_current_user_id())) if get_current_user_id() else {"id": None, "role": "admin", "status": "active"}
+    request = SimpleNamespace(
+        url=SimpleNamespace(path=path),
+        query_params={},
+        state=SimpleNamespace(current_user=current_user),
+    )
+    routes = {
+        "/apps/recipes": recipe_home_page,
+        "/apps/recipes/create-meal": recipe_create_meal_page,
+        "/apps/recipes/manage": recipe_manage_page,
+        "/apps/recipes/grocery-lists": recipe_grocery_lists_page,
+        "/apps/recipes/import": recipe_import_page,
+    }
+    handler = routes.get(path, recipe_home_page)
+    try:
+        response = handler(request)
+        body = response.body.decode("utf-8", errors="replace") if hasattr(response, "body") else str(response)
+        return {
+            "status_code": getattr(response, "status_code", 200),
+            "body": body,
+            "summary": compact_html_summary(body),
+        }
+    except HTTPException as exc:
+        return {"status_code": exc.status_code, "body": exc.detail, "summary": str(exc.detail)}
+    except Exception as exc:
+        return {"status_code": 500, "body": str(exc), "summary": str(exc)}
+
+def compact_html_summary(html, limit=900):
+    """Turn rendered HTML into a compact observation snippet."""
+    text = re.sub(r"<(script|style)\b.*?</\1>", " ", html or "", flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit]
 
 @app.get("/api/app-feedback/codex-inbox")
 def api_app_feedback_codex_inbox(limit: int = 50, status: str = "open"):
@@ -4639,6 +5323,23 @@ def api_save_app_feedback_codex_inbox(limit: int = 50, status: str = "open"):
     output_path = Path("codex_feedback_inbox.md").resolve()
     output_path.write_text(markdown, encoding="utf-8")
     return {"status": "success", "path": str(output_path), "markdown": markdown}
+
+@app.post("/api/app-feedback/stalled/scan")
+def api_scan_stalled_app_feedback(
+    token: str = "",
+    limit: int = 10,
+    inactivity_days: int = 3,
+    recent_issue_days: int = 1,
+):
+    """Generate reviewable stalled-evaluation plans for Kitchen issues."""
+    if not codex_worker_token_valid(token):
+        raise HTTPException(status_code=403, detail="Invalid Codex worker token.")
+    result = scan_kitchen_stalled_issues(
+        limit=min(max(limit, 1), 25),
+        inactivity_days=max(1, min(inactivity_days, 30)),
+        recent_issue_days=max(0, min(recent_issue_days, 14)),
+    )
+    return {"status": "success", **result}
 
 @app.get("/api/app-feedback/codex-plan")
 def api_app_feedback_codex_plan(limit: int = 50, status: str = "open", area: str = ""):
@@ -4662,16 +5363,40 @@ def api_save_app_feedback_codex_plan(limit: int = 50, status: str = "open", area
     return {"status": "success", "path": str(output_path), "markdown": markdown}
 
 @app.post("/api/app-feedback/codex-runs/next")
-def api_claim_next_app_feedback_codex_run(token: str = "", worker: str = "local-codex"):
+def api_claim_next_app_feedback_codex_run(token: str = "", worker: str = "local-codex", project: str = "dieter"):
     """Claim the next queued feedback issue for a trusted local Codex worker."""
     if not codex_worker_token_valid(token):
         raise HTTPException(status_code=403, detail="Invalid Codex worker token.")
-    queued = dict_from_row(db.get_next_app_feedback_codex_run())
+    safe_project = normalize_project_id(project)
+    project_label = project_label_for_id(safe_project)
+    db.record_app_feedback_codex_worker_heartbeat(
+        worker,
+        "listening",
+        f"Checked for queued {project_label} lane work.",
+        project_id=safe_project,
+    )
+    queued_runs = dicts_from_rows(db.get_queued_app_feedback_codex_runs(limit=100))
+    queued = select_next_codex_run_for_project(queued_runs, safe_project)
     if not queued:
-        return {"status": "empty"}
+        return {"status": "empty", "project": safe_project, "project_label": project_label}
     claimed = dict_from_row(db.claim_app_feedback_codex_run(queued["id"], worker_name=worker))
     if not claimed:
-        return {"status": "empty"}
+        return {"status": "empty", "project": safe_project, "project_label": project_label}
+    claimed["project_id"] = app_feedback_codex_run_project_id(claimed)
+    claimed["project_label"] = project_label_for_id(claimed["project_id"])
+    db.record_app_feedback_codex_worker_heartbeat(
+        worker,
+        "running",
+        f"Running issue #{claimed.get('report_id')}: {claimed.get('report_title') or 'Untitled issue'}",
+        run_id=claimed.get("id"),
+        project_id=claimed["project_id"],
+    )
+    db.append_app_feedback_report_action(
+        claimed["report_id"],
+        "codex_started",
+        "Codex worker claimed this issue.",
+        {"run_id": claimed.get("id"), "worker": worker},
+    )
     return {
         "status": "claimed",
         "run": {
@@ -4679,6 +5404,8 @@ def api_claim_next_app_feedback_codex_run(token: str = "", worker: str = "local-
             "report_id": claimed["report_id"],
             "title": claimed.get("report_title") or "",
             "area": claimed.get("report_area") or "",
+            "project": claimed.get("project_id") or safe_project,
+            "project_label": claimed.get("project_label") or project_label,
             "raw_feedback": claimed.get("raw_feedback") or "",
             "plan": claimed.get("plan") or "",
         },
@@ -4694,18 +5421,88 @@ def api_finish_app_feedback_codex_run(run_id: int, payload: CodexRunFinishIn):
     """Record local Codex run output and move successful work to testing."""
     if not codex_worker_token_valid(payload.token):
         raise HTTPException(status_code=403, detail="Invalid Codex worker token.")
-    safe_status = payload.status if payload.status in {"ready_for_testing", "failed"} else "failed"
+    safe_status = payload.status if payload.status in {"ready_for_testing", "failed", "canceled"} else "failed"
     note = (payload.result_note or "").strip()
     db.finish_app_feedback_codex_run(run_id, safe_status, note)
+    run = dict_from_row(db.get_app_feedback_codex_run(run_id))
+    if run:
+        run_project = app_feedback_codex_run_project_id(run)
+        db.record_app_feedback_codex_worker_heartbeat(
+            run.get("worker_name") or "local-codex",
+            "finished" if safe_status == "ready_for_testing" else safe_status,
+            (
+                f"Finished issue #{run.get('report_id')} as ready for testing."
+                if safe_status == "ready_for_testing"
+                else f"{safe_status.replace('_', ' ').title()} issue #{run.get('report_id')}."
+            ),
+            run_id=run_id,
+            project_id=run_project,
+        )
     if safe_status == "ready_for_testing":
-        run = dict_from_row(db.get_app_feedback_codex_run(run_id))
         if run:
             db.update_app_feedback_report_review_note(
                 run["report_id"],
                 "ready_for_review",
                 note or "Codex reported this issue is ready for testing.",
             )
+            db.append_app_feedback_report_action(
+                run["report_id"],
+                "codex_ready_for_testing",
+                "Codex finished and marked the issue ready for testing.",
+                {"run_id": run_id},
+            )
+    elif safe_status == "failed" and run:
+        db.append_app_feedback_report_action(
+            run["report_id"],
+            "codex_failed",
+            "Codex worker reported a failed run.",
+            {"run_id": run_id},
+        )
+    elif safe_status == "canceled" and run:
+        db.append_app_feedback_report_action(
+            run["report_id"],
+            "codex_canceled",
+            "Codex worker run was canceled before execution.",
+            {"run_id": run_id},
+        )
     return {"status": "success"}
+
+
+@app.get("/api/app-feedback/codex-runs/recent")
+def api_recent_app_feedback_codex_runs(token: str = "", limit: int = 12, project: str = ""):
+    """Return recent Codex worker runs for the local worker dashboard."""
+    if not codex_worker_token_valid(token):
+        raise HTTPException(status_code=403, detail="Invalid Codex worker token.")
+    safe_limit = max(1, min(limit, 25))
+    safe_project = normalize_project_id(project) if project else ""
+    runs = []
+    for row in dicts_from_rows(db.get_recent_app_feedback_codex_runs(limit=safe_limit * 3)):
+        row_project = app_feedback_codex_run_project_id(row)
+        if safe_project and row_project != safe_project:
+            continue
+        runs.append(
+            {
+                "id": row.get("id"),
+                "run_id": row.get("id"),
+                "report_id": row.get("report_id"),
+                "title": row.get("report_title") or "",
+                "area": row.get("report_area") or "",
+                "project": row_project,
+                "project_label": project_label_for_id(row_project),
+                "status": row.get("status") or "",
+                "worker": row.get("worker_name") or "",
+                "created_at": row.get("created_at") or "",
+                "started_at": row.get("started_at") or "",
+                "finished_at": row.get("finished_at") or "",
+                "updated_at": row.get("updated_at") or "",
+                "note": ((row.get("result_note") or "")[:697] + "...")
+                if len(row.get("result_note") or "") > 700
+                else (row.get("result_note") or ""),
+            }
+        )
+        if len(runs) >= safe_limit:
+            break
+    return {"runs": runs}
 
 
 # ============================================================================
@@ -4720,7 +5517,12 @@ def api_get_projects():
 @app.post("/api/projects")
 def api_create_project(project: ProjectIn):
     """Create a new project."""
-    project_id = db.add_project(project.name, project.description, project.priority_score)
+    project_id = db.add_project(
+        available_project_name(project.name),
+        project.description,
+        project.priority_score,
+        safe_project_type(project.project_type),
+    )
     return {"status": "success", "project_id": project_id}
 
 @app.get("/api/projects/{project_id}")
@@ -4935,6 +5737,85 @@ def share_recipe_with_email(recipe_kind, recipe_id, email, permission, request):
     db.share_recipe(recipe_kind, recipe_id, target_user["id"], permission)
     return target_user
 
+PROJECT_STARTER_TYPES = {
+    "general": {
+        "label": "General project",
+        "title": "New Project",
+        "brief": "Start a new project and help define the goal, scope, and next steps.",
+    },
+    "research": {
+        "label": "Research project",
+        "title": "Company Research",
+        "brief": "Research a company and summarize what they do, their industry, and relevant business context.",
+    },
+    "technical": {
+        "label": "Technical project",
+        "title": "Technical Scope",
+        "brief": "Help determine what probably needs to be built, including product scope, technical requirements, workflows, integrations, and risks.",
+    },
+}
+
+CCT_STARTER_PROJECTS = (
+    {
+        "name": "CCT Research",
+        "description": "Research CCT and summarize what they do, with emphasis on their casino-related business.",
+        "priority_score": 3,
+        "project_type": "research",
+        "actions": (
+            "Identify which company CCT refers to and confirm its casino-related business context",
+            "Summarize what CCT does, its industry, and relevant customers or offerings",
+        ),
+    },
+    {
+        "name": "CCT Technical Scope",
+        "description": "Based on CCT's business, identify what I will probably have to build for them, including likely product, technical, and integration needs.",
+        "priority_score": 3,
+        "project_type": "technical",
+        "actions": (
+            "Map likely user workflows, product surfaces, and operational needs for CCT",
+            "Outline likely technical requirements, integrations, data flows, and delivery risks",
+        ),
+    },
+)
+
+def safe_project_type(project_type):
+    """Normalize project type for the first planner project-start flow."""
+    return project_type if project_type in PROJECT_STARTER_TYPES else "general"
+
+def available_project_name(name):
+    """Return a project name that does not collide with existing global project names."""
+    base_name = re.sub(r"\s+", " ", (name or "").strip()) or "New Project"
+    if not db.get_any_project_by_name(base_name):
+        return base_name
+    for suffix in range(2, 100):
+        candidate = f"{base_name} {suffix}"
+        if not db.get_any_project_by_name(candidate):
+            return candidate
+    return f"{base_name} {uuid.uuid4().hex[:6]}"
+
+def ensure_cct_starter_projects(request):
+    """Create the approved CCT starter projects once for signed-in non-guest users."""
+    current_user = getattr(getattr(request, "state", None), "current_user", None)
+    user_role = current_user.get("role") if isinstance(current_user, dict) else getattr(current_user, "role", "")
+    if not current_user or user_role == "guest":
+        return []
+    created_projects = []
+    for starter in CCT_STARTER_PROJECTS:
+        existing = db.get_project_by_name(starter["name"]) or db.get_any_project_by_name(starter["name"])
+        if existing:
+            continue
+        project_id = db.add_project(
+            starter["name"],
+            starter["description"],
+            starter["priority_score"],
+            starter["project_type"],
+        )
+        db.add_note(project_id, starter["description"])
+        for action in starter["actions"]:
+            db.add_recommended_action(project_id, action, "medium")
+        created_projects.append(project_id)
+    return created_projects
+
 def safe_redirect_path(path, fallback="/"):
     """Keep form redirects inside this app."""
     return path if path and path.startswith("/") and not path.startswith("//") else fallback
@@ -4971,6 +5852,8 @@ def login_form(
     user = db.get_user_by_email(email)
     if not user or not verify_password(password, user["password_hash"]):
         return render_auth_page(request, "login", "Email or password was not recognized.")
+    if user["status"] == "pending":
+        return RedirectResponse(url="/registration-pending", status_code=303)
     if user["status"] != "active":
         return render_auth_page(request, "login", "This account is not active.")
     safe_next = safe_internal_redirect_target(next)
@@ -4978,10 +5861,11 @@ def login_form(
 
 
 @app.post("/guest-login")
-def guest_login_form(next: str = Form("/apps/recipes")):
+def guest_login_form(next: str = Form("")):
     """Start a read-only guest session."""
     user_id = get_or_create_guest_user_id()
-    return create_login_response(user_id, safe_internal_redirect_target(next, "/apps/recipes"))
+    fallback = "/apps" if DEMO_MODE else "/apps/recipes"
+    return create_login_response(user_id, safe_internal_redirect_target(next or fallback, fallback))
 
 
 @app.get("/register")
@@ -4992,12 +5876,19 @@ def register_page(request: Request):
     return render_auth_page(request, "register")
 
 
+@app.get("/registration-pending")
+def registration_pending_page(request: Request):
+    """Show the post-registration approval waiting page."""
+    return render_auth_page(request, "pending")
+
+
 @app.post("/register")
 def register_form(
     request: Request,
     email: str = Form(...),
     display_name: str = Form(""),
     password: str = Form(...),
+    trainer_mode_request: str = Form("athlete"),
     registration_code: str = Form(""),
 ):
     """Create a user account."""
@@ -5012,11 +5903,22 @@ def register_form(
 
     first_user = db.get_user_count() == 0
     role = "admin" if first_user else "user"
-    user_id = db.create_user(email, display_name, hash_password(password), role)
+    status = "active" if first_user else "pending"
+    requested_trainer_mode = trainer_mode_request if trainer_mode_request in {"athlete", "coach"} else "athlete"
+    user_id = db.create_user(
+        email,
+        display_name,
+        hash_password(password),
+        role,
+        status=status,
+        requested_trainer_mode=requested_trainer_mode,
+    )
     if first_user:
         db.claim_unowned_data(user_id)
-    db.share_recipe_library_with_all_users()
-    return create_login_response(user_id)
+        db.update_trainer_mode_for_user(user_id, requested_trainer_mode)
+        db.share_recipe_library_with_all_users()
+        return create_login_response(user_id)
+    return RedirectResponse(url="/registration-pending", status_code=303)
 
 
 @app.post("/logout")
@@ -5028,10 +5930,73 @@ def logout_form(request: Request):
     return clear_login_response()
 
 
+@app.get("/admin/members")
+def admin_members_page(request: Request):
+    """Approve and manage Dieter member accounts."""
+    require_admin(request)
+    template = jinja_env.get_template("admin_members.html")
+    return HTMLResponse(template.render({
+        "request": request,
+        "members": dicts_from_rows(db.get_users_for_admin()),
+    }))
+
+
+@app.post("/admin/members/{user_id}/status")
+def admin_update_member_status(
+    request: Request,
+    user_id: int,
+    status: str = Form(...),
+    trainer_mode: str = Form(""),
+):
+    """Approve, reject, or disable a member account."""
+    current_user = require_admin(request)
+    safe_status = status if status in {"pending", "active", "rejected", "disabled"} else "pending"
+    if current_user and current_user.get("id") == user_id and safe_status != "active":
+        raise HTTPException(status_code=400, detail="You cannot deactivate your own admin account.")
+    db.update_user_status(user_id, safe_status)
+    if safe_status == "active":
+        safe_trainer_mode = trainer_mode if trainer_mode in {"athlete", "coach"} else ""
+        if not safe_trainer_mode:
+            member = dict_from_row(db.get_user_by_id(user_id))
+            safe_trainer_mode = member.get("requested_trainer_mode") if member else ""
+        db.update_trainer_mode_for_user(user_id, safe_trainer_mode if safe_trainer_mode in {"athlete", "coach"} else "athlete")
+        db.share_recipe_library_with_all_users()
+    return RedirectResponse(url="/admin/members", status_code=303)
+
+
+@app.post("/admin/members/{user_id}/role")
+def admin_update_member_role(request: Request, user_id: int, role: str = Form(...)):
+    """Promote or demote a member account."""
+    current_user = require_admin(request)
+    safe_role = role if role in {"admin", "user"} else "user"
+    if current_user and current_user.get("id") == user_id and safe_role != "admin":
+        raise HTTPException(status_code=400, detail="You cannot remove your own admin role.")
+    db.update_user_role(user_id, safe_role)
+    return RedirectResponse(url="/admin/members", status_code=303)
+
+
+@app.post("/admin/members/{user_id}/trainer-mode")
+def admin_update_member_trainer_mode(request: Request, user_id: int, trainer_mode: str = Form("athlete")):
+    """Approve or change a member's Trainer mode."""
+    require_admin(request)
+    safe_mode = trainer_mode if trainer_mode in {"athlete", "coach"} else "athlete"
+    db.update_user_requested_trainer_mode(user_id, safe_mode)
+    db.update_trainer_mode_for_user(user_id, safe_mode)
+    return RedirectResponse(url="/admin/members", status_code=303)
+
+
 @app.get("/")
 def home_default(request: Request):
     """Dieter app launcher."""
+    if DEMO_MODE and not request.state.current_user:
+        return render_demo_landing(request)
     return render_apps_page(request)
+
+
+@app.get("/demo")
+def demo_landing(request: Request):
+    """Public read-only demo landing page."""
+    return render_demo_landing(request)
 
 
 @app.get("/dashboard")
@@ -5052,9 +6017,39 @@ def assistant_app(request: Request):
     return RedirectResponse(url="/apps/assistant/planner", status_code=303)
 
 @app.get("/apps/issues")
-def issues_app(request: Request):
-    """Shortcut to the app feedback issue inbox."""
-    return RedirectResponse(url="/apps/assistant/feedback", status_code=303)
+def issues_app(
+    request: Request,
+    status: str = "active",
+    area: str = "",
+):
+    """Dieter Issues inbox."""
+    if request.query_params.get("new"):
+        target = "/apps/issues/new"
+        if area:
+            target += f"?area={quote(area)}"
+        return RedirectResponse(url=target, status_code=303)
+    return render_issues_app(request, status=status, area=area, issues_view="list")
+
+
+@app.get("/apps/issues/new")
+def issues_create_app(
+    request: Request,
+    area: str = "",
+):
+    """Dedicated issue creation page."""
+    return render_issues_app(request, status="active", area=area, issues_view="create")
+
+
+@app.get("/apps/issues/workers")
+def issues_workers_app(
+    request: Request,
+    status: str = "active",
+    area: str = "",
+):
+    """Dedicated Codex worker tracking page."""
+    if is_guest_user(request.state.current_user):
+        return RedirectResponse(url="/apps/issues", status_code=303)
+    return render_issues_app(request, status=status, area=area, issues_view="workers")
 
 
 @app.get("/apps/assistant/planner")
@@ -5081,37 +6076,127 @@ def assistant_scheduler_app(request: Request):
     return HTMLResponse(template.render(context))
 
 @app.get("/apps/assistant/feedback")
-def assistant_feedback_app(
+def assistant_feedback_app_redirect(request: Request):
+    """Legacy Assistant feedback route."""
+    query = f"?{request.url.query}" if request.url.query else ""
+    return RedirectResponse(url=f"/apps/issues{query}", status_code=303)
+
+
+def render_issues_app(
     request: Request,
     status: str = "active",
     area: str = "",
+    issues_view: str = "list",
+    active_feedback_report=None,
+    feedback_plan="",
+    feedback_plan_path="",
+    feedback_issue_path="",
+    feedback_plan_pending_approval=False,
+    feedback_plan_saved=False,
+    feedback_questions_answered=False,
+    feedback_revision_instructions="",
 ):
     """Visible inbox for user-reported app feedback."""
+    studio_read_only = is_guest_user(request.state.current_user)
+    if not studio_read_only:
+        require_admin(request)
     safe_status = safe_app_feedback_status(status, default="active", allow_all=True)
-    all_reports = get_app_feedback_reports_for_status(safe_status, limit=100)
-    visible_reports = prepare_app_feedback_reports_for_display(filter_app_feedback_reports(all_reports, area))
+    if studio_read_only:
+        all_reports = demo_studio_reports_for_status("", limit=100)
+        visible_reports = prepare_app_feedback_reports_for_display(demo_studio_reports_for_status(safe_status, area, limit=100))
+    else:
+        all_reports = get_app_feedback_reports_for_status(safe_status, limit=100)
+        visible_reports = prepare_app_feedback_reports_for_display(filter_app_feedback_reports(all_reports, area))
+    show_issue_list = issues_view == "list"
+    show_issue_create = issues_view == "create"
+    show_worker_panel = issues_view == "workers" and not studio_read_only
+    worker_context = app_feedback_worker_dashboard_context() if not studio_read_only else {}
+    board_overview = app_feedback_board_overview(visible_reports, worker_context)
+    lane_overview = app_feedback_lane_overview(all_reports, worker_context)
     context = {
         "request": request,
-        "feedback_reports": visible_reports,
-        "feedback_report_groups": group_app_feedback_reports_by_status(visible_reports),
-        "feedback_report_groups": group_app_feedback_reports_by_status(visible_reports),
+        "feedback_reports": visible_reports if show_issue_list else [],
+        "feedback_report_groups": group_app_feedback_reports_by_status(visible_reports) if show_issue_list else [],
         "feedback_area_counts": app_feedback_area_counts(all_reports),
+        "feedback_board_overview": board_overview,
+        "feedback_lane_overview": lane_overview,
+        "issues_view": issues_view,
+        "show_issue_list": show_issue_list,
+        "show_issue_create": show_issue_create,
+        "show_worker_panel": show_worker_panel,
+        "show_issue_pipeline": issues_view == "pipeline",
         "feedback_status": safe_status,
         "feedback_area": area,
-        "feedback_areas": [
-            "Kitchen / Recipes",
-            "Scheduler",
-            "Assistant / Planner",
-            "Trainer",
-            "Music",
-            "Auth",
-            "Dieter",
-        ],
+        "feedback_areas": studio_area_options(),
+        "active_feedback_report": active_feedback_report,
+        "feedback_plan": feedback_plan,
+        "feedback_plan_path": feedback_plan_path,
+        "feedback_issue_path": feedback_issue_path,
+        "feedback_plan_pending_approval": feedback_plan_pending_approval,
+        "feedback_plan_saved": feedback_plan_saved,
+        "feedback_questions_answered": feedback_questions_answered,
+        "feedback_revision_instructions": feedback_revision_instructions,
+        "feedback_plan_questions": [],
+        "feedback_plan_answers": {},
+        "feedback_plan_addressed_questions": [],
+        "studio_read_only": studio_read_only,
         "scheduler_due": scheduler_due_context(),
+        **worker_context,
     }
+    if active_feedback_report and feedback_plan:
+        context.update(feedback_plan_question_context(active_feedback_report, feedback_plan))
     template = jinja_env.get_template("app_feedback.html")
     return HTMLResponse(template.render(context))
 
+@app.get("/apps/issues/{report_id}")
+@app.get("/apps/assistant/feedback/{report_id}")
+def issue_pipeline_app(
+    request: Request,
+    report_id: int,
+    status: str = "active",
+    area: str = "",
+):
+    """Standard issue pipeline page for questions, plan approval, and Codex runs."""
+    report = feedback_report_by_id(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Feedback report not found")
+    display_report = prepare_app_feedback_reports_for_display([report])[0]
+    return render_issues_app(
+        request,
+        status=status,
+        area=area or report.get("area") or "",
+        issues_view="pipeline",
+        active_feedback_report=display_report,
+        feedback_plan=report.get("audit_plan") or "",
+        feedback_plan_path=str(Path("codex_feedback_plan.md").resolve()) if report.get("audit_plan") else "",
+        feedback_issue_path=str(Path(f"codex_feedback_issue_{int(report_id)}.md").resolve()) if report.get("audit_plan") else "",
+    )
+
+@app.post("/apps/issues/create")
+@app.post("/apps/assistant/feedback/create")
+def create_app_feedback_form(
+    raw_feedback: str = Form(""),
+    area: str = Form(""),
+    title: str = Form(""),
+    severity: str = Form("medium"),
+    page_url: str = Form(""),
+    page_title: str = Form(""),
+):
+    """Create an issue from the dedicated Issues form."""
+    report_id, selected_area = save_app_feedback_report_from_form(
+        raw_feedback=raw_feedback,
+        area=area,
+        page_url=page_url,
+        page_title=page_title,
+        title=title,
+        severity=severity,
+    )
+    return RedirectResponse(
+        url=f"/apps/issues?status=active&area={selected_area.replace(' ', '%20').replace('/', '%2F')}&created={report_id}",
+        status_code=303,
+    )
+
+@app.post("/apps/issues/synthesize")
 @app.post("/apps/assistant/feedback/synthesize")
 def synthesize_app_feedback_form(
     request: Request,
@@ -5129,19 +6214,10 @@ def synthesize_app_feedback_form(
         "request": request,
         "feedback_reports": visible_reports,
         "feedback_report_groups": group_app_feedback_reports_by_status(visible_reports),
-        "feedback_report_groups": group_app_feedback_reports_by_status(visible_reports),
         "feedback_area_counts": app_feedback_area_counts(reports),
         "feedback_status": safe_status,
         "feedback_area": area,
-        "feedback_areas": [
-            "Kitchen / Recipes",
-            "Scheduler",
-            "Assistant / Planner",
-            "Trainer",
-            "Music",
-            "Auth",
-            "Dieter",
-        ],
+        "feedback_areas": studio_area_options(),
         "feedback_plan": markdown,
         "feedback_plan_path": str(output_path),
         "scheduler_due": scheduler_due_context(),
@@ -5149,6 +6225,7 @@ def synthesize_app_feedback_form(
     template = jinja_env.get_template("app_feedback.html")
     return HTMLResponse(template.render(context))
 
+@app.post("/apps/issues/audit-next")
 @app.post("/apps/assistant/feedback/audit-next")
 def audit_next_app_feedback_form(
     request: Request,
@@ -5159,11 +6236,29 @@ def audit_next_app_feedback_form(
     report = next_feedback_issue(status=status, area=area)
     if not report:
         return RedirectResponse(
-            url=f"/apps/assistant/feedback?status={status}&area={area}",
+            url=f"/apps/issues?status={status}&area={area}",
             status_code=303,
         )
     return audit_app_feedback_form(report["id"], request=request, status=status, area=area)
 
+@app.post("/apps/issues/stalled-scan")
+def stalled_issue_scan_form(
+    request: Request,
+    status: str = Form("active"),
+    area: str = Form(KITCHEN_AREA),
+    inactivity_days: int = Form(3),
+    recent_issue_days: int = Form(1),
+):
+    """Generate stalled Kitchen evaluation plans for user review."""
+    require_admin(request)
+    scan_kitchen_stalled_issues(
+        limit=10,
+        inactivity_days=max(1, min(int(inactivity_days or 3), 30)),
+        recent_issue_days=max(0, min(int(recent_issue_days or 1), 14)),
+    )
+    return RedirectResponse(url=feedback_redirect_url(status=status, area=area or KITCHEN_AREA), status_code=303)
+
+@app.post("/apps/issues/{report_id}/audit")
 @app.post("/apps/assistant/feedback/{report_id}/audit")
 def audit_app_feedback_form(
     report_id: int,
@@ -5171,43 +6266,26 @@ def audit_app_feedback_form(
     status: str = Form("open"),
     area: str = Form(""),
 ):
-    """Mark one feedback report in progress and create a Codex issue plan."""
+    """Mark one unaudited feedback report in progress and create a Codex issue plan."""
     report = feedback_report_by_id(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Feedback report not found")
+    if (report.get("audit_plan") or "").strip():
+        return RedirectResponse(
+            url=f"/apps/issues/{report_id}?status=in_progress&area={area}",
+            status_code=303,
+        )
     db.update_app_feedback_report_status(report_id, "in_progress")
     report = feedback_report_by_id(report_id)
-    markdown, stable_path, issue_path = save_single_feedback_issue_plan(report)
-    safe_status = "in_progress"
-    reports = dicts_from_rows(db.get_app_feedback_reports(status=safe_status, limit=100))
-    visible_reports = prepare_app_feedback_reports_for_display(filter_app_feedback_reports(reports, area))
-    context = {
-        "request": request,
-        "feedback_reports": visible_reports,
-        "feedback_report_groups": group_app_feedback_reports_by_status(visible_reports),
-        "feedback_report_groups": group_app_feedback_reports_by_status(visible_reports),
-        "feedback_area_counts": app_feedback_area_counts(reports),
-        "feedback_status": safe_status,
-        "feedback_area": area,
-        "feedback_areas": [
-            "Kitchen / Recipes",
-            "Scheduler",
-            "Assistant / Planner",
-            "Trainer",
-            "Music",
-            "Auth",
-            "Dieter",
-        ],
-        "feedback_plan": markdown,
-        "feedback_plan_path": str(stable_path),
-        "feedback_issue_path": str(issue_path),
-        "active_feedback_report": report,
-        "scheduler_due": scheduler_due_context(),
-        **feedback_plan_question_context(report, markdown),
-    }
-    template = jinja_env.get_template("app_feedback.html")
-    return HTMLResponse(template.render(context))
+    save_single_feedback_issue_plan(report)
+    db.append_app_feedback_report_action(
+        report_id,
+        "plan_generated",
+        "Initial Codex plan generated for the issue.",
+    )
+    return RedirectResponse(url=issue_pipeline_url(report_id, area=area or report.get("area") or ""), status_code=303)
 
+@app.post("/apps/issues/{report_id}/plan/revise")
 @app.post("/apps/assistant/feedback/{report_id}/plan/revise")
 def revise_app_feedback_plan_form(
     report_id: int,
@@ -5216,41 +6294,13 @@ def revise_app_feedback_plan_form(
     revision_instructions: str = Form(""),
     area: str = Form(""),
 ):
-    """Draft a revised Codex plan from user instructions without saving it."""
+    """Compatibility path: revisions are handled by the standard revision input."""
     report = feedback_report_by_id(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Feedback report not found")
-    markdown = revise_feedback_issue_plan(report, current_plan, revision_instructions)
-    approval_token = feedback_plan_approval_token(report_id, markdown)
-    reports = dicts_from_rows(db.get_app_feedback_reports(status="in_progress", limit=100))
-    visible_reports = prepare_app_feedback_reports_for_display(filter_app_feedback_reports(reports, area))
-    context = {
-        "request": request,
-        "feedback_reports": visible_reports,
-        "feedback_area_counts": app_feedback_area_counts(reports),
-        "feedback_status": "in_progress",
-        "feedback_area": area,
-        "feedback_areas": [
-            "Kitchen / Recipes",
-            "Scheduler",
-            "Assistant / Planner",
-            "Trainer",
-            "Music",
-            "Auth",
-            "Dieter",
-        ],
-        "feedback_plan": markdown,
-        "feedback_plan_path": "pending approval",
-        "active_feedback_report": report,
-        "feedback_plan_pending_approval": True,
-        "feedback_plan_approval_token": approval_token,
-        "feedback_revision_instructions": revision_instructions,
-        "scheduler_due": scheduler_due_context(),
-        **feedback_plan_question_context(report, markdown),
-    }
-    template = jinja_env.get_template("app_feedback.html")
-    return HTMLResponse(template.render(context))
+    return RedirectResponse(url=issue_pipeline_url(report_id, area=area or report.get("area") or ""), status_code=303)
 
+@app.post("/apps/issues/{report_id}/plan/answer-questions")
 @app.post("/apps/assistant/feedback/{report_id}/plan/answer-questions")
 def answer_app_feedback_plan_questions_form(
     report_id: int,
@@ -5260,7 +6310,7 @@ def answer_app_feedback_plan_questions_form(
     answers: List[str] = Form([]),
     area: str = Form(""),
 ):
-    """Draft a re-audited plan after the user answers open questions."""
+    """Save answers, re-audit the plan, and return to the pipeline."""
     report = feedback_report_by_id(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Feedback report not found")
@@ -5274,120 +6324,162 @@ def answer_app_feedback_plan_questions_form(
     report = feedback_report_by_id(report_id)
     revision_instructions = format_feedback_audit_answer_instructions(merged_answers)
     markdown = revise_feedback_issue_plan(report, current_plan, revision_instructions)
-    approval_token = feedback_plan_approval_token(report_id, markdown)
-    reports = dicts_from_rows(db.get_app_feedback_reports(status="in_progress", limit=100))
-    visible_reports = prepare_app_feedback_reports_for_display(filter_app_feedback_reports(reports, area))
-    context = {
-        "request": request,
-        "feedback_reports": visible_reports,
-        "feedback_area_counts": app_feedback_area_counts(reports),
-        "feedback_status": "in_progress",
-        "feedback_area": area,
-        "feedback_areas": [
-            "Kitchen / Recipes",
-            "Scheduler",
-            "Assistant / Planner",
-            "Trainer",
-            "Music",
-            "Auth",
-            "Dieter",
-        ],
-        "feedback_plan": markdown,
-        "feedback_plan_path": "pending approval",
-        "active_feedback_report": report,
-        "feedback_plan_pending_approval": True,
-        "feedback_plan_approval_token": approval_token,
-        "feedback_revision_instructions": "",
-        "feedback_questions_answered": True,
-        "scheduler_due": scheduler_due_context(),
-        **feedback_plan_question_context(report, markdown),
-    }
-    template = jinja_env.get_template("app_feedback.html")
-    return HTMLResponse(template.render(context))
+    save_feedback_issue_plan_markdown(report_id, markdown)
+    db.append_app_feedback_report_action(
+        report_id,
+        "questions_answered",
+        "Open questions answered and plan re-audited.",
+        {"answer_count": len(merged_answers)},
+    )
+    return RedirectResponse(url=issue_pipeline_url(report_id, area=area or report.get("area") or ""), status_code=303)
 
+@app.post("/apps/issues/{report_id}/plan/refresh-answers")
+@app.post("/apps/assistant/feedback/{report_id}/plan/refresh-answers")
+def refresh_app_feedback_plan_with_answers_form(
+    report_id: int,
+    request: Request,
+    area: str = Form(""),
+):
+    """Regenerate and save an unapproved issue plan from stored audit answers."""
+    report = feedback_report_by_id(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Feedback report not found")
+    answers = feedback_audit_answers_from_report(report)
+    if not answers:
+        raise HTTPException(status_code=400, detail="No saved answers are available for this issue.")
+    current_plan = (report.get("audit_plan") or "").strip()
+    revision_instructions = format_feedback_audit_answer_instructions(answers)
+    markdown = revise_feedback_issue_plan(report, current_plan, revision_instructions)
+    save_feedback_issue_plan_markdown(report_id, markdown)
+    db.append_app_feedback_report_action(
+        report_id,
+        "plan_refreshed",
+        "Plan refreshed from saved answers.",
+        {"answer_count": len(answers)},
+    )
+    return RedirectResponse(url=issue_pipeline_url(report_id, area=area or report.get("area") or ""), status_code=303)
+
+@app.post("/apps/issues/{report_id}/plan/approve")
 @app.post("/apps/assistant/feedback/{report_id}/plan/approve")
 def approve_app_feedback_plan_form(
     report_id: int,
-    request: Request,
     feedback_plan: str = Form(""),
     confirmation_token: str = Form(""),
     area: str = Form(""),
 ):
-    """Persist an approved Codex plan for one feedback issue."""
+    """Compatibility path: send users back to the standard issue pipeline."""
     report = feedback_report_by_id(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Feedback report not found")
-    markdown = feedback_plan.strip()
-    if not markdown:
-        raise HTTPException(status_code=400, detail="No plan was provided.")
-    if not feedback_plan_approval_confirmed(report_id, markdown, confirmation_token):
-        raise HTTPException(status_code=400, detail="Plan approval token did not match this draft.")
-    _, stable_path, issue_path = save_feedback_issue_plan_markdown(report_id, markdown)
-    db.mark_app_feedback_report_audit_plan_approved(report_id)
-    report = feedback_report_by_id(report_id)
-    reports = dicts_from_rows(db.get_app_feedback_reports(status="in_progress", limit=100))
-    visible_reports = prepare_app_feedback_reports_for_display(filter_app_feedback_reports(reports, area))
-    context = {
-        "request": request,
-        "feedback_reports": visible_reports,
-        "feedback_area_counts": app_feedback_area_counts(reports),
-        "feedback_status": "in_progress",
-        "feedback_area": area,
-        "feedback_areas": [
-            "Kitchen / Recipes",
-            "Scheduler",
-            "Assistant / Planner",
-            "Trainer",
-            "Music",
-            "Auth",
-            "Dieter",
-        ],
-        "feedback_plan": markdown,
-        "feedback_plan_path": str(stable_path),
-        "feedback_issue_path": str(issue_path),
-        "active_feedback_report": report,
-        "feedback_plan_saved": True,
-        "scheduler_due": scheduler_due_context(),
-        **feedback_plan_question_context(report, markdown),
-    }
-    template = jinja_env.get_template("app_feedback.html")
-    return HTMLResponse(template.render(context))
+    return RedirectResponse(url=issue_pipeline_url(report_id, area=area or report.get("area") or ""), status_code=303)
 
+@app.post("/apps/issues/{report_id}/plan/approve-draft-and-run")
+@app.post("/apps/assistant/feedback/{report_id}/plan/approve-draft-and-run")
+def approve_draft_and_run_app_feedback_plan_form(
+    report_id: int,
+    feedback_plan: str = Form(""),
+    confirmation_token: str = Form(""),
+    area: str = Form(""),
+):
+    """Compatibility path: send users back to the standard issue pipeline."""
+    report = feedback_report_by_id(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Feedback report not found")
+    return RedirectResponse(url=issue_pipeline_url(report_id, area=area or report.get("area") or ""), status_code=303)
+
+@app.post("/apps/issues/{report_id}/plan/approve-saved")
 @app.post("/apps/assistant/feedback/{report_id}/plan/approve-saved")
 def approve_saved_app_feedback_plan_form(
     report_id: int,
-    next: str = Form("/apps/assistant/feedback"),
+    next: str = Form("/apps/issues"),
 ):
-    """Approve the current saved audit plan for an issue."""
+    """Compatibility path: send users to the standard issue pipeline."""
+    return RedirectResponse(url=f"/apps/issues/{report_id}", status_code=303)
+
+@app.post("/apps/issues/{report_id}/plan/approve-and-run")
+@app.post("/apps/assistant/feedback/{report_id}/plan/approve-and-run")
+def approve_and_run_app_feedback_plan_form(
+    report_id: int,
+    next: str = Form("/apps/issues"),
+):
+    """Canonical issue approval path."""
+    return approve_feedback_plan_and_queue_codex(report_id, next_url=next)
+
+@app.get("/apps/issues/{report_id}/plan/approve-and-run")
+@app.get("/apps/assistant/feedback/{report_id}/plan/approve-and-run")
+def approve_and_run_app_feedback_plan_get(report_id: int, next: str = "/apps/issues"):
+    """Compatibility fallback for older links or browser navigation."""
+    return approve_feedback_plan_and_queue_codex(report_id, next_url=next)
+
+@app.post("/apps/issues/{report_id}/auto-evaluation/approve")
+def approve_stalled_issue_evaluation_form(
+    report_id: int,
+    next: str = Form("/apps/issues"),
+):
+    """Approve a generated stalled-issue evaluation plan without running Codex."""
     report = feedback_report_by_id(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Feedback report not found")
-    markdown = (report.get("audit_plan") or "").strip()
-    if not markdown:
-        raise HTTPException(status_code=400, detail="Audit this issue before approving a plan.")
-    questions = extract_feedback_plan_questions(markdown)
-    answers = {question.lower(): answer for question, answer in feedback_audit_answers_from_report(report).items()}
-    if any(not answers.get(question.lower()) for question in questions):
-        raise HTTPException(status_code=400, detail="Answer open questions and re-audit before approving this plan.")
-    db.mark_app_feedback_report_audit_plan_approved(report_id)
-    return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/feedback"), status_code=303)
+    if not (report.get("auto_evaluation_plan") or "").strip():
+        raise HTTPException(status_code=400, detail="Generate an automated evaluation plan first.")
+    db.approve_app_feedback_auto_evaluation_plan(report_id)
+    db.append_app_feedback_report_action(
+        report_id,
+        "auto_evaluation_plan_approved",
+        "Automated stalled-issue evaluation plan approved for safe observation checks.",
+    )
+    return RedirectResponse(url=safe_redirect_path(next, f"/apps/issues/{report_id}"), status_code=303)
 
+@app.post("/apps/issues/{report_id}/auto-evaluation/run")
+def run_stalled_issue_evaluation_form(
+    report_id: int,
+    next: str = Form("/apps/issues"),
+):
+    """Run approved non-destructive app checks for a stalled Kitchen issue."""
+    report = feedback_report_by_id(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Feedback report not found")
+    if (report.get("area") or "") != KITCHEN_AREA:
+        raise HTTPException(status_code=400, detail="Automated stalled evaluation is enabled for Kitchen / Recipes first.")
+    if not (report.get("auto_evaluation_plan_approved_at") or "").strip():
+        raise HTTPException(status_code=400, detail="Approve the automated evaluation plan before running checks.")
+    result = evaluate_observed_behavior(report, kitchen_observation_check)
+    db.update_app_feedback_auto_evaluation_result(report_id, result["status"], result["summary"])
+    db.append_app_feedback_report_action(
+        report_id,
+        "auto_evaluation_completed",
+        "Automated non-destructive Kitchen evaluation completed.",
+        {
+            "route": result.get("route") or "",
+            "appears_resolved": "yes" if result.get("appears_resolved") else "no",
+            "confidence": result.get("confidence") or "",
+        },
+    )
+    return RedirectResponse(url=safe_redirect_path(next, f"/apps/issues/{report_id}"), status_code=303)
+
+@app.post("/apps/issues/{report_id}/status")
 @app.post("/apps/assistant/feedback/{report_id}/status")
 def update_app_feedback_status_form(
     report_id: int,
     status: str = Form("open"),
-    next: str = Form("/apps/assistant/feedback"),
+    next: str = Form("/apps/issues"),
 ):
     """Update a feedback report status from the visible inbox."""
     safe_status = safe_app_feedback_status(status)
     db.update_app_feedback_report_status(report_id, safe_status)
-    return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/feedback"), status_code=303)
+    db.append_app_feedback_report_action(
+        report_id,
+        "status_changed",
+        f"Issue status changed to {safe_status.replace('_', ' ')}.",
+    )
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/issues"), status_code=303)
 
+@app.post("/apps/issues/{report_id}/ready-for-review")
 @app.post("/apps/assistant/feedback/{report_id}/ready-for-review")
 def ready_for_review_app_feedback_form(
     report_id: int,
     implementation_note: str = Form(""),
-    next: str = Form("/apps/assistant/feedback"),
+    next: str = Form("/apps/issues"),
 ):
     """Mark an implemented issue ready for user testing without closing it."""
     report = feedback_report_by_id(report_id)
@@ -5395,12 +6487,61 @@ def ready_for_review_app_feedback_form(
         raise HTTPException(status_code=404, detail="Feedback report not found")
     note = (implementation_note or "").strip()
     db.update_app_feedback_report_review_note(report_id, "ready_for_review", note)
-    return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/feedback"), status_code=303)
+    db.append_app_feedback_report_action(
+        report_id,
+        "marked_ready_for_testing",
+        "Issue marked ready for user testing.",
+    )
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/issues"), status_code=303)
 
+@app.post("/apps/issues/{report_id}/testing-feedback")
+@app.post("/apps/assistant/feedback/{report_id}/testing-feedback")
+def testing_feedback_app_feedback_form(
+    report_id: int,
+    request: Request,
+    testing_feedback: str = Form(""),
+    area: str = Form(""),
+):
+    """Keep an issue alive after revision input and draft a revised Codex plan."""
+    report = feedback_report_by_id(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Feedback report not found")
+    feedback = (testing_feedback or "").strip()
+    if not feedback:
+        raise HTTPException(status_code=400, detail="Revision input is required.")
+    current_plan = (report.get("audit_plan") or "").strip()
+    revision_instructions = "\n".join([
+        "The user provided revision input for this issue.",
+        "Treat this input like a fresh issue cycle for this same report.",
+        "Revise the Codex plan for another implementation pass using this newest input as the source of truth.",
+        "Do not preserve implementation steps from the previous plan unless they directly address this new input.",
+        "Generate open questions if the next implementation pass needs user input before it can be safely approved.",
+        "Do not mark the issue closed. The user must approve this revised plan before Codex is authorized again.",
+        "",
+        "Revision input:",
+        feedback,
+    ])
+    markdown = revise_feedback_issue_plan(report, current_plan, revision_instructions)
+    save_feedback_issue_plan_markdown(report_id, markdown)
+    db.clear_app_feedback_report_audit_answers(report_id)
+    db.update_app_feedback_report_review_note(
+        report_id,
+        "in_progress",
+        f"Revision input submitted:\n\n{feedback}",
+    )
+    db.append_app_feedback_report_action(
+        report_id,
+        "revision_input_submitted",
+        "Revision input captured and a revised plan drafted.",
+        {"input": feedback},
+    )
+    return RedirectResponse(url=issue_pipeline_url(report_id, area=area or report.get("area") or ""), status_code=303)
+
+@app.post("/apps/issues/{report_id}/run-codex")
 @app.post("/apps/assistant/feedback/{report_id}/run-codex")
 def run_codex_app_feedback_form(
     report_id: int,
-    next: str = Form("/apps/assistant/feedback"),
+    next: str = Form("/apps/issues"),
 ):
     """Queue an approved issue plan for local Codex execution."""
     report = feedback_report_by_id(report_id)
@@ -5410,33 +6551,85 @@ def run_codex_app_feedback_form(
         raise HTTPException(status_code=400, detail="Audit this issue before running Codex.")
     if not (report.get("audit_plan_approved_at") or "").strip():
         raise HTTPException(status_code=400, detail="Approve the Codex plan before running Codex.")
-    remaining_questions = extract_feedback_plan_questions(report.get("audit_plan") or "")
-    answers = {question.lower(): answer for question, answer in feedback_audit_answers_from_report(report).items()}
-    if any(not answers.get(question.lower()) for question in remaining_questions):
-        raise HTTPException(status_code=400, detail="Answer open questions and re-audit before running Codex.")
-    db.add_app_feedback_codex_run(
+    if not app_feedback_can_submit_to_codex(report):
+        return RedirectResponse(url=safe_redirect_path(next, "/apps/issues"), status_code=303)
+    run_id = db.add_app_feedback_codex_run(
         report_id,
         report.get("audit_plan") or "",
         requested_by_user_id=get_current_user_id(),
     )
+    db.append_app_feedback_report_action(
+        report_id,
+        "codex_queued",
+        "Approved plan queued for the Codex worker.",
+        {"run_id": run_id},
+    )
     db.update_app_feedback_report_status(report_id, "in_progress")
-    return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/feedback"), status_code=303)
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/issues"), status_code=303)
 
+
+@app.post("/apps/issues/codex-runs/{run_id}/hide")
+@app.post("/apps/assistant/feedback/codex-runs/{run_id}/hide")
+def hide_app_feedback_codex_run_form(
+    run_id: int,
+    next: str = Form("/apps/issues"),
+):
+    """Hide one completed worker run from normal issue dashboards."""
+    db.hide_app_feedback_codex_run(run_id)
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/issues"), status_code=303)
+
+
+@app.post("/apps/issues/codex-runs/clear-failed")
+@app.post("/apps/assistant/feedback/codex-runs/clear-failed")
+def clear_failed_app_feedback_codex_runs_form(
+    status: str = Form("active"),
+    area: str = Form(""),
+):
+    """Hide completed failed worker runs from normal issue dashboards."""
+    db.hide_finished_app_feedback_codex_runs(status="failed")
+    return RedirectResponse(url=feedback_redirect_url(status=status, area=area), status_code=303)
+
+
+@app.post("/apps/issues/{report_id}/plan/delete")
+@app.post("/apps/assistant/feedback/{report_id}/plan/delete")
+def delete_app_feedback_plan_form(
+    report_id: int,
+    next: str = Form("/apps/issues"),
+):
+    """Delete the current Codex plan without deleting the feedback issue."""
+    report = feedback_report_by_id(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Feedback report not found")
+    if report.get("codex_run_status") in {"queued", "running"}:
+        raise HTTPException(status_code=400, detail="Wait for the active Codex run to finish before deleting this plan.")
+    deleted = db.delete_app_feedback_report_audit_plan(report_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Feedback report not found")
+    db.append_app_feedback_report_action(
+        report_id,
+        "plan_deleted",
+        "Current Codex plan deleted; the issue remains open.",
+    )
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/issues"), status_code=303)
+
+
+@app.post("/apps/issues/{report_id}/delete")
 @app.post("/apps/assistant/feedback/{report_id}/delete")
 def delete_app_feedback_form(
     report_id: int,
-    next: str = Form("/apps/assistant/feedback"),
+    next: str = Form("/apps/issues"),
 ):
     """Delete a feedback issue opened in error."""
     deleted = db.delete_app_feedback_report(report_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Feedback report not found")
-    return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/feedback"), status_code=303)
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/issues"), status_code=303)
 
 
 def render_planner_app(request: Request):
     """Main dashboard view - renders HTML."""
     split_mixed_priority_scheduler_notes()
+    created_starter_project_ids = ensure_cct_starter_projects(request)
     data = api_dashboard()
     # Convert to JSON and back to ensure all dicts are pure Python dicts
     data_json = json.dumps(data, default=str)
@@ -5457,6 +6650,8 @@ def render_planner_app(request: Request):
         "scheduler_due": scheduler_due_context(),
         "recipe_app_url": "/apps/recipes" if recipe_app["project"] else "",
         "recipe_app": recipe_app,
+        "project_starter_types": PROJECT_STARTER_TYPES,
+        "created_starter_project_ids": created_starter_project_ids,
     }
     template = jinja_env.get_template("dashboard.html")
     html = template.render(context)
@@ -5488,9 +6683,54 @@ def render_apps_page(request: Request):
         },
         "scheduler_due": scheduler_due_context(),
     }
+    context["launcher_apps"] = launcher_cards(context["recipe_app"], context["planner"])
     template = jinja_env.get_template("apps.html")
     html = template.render(context)
     return HTMLResponse(html)
+
+
+def render_demo_landing(request: Request):
+    """Render the public demo front door."""
+    demo_apps = [
+        {
+            "class": "kitchen-launch-card",
+            "kicker": "Kitchen",
+            "title": "Kitchen / Recipes",
+            "url": "/apps/recipes",
+            "description": "Browse demo recipes, meal planning, grocery lists, and cooking feedback.",
+        },
+        {
+            "class": "planner-launch-card",
+            "kicker": "Scheduler",
+            "title": "Scheduler",
+            "url": "/apps/assistant/scheduler",
+            "description": "Review agenda cards and checklist-style planning workflows.",
+        },
+        {
+            "class": "issues-launch-card",
+            "kicker": "Studio",
+            "title": "Dieter Studio",
+            "url": "/apps/issues",
+            "description": "See the feedback-to-plan-to-Codex development pipeline.",
+        },
+        {
+            "class": "trainer-launch-card",
+            "kicker": "Trainer",
+            "title": "Trainer",
+            "url": "/apps/trainer",
+            "description": "Preview workout, import, and coach/athlete workflow direction.",
+        },
+    ]
+    template = jinja_env.get_template("demo_landing.html")
+    return HTMLResponse(
+        template.render(
+            {
+                "request": request,
+                "demo_apps": demo_apps,
+                "scheduler_due": scheduler_due_context(),
+            }
+        )
+    )
 
 
 def trainer_workout_view(row):
@@ -5501,6 +6741,12 @@ def trainer_workout_view(row):
     except (TypeError, json.JSONDecodeError):
         item["details"] = []
     return item
+
+
+def trainer_role(profile):
+    """Return the selected Trainer role, if any."""
+    mode = (profile or {}).get("mode") or ""
+    return mode if mode in {"athlete", "coach"} else "athlete"
 
 TRAINER_CATEGORY_LABELS = {
     "run_threshold": "Run: Threshold",
@@ -6407,13 +7653,21 @@ def scan_trainer_audit_insights(user_id=None, minimum_total=2, minimum_bad=2):
     return saved
 
 
-def trainer_context(request, active_tab="home", workout_type="", athlete_user_id=None):
+def trainer_context(request, active_tab="home", workout_type="", athlete_user_id=None, coach_search="", selected_coach_athlete_id=0):
     """Build shared Dieter Trainer template context."""
     current_user = request.state.current_user
     selected_athlete_id = athlete_user_id or (current_user or {}).get("id")
     week_offset = trainer_week_offset(request)
     workouts = [trainer_workout_view(row) for row in db.get_trainer_workouts(workout_type)]
     trainer_profile = dict_from_row(db.get_trainer_profile())
+    mode = trainer_role(trainer_profile)
+    coach_athletes = dicts_from_rows(db.get_trainer_athletes_for_coach())
+    selected_coach_athlete = None
+    selected_coach_athlete_id = selected_coach_athlete_id or selected_athlete_id
+    for athlete in coach_athletes:
+        if athlete.get("athlete_user_id") == selected_coach_athlete_id:
+            selected_coach_athlete = athlete
+            break
     import_target_id = parse_trainer_import_target(str(request.url)) if request else None
     reflection_target_id = parse_trainer_reflection_target(str(request.url)) if request else None
     reflection_target = dict_from_row(db.get_trainer_imported_workout(reflection_target_id)) if reflection_target_id else None
@@ -6423,13 +7677,20 @@ def trainer_context(request, active_tab="home", workout_type="", athlete_user_id
         "request": request,
         "active_tab": active_tab,
         "workout_type": workout_type,
+        "trainer_current_user": current_user,
         "trainer_profile": trainer_profile,
+        "trainer_mode": mode,
+        "needs_trainer_role": not mode,
         "strava_configured": strava_configured(),
         "strava_connected": bool(trainer_profile and trainer_profile.get("strava_refresh_token")),
         "reflection_target": reflection_target,
         "shoe_target": shoe_target,
         "coach_grants": dicts_from_rows(db.get_trainer_coach_grants_for_athlete()),
-        "coach_athletes": dicts_from_rows(db.get_trainer_athletes_for_coach()),
+        "coach_athletes": coach_athletes,
+        "selected_coach_athlete": selected_coach_athlete,
+        "selected_coach_athlete_id": selected_coach_athlete_id,
+        "coach_search_query": coach_search,
+        "coach_search_results": dicts_from_rows(db.search_trainer_coaches(coach_search)) if active_tab == "coaching" or coach_search else [],
         "current_user_id": (current_user or {}).get("id"),
         "selected_athlete_id": selected_athlete_id,
         "is_viewing_own_trainer": selected_athlete_id == (current_user or {}).get("id"),
@@ -6456,6 +7717,21 @@ def trainer_context(request, active_tab="home", workout_type="", athlete_user_id
         "run_reflections": dicts_from_rows(db.get_trainer_run_reflections(user_id=selected_athlete_id, limit=10)),
         "scheduler_due": scheduler_due_context(),
     }
+
+
+def selected_trainer_athlete_id_for_mode(request, profile, athlete_user_id=0):
+    """Resolve the athlete whose Trainer data can be shown for the current mode."""
+    current_user_id = (request.state.current_user or {}).get("id")
+    mode = trainer_role(profile)
+    if mode == "athlete":
+        return current_user_id
+    if mode == "coach":
+        if not athlete_user_id:
+            return None
+        if not db.can_view_trainer_user(athlete_user_id):
+            raise HTTPException(status_code=403, detail="This athlete has not shared Trainer access with you.")
+        return athlete_user_id
+    return None
 
 
 def spotify_configured():
@@ -6981,15 +8257,59 @@ def submit_playlist_to_spotify(playlist_id: int):
 
 
 @app.get("/apps/trainer")
-def trainer_app(request: Request):
+def trainer_app(request: Request, athlete_user_id: int = 0):
     """Dieter Trainer home."""
+    profile = dict_from_row(db.get_trainer_profile())
+    mode = trainer_role(profile)
+    if not mode:
+        template = jinja_env.get_template("trainer.html")
+        return HTMLResponse(template.render(trainer_context(request, "role_select")))
+    selected_athlete_id = selected_trainer_athlete_id_for_mode(request, profile, athlete_user_id)
+    if mode == "coach" and not selected_athlete_id:
+        return RedirectResponse(url="/apps/trainer/coach", status_code=303)
     template = jinja_env.get_template("trainer.html")
-    return HTMLResponse(template.render(trainer_context(request, "home")))
+    return HTMLResponse(template.render(trainer_context(request, "home", athlete_user_id=selected_athlete_id)))
+
+
+@app.get("/apps/trainer/coach")
+def trainer_coach_app(request: Request, athlete_user_id: int = 0):
+    """Coach dashboard for authorized athletes."""
+    profile = dict_from_row(db.get_trainer_profile())
+    mode = trainer_role(profile)
+    if not mode:
+        template = jinja_env.get_template("trainer.html")
+        return HTMLResponse(template.render(trainer_context(request, "role_select")))
+    if mode != "coach":
+        return RedirectResponse(url="/apps/trainer", status_code=303)
+    if athlete_user_id and not db.can_view_trainer_user(athlete_user_id):
+        raise HTTPException(status_code=403, detail="This athlete has not shared Trainer access with you.")
+    template = jinja_env.get_template("trainer.html")
+    return HTMLResponse(
+        template.render(trainer_context(request, "coach", athlete_user_id=athlete_user_id or None, selected_coach_athlete_id=athlete_user_id))
+    )
+
+
+@app.get("/apps/trainer/coaching")
+def trainer_coaching_app(request: Request, coach_search: str = ""):
+    """Athlete coaching link management."""
+    profile = dict_from_row(db.get_trainer_profile())
+    mode = trainer_role(profile)
+    if not mode:
+        template = jinja_env.get_template("trainer.html")
+        return HTMLResponse(template.render(trainer_context(request, "role_select")))
+    if mode != "athlete":
+        return RedirectResponse(url="/apps/trainer/coach", status_code=303)
+    template = jinja_env.get_template("trainer.html")
+    return HTMLResponse(template.render(trainer_context(request, "coaching", coach_search=coach_search.strip())))
 
 
 @app.get("/apps/trainer/workouts")
 def trainer_workouts_app(request: Request, workout_type: str = ""):
     """Dieter Trainer workout catalog."""
+    profile = dict_from_row(db.get_trainer_profile())
+    if not trainer_role(profile):
+        template = jinja_env.get_template("trainer.html")
+        return HTMLResponse(template.render(trainer_context(request, "role_select")))
     safe_type = workout_type if workout_type in {"run", "bike", "strength"} else ""
     template = jinja_env.get_template("trainer.html")
     return HTMLResponse(template.render(trainer_context(request, "library", safe_type)))
@@ -6998,9 +8318,14 @@ def trainer_workouts_app(request: Request, workout_type: str = ""):
 @app.get("/apps/trainer/upcoming")
 def trainer_upcoming_app(request: Request, athlete_user_id: int = 0):
     """Upcoming Dieter Trainer workouts."""
-    selected_athlete_id = athlete_user_id or (request.state.current_user or {}).get("id")
-    if selected_athlete_id and not db.can_view_trainer_user(selected_athlete_id):
-        raise HTTPException(status_code=403, detail="This athlete has not shared Trainer access with you.")
+    profile = dict_from_row(db.get_trainer_profile())
+    mode = trainer_role(profile)
+    if not mode:
+        template = jinja_env.get_template("trainer.html")
+        return HTMLResponse(template.render(trainer_context(request, "role_select")))
+    selected_athlete_id = selected_trainer_athlete_id_for_mode(request, profile, athlete_user_id)
+    if mode == "coach" and not selected_athlete_id:
+        return RedirectResponse(url="/apps/trainer/coach", status_code=303)
     template = jinja_env.get_template("trainer.html")
     return HTMLResponse(template.render(trainer_context(request, "upcoming", athlete_user_id=selected_athlete_id)))
 
@@ -7008,9 +8333,14 @@ def trainer_upcoming_app(request: Request, athlete_user_id: int = 0):
 @app.get("/apps/trainer/past")
 def trainer_past_app(request: Request, athlete_user_id: int = 0):
     """Past Dieter Trainer workouts."""
-    selected_athlete_id = athlete_user_id or (request.state.current_user or {}).get("id")
-    if selected_athlete_id and not db.can_view_trainer_user(selected_athlete_id):
-        raise HTTPException(status_code=403, detail="This athlete has not shared Trainer access with you.")
+    profile = dict_from_row(db.get_trainer_profile())
+    mode = trainer_role(profile)
+    if not mode:
+        template = jinja_env.get_template("trainer.html")
+        return HTMLResponse(template.render(trainer_context(request, "role_select")))
+    selected_athlete_id = selected_trainer_athlete_id_for_mode(request, profile, athlete_user_id)
+    if mode == "coach" and not selected_athlete_id:
+        return RedirectResponse(url="/apps/trainer/coach", status_code=303)
     template = jinja_env.get_template("trainer.html")
     return HTMLResponse(template.render(trainer_context(request, "past", athlete_user_id=selected_athlete_id)))
 
@@ -7018,9 +8348,14 @@ def trainer_past_app(request: Request, athlete_user_id: int = 0):
 @app.get("/apps/trainer/imports")
 def trainer_imports_app(request: Request, athlete_user_id: int = 0):
     """Imported Strava workouts."""
-    selected_athlete_id = athlete_user_id or (request.state.current_user or {}).get("id")
-    if selected_athlete_id and not db.can_view_trainer_user(selected_athlete_id):
-        raise HTTPException(status_code=403, detail="This athlete has not shared Trainer access with you.")
+    profile = dict_from_row(db.get_trainer_profile())
+    mode = trainer_role(profile)
+    if not mode:
+        template = jinja_env.get_template("trainer.html")
+        return HTMLResponse(template.render(trainer_context(request, "role_select")))
+    selected_athlete_id = selected_trainer_athlete_id_for_mode(request, profile, athlete_user_id)
+    if mode == "coach" and not selected_athlete_id:
+        return RedirectResponse(url="/apps/trainer/coach", status_code=303)
     template = jinja_env.get_template("trainer.html")
     return HTMLResponse(template.render(trainer_context(request, "imports", athlete_user_id=selected_athlete_id)))
 
@@ -7173,34 +8508,49 @@ def scan_trainer_audit():
 
 
 @app.get("/apps/trainer/settings")
-def trainer_settings_app(request: Request):
+def trainer_settings_app(request: Request, coach_search: str = ""):
     """Trainer profile and coach permission settings."""
     template = jinja_env.get_template("trainer.html")
-    return HTMLResponse(template.render(trainer_context(request, "settings")))
+    return HTMLResponse(template.render(trainer_context(request, "settings", coach_search=coach_search.strip())))
 
 
 @app.post("/apps/trainer/settings/mode")
-def update_trainer_mode(mode: str = Form("athlete")):
+def update_trainer_mode(mode: str = Form("athlete"), next: str = Form("")):
     """Switch between athlete and coach mode."""
-    db.update_trainer_mode(mode)
-    return RedirectResponse(url="/apps/trainer/settings", status_code=303)
+    requested_mode = mode if mode in {"athlete", "coach"} else "athlete"
+    if requested_mode == "coach" and not current_user_id_is_admin():
+        raise HTTPException(status_code=403, detail="Coach mode requires admin approval.")
+    db.update_trainer_mode(requested_mode)
+    target = "/apps/trainer/coach" if requested_mode == "coach" else "/apps/trainer"
+    if next and requested_mode == "athlete":
+        target = safe_redirect_path(next, "/apps/trainer")
+    return RedirectResponse(url=target, status_code=303)
 
 
 @app.post("/apps/trainer/settings/coaches/grant")
-def grant_trainer_coach(email: str = Form(...)):
+def grant_trainer_coach(coach_user_id: int = Form(0), email: str = Form(""), next: str = Form("/apps/trainer/settings")):
     """Grant a coach permission to view the active athlete's workouts."""
-    coach = dict_from_row(db.get_user_by_email(email))
+    profile = dict_from_row(db.get_trainer_profile())
+    if trainer_role(profile) != "athlete":
+        raise HTTPException(status_code=403, detail="Only athlete accounts can authorize coaches.")
+    coach = dict_from_row(db.get_user_by_id(coach_user_id)) if coach_user_id else dict_from_row(db.get_user_by_email(email))
     if not coach:
-        raise HTTPException(status_code=404, detail="No user with that email exists.")
-    db.grant_trainer_coach(coach["id"])
-    return RedirectResponse(url="/apps/trainer/settings", status_code=303)
+        raise HTTPException(status_code=404, detail="Coach not found.")
+    coach_profile = dict_from_row(db.get_trainer_profile(coach["id"]))
+    if trainer_role(coach_profile) != "coach":
+        raise HTTPException(status_code=400, detail="That user has not selected coach mode.")
+    db.grant_trainer_coach(coach["id"], permission="assign")
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/trainer/settings"), status_code=303)
 
 
 @app.post("/apps/trainer/settings/coaches/{grant_id}/revoke")
-def revoke_trainer_coach(grant_id: int):
+def revoke_trainer_coach(grant_id: int, next: str = Form("/apps/trainer/settings")):
     """Revoke a coach's Trainer access."""
+    profile = dict_from_row(db.get_trainer_profile())
+    if trainer_role(profile) != "athlete":
+        raise HTTPException(status_code=403, detail="Only athlete accounts can revoke coach access.")
     db.revoke_trainer_coach(grant_id)
-    return RedirectResponse(url="/apps/trainer/settings", status_code=303)
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/trainer/settings"), status_code=303)
 
 
 @app.post("/apps/trainer/imports/strava/manual")
@@ -7232,13 +8582,56 @@ def schedule_trainer_workout(
     workout_id: int,
     scheduled_for: str = Form(""),
     notes: str = Form(""),
+    athlete_user_id: int = Form(0),
 ):
     """Schedule a workout from the Trainer catalog."""
     workout = db.get_trainer_workout(workout_id)
     if not workout:
         raise HTTPException(status_code=404, detail="Workout not found")
-    db.add_trainer_session(workout_id, scheduled_for=scheduled_for, notes=notes)
+    current_user_id = get_current_user_id()
+    target_athlete_id = athlete_user_id or current_user_id
+    assigned_by = None
+    if target_athlete_id != current_user_id:
+        if not db.can_coach_assign_trainer_user(target_athlete_id):
+            raise HTTPException(status_code=403, detail="This athlete has not authorized you to assign workouts.")
+        assigned_by = current_user_id
+    else:
+        profile = dict_from_row(db.get_trainer_profile())
+        if trainer_role(profile) == "coach":
+            raise HTTPException(status_code=403, detail="Choose an authorized athlete before assigning a workout.")
+    db.add_trainer_session(
+        workout_id,
+        scheduled_for=scheduled_for,
+        notes=notes,
+        user_id=target_athlete_id,
+        assigned_by_coach_user_id=assigned_by,
+    )
+    if assigned_by:
+        return RedirectResponse(url=f"/apps/trainer/upcoming?athlete_user_id={target_athlete_id}", status_code=303)
     return RedirectResponse(url="/apps/trainer/upcoming", status_code=303)
+
+
+@app.post("/apps/trainer/workouts/assign")
+def assign_trainer_workout(
+    workout_id: int = Form(...),
+    athlete_user_id: int = Form(...),
+    scheduled_for: str = Form(""),
+    notes: str = Form(""),
+):
+    """Assign a catalog workout to an authorized athlete."""
+    workout = db.get_trainer_workout(workout_id)
+    if not workout:
+        raise HTTPException(status_code=404, detail="Workout not found")
+    if not db.can_coach_assign_trainer_user(athlete_user_id):
+        raise HTTPException(status_code=403, detail="This athlete has not authorized you to assign workouts.")
+    db.add_trainer_session(
+        workout_id,
+        scheduled_for=scheduled_for,
+        notes=notes,
+        user_id=athlete_user_id,
+        assigned_by_coach_user_id=get_current_user_id(),
+    )
+    return RedirectResponse(url=f"/apps/trainer/upcoming?athlete_user_id={athlete_user_id}", status_code=303)
 
 
 @app.post("/apps/trainer/sessions/{session_id}/complete")
@@ -7284,6 +8677,7 @@ def projects_page(request: Request):
     context = {
         "request": request,
         "projects": projects,
+        "project_starter_types": PROJECT_STARTER_TYPES,
     }
     template = jinja_env.get_template("projects.html")
     html = template.render(context)
@@ -7391,6 +8785,36 @@ def toggle_scheduler_note_form(
     db.update_scheduler_item(item_id, notes=notes)
     return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/scheduler"), status_code=303)
 
+@app.post("/scheduler/{item_id}/notes/add")
+def add_scheduler_note_form(
+    request: Request,
+    item_id: int,
+    note_text: str = Form(""),
+    next: str = Form("/apps/assistant/scheduler"),
+):
+    """Add one quick item to an existing scheduler card."""
+    item = dict_from_row(db.get_scheduler_item(item_id))
+    wants_json = "application/json" in (request.headers.get("accept") or "")
+    if not item:
+        if wants_json:
+            raise HTTPException(status_code=404, detail="Scheduler item not found")
+        return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/scheduler"), status_code=303)
+    result = append_scheduler_quick_add_note(item, note_text)
+    if not result["note"]:
+        if wants_json:
+            raise HTTPException(status_code=400, detail="Enter an item to add.")
+        return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/scheduler"), status_code=303)
+    if result["added"]:
+        db.update_scheduler_item(item_id, notes=result["notes"])
+    if wants_json:
+        return {
+            "status": "success",
+            "added": result["added"],
+            "note": result["note"],
+            "message": "Added." if result["added"] else "Already in this list.",
+        }
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/scheduler"), status_code=303)
+
 @app.post("/scheduler/{item_id}/notes/make-checklist")
 def make_scheduler_notes_checklist_form(
     item_id: int,
@@ -7478,6 +8902,18 @@ def codex_plan_preview(
     return HTMLResponse(html)
 
 
+def recipe_app_page_context(request: Request, recipe_app, extra_context=None):
+    """Build shared context for Kitchen pages rendered inside the app shell."""
+    context = {
+        "request": request,
+        "recipe_app": recipe_app,
+        "project": recipe_app.get("project") if recipe_app else None,
+        "scheduler_due": scheduler_due_context(),
+    }
+    context.update(extra_context or {})
+    return context
+
+
 @app.get("/apps/recipes")
 def recipe_home_page(request: Request):
     """Recipe app home page."""
@@ -7486,10 +8922,7 @@ def recipe_home_page(request: Request):
         raise HTTPException(status_code=404, detail="Recipe app project not found")
 
     public_complete_meals = filter_public_complete_meals(recipe_app["complete_meals"])
-    context = {
-        "request": request,
-        "recipe_app": recipe_app,
-        "project": recipe_app["project"],
+    context = recipe_app_page_context(request, recipe_app, {
         "import_action": recipe_app["import_action"],
         "groups": recipe_app["groups"],
         "complete_meals": public_complete_meals,
@@ -7500,7 +8933,7 @@ def recipe_home_page(request: Request):
         "done_grocery_lists": recipe_app["done_grocery_lists"],
         "stats": recipe_app["stats"],
         "recipe_view": "home",
-    }
+    })
     template = jinja_env.get_template("recipe_home.html")
     html = template.render(context)
     return HTMLResponse(html)
@@ -7513,10 +8946,7 @@ def recipe_create_meal_page(request: Request):
     if not recipe_app["project"]:
         raise HTTPException(status_code=404, detail="Recipe app project not found")
 
-    context = {
-        "request": request,
-        "recipe_app": recipe_app,
-        "project": recipe_app["project"],
+    context = recipe_app_page_context(request, recipe_app, {
         "import_action": recipe_app["import_action"],
         "groups": recipe_app["groups"],
         "complete_meals": filter_public_complete_meals(recipe_app["complete_meals"]),
@@ -7527,7 +8957,7 @@ def recipe_create_meal_page(request: Request):
         "done_grocery_lists": recipe_app["done_grocery_lists"],
         "stats": recipe_app["stats"],
         "recipe_view": "create_meal",
-    }
+    })
     template = jinja_env.get_template("recipe_home.html")
     html = template.render(context)
     return HTMLResponse(html)
@@ -7540,16 +8970,13 @@ def recipe_manage_page(request: Request):
     if not recipe_app["project"]:
         raise HTTPException(status_code=404, detail="Recipe app project not found")
 
-    context = {
-        "request": request,
-        "recipe_app": recipe_app,
-        "project": recipe_app["project"],
+    context = recipe_app_page_context(request, recipe_app, {
         "import_action": recipe_app["import_action"],
         "groups": recipe_app["groups"],
         "complete_meals": recipe_app["complete_meals"],
         "components": recipe_app["components"],
         "stats": recipe_app["stats"],
-    }
+    })
     template = jinja_env.get_template("recipe_manage.html")
     html = template.render(context)
     return HTMLResponse(html)
@@ -7565,12 +8992,9 @@ def recipe_grocery_lists_page(request: Request):
     done_grocery_lists = annotate_grocery_list_cook_counts(
         prepare_grocery_lists(db.get_recipe_grocery_lists(100, "done"))
     )
-    context = {
-        "request": request,
-        "recipe_app": recipe_app,
-        "project": recipe_app["project"],
+    context = recipe_app_page_context(request, recipe_app, {
         "done_grocery_lists": done_grocery_lists,
-    }
+    })
     template = jinja_env.get_template("recipe_grocery_lists.html")
     html = template.render(context)
     return HTMLResponse(html)
@@ -7591,9 +9015,7 @@ def recipe_meal_detail_page(request: Request, meal_id: int):
         meal.get("display_instructions_text") or "",
     )
     change_log = prepare_recipe_change_log(db.get_recipe_change_log("meal", meal_id))
-    context = {
-        "request": request,
-        "recipe_app": recipe_app,
+    context = recipe_app_page_context(request, recipe_app, {
         "meal": meal,
         "ingredient_sections": ingredient_sections,
         "sectioned_ingredient_values": {
@@ -7603,7 +9025,7 @@ def recipe_meal_detail_page(request: Request, meal_id: int):
         },
         "change_log": change_log,
         "cooked_prompt": request.query_params.get("cooked") == "1",
-    }
+    })
     template = jinja_env.get_template("recipe_meal_detail.html")
     html = template.render(context)
     return HTMLResponse(html)
@@ -7667,9 +9089,7 @@ def recipe_component_detail_page(request: Request, component_id: int):
     )
     change_log = prepare_recipe_change_log(db.get_recipe_change_log("component", component_id))
 
-    context = {
-        "request": request,
-        "recipe_app": recipe_app,
+    context = recipe_app_page_context(request, recipe_app, {
         "component": component,
         "ingredient_sections": ingredient_sections,
         "sectioned_ingredient_values": {
@@ -7678,7 +9098,7 @@ def recipe_component_detail_page(request: Request, component_id: int):
             if section["key"] in BAKING_SECTION_LABELS
         },
         "change_log": change_log,
-    }
+    })
     template = jinja_env.get_template("recipe_component_detail.html")
     html = template.render(context)
     return HTMLResponse(html)
@@ -7746,18 +9166,16 @@ def recipe_import_page(request: Request):
         group["imported_meal_id"] = meal.get("id") if meal else None
         group["imported_meal_status"] = meal.get("status") if meal else ""
 
-    context = {
-        "request": request,
+    context = recipe_app_page_context(request, recipe_app, {
         "project": project,
         "action": action,
-        "recipe_app": recipe_app,
         "recipe_image_groups": recipe_image_groups,
         "recipe_image_roles": [
             {"value": "front", "label": "Front"},
             {"value": "back", "label": "Back"},
             {"value": "extra", "label": "Extra page"},
         ],
-    }
+    })
     context["extraction_stats"] = build_recipe_extraction_stats(context["recipe_image_groups"])
     template = jinja_env.get_template("recipe_import.html")
     html = template.render(context)
@@ -7969,15 +9387,13 @@ def recipe_grocery_list_page(request: Request, list_id: int):
     linked_items = prepare_meal_plan_items(db.get_recipe_meal_plan_items(None, 250))
     linked_items_by_id = {item["id"]: item for item in linked_items}
     linked_cookable_items = cookable_meal_plan_items_for_grocery_list(grocery_list, linked_items_by_id)
-    context = {
-        "request": request,
-        "recipe_app": recipe_app,
+    context = recipe_app_page_context(request, recipe_app, {
         "grocery_list": grocery_list,
         "needed_grocery_items": needed_grocery_items,
         "needed_grocery_sections": needed_grocery_sections,
         "gotten_grocery_items": gotten_grocery_items,
         "linked_meal_plan_items": linked_cookable_items,
-    }
+    })
     template = jinja_env.get_template("recipe_grocery_list.html")
     html = template.render(context)
     return HTMLResponse(html)
@@ -8155,10 +9571,17 @@ def mark_meal_plan_item_cooked_form(item_id: int, feedback: str = Form("")):
 # ============================================================================
 
 @app.post("/projects/create")
-def create_project_form(name: str = Form(...), description: str = Form(""), priority_score: int = Form(3)):
+def create_project_form(
+    name: str = Form(...),
+    description: str = Form(""),
+    priority_score: int = Form(3),
+    project_type: str = Form("general"),
+    next: str = Form("detail"),
+):
     """Create project via form."""
-    db.add_project(name, description, priority_score)
-    return RedirectResponse(url="/projects", status_code=303)
+    project_id = db.add_project(available_project_name(name), description, priority_score, safe_project_type(project_type))
+    redirect_url = f"/projects/{project_id}" if next == "detail" else "/projects"
+    return RedirectResponse(url=redirect_url, status_code=303)
 
 @app.post("/projects/{project_id}/notes/add")
 @app.post("/projects/{project_id}/notes/create")

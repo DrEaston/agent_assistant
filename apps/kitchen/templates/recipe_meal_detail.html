@@ -57,6 +57,7 @@
         </div>
     {% endif %}
 
+    {% if meal.show_bake_mode %}
     <section class="baking-prep-panel" id="bake-mode" data-baking-prep data-meal-id="meal-{{ meal.id }}">
         <div class="baking-prep-header">
             <div>
@@ -95,7 +96,9 @@
             <p class="muted-text">Add sectioned ingredients below to enable Bake Mode.</p>
         {% endif %}
     </section>
+    {% endif %}
 
+    {% if meal.show_bake_mode %}
     <div class="baking-intake-panel">
         <div class="section-header">
             <div>
@@ -142,6 +145,25 @@
             </details>
         {% endif %}
     </div>
+    {% else %}
+    <section class="detail-section">
+        <div class="section-header">
+            <div>
+                <h2>Ingredients</h2>
+                <p class="section-subtitle">Recipe ingredients.</p>
+            </div>
+        </div>
+        {% if meal.display_ingredients_text %}
+            <ul class="recipe-steps-list">
+                {% for ingredient in meal.display_ingredients_text.splitlines() if ingredient.strip() %}
+                    <li>{{ ingredient.strip() }}</li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p class="muted-text">No ingredients were extracted yet.</p>
+        {% endif %}
+    </section>
+    {% endif %}
 
     <div class="recipe-meal-preview recipe-detail-grid">
         <section class="recipe-steps-section">

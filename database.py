@@ -81,6 +81,7 @@ class Database:
                 password_hash TEXT NOT NULL,
                 role TEXT DEFAULT 'user',
                 status TEXT DEFAULT 'active',
+                requested_trainer_mode TEXT DEFAULT 'athlete',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
@@ -109,6 +110,26 @@ class Database:
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
                 FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE,
                 FOREIGN KEY (shared_with_user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS project_artifacts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                action_id INTEGER,
+                title TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                public_slug TEXT DEFAULT '',
+                artifact_type TEXT DEFAULT 'report',
+                content_markdown TEXT DEFAULT '',
+                status TEXT DEFAULT 'draft',
+                is_public INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(project_id, slug),
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY (action_id) REFERENCES recommended_actions(id) ON DELETE SET NULL
             )
         """)
 
@@ -299,6 +320,7 @@ class Database:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL UNIQUE,
                 mode TEXT DEFAULT 'athlete',
+                role_selected_at TEXT DEFAULT '',
                 strava_athlete_id TEXT DEFAULT '',
                 strava_access_token TEXT DEFAULT '',
                 strava_refresh_token TEXT DEFAULT '',
@@ -317,6 +339,8 @@ class Database:
                 coach_user_id INTEGER NOT NULL,
                 permission TEXT DEFAULT 'view',
                 status TEXT DEFAULT 'active',
+                granted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                revoked_at TEXT DEFAULT '',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(athlete_user_id, coach_user_id),
@@ -442,10 +466,14 @@ class Database:
                 status TEXT DEFAULT 'upcoming',
                 notes TEXT DEFAULT '',
                 user_id INTEGER,
+                assigned_by_coach_user_id INTEGER,
+                assigned_athlete_user_id INTEGER,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (workout_id) REFERENCES trainer_workouts(id) ON DELETE CASCADE,
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+                FOREIGN KEY (assigned_by_coach_user_id) REFERENCES users(id) ON DELETE SET NULL,
+                FOREIGN KEY (assigned_athlete_user_id) REFERENCES users(id) ON DELETE SET NULL
             )
         """)
 
@@ -682,6 +710,19 @@ class Database:
         """)
 
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS app_feedback_codex_worker_heartbeats (
+                worker_name TEXT PRIMARY KEY,
+                project_id TEXT DEFAULT 'dieter',
+                status TEXT DEFAULT '',
+                message TEXT DEFAULT '',
+                run_id INTEGER,
+                last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (run_id) REFERENCES app_feedback_codex_runs(id) ON DELETE SET NULL
+            )
+        """)
+
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS recipe_grocery_lists (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT DEFAULT '',
@@ -741,9 +782,18 @@ class Database:
         """)
 
         self._ensure_column(cursor, "projects", "description", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "users", "requested_trainer_mode", "TEXT DEFAULT 'athlete'")
         self._ensure_column(cursor, "projects", "priority_score", "INTEGER DEFAULT 3")
         self._ensure_column(cursor, "projects", "focus_reason", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "projects", "project_type", "TEXT DEFAULT 'general'")
         self._ensure_column(cursor, "projects", "user_id", "INTEGER")
+        self._ensure_column(cursor, "project_artifacts", "action_id", "INTEGER")
+        self._ensure_column(cursor, "project_artifacts", "public_slug", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "project_artifacts", "artifact_type", "TEXT DEFAULT 'report'")
+        self._ensure_column(cursor, "project_artifacts", "content_markdown", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "project_artifacts", "status", "TEXT DEFAULT 'draft'")
+        self._ensure_column(cursor, "project_artifacts", "is_public", "INTEGER DEFAULT 0")
+        self._ensure_column(cursor, "project_artifacts", "updated_at", "TEXT DEFAULT CURRENT_TIMESTAMP")
         self._ensure_column(cursor, "recommended_actions", "sort_order", "INTEGER DEFAULT 100")
         self._ensure_column(cursor, "recommended_actions", "status", "TEXT DEFAULT 'open'")
         self._ensure_column(cursor, "recommended_actions", "completed_at", "TEXT DEFAULT ''")
@@ -781,18 +831,40 @@ class Database:
         self._ensure_column(cursor, "app_feedback_reports", "destination_action_id", "INTEGER")
         self._ensure_column(cursor, "app_feedback_reports", "audit_plan", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_reports", "audit_plan_updated_at", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_reports", "audit_plan_history_json", "TEXT DEFAULT '[]'")
+        self._ensure_column(cursor, "app_feedback_reports", "audit_action_history_json", "TEXT DEFAULT '[]'")
         self._ensure_column(cursor, "app_feedback_reports", "audit_answers_json", "TEXT DEFAULT '{}'")
         self._ensure_column(cursor, "app_feedback_reports", "audit_plan_approved_at", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_reports", "implementation_note", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_reports", "implementation_note_updated_at", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_reports", "last_auto_plan_at", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_reports", "last_auto_evaluated_at", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_reports", "auto_evaluation_status", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_reports", "auto_evaluation_summary", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_reports", "auto_evaluation_plan", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_reports", "auto_evaluation_plan_approved_at", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_reports", "stalled_detected_at", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_reports", "stalled_reason", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_reports", "plan_approval_status", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_reports", "inferred_objective", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_codex_runs", "worker_name", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_codex_runs", "result_note", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_codex_runs", "started_at", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_codex_runs", "finished_at", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_codex_runs", "hidden_at", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_codex_worker_heartbeats", "status", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_codex_worker_heartbeats", "project_id", "TEXT DEFAULT 'dieter'")
+        self._ensure_column(cursor, "app_feedback_codex_worker_heartbeats", "message", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_codex_worker_heartbeats", "run_id", "INTEGER")
+        self._ensure_column(cursor, "app_feedback_codex_worker_heartbeats", "last_seen_at", "TEXT DEFAULT CURRENT_TIMESTAMP")
+        self._ensure_column(cursor, "app_feedback_codex_worker_heartbeats", "updated_at", "TEXT DEFAULT CURRENT_TIMESTAMP")
         self._ensure_column(cursor, "trainer_profiles", "strava_access_token", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_profiles", "strava_refresh_token", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_profiles", "strava_token_expires_at", "INTEGER DEFAULT 0")
         self._ensure_column(cursor, "trainer_profiles", "strava_scope", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "trainer_profiles", "role_selected_at", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "trainer_coach_grants", "granted_at", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "trainer_coach_grants", "revoked_at", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_imported_workouts", "elevation_gain_meters", "REAL")
         self._ensure_column(cursor, "trainer_imported_workouts", "average_speed_mps", "REAL")
         self._ensure_column(cursor, "trainer_imported_workouts", "max_speed_mps", "REAL")
@@ -815,6 +887,8 @@ class Database:
         self._ensure_column(cursor, "recipe_variations", "promotion_threshold", "INTEGER DEFAULT 2")
         self._ensure_column(cursor, "trainer_workouts", "workout_category", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_workout_sessions", "user_id", "INTEGER")
+        self._ensure_column(cursor, "trainer_workout_sessions", "assigned_by_coach_user_id", "INTEGER")
+        self._ensure_column(cursor, "trainer_workout_sessions", "assigned_athlete_user_id", "INTEGER")
         self._ensure_column(cursor, "playlist_drafts", "collection_id", "INTEGER")
         self._repair_sample_data_links(cursor)
         self._deprioritize_overlong_actions(cursor)
@@ -845,16 +919,17 @@ class Database:
         self.close()
         return result["count"]
 
-    def create_user(self, email, display_name, password_hash, role="user"):
+    def create_user(self, email, display_name, password_hash, role="user", status="active", requested_trainer_mode="athlete"):
         """Create an application user."""
+        safe_requested_mode = requested_trainer_mode if requested_trainer_mode in {"athlete", "coach"} else "athlete"
         self.connect()
         cursor = self.conn.cursor()
         cursor.execute(
             """
-            INSERT INTO users (email, display_name, password_hash, role, updated_at)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO users (email, display_name, password_hash, role, status, requested_trainer_mode, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """,
-            (email.strip().lower(), display_name.strip(), password_hash, role),
+            (email.strip().lower(), display_name.strip(), password_hash, role, status, safe_requested_mode),
         )
         user_id = cursor.lastrowid
         self._commit()
@@ -879,6 +954,42 @@ class Database:
         self.close()
         return user
 
+    def search_trainer_coaches(self, query="", limit=25):
+        """Find users who selected coach mode by name or email."""
+        search = (query or "").strip()
+        active_user_id = self._active_user_id()
+        pattern = f"%{search}%"
+        self.connect()
+        cursor = self.conn.cursor()
+        search_clause = ""
+        params = [active_user_id or 0]
+        if search:
+            search_clause = """
+              AND (
+                  users.display_name LIKE ? COLLATE NOCASE
+                  OR users.email LIKE ? COLLATE NOCASE
+              )
+            """
+            params.extend([pattern, pattern])
+        params.append(limit)
+        cursor.execute(
+            f"""
+            SELECT users.id, users.email, users.display_name
+            FROM users
+            JOIN trainer_profiles ON trainer_profiles.user_id = users.id
+            WHERE users.status = 'active'
+              AND trainer_profiles.mode = 'coach'
+              AND users.id != ?
+              {search_clause}
+            ORDER BY users.display_name COLLATE NOCASE, users.email COLLATE NOCASE
+            LIMIT ?
+            """,
+            params,
+        )
+        users = cursor.fetchall()
+        self.close()
+        return users
+
     def get_users_by_role(self, role):
         """Get active users by role."""
         self.connect()
@@ -890,6 +1001,91 @@ class Database:
         users = cursor.fetchall()
         self.close()
         return users
+
+    def get_users_for_admin(self):
+        """Return users for member approval/admin screens."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT users.id,
+                   users.email,
+                   users.display_name,
+                   users.role,
+                   users.status,
+                   users.requested_trainer_mode,
+                   trainer_profiles.mode AS trainer_mode,
+                   users.created_at,
+                   users.updated_at
+            FROM users
+            LEFT JOIN trainer_profiles ON trainer_profiles.user_id = users.id
+            ORDER BY
+                CASE status
+                    WHEN 'pending' THEN 0
+                    WHEN 'active' THEN 1
+                    ELSE 2
+                END,
+                users.created_at DESC,
+                users.id DESC
+            """
+        )
+        users = cursor.fetchall()
+        self.close()
+        return users
+
+    def update_user_status(self, user_id, status):
+        """Update membership status for a user."""
+        safe_status = status if status in {"pending", "active", "rejected", "disabled"} else "pending"
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE users
+            SET status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (safe_status, user_id),
+        )
+        changed = cursor.rowcount
+        self._commit()
+        self.close()
+        return changed > 0
+
+    def update_user_role(self, user_id, role):
+        """Update a user's application role."""
+        safe_role = role if role in {"admin", "user"} else "user"
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE users
+            SET role = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (safe_role, user_id),
+        )
+        changed = cursor.rowcount
+        self._commit()
+        self.close()
+        return changed > 0
+
+    def update_user_requested_trainer_mode(self, user_id, mode):
+        """Store the Trainer mode a user requested during onboarding."""
+        safe_mode = mode if mode in {"athlete", "coach"} else "athlete"
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE users
+            SET requested_trainer_mode = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (safe_mode, user_id),
+        )
+        changed = cursor.rowcount
+        self._commit()
+        self.close()
+        return changed > 0
 
     def create_session(self, user_id, token_hash, expires_at):
         """Persist a login session."""
@@ -1384,16 +1580,17 @@ class Database:
         self.close()
         return projects
 
-    def add_project(self, name, description="", priority_score=3):
+    def add_project(self, name, description="", priority_score=3, project_type="general"):
         """Add a project."""
+        project_type = project_type if project_type in {"general", "research", "technical"} else "general"
         self.connect()
         cursor = self.conn.cursor()
         cursor.execute(
             """
-            INSERT INTO projects (name, description, priority_score, status, updated_at, user_id)
-            VALUES (?, ?, ?, 'active', CURRENT_TIMESTAMP, ?)
+            INSERT INTO projects (name, description, priority_score, project_type, status, updated_at, user_id)
+            VALUES (?, ?, ?, ?, 'active', CURRENT_TIMESTAMP, ?)
             """,
-            (name, description, priority_score, self._active_user_id()),
+            (name, description, priority_score, project_type, self._active_user_id()),
         )
         self._commit()
         project_id = cursor.lastrowid
@@ -1499,6 +1696,15 @@ class Database:
         self.close()
         return project
 
+    def get_any_project_by_name(self, name):
+        """Get a project by name without active-user visibility filtering."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM projects WHERE name = ?", (name,))
+        project = cursor.fetchone()
+        self.close()
+        return project
+
     def get_notes(self, project_id):
         """Get all notes for a project."""
         self.connect()
@@ -1515,6 +1721,110 @@ class Database:
         cursor.execute("INSERT INTO notes (project_id, content) VALUES (?, ?)", (project_id, content))
         self._commit()
         self.close()
+
+    def upsert_project_artifact(
+        self,
+        project_id,
+        title,
+        slug,
+        content_markdown="",
+        action_id=None,
+        public_slug="",
+        artifact_type="report",
+        status="draft",
+        is_public=False,
+    ):
+        """Create or update a project artifact."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO project_artifacts
+                (project_id, action_id, title, slug, public_slug, artifact_type, content_markdown, status, is_public, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(project_id, slug) DO UPDATE SET
+                action_id = excluded.action_id,
+                title = excluded.title,
+                public_slug = excluded.public_slug,
+                artifact_type = excluded.artifact_type,
+                content_markdown = excluded.content_markdown,
+                status = excluded.status,
+                is_public = excluded.is_public,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                project_id,
+                action_id,
+                title,
+                slug,
+                public_slug,
+                artifact_type or "report",
+                content_markdown or "",
+                status or "draft",
+                1 if is_public else 0,
+            ),
+        )
+        self._commit()
+        cursor.execute(
+            "SELECT * FROM project_artifacts WHERE project_id = ? AND slug = ?",
+            (project_id, slug),
+        )
+        artifact = cursor.fetchone()
+        self.close()
+        return artifact
+
+    def get_project_artifacts(self, project_id):
+        """List artifacts for a project."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT project_artifacts.*, recommended_actions.action AS action_title
+            FROM project_artifacts
+            LEFT JOIN recommended_actions ON recommended_actions.id = project_artifacts.action_id
+            WHERE project_artifacts.project_id = ?
+            ORDER BY project_artifacts.updated_at DESC, project_artifacts.id DESC
+            """,
+            (project_id,),
+        )
+        artifacts = cursor.fetchall()
+        self.close()
+        return artifacts
+
+    def get_project_artifact(self, project_id, slug):
+        """Fetch one artifact by project and slug."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT project_artifacts.*, projects.name AS project_name
+            FROM project_artifacts
+            JOIN projects ON projects.id = project_artifacts.project_id
+            WHERE project_artifacts.project_id = ? AND project_artifacts.slug = ?
+            """,
+            (project_id, slug),
+        )
+        artifact = cursor.fetchone()
+        self.close()
+        return artifact
+
+    def get_public_project_artifact(self, public_slug):
+        """Fetch one public artifact by share slug."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT project_artifacts.*, projects.name AS project_name, projects.description AS project_description
+            FROM project_artifacts
+            JOIN projects ON projects.id = project_artifacts.project_id
+            WHERE project_artifacts.public_slug = ?
+              AND project_artifacts.is_public = 1
+            """,
+            (public_slug,),
+        )
+        artifact = cursor.fetchone()
+        self.close()
+        return artifact
 
     def get_scheduler_items(self, status="open", limit=25):
         """Get scheduler/agenda items across projects."""
@@ -3229,24 +3539,31 @@ class Database:
         self.close()
         return row
 
-    def update_trainer_mode(self, mode):
-        """Set the active user's Trainer mode."""
-        user_id = self._active_user_id()
+    def update_trainer_mode_for_user(self, user_id, mode):
+        """Set a user's Trainer mode."""
         if not user_id:
-            return
+            return False
         mode = mode if mode in {"athlete", "coach"} else "athlete"
         self.connect()
         cursor = self.conn.cursor()
         cursor.execute(
             """
-            INSERT INTO trainer_profiles (user_id, mode, updated_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(user_id) DO UPDATE SET mode = excluded.mode, updated_at = CURRENT_TIMESTAMP
+            INSERT INTO trainer_profiles (user_id, mode, role_selected_at, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET
+                mode = excluded.mode,
+                role_selected_at = COALESCE(NULLIF(trainer_profiles.role_selected_at, ''), CURRENT_TIMESTAMP),
+                updated_at = CURRENT_TIMESTAMP
             """,
             (user_id, mode),
         )
         self._commit()
         self.close()
+        return True
+
+    def update_trainer_mode(self, mode):
+        """Set the active user's Trainer mode."""
+        return self.update_trainer_mode_for_user(self._active_user_id(), mode)
 
     def update_trainer_strava_tokens(self, athlete_id, access_token, refresh_token, expires_at, scope=""):
         """Save Strava OAuth tokens for the active Trainer profile."""
@@ -3290,7 +3607,7 @@ class Database:
                 strava_token_expires_at = 0,
                 strava_scope = '',
                 updated_at = CURRENT_TIMESTAMP
-            WHERE playlist_drafts.user_id = ?
+            WHERE user_id = ?
             """,
             (user_id,),
         )
@@ -3302,17 +3619,22 @@ class Database:
         athlete_user_id = self._active_user_id()
         if not athlete_user_id or not coach_user_id or athlete_user_id == coach_user_id:
             return
-        permission = permission if permission in {"view"} else "view"
+        coach = self.get_trainer_profile(coach_user_id)
+        if not coach or coach["mode"] != "coach":
+            return
+        permission = permission if permission in {"view", "assign"} else "view"
         self.connect()
         cursor = self.conn.cursor()
         cursor.execute(
             """
             INSERT INTO trainer_coach_grants
-                (athlete_user_id, coach_user_id, permission, status, updated_at)
-            VALUES (?, ?, ?, 'active', CURRENT_TIMESTAMP)
+                (athlete_user_id, coach_user_id, permission, status, granted_at, revoked_at, updated_at)
+            VALUES (?, ?, ?, 'active', CURRENT_TIMESTAMP, '', CURRENT_TIMESTAMP)
             ON CONFLICT(athlete_user_id, coach_user_id) DO UPDATE SET
                 permission = excluded.permission,
                 status = 'active',
+                granted_at = CURRENT_TIMESTAMP,
+                revoked_at = '',
                 updated_at = CURRENT_TIMESTAMP
             """,
             (athlete_user_id, coach_user_id, permission),
@@ -3326,7 +3648,13 @@ class Database:
         self.connect()
         cursor = self.conn.cursor()
         cursor.execute(
-            "UPDATE trainer_coach_grants SET status = 'revoked', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND athlete_user_id = ?",
+            """
+            UPDATE trainer_coach_grants
+            SET status = 'revoked',
+                revoked_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND athlete_user_id = ?
+            """,
             (grant_id, athlete_user_id),
         )
         self._commit()
@@ -3385,9 +3713,34 @@ class Database:
             """
             SELECT 1
             FROM trainer_coach_grants
+            JOIN trainer_profiles ON trainer_profiles.user_id = trainer_coach_grants.coach_user_id
             WHERE athlete_user_id = ?
               AND coach_user_id = ?
               AND status = 'active'
+              AND trainer_profiles.mode = 'coach'
+            """,
+            (athlete_user_id, viewer_id),
+        )
+        row = cursor.fetchone()
+        self.close()
+        return bool(row)
+
+    def can_coach_assign_trainer_user(self, athlete_user_id):
+        """Return whether the active coach can assign workouts to an athlete."""
+        viewer_id = self._active_user_id()
+        if not viewer_id or viewer_id == athlete_user_id:
+            return False
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT 1
+            FROM trainer_coach_grants
+            JOIN trainer_profiles ON trainer_profiles.user_id = trainer_coach_grants.coach_user_id
+            WHERE trainer_coach_grants.athlete_user_id = ?
+              AND trainer_coach_grants.coach_user_id = ?
+              AND trainer_coach_grants.status = 'active'
+              AND trainer_profiles.mode = 'coach'
             """,
             (athlete_user_id, viewer_id),
         )
@@ -4285,17 +4638,19 @@ class Database:
         self.close()
         return rows
 
-    def add_trainer_session(self, workout_id, scheduled_for="", notes=""):
+    def add_trainer_session(self, workout_id, scheduled_for="", notes="", user_id=None, assigned_by_coach_user_id=None):
         """Schedule a Trainer workout session."""
+        athlete_user_id = user_id or self._active_user_id()
         self.connect()
         cursor = self.conn.cursor()
         cursor.execute(
             """
             INSERT INTO trainer_workout_sessions
-                (workout_id, scheduled_for, notes, status, user_id, updated_at)
-            VALUES (?, ?, ?, 'upcoming', ?, CURRENT_TIMESTAMP)
+                (workout_id, scheduled_for, notes, status, user_id, assigned_athlete_user_id,
+                 assigned_by_coach_user_id, updated_at)
+            VALUES (?, ?, ?, 'upcoming', ?, ?, ?, CURRENT_TIMESTAMP)
             """,
-            (workout_id, scheduled_for, notes, self._active_user_id()),
+            (workout_id, scheduled_for, notes, athlete_user_id, athlete_user_id, assigned_by_coach_user_id),
         )
         session_id = cursor.lastrowid
         self._commit()
@@ -4313,9 +4668,12 @@ class Database:
             """
             SELECT trainer_workout_sessions.*, trainer_workouts.title, trainer_workouts.workout_type,
                    trainer_workouts.focus, trainer_workouts.summary, trainer_workouts.details_json,
-                   trainer_workouts.source_url
+                   trainer_workouts.source_url,
+                   coach.email AS assigned_by_coach_email,
+                   coach.display_name AS assigned_by_coach_name
             FROM trainer_workout_sessions
             JOIN trainer_workouts ON trainer_workouts.id = trainer_workout_sessions.workout_id
+            LEFT JOIN users coach ON coach.id = trainer_workout_sessions.assigned_by_coach_user_id
             WHERE trainer_workout_sessions.status = ?
               AND (? IS NULL OR trainer_workout_sessions.user_id = ?)
             ORDER BY
@@ -4338,9 +4696,12 @@ class Database:
             """
             SELECT trainer_workout_sessions.*, trainer_workouts.title, trainer_workouts.workout_type,
                    trainer_workouts.focus, trainer_workouts.summary, trainer_workouts.details_json,
-                   trainer_workouts.source_url
+                   trainer_workouts.source_url,
+                   coach.email AS assigned_by_coach_email,
+                   coach.display_name AS assigned_by_coach_name
             FROM trainer_workout_sessions
             JOIN trainer_workouts ON trainer_workouts.id = trainer_workout_sessions.workout_id
+            LEFT JOIN users coach ON coach.id = trainer_workout_sessions.assigned_by_coach_user_id
             WHERE trainer_workout_sessions.id = ?
               AND (? IS NULL OR trainer_workout_sessions.user_id = ?)
             """,
@@ -4528,6 +4889,7 @@ class Database:
                        SELECT app_feedback_codex_runs.id
                        FROM app_feedback_codex_runs
                        WHERE app_feedback_codex_runs.report_id = app_feedback_reports.id
+                         AND COALESCE(app_feedback_codex_runs.hidden_at, '') = ''
                        ORDER BY app_feedback_codex_runs.id DESC
                        LIMIT 1
                    ) AS codex_run_id,
@@ -4535,6 +4897,7 @@ class Database:
                        SELECT app_feedback_codex_runs.status
                        FROM app_feedback_codex_runs
                        WHERE app_feedback_codex_runs.report_id = app_feedback_reports.id
+                         AND COALESCE(app_feedback_codex_runs.hidden_at, '') = ''
                        ORDER BY app_feedback_codex_runs.id DESC
                        LIMIT 1
                    ) AS codex_run_status,
@@ -4542,12 +4905,16 @@ class Database:
                        SELECT app_feedback_codex_runs.created_at
                        FROM app_feedback_codex_runs
                        WHERE app_feedback_codex_runs.report_id = app_feedback_reports.id
+                         AND COALESCE(app_feedback_codex_runs.hidden_at, '') = ''
                        ORDER BY app_feedback_codex_runs.id DESC
                        LIMIT 1
-                   ) AS codex_run_requested_at
+                   ) AS codex_run_requested_at,
+                   users.updated_at AS user_updated_at,
+                   users.updated_at AS user_last_active_at
             FROM app_feedback_reports
             LEFT JOIN projects ON projects.id = app_feedback_reports.destination_project_id
             LEFT JOIN recommended_actions ON recommended_actions.id = app_feedback_reports.destination_action_id
+            LEFT JOIN users ON users.id = app_feedback_reports.user_id
         """
         params = []
         if status:
@@ -4559,6 +4926,28 @@ class Database:
         rows = cursor.fetchall()
         self.close()
         return rows
+
+    def find_recent_duplicate_app_feedback_report(self, raw_feedback, area, minutes=10):
+        """Return a recent same-user issue report for repeated form submissions."""
+        self.connect()
+        cursor = self.conn.cursor()
+        active_user_id = self._active_user_id()
+        cursor.execute(
+            """
+            SELECT *
+            FROM app_feedback_reports
+            WHERE raw_feedback = ?
+              AND area = ?
+              AND COALESCE(user_id, 0) = COALESCE(?, 0)
+              AND created_at >= datetime('now', ?)
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (raw_feedback, area, active_user_id, f"-{int(minutes)} minutes"),
+        )
+        row = cursor.fetchone()
+        self.close()
+        return row
 
     def add_app_feedback_codex_run(self, report_id, plan, requested_by_user_id=None):
         """Queue an approved feedback issue plan for local Codex execution."""
@@ -4579,6 +4968,11 @@ class Database:
 
     def get_next_app_feedback_codex_run(self):
         """Return the oldest queued feedback Codex run."""
+        rows = self.get_queued_app_feedback_codex_runs(limit=1)
+        return rows[0] if rows else None
+
+    def get_queued_app_feedback_codex_runs(self, limit=100):
+        """Return queued feedback Codex runs in claim order."""
         self.connect()
         cursor = self.conn.cursor()
         cursor.execute(
@@ -4591,12 +4985,13 @@ class Database:
             JOIN app_feedback_reports ON app_feedback_reports.id = app_feedback_codex_runs.report_id
             WHERE app_feedback_codex_runs.status = 'queued'
             ORDER BY app_feedback_codex_runs.created_at ASC, app_feedback_codex_runs.id ASC
-            LIMIT 1
-            """
+            LIMIT ?
+            """,
+            (limit,),
         )
-        row = cursor.fetchone()
+        rows = cursor.fetchall()
         self.close()
-        return row
+        return rows
 
     def claim_app_feedback_codex_run(self, run_id, worker_name=""):
         """Mark a queued feedback Codex run as running."""
@@ -4651,9 +5046,137 @@ class Database:
         self.close()
         return row
 
+    def get_recent_app_feedback_codex_runs(self, limit=10):
+        """List recent feedback Codex worker runs for the visible issue dashboard."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT app_feedback_codex_runs.*,
+                   app_feedback_reports.title AS report_title,
+                   app_feedback_reports.area AS report_area,
+                   app_feedback_reports.status AS report_status
+            FROM app_feedback_codex_runs
+            JOIN app_feedback_reports ON app_feedback_reports.id = app_feedback_codex_runs.report_id
+            WHERE COALESCE(app_feedback_codex_runs.hidden_at, '') = ''
+            ORDER BY
+                CASE app_feedback_codex_runs.status
+                    WHEN 'running' THEN 0
+                    WHEN 'queued' THEN 1
+                    ELSE 2
+                END,
+                app_feedback_codex_runs.updated_at DESC,
+                app_feedback_codex_runs.id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        rows = cursor.fetchall()
+        self.close()
+        return rows
+
+    def record_app_feedback_codex_worker_heartbeat(self, worker_name, status="", message="", run_id=None, project_id="dieter"):
+        """Record that a trusted Codex worker recently checked in."""
+        safe_worker = (worker_name or "local-codex").strip()[:120] or "local-codex"
+        safe_project = (project_id or "dieter").strip()[:80] or "dieter"
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO app_feedback_codex_worker_heartbeats
+                (worker_name, project_id, status, message, run_id, last_seen_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(worker_name) DO UPDATE SET
+                project_id = excluded.project_id,
+                status = excluded.status,
+                message = excluded.message,
+                run_id = excluded.run_id,
+                last_seen_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (safe_worker, safe_project, status or "", message or "", run_id),
+        )
+        self._commit()
+        self.close()
+
+    def get_app_feedback_codex_worker_heartbeats(self, limit=10):
+        """List recent Codex worker check-ins."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT app_feedback_codex_worker_heartbeats.*,
+                   app_feedback_codex_runs.report_id AS report_id,
+                   app_feedback_codex_runs.status AS run_status,
+                   app_feedback_reports.title AS report_title,
+                   app_feedback_reports.area AS report_area
+            FROM app_feedback_codex_worker_heartbeats
+            LEFT JOIN app_feedback_codex_runs
+                ON app_feedback_codex_runs.id = app_feedback_codex_worker_heartbeats.run_id
+            LEFT JOIN app_feedback_reports
+                ON app_feedback_reports.id = app_feedback_codex_runs.report_id
+            ORDER BY app_feedback_codex_worker_heartbeats.last_seen_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        rows = cursor.fetchall()
+        self.close()
+        return rows
+
+    def hide_app_feedback_codex_run(self, run_id):
+        """Hide one worker run from normal issue dashboards."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE app_feedback_codex_runs
+            SET hidden_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+              AND status NOT IN ('queued', 'running')
+            """,
+            (run_id,),
+        )
+        changed = cursor.rowcount
+        self._commit()
+        self.close()
+        return bool(changed)
+
+    def hide_finished_app_feedback_codex_runs(self, status="failed"):
+        """Hide finished worker runs by status from normal issue dashboards."""
+        self.connect()
+        cursor = self.conn.cursor()
+        if status:
+            cursor.execute(
+                """
+                UPDATE app_feedback_codex_runs
+                SET hidden_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE status = ?
+                  AND status NOT IN ('queued', 'running')
+                  AND COALESCE(hidden_at, '') = ''
+                """,
+                (status,),
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE app_feedback_codex_runs
+                SET hidden_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE status NOT IN ('queued', 'running')
+                  AND COALESCE(hidden_at, '') = ''
+                """
+            )
+        changed = cursor.rowcount
+        self._commit()
+        self.close()
+        return changed
+
     def finish_app_feedback_codex_run(self, run_id, status, result_note):
         """Record the result of a local Codex run."""
-        safe_status = status if status in {"ready_for_testing", "failed"} else "failed"
+        safe_status = status if status in {"ready_for_testing", "failed", "canceled"} else "failed"
         self.connect()
         cursor = self.conn.cursor()
         cursor.execute(
@@ -4685,20 +5208,92 @@ class Database:
         self._commit()
         self.close()
 
+    def append_app_feedback_report_action(self, report_id, action, summary="", details=None):
+        """Append a compact human-readable event to an issue's action chain."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT audit_action_history_json FROM app_feedback_reports WHERE id = ?",
+            (report_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            self.close()
+            return False
+        try:
+            history = json.loads(row["audit_action_history_json"] or "[]")
+        except json.JSONDecodeError:
+            history = []
+        if not isinstance(history, list):
+            history = []
+        clean_details = {}
+        if isinstance(details, dict):
+            for key, value in details.items():
+                clean_key = str(key).strip()[:80]
+                clean_value = str(value).strip()[:500]
+                if clean_key and clean_value:
+                    clean_details[clean_key] = clean_value
+        entry = {
+            "action": str(action or "updated").strip()[:80],
+            "summary": str(summary or "").strip()[:500],
+            "created_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        if clean_details:
+            entry["details"] = clean_details
+        history.append(entry)
+        history = history[-40:]
+        cursor.execute(
+            """
+            UPDATE app_feedback_reports
+            SET audit_action_history_json = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (json.dumps(history, ensure_ascii=False), report_id),
+        )
+        self._commit()
+        self.close()
+        return True
+
     def update_app_feedback_report_audit_plan(self, report_id, audit_plan):
         """Persist the latest Codex audit plan for a feedback report."""
         self.connect()
         cursor = self.conn.cursor()
         cursor.execute(
             """
+            SELECT audit_plan, audit_plan_updated_at, audit_plan_approved_at, audit_plan_history_json
+            FROM app_feedback_reports
+            WHERE id = ?
+            """,
+            (report_id,),
+        )
+        existing = cursor.fetchone()
+        history_json = existing["audit_plan_history_json"] if existing else "[]"
+        try:
+            history = json.loads(history_json or "[]")
+        except json.JSONDecodeError:
+            history = []
+        previous_plan = (existing["audit_plan"] if existing else "") or ""
+        if previous_plan.strip() and previous_plan.strip() != (audit_plan or "").strip():
+            history.append(
+                {
+                    "plan": previous_plan,
+                    "updated_at": (existing["audit_plan_updated_at"] if existing else "") or "",
+                    "approved_at": (existing["audit_plan_approved_at"] if existing else "") or "",
+                }
+            )
+            history = history[-8:]
+        cursor.execute(
+            """
             UPDATE app_feedback_reports
             SET audit_plan = ?,
                 audit_plan_updated_at = CURRENT_TIMESTAMP,
+                audit_plan_history_json = ?,
                 audit_plan_approved_at = '',
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
-            (audit_plan, report_id),
+            (audit_plan, json.dumps(history, ensure_ascii=False), report_id),
         )
         self._commit()
         self.close()
@@ -4733,6 +5328,10 @@ class Database:
         self._commit()
         self.close()
 
+    def clear_app_feedback_report_audit_answers(self, report_id):
+        """Clear stale audit answers when a feedback issue starts a fresh plan cycle."""
+        self.update_app_feedback_report_audit_answers(report_id, "{}")
+
     def update_app_feedback_report_review_note(self, report_id, status, note):
         """Mark a feedback issue ready for user testing with an implementation note."""
         self.connect()
@@ -4751,20 +5350,113 @@ class Database:
         self._commit()
         self.close()
 
-    def delete_app_feedback_report(self, report_id):
-        """Delete a feedback report opened in error for the active user."""
+    def update_app_feedback_auto_evaluation_plan(self, report_id, plan, inferred_objective, stalled_reason):
+        """Persist a reviewable stalled-issue evaluation plan."""
         self.connect()
         cursor = self.conn.cursor()
-        active_user_id = self._active_user_id()
         cursor.execute(
-            "SELECT destination_action_id, user_id FROM app_feedback_reports WHERE id = ?",
+            """
+            UPDATE app_feedback_reports
+            SET auto_evaluation_plan = ?,
+                auto_evaluation_status = 'plan_ready',
+                auto_evaluation_summary = '',
+                auto_evaluation_plan_approved_at = '',
+                last_auto_plan_at = CURRENT_TIMESTAMP,
+                stalled_detected_at = CURRENT_TIMESTAMP,
+                stalled_reason = ?,
+                plan_approval_status = 'pending',
+                inferred_objective = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (plan, stalled_reason, inferred_objective, report_id),
+        )
+        changed = cursor.rowcount
+        self._commit()
+        self.close()
+        return bool(changed)
+
+    def approve_app_feedback_auto_evaluation_plan(self, report_id):
+        """Mark the current stalled-issue evaluation plan approved for safe checks."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE app_feedback_reports
+            SET auto_evaluation_plan_approved_at = CURRENT_TIMESTAMP,
+                auto_evaluation_status = 'approved',
+                plan_approval_status = 'approved',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+              AND COALESCE(auto_evaluation_plan, '') != ''
+            """,
+            (report_id,),
+        )
+        changed = cursor.rowcount
+        self._commit()
+        self.close()
+        return bool(changed)
+
+    def update_app_feedback_auto_evaluation_result(self, report_id, status, summary):
+        """Persist an observation-only automated evaluation outcome."""
+        safe_status = status if status in {"completed", "failed"} else "completed"
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE app_feedback_reports
+            SET auto_evaluation_status = ?,
+                auto_evaluation_summary = ?,
+                last_auto_evaluated_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (safe_status, summary, report_id),
+        )
+        changed = cursor.rowcount
+        self._commit()
+        self.close()
+        return bool(changed)
+
+    def delete_app_feedback_report_audit_plan(self, report_id):
+        """Clear the current audit plan while keeping the feedback issue."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT id FROM app_feedback_reports WHERE id = ?",
             (report_id,),
         )
         row = cursor.fetchone()
         if not row:
             self.close()
             return False
-        if active_user_id and row["user_id"] and row["user_id"] != active_user_id:
+        cursor.execute(
+            """
+            UPDATE app_feedback_reports
+            SET audit_plan = '',
+                audit_plan_updated_at = '',
+                audit_plan_history_json = '[]',
+                audit_answers_json = '{}',
+                audit_plan_approved_at = '',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (report_id,),
+        )
+        self._commit()
+        self.close()
+        return True
+
+    def delete_app_feedback_report(self, report_id):
+        """Delete a feedback report opened in error."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT destination_action_id FROM app_feedback_reports WHERE id = ?",
+            (report_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
             self.close()
             return False
         action_id = row["destination_action_id"]

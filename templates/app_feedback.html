@@ -1,32 +1,211 @@
 {% extends "base.html" %}
 
-{% block title %}App Feedback - Dieter Assistant{% endblock %}
+{% block title %}Dieter Studio{% endblock %}
+
+{% macro issue_pipeline_controls(report, feedback_plan, feedback_plan_questions, feedback_plan_answers, feedback_status, feedback_area, feedback_revision_instructions, request, studio_read_only=false) %}
+    <div class="detail-section">
+        <div class="section-header">
+            <div>
+                <h3>Pipeline Actions</h3>
+                <p class="section-subtitle">Use this page for questions, plan approval, Codex runs, revisions, and closure.</p>
+            </div>
+        </div>
+        <div class="scheduler-item-actions app-feedback-actions">
+            {% if studio_read_only %}
+                <button type="button" class="secondary compact" disabled>Read-only Demo</button>
+                <button type="button" class="secondary compact" disabled>Codex Controls Disabled</button>
+            {% elif not feedback_plan and report.status != "ready_for_review" and report.status != "done" %}
+                <form method="post" action="/apps/issues/{{ report.id }}/audit" class="inline-form">
+                    <input type="hidden" name="status" value="{{ feedback_status or 'open' }}">
+                    <input type="hidden" name="area" value="{{ feedback_area }}">
+                    <button type="submit" class="secondary compact">Audit Issue</button>
+                </form>
+            {% elif report.codex_run_status in ["queued", "running"] %}
+                <button type="button" class="secondary compact" disabled>
+                    {% if report.codex_run_status == "queued" %}Queued in Codex{% else %}Running in Codex{% endif %}
+                </button>
+            {% elif not report.audit_plan_approved_at and not feedback_plan_questions and report.can_approve_and_send_to_codex %}
+                <form method="post" action="/apps/issues/{{ report.id }}/plan/approve-and-run" class="inline-form">
+                    <input type="hidden" name="next" value="/apps/issues/{{ report.id }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
+                    <button type="submit" class="compact">Approve and Send to Codex</button>
+                </form>
+            {% elif report.audit_plan_approved_at and report.can_submit_to_codex %}
+                <form method="post" action="/apps/issues/{{ report.id }}/run-codex" class="inline-form">
+                    <input type="hidden" name="next" value="/apps/issues/{{ report.id }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
+                    <button type="submit" class="compact">
+                        {% if report.codex_run_status == "failed" %}Retry in Codex{% else %}Send to Codex Worker{% endif %}
+                    </button>
+                </form>
+            {% elif feedback_plan_questions %}
+                <button type="button" class="secondary compact" disabled title="Answer the open questions before approval.">Answer Questions First</button>
+            {% elif report.codex_run_status and report.codex_run_status not in ["queued", "running", "failed"] and not report.has_ready_to_test_feedback %}
+                <button type="button" class="secondary compact" disabled title="Submit revision input before approving another Codex run.">Waiting for Revision Input</button>
+            {% endif %}
+
+            {% if report.status != "done" %}
+                <form method="post" action="/apps/issues/{{ report.id }}/status" class="inline-form">
+                    <input type="hidden" name="next" value="/apps/issues/{{ report.id }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
+                    <input type="hidden" name="status" value="done">
+                    <button type="submit" class="secondary compact">Close Issue</button>
+                </form>
+            {% endif %}
+            {% if not studio_read_only and report.auto_evaluation_plan and not report.auto_evaluation_plan_approved_at %}
+                <form method="post" action="/apps/issues/{{ report.id }}/auto-evaluation/approve" class="inline-form">
+                    <input type="hidden" name="next" value="/apps/issues/{{ report.id }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
+                    <button type="submit" class="secondary compact">Approve Evaluation Plan</button>
+                </form>
+            {% elif not studio_read_only and report.auto_evaluation_plan_approved_at and report.auto_evaluation_status != "completed" %}
+                <form method="post" action="/apps/issues/{{ report.id }}/auto-evaluation/run" class="inline-form">
+                    <input type="hidden" name="next" value="/apps/issues/{{ report.id }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
+                    <button type="submit" class="secondary compact">Run Safe Evaluation</button>
+                </form>
+            {% endif %}
+            {% if feedback_plan and report.codex_run_status not in ["queued", "running"] %}
+                <form method="post" action="/apps/issues/{{ report.id }}/plan/delete" class="inline-form">
+                    <input type="hidden" name="next" value="/apps/issues/{{ report.id }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
+                    <button type="submit" class="secondary compact danger-button">Delete Plan</button>
+                </form>
+            {% endif %}
+            <form method="post" action="/apps/issues/{{ report.id }}/delete" class="inline-form">
+                <input type="hidden" name="next" value="/apps/issues?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
+                <button type="submit" class="secondary compact danger-button">Delete Issue</button>
+            </form>
+        </div>
+    </div>
+
+    {% if not studio_read_only and feedback_plan and feedback_plan_questions %}
+        <form method="post" action="/apps/issues/{{ report.id }}/plan/answer-questions" class="detail-section feedback-question-form">
+            <div class="section-header">
+                <div>
+                    <h3>Open Questions</h3>
+                    <p class="section-subtitle">Answer these to generate the next approvable plan for this issue.</p>
+                </div>
+            </div>
+            {% for question in feedback_plan_questions %}
+                <div class="form-group feedback-question-item">
+                    <label for="feedback-question-{{ loop.index }}">{{ question }}</label>
+                    <input type="hidden" name="questions" value="{{ question }}">
+                    <div class="feedback-answer-row">
+                        <textarea
+                            id="feedback-question-{{ loop.index }}"
+                            name="answers"
+                            data-feedback-dictate-target
+                            placeholder="Answer this question..."
+                        >{{ feedback_plan_answers.get(question, "") if feedback_plan_answers else "" }}</textarea>
+                        <button
+                            type="button"
+                            class="secondary compact feedback-dictate-button"
+                            data-feedback-dictate
+                            aria-label="Dictate answer"
+                            title="Dictate answer"
+                        >Mic</button>
+                    </div>
+                </div>
+            {% endfor %}
+            <input type="hidden" name="area" value="{{ feedback_area }}">
+            <textarea name="current_plan" hidden>{{ feedback_plan }}</textarea>
+            <button type="submit" class="secondary">Generate Plan from Answers</button>
+        </form>
+    {% endif %}
+
+    {% if not studio_read_only and feedback_plan and report.codex_run_status not in ["queued", "running"] and report.status != "done" %}
+        <details class="feedback-ready-details" open>
+            <summary>Revision Input</summary>
+            <form method="post" action="/apps/issues/{{ report.id }}/testing-feedback" class="feedback-ready-form">
+                <label for="feedback-revision-pipeline">What should change next?</label>
+                <textarea
+                    id="feedback-revision-pipeline"
+                    name="testing_feedback"
+                    placeholder="Describe the next change, failed test, missing behavior, or plan adjustment."
+                    required
+                ></textarea>
+                <input type="hidden" name="area" value="{{ feedback_area }}">
+                <button type="submit" class="compact">Generate Revised Plan</button>
+            </form>
+        </details>
+    {% endif %}
+
+    {% if report.audit_action_history %}
+        <details class="feedback-addressed-questions" open>
+            <summary>Action Chain</summary>
+            {% for entry in report.audit_action_history|reverse %}
+                <div class="feedback-addressed-question">
+                    <strong>{{ (entry.action or "updated")|replace("_", " ")|title }}{% if entry.created_at %} - {{ entry.created_at }}{% endif %}</strong>
+                    {% if entry.summary %}<p>{{ entry.summary }}</p>{% endif %}
+                </div>
+            {% endfor %}
+        </details>
+    {% endif %}
+    {% if report.auto_evaluation_plan %}
+        <details class="feedback-addressed-questions" open>
+            <summary>Automated Evaluation Plan</summary>
+            {% if report.stalled_reason %}<p>{{ report.stalled_reason }}</p>{% endif %}
+            {% if report.inferred_objective %}<p><strong>{{ report.inferred_objective }}</strong></p>{% endif %}
+            {% if report.auto_evaluation_plan_approved_at %}
+                <small>Approved {{ report.auto_evaluation_plan_approved_at }}</small>
+            {% else %}
+                <small>Waiting for review before automated checks run.</small>
+            {% endif %}
+            <pre class="feedback-worker-note">{{ report.auto_evaluation_plan }}</pre>
+        </details>
+    {% endif %}
+    {% if report.auto_evaluation_summary %}
+        <details class="feedback-addressed-questions" open>
+            <summary>Automated Evaluation Outcome</summary>
+            {% if report.last_auto_evaluated_at %}<small>Evaluated {{ report.last_auto_evaluated_at }}</small>{% endif %}
+            <pre class="feedback-worker-note">{{ report.auto_evaluation_summary }}</pre>
+        </details>
+    {% endif %}
+{% endmacro %}
 
 {% block content %}
 <section class="detail-section">
+    <div id="feedback-working-status" class="feedback-working-status" role="status" aria-live="polite" hidden>
+        <span class="feedback-working-spinner" aria-hidden="true"></span>
+        <span data-feedback-working-message>Working...</span>
+    </div>
     <div class="section-header">
         <div>
-            <h2>App Feedback</h2>
-            <p class="section-subtitle">User-reported bugs, UX issues, and suggested improvements for Codex triage.</p>
+            <h2>Dieter Studio</h2>
+            <p class="section-subtitle">Agentic development console for feedback, planning, Codex worker runs, and testing loops.</p>
         </div>
-        <form method="post" action="/apps/assistant/feedback/synthesize" class="inline-form">
-            <input type="hidden" name="status" value="{{ feedback_status }}">
-            <input type="hidden" name="area" value="{{ feedback_area }}">
-            <button type="submit">Synthesize</button>
-        </form>
-        <form method="post" action="/apps/assistant/feedback/audit-next" class="inline-form">
+        <div class="feedback-header-actions" aria-label="Studio actions">
+        <a class="feedback-header-action" href="/apps/issues">Studio</a>
+        {% if not studio_read_only and not show_issue_create %}
+        <a class="feedback-header-action" href="/apps/issues/new{% if feedback_area %}?area={{ feedback_area|urlencode }}{% endif %}">New Issue</a>
+        {% endif %}
+        {% if not studio_read_only %}
+        <a class="feedback-header-action" href="/apps/issues/workers">Workers</a>
+        {% endif %}
+        {% if not studio_read_only and (show_issue_list is not defined or show_issue_list) %}
+        <form method="post" action="/apps/issues/audit-next" class="inline-form">
             <input type="hidden" name="status" value="{{ feedback_status or 'open' }}">
             <input type="hidden" name="area" value="{{ feedback_area }}">
-            <button type="submit" class="secondary">Audit next issue</button>
+            <button type="submit" class="feedback-header-action">Audit next issue</button>
         </form>
+        <form method="post" action="/apps/issues/stalled-scan" class="inline-form">
+            <input type="hidden" name="status" value="{{ feedback_status or 'active' }}">
+            <input type="hidden" name="area" value="Kitchen / Recipes">
+            <button type="submit" class="feedback-header-action">Plan stalled Kitchen</button>
+        </form>
+        {% endif %}
+        </div>
     </div>
 
+    {% if studio_read_only %}
+        <div class="success-panel">
+            <strong>Guest Studio Preview</strong>
+            <p>{% if show_issue_create %}This demo form shows the normal issue intake path. In the live workflow, submissions become Studio issues, then plans, Codex runs, and tested changes.{% else %}These are sample Codex issue pipelines. You can inspect reports, plans, and action history, but issue creation and Codex execution are disabled in guest mode.{% endif %}</p>
+        </div>
+    {% endif %}
+
+    {% if show_issue_list is not defined or show_issue_list %}
     <div class="filter-tabs" aria-label="Feedback status filters">
         {% set status_options = [("active", "Active"), ("open", "Open"), ("in_progress", "In Progress"), ("ready_for_review", "Ready for Testing"), ("done", "Closed"), ("", "All")] %}
         {% for value, label in status_options %}
             <a
                 class="{% if feedback_status == value %}active{% endif %}"
-                href="/apps/assistant/feedback?status={{ value }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}"
+                href="/apps/issues?status={{ value }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}"
             >{{ label }}</a>
         {% endfor %}
     </div>
@@ -34,16 +213,258 @@
     <div class="filter-tabs" aria-label="Feedback app filters">
         <a
             class="{% if not feedback_area %}active{% endif %}"
-            href="/apps/assistant/feedback?status={{ feedback_status }}"
+            href="/apps/issues?status={{ feedback_status }}"
         >All apps</a>
         {% for area in feedback_areas %}
             <a
                 class="{% if feedback_area == area %}active{% endif %}"
-                href="/apps/assistant/feedback?status={{ feedback_status }}&area={{ area|urlencode }}"
+                href="/apps/issues?status={{ feedback_status }}&area={{ area|urlencode }}"
             >{{ area }}{% if feedback_area_counts.get(area) %} ({{ feedback_area_counts.get(area) }}){% endif %}</a>
         {% endfor %}
     </div>
+    {% endif %}
 
+    {% if show_issue_create %}
+    <section class="feedback-create-panel">
+        <h3>Create Studio Issue</h3>
+        <p class="section-subtitle">{% if studio_read_only %}Demo-only intake preview. Nothing entered here is saved or sent to Codex.{% else %}Use this for bugs, confusing behavior, missing features, or implementation requests that should enter the development pipeline.{% endif %}</p>
+        <form method="post" action="{% if studio_read_only %}#{% else %}/apps/issues/create{% endif %}" class="feedback-create-form"{% if studio_read_only %} onsubmit="return false"{% endif %}>
+            <div class="form-group">
+                <label for="issue-area">App</label>
+                <select id="issue-area" name="area"{% if studio_read_only %} disabled{% endif %}>
+                    {% for area in feedback_areas %}
+                        <option value="{{ area }}" {% if feedback_area == area %}selected{% endif %}>{{ area }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="issue-severity">Severity</label>
+                <select id="issue-severity" name="severity"{% if studio_read_only %} disabled{% endif %}>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="low">Low</option>
+                </select>
+            </div>
+            <div class="form-group feedback-create-description">
+                <label for="issue-description">Issue</label>
+                <div class="feedback-answer-row">
+                    <textarea
+                        id="issue-description"
+                        name="raw_feedback"
+                        data-feedback-dictate-target
+                        placeholder="Describe what happened, what you expected, and where you saw it."
+                        {% if studio_read_only %}readonly{% endif %}
+                        required
+                    >{% if studio_read_only %}Example: The guest homepage should explain how Studio turns app feedback into a Codex implementation plan.{% endif %}</textarea>
+                    <button
+                        type="button"
+                        class="secondary compact feedback-dictate-button"
+                        data-feedback-dictate
+                        aria-label="Dictate issue"
+                        title="Dictate issue"
+                        {% if studio_read_only %}disabled{% endif %}
+                    >Mic</button>
+                </div>
+            </div>
+            <div class="form-group feedback-create-title">
+                <label for="issue-title">Title optional</label>
+                <input id="issue-title" type="text" name="title" placeholder="Dieter can summarize this from the description"{% if studio_read_only %} value="Demo issue intake preview" readonly{% endif %}>
+            </div>
+            <input type="hidden" name="page_url" value="{{ request.query_params.get('source_url') or request.url.path }}">
+            <input type="hidden" name="page_title" value="{{ request.query_params.get('source_title') or 'Dieter Studio' }}">
+            {% if studio_read_only %}
+                <button type="button" class="compact" disabled>Demo Only</button>
+            {% else %}
+                <button type="submit" class="compact">Submit Issue</button>
+            {% endif %}
+        </form>
+    </section>
+    {% endif %}
+
+    {% if show_worker_panel %}
+        <section class="feedback-worker-panel" aria-label="Codex worker status">
+            <div class="section-header">
+                <div>
+                    <h3>Codex Worker Dashboard</h3>
+                    <p class="section-subtitle">Shared worker state from the deployed Studio queue.</p>
+                </div>
+                <div class="scheduler-item-actions app-feedback-actions">
+                    <a class="secondary compact button-link" href="/apps/issues/workers?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">Refresh</a>
+                </div>
+            </div>
+            <div class="feedback-worker-grid">
+                <article class="feedback-worker-active-run">
+                    <span class="feedback-status-pill status-{% if worker_listener_recent %}running{% else %}failed{% endif %}">
+                        {% if worker_listener_recent %}Listening{% else %}No Recent Check-In{% endif %}
+                    </span>
+                    <span>
+                        <strong>Worker listener</strong>
+                        <small>
+                            {% if worker_heartbeats %}
+                                Last check-in {{ worker_heartbeats[0].age_label }} from {{ worker_heartbeats[0].worker_name }}.
+                            {% else %}
+                                No worker has checked in yet.
+                            {% endif %}
+                        </small>
+                    </span>
+                </article>
+                {% for worker in worker_heartbeats %}
+                    <article class="feedback-worker-active-run">
+                        <span class="feedback-status-pill status-{{ (worker.status or 'queued')|replace('_', '-') }}">{{ (worker.status or "listening")|replace("_", " ")|title }}</span>
+                        <span>
+                            <strong>{{ worker.worker_name }}</strong>
+                            <small>
+                                {{ worker.message or "Checked in." }} - {{ worker.age_label }}
+                                {% if worker.report_id %} - Issue #{{ worker.report_id }} {{ worker.report_title or "Untitled issue" }}{% endif %}
+                            </small>
+                        </span>
+                    </article>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="feedback-worker-panel" aria-label="Active Codex runs">
+            <div class="section-header">
+                <div>
+                    <h3>Active Runs</h3>
+                    <p class="section-subtitle">Queued or running jobs waiting for the local worker.</p>
+                </div>
+            </div>
+            <div class="feedback-worker-strip">
+                {% if feedback_worker_runs %}
+                    {% for run in feedback_worker_runs %}
+                        <div class="feedback-worker-active-run">
+                            <span class="feedback-status-pill status-{{ (run.status or 'queued')|replace('_', '-') }}">{{ (run.status or "queued")|replace("_", " ")|title }}</span>
+                            <span>
+                                <strong>#{{ run.report_id }} {{ run.report_title or "Untitled issue" }}</strong>
+                                <small>{{ run.report_area or "Dieter" }}{% if run.worker_name %} - {{ run.worker_name }}{% endif %}{% if run.started_at %} - Started {{ run.started_at }}{% endif %}</small>
+                            </span>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="feedback-worker-empty">No Codex pipeline jobs are currently queued or running.</p>
+                {% endif %}
+            </div>
+        </section>
+
+        <section class="feedback-worker-panel" aria-label="Recent Codex runs">
+            <div class="section-header">
+                <div>
+                    <h3>Recent Runs</h3>
+                    <p class="section-subtitle">Completed, failed, queued, and running worker jobs.</p>
+                </div>
+            </div>
+            <div class="feedback-worker-strip">
+                {% if feedback_worker_recent_runs %}
+                    {% for run in feedback_worker_recent_runs %}
+                        <details class="feedback-worker-run">
+                            <summary>
+                                <span class="feedback-worker-main">
+                                    <strong>#{{ run.report_id }} {{ run.report_title or "Untitled issue" }}</strong>
+                                    <small>{{ run.report_area or "Dieter" }}{% if run.worker_name %} - {{ run.worker_name }}{% endif %}</small>
+                                </span>
+                                <span class="feedback-status-pill status-{{ (run.status or 'queued')|replace('_', '-') }}">{{ (run.status or "queued")|replace("_", " ")|title }}</span>
+                            </summary>
+                            <div class="feedback-worker-meta">
+                                {% if run.created_at %}<span>Queued {{ run.created_at }}</span>{% endif %}
+                                {% if run.started_at %}<span>Started {{ run.started_at }}</span>{% endif %}
+                                {% if run.finished_at %}<span>Finished {{ run.finished_at }}</span>{% endif %}
+                                {% if run.updated_at %}<span>Updated {{ run.updated_at }}</span>{% endif %}
+                            </div>
+                            {% if run.result_note_preview %}
+                                <pre class="feedback-worker-note">{{ run.result_note_preview }}</pre>
+                            {% endif %}
+                        </details>
+                    {% endfor %}
+                {% else %}
+                    <p class="feedback-worker-empty">No Codex worker runs yet.</p>
+                {% endif %}
+            </div>
+        </section>
+        <script>
+            setTimeout(() => {
+                if (!document.hidden) {
+                    window.location.reload();
+                }
+            }, 15000);
+        </script>
+    {% endif %}
+
+    {% if show_issue_list is not defined or show_issue_list %}
+    {% if feedback_board_overview %}
+        <section class="feedback-now-panel" aria-label="Studio pipeline overview">
+            <div class="feedback-now-main">
+                <div>
+                    <h3>Studio Now</h3>
+                    <p>
+                        {% if feedback_board_overview.active_issue %}
+                            Running #{{ feedback_board_overview.active_issue.id }} {{ feedback_board_overview.active_issue.title }}
+                        {% elif feedback_board_overview.queued_issue %}
+                            Next queued: #{{ feedback_board_overview.queued_issue.id }} {{ feedback_board_overview.queued_issue.title }}
+                        {% elif feedback_board_overview.ready_issue %}
+                            Ready to test: #{{ feedback_board_overview.ready_issue.id }} {{ feedback_board_overview.ready_issue.title }}
+                        {% else %}
+                            No active Codex run in this view.
+                        {% endif %}
+                    </p>
+                </div>
+                <span class="feedback-status-pill status-{% if feedback_board_overview.worker_recent %}running{% else %}failed{% endif %}">
+                    {% if feedback_board_overview.worker_recent %}Worker Listening{% else %}Worker Quiet{% endif %}
+                </span>
+            </div>
+            <div class="feedback-flow-strip" aria-label="Issue pipeline counts">
+                {% for stage in feedback_board_overview.stages %}
+                    <div class="feedback-flow-stage feedback-flow-stage-{{ stage.key|replace('_', '-') }}">
+                        <span>{{ stage.label }}</span>
+                        <strong>{{ stage.count }}</strong>
+                    </div>
+                {% endfor %}
+            </div>
+            <div class="feedback-now-notes">
+                <span>{{ feedback_board_overview.worker_message }}</span>
+                {% if feedback_board_overview.failed_issue %}
+                    <a href="/apps/issues/{{ feedback_board_overview.failed_issue.id }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">Review failed #{{ feedback_board_overview.failed_issue.id }}</a>
+                {% endif %}
+                <a href="/apps/issues/workers?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">Worker detail</a>
+            </div>
+        </section>
+    {% endif %}
+    {% if feedback_lane_overview %}
+        <section class="feedback-lanes-panel" aria-label="Studio project lanes">
+            <div class="feedback-lanes-header">
+                <div>
+                    <h3>Lanes</h3>
+                    <p>Project-level workers stay separated so Dieter and future repos can move independently.</p>
+                </div>
+            </div>
+            <div class="feedback-lane-list">
+                {% for lane in feedback_lane_overview %}
+                    <article class="feedback-lane-row">
+                        <div class="feedback-lane-copy">
+                            <strong>{{ lane.label }}</strong>
+                            <small>{{ lane.description }}</small>
+                            {% if lane.active_issue %}
+                                <a href="/apps/issues/{{ lane.active_issue.id }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">Running #{{ lane.active_issue.id }} {{ lane.active_issue.title }}</a>
+                            {% elif lane.repo_env and not lane.repo_configured %}
+                                <small class="feedback-lane-setup">Set {{ lane.repo_env }} before worker runs can execute.</small>
+                            {% else %}
+                                <small>{{ lane.worker_message }}</small>
+                            {% endif %}
+                        </div>
+                        <div class="feedback-lane-metrics" aria-label="{{ lane.label }} lane counts">
+                            <span><strong>{{ lane.counts.queued }}</strong>Queued</span>
+                            <span><strong>{{ lane.counts.running }}</strong>Running</span>
+                            <span><strong>{{ lane.counts.ready_for_testing }}</strong>Test</span>
+                            <span><strong>{{ lane.counts.failed }}</strong>Failed</span>
+                        </div>
+                        <span class="feedback-status-pill status-{% if lane.worker_recent %}running{% elif lane.repo_env and not lane.repo_configured %}queued{% else %}failed{% endif %}">
+                            {% if lane.worker_recent %}Listening{% elif lane.repo_env and not lane.repo_configured %}Setup{% else %}Quiet{% endif %}
+                        </span>
+                    </article>
+                {% endfor %}
+            </div>
+        </section>
+    {% endif %}
     {% if feedback_report_groups %}
         <div class="task-list app-feedback-list">
             {% for group in feedback_report_groups %}
@@ -59,6 +480,9 @@
                                 <span class="feedback-status-pill status-{{ (report.status or 'open')|replace('_', '-') }}">{{ (report.status or "open")|replace("_", " ")|title }}</span>
                             </summary>
                             <div class="feedback-card-detail">
+                                <div class="scheduler-item-actions app-feedback-actions">
+                                    <a class="button-link secondary-link compact-link" href="/apps/issues/{{ report.id }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">Open Pipeline</a>
+                                </div>
                                 <details class="feedback-original-prompt">
                                     <summary>Original prompt</summary>
                                     <p>{{ report.raw_feedback }}</p>
@@ -86,88 +510,20 @@
                                     </div>
                                 {% endif %}
                                 {% if report.audit_plan %}
-                                    <details class="feedback-plan-preview">
-                                        <summary>Codex plan{% if report.audit_plan_approved_at %} - approved{% endif %}</summary>
-                                        {% if report.audit_plan_has_open_questions %}
-                                            <div class="feedback-plan-warning">
-                                                <strong>Open questions remain</strong>
-                                                <form method="post" action="/apps/assistant/feedback/{{ report.id }}/plan/answer-questions" class="feedback-inline-question-form">
-                                                    {% for question in report.audit_plan_unanswered_questions %}
-                                                        <div class="form-group feedback-question-item">
-                                                            <label for="feedback-card-question-{{ report.id }}-{{ loop.index }}">{{ question }}</label>
-                                                            <input type="hidden" name="questions" value="{{ question }}">
-                                                            <textarea
-                                                                id="feedback-card-question-{{ report.id }}-{{ loop.index }}"
-                                                                name="answers"
-                                                                placeholder="Answer this question..."
-                                                            ></textarea>
-                                                        </div>
-                                                    {% endfor %}
-                                                    <input type="hidden" name="area" value="{{ feedback_area }}">
-                                                    <textarea name="current_plan" hidden>{{ report.audit_plan }}</textarea>
-                                                    <button type="submit" class="secondary compact">Re-audit with answers</button>
-                                                </form>
-                                            </div>
+                                    <small>
+                                        Plan:
+                                        {% if report.audit_plan_has_open_questions %}waiting on questions
+                                        {% elif report.audit_plan_approved_at %}approved
+                                        {% else %}ready for approval
                                         {% endif %}
-                                        {% if report.audit_plan_addressed_questions %}
-                                            <details class="feedback-addressed-questions">
-                                                <summary>Addressed questions</summary>
-                                                {% for item in report.audit_plan_addressed_questions %}
-                                                    <div class="feedback-addressed-question">
-                                                        <strong>{{ item.question }}</strong>
-                                                        <p>{{ item.answer }}</p>
-                                                    </div>
-                                                {% endfor %}
-                                            </details>
-                                        {% endif %}
-                                        <pre class="feedback-plan-text">{{ report.audit_plan }}</pre>
-                                        <form method="post" action="/apps/assistant/feedback/{{ report.id }}/plan/revise" class="feedback-plan-card-form">
-                                            <label for="feedback-plan-revision-{{ report.id }}">Suggest edits</label>
-                                            <textarea
-                                                id="feedback-plan-revision-{{ report.id }}"
-                                                name="revision_instructions"
-                                                placeholder="Tell Dieter how to revise this plan."
-                                            ></textarea>
-                                            <input type="hidden" name="area" value="{{ feedback_area }}">
-                                            <textarea name="current_plan" hidden>{{ report.audit_plan }}</textarea>
-                                            <button type="submit" class="secondary compact">Preview revised plan</button>
-                                        </form>
-                                        {% if not report.audit_plan_approved_at and not report.audit_plan_has_open_questions %}
-                                            <form method="post" action="/apps/assistant/feedback/{{ report.id }}/plan/approve-saved" class="inline-form">
-                                                <input type="hidden" name="next" value="{{ request.url.path }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
-                                                <button type="submit" class="compact">Approve plan</button>
-                                            </form>
-                                        {% endif %}
-                                    </details>
+                                    </small>
                                 {% endif %}
-                                <div class="scheduler-item-actions app-feedback-actions">
-                                    {% if report.status != "ready_for_review" and report.status != "done" %}
-                                        <form method="post" action="/apps/assistant/feedback/{{ report.id }}/audit" class="inline-form">
-                                            <input type="hidden" name="status" value="{{ feedback_status or 'open' }}">
-                                            <input type="hidden" name="area" value="{{ feedback_area }}">
-                                            <button type="submit" class="secondary compact">Audit</button>
-                                        </form>
-                                    {% endif %}
-                                    {% if report.audit_plan_approved_at and report.status != "ready_for_review" and report.status != "done" %}
-                                        {% if report.codex_run_status not in ["queued", "running"] %}
-                                            <form method="post" action="/apps/assistant/feedback/{{ report.id }}/run-codex" class="inline-form">
-                                                <input type="hidden" name="next" value="{{ request.url.path }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
-                                                <button type="submit" class="secondary compact">Run Codex</button>
-                                            </form>
-                                        {% endif %}
-                                    {% endif %}
-                                    {% if report.status == "ready_for_review" %}
-                                        <form method="post" action="/apps/assistant/feedback/{{ report.id }}/status" class="inline-form">
-                                            <input type="hidden" name="next" value="{{ request.url.path }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
-                                            <input type="hidden" name="status" value="done">
-                                            <button type="submit" class="secondary compact">Approve / Close</button>
-                                        </form>
-                                    {% endif %}
-                                    <form method="post" action="/apps/assistant/feedback/{{ report.id }}/delete" class="inline-form">
-                                        <input type="hidden" name="next" value="{{ request.url.path }}?status={{ feedback_status }}{% if feedback_area %}&area={{ feedback_area|urlencode }}{% endif %}">
-                                        <button type="submit" class="secondary compact danger-button">Delete</button>
-                                    </form>
-                                </div>
+                                {% if report.auto_evaluation_status %}
+                                    <small>Automated evaluation: {{ report.auto_evaluation_status|replace("_", " ")|title }}</small>
+                                {% endif %}
+                                {% if report.inferred_objective %}
+                                    <small>{{ report.inferred_objective }}</small>
+                                {% endif %}
                             </div>
                         </details>
                     {% endfor %}
@@ -178,6 +534,7 @@
         <div class="empty-state">
             <p>No feedback reports match this view.</p>
         </div>
+    {% endif %}
     {% endif %}
 </section>
 
@@ -195,23 +552,7 @@
         {% if feedback_plan_saved %}
             <div class="success-panel">
                 <strong>Plan saved</strong>
-                <p>The approved plan was written for Codex access.</p>
-            </div>
-        {% endif %}
-        {% if feedback_plan_pending_approval and active_feedback_report %}
-            <div class="detail-section">
-                <div class="section-header">
-                    <div>
-                        <h3>Pending Approval</h3>
-                        <p class="section-subtitle">Approve this draft to write it, or suggest another revision below.</p>
-                    </div>
-                    <form method="post" action="/apps/assistant/feedback/{{ active_feedback_report.id }}/plan/approve" class="inline-form">
-                        <input type="hidden" name="area" value="{{ feedback_area }}">
-                        <input type="hidden" name="confirmation_token" value="{{ feedback_plan_approval_token }}">
-                        <textarea name="feedback_plan" hidden>{{ feedback_plan }}</textarea>
-                        <button type="submit">Approve plan</button>
-                    </form>
-                </div>
+                <p>The approved plan is now the active Codex plan for this issue.</p>
             </div>
         {% endif %}
         {% if feedback_questions_answered %}
@@ -220,59 +561,85 @@
                 <p>Dieter re-audited the issue with your answers. Approve the plan to save it, or keep revising.</p>
             </div>
         {% endif %}
-        {% if active_feedback_report and feedback_plan_questions %}
-            <form method="post" action="/apps/assistant/feedback/{{ active_feedback_report.id }}/plan/answer-questions" class="detail-section feedback-question-form">
-                <div class="section-header">
-                    <div>
-                        <h3>Open Questions</h3>
-                        <p class="section-subtitle">Answer these, then re-audit the plan with your answers included.</p>
-                    </div>
-                </div>
-                {% for question in feedback_plan_questions %}
-                    <div class="form-group feedback-question-item">
-                        <label for="feedback-question-{{ loop.index }}">{{ question }}</label>
-                        <input type="hidden" name="questions" value="{{ question }}">
-                        <div class="feedback-answer-row">
-                            <textarea
-                                id="feedback-question-{{ loop.index }}"
-                                name="answers"
-                                data-feedback-dictate-target
-                                placeholder="Answer this question..."
-                            >{{ feedback_plan_answers.get(question, "") if feedback_plan_answers else "" }}</textarea>
-                            <button
-                                type="button"
-                                class="secondary compact feedback-dictate-button"
-                                data-feedback-dictate
-                                aria-label="Dictate answer"
-                                title="Dictate answer"
-                            >Mic</button>
-                        </div>
-                    </div>
-                {% endfor %}
-                <input type="hidden" name="area" value="{{ feedback_area }}">
-                <textarea name="current_plan" hidden>{{ feedback_plan }}</textarea>
-                <button type="submit" class="secondary">Re-audit with answers</button>
-            </form>
+        {% if active_feedback_report %}
+            {{ issue_pipeline_controls(active_feedback_report, feedback_plan, feedback_plan_questions, feedback_plan_answers, feedback_status, feedback_area, feedback_revision_instructions, request, studio_read_only) }}
         {% endif %}
         <pre class="work-packet">{{ feedback_plan }}</pre>
-        {% if active_feedback_report %}
-            <form method="post" action="/apps/assistant/feedback/{{ active_feedback_report.id }}/plan/revise" class="detail-section">
-                <div class="form-group">
-                    <label for="feedback-plan-revision">Suggest edits to this plan</label>
-                    <textarea
-                        id="feedback-plan-revision"
-                        name="revision_instructions"
-                        placeholder="Example: split this into frontend and backend work, and add a browser verification step."
-                    >{{ feedback_revision_instructions or "" }}</textarea>
-                </div>
-                <input type="hidden" name="area" value="{{ feedback_area }}">
-                <textarea name="current_plan" hidden>{{ feedback_plan }}</textarea>
-                <button type="submit" class="secondary">Preview revised plan</button>
-            </form>
-        {% endif %}
+    </section>
+{% elif active_feedback_report %}
+    <section class="detail-section">
+        <div class="section-header">
+            <div>
+                <h2>Issue Pipeline</h2>
+                <p class="section-subtitle">#{{ active_feedback_report.id }} {{ active_feedback_report.title }}</p>
+            </div>
+        </div>
+        <details class="feedback-original-prompt" open>
+            <summary>Original prompt</summary>
+            <p>{{ active_feedback_report.raw_feedback }}</p>
+        </details>
+        {{ issue_pipeline_controls(active_feedback_report, "", [], {}, feedback_status, feedback_area, feedback_revision_instructions, request, studio_read_only) }}
     </section>
 {% endif %}
 <script>
+    (() => {
+        const status = document.getElementById("feedback-working-status");
+        const statusMessage = status?.querySelector("[data-feedback-working-message]");
+        const workingMessageFor = (button) => {
+            const text = (button?.textContent || "").trim().toLowerCase();
+            if (text.includes("submit issue")) return "Creating issue...";
+            if (text.includes("audit")) return "Auditing issue...";
+            if (text.includes("re-audit") || text.includes("refresh") || text.includes("preview") || text.includes("draft")) return "Drafting plan...";
+            if (text.includes("approve and send")) return "Approving and sending to Codex...";
+            if (text.includes("approve plan") || text.includes("approve revised")) return "Approving plan...";
+            if (text.includes("codex") || text.includes("worker")) return "Sending to Codex worker...";
+            if (text.includes("close") || text.includes("clear") || text.includes("hide") || text.includes("delete")) return "Updating issues...";
+            return "Working...";
+        };
+        document.querySelectorAll("section.detail-section form[method='post']").forEach((form) => {
+            form.addEventListener("submit", (event) => {
+                if (event.defaultPrevented || (form.checkValidity && !form.checkValidity())) {
+                    return;
+                }
+                const submitter = event.submitter || form.querySelector("button[type='submit']");
+                const message = workingMessageFor(submitter);
+                form.classList.add("is-working");
+                if (submitter) {
+                    submitter.dataset.originalText = submitter.textContent.trim();
+                    submitter.textContent = message;
+                }
+                form.querySelectorAll("button").forEach((button) => {
+                    button.disabled = true;
+                });
+                form.querySelectorAll("input:not([type='hidden']), textarea").forEach((control) => {
+                    control.readOnly = true;
+                });
+                if (status && statusMessage) {
+                    statusMessage.textContent = message;
+                    status.hidden = false;
+                }
+            });
+        });
+        window.addEventListener("pageshow", () => {
+            document.querySelectorAll("form.is-working").forEach((form) => {
+                form.classList.remove("is-working");
+                form.querySelectorAll("button").forEach((control) => {
+                    control.disabled = false;
+                });
+                form.querySelectorAll("input:not([type='hidden']), textarea").forEach((control) => {
+                    control.readOnly = false;
+                });
+                form.querySelectorAll("button[data-original-text]").forEach((button) => {
+                    button.textContent = button.dataset.originalText;
+                    delete button.dataset.originalText;
+                });
+            });
+            if (status) {
+                status.hidden = true;
+            }
+        });
+    })();
+
     (() => {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         const buttons = document.querySelectorAll("[data-feedback-dictate]");

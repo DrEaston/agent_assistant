@@ -1,0 +1,1 @@
+"""Kitchen app boundary."""

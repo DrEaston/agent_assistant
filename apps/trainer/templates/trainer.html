@@ -2,7 +2,7 @@
 
 {% block title %}Dieter Trainer{% endblock %}
 
-{% macro workout_card(workout, show_schedule=True) %}
+{% macro workout_card(workout, show_schedule=True, target_athlete_id=0, schedule_label="Schedule") %}
     <article class="trainer-card">
         <div class="trainer-card-header">
             <div>
@@ -26,9 +26,12 @@
             {% endif %}
             {% if show_schedule %}
                 <form method="post" action="/apps/trainer/workouts/{{ workout.id }}/schedule">
+                    {% if target_athlete_id %}
+                        <input type="hidden" name="athlete_user_id" value="{{ target_athlete_id }}">
+                    {% endif %}
                     <input type="date" name="scheduled_for" aria-label="Workout date">
                     <input type="text" name="notes" placeholder="Notes" aria-label="Workout notes">
-                    <button type="submit" class="compact">Schedule</button>
+                    <button type="submit" class="compact">{{ schedule_label }}</button>
                 </form>
             {% endif %}
         </div>
@@ -50,6 +53,9 @@
                 Scheduled {{ session.scheduled_for }}
             {% else %}
                 Unscheduled
+            {% endif %}
+            {% if session.assigned_by_coach_user_id %}
+                <br>Assigned by {{ session.assigned_by_coach_name or session.assigned_by_coach_email or "coach" }}
             {% endif %}
         </p>
         {% if session.notes %}
@@ -96,9 +102,9 @@
                 <p>{{ week.week_start }} to {{ week.week_end }}</p>
             </div>
             <div class="trainer-filter-row trainer-week-nav">
-                <a href="{{ route }}?week_offset={{ week.previous_offset }}">Past Week</a>
+                <a href="{{ route }}{{ '&' if '?' in route else '?' }}week_offset={{ week.previous_offset }}">Past Week</a>
                 {% if week.week_offset > 0 %}
-                    <a href="{{ route }}?week_offset={{ week.next_offset }}">Newer Week</a>
+                    <a href="{{ route }}{{ '&' if '?' in route else '?' }}week_offset={{ week.next_offset }}">Newer Week</a>
                 {% endif %}
             </div>
         </div>
@@ -165,7 +171,7 @@
     </div>
 {% endmacro %}
 
-{% macro weekly_plan_card(plan) %}
+{% macro weekly_plan_card(plan, target_athlete_id=0, can_schedule=True) %}
     <article class="trainer-card">
         <span class="trainer-card-meta">This Week's Menu</span>
         <h3>Workouts To Choose From</h3>
@@ -175,11 +181,16 @@
                     <span class="trainer-card-meta">{{ item.label }}</span>
                     <h3>{{ item.workout.title }}</h3>
                     <p>{{ item.workout.summary }}</p>
-                    <form method="post" action="/apps/trainer/workouts/{{ item.workout.id }}/schedule">
-                        <input type="date" name="scheduled_for" aria-label="Workout date">
-                        <input type="text" name="notes" placeholder="Notes" aria-label="Workout notes">
-                        <button type="submit" class="compact">Schedule</button>
-                    </form>
+                    {% if can_schedule %}
+                        <form method="post" action="/apps/trainer/workouts/{{ item.workout.id }}/schedule">
+                            {% if target_athlete_id %}
+                                <input type="hidden" name="athlete_user_id" value="{{ target_athlete_id }}">
+                            {% endif %}
+                            <input type="date" name="scheduled_for" aria-label="Workout date">
+                            <input type="text" name="notes" placeholder="Notes" aria-label="Workout notes">
+                            <button type="submit" class="compact">{% if target_athlete_id %}Assign{% else %}Schedule{% endif %}</button>
+                        </form>
+                    {% endif %}
                 </div>
             {% endfor %}
         {% else %}
@@ -203,10 +214,156 @@
         </div>
     </div>
 
-    {% if active_tab == "home" %}
+    {% if active_tab != "role_select" %}
+        <div class="trainer-view-controls">
+            <div class="trainer-role-status trainer-role-status-{{ trainer_mode or 'athlete' }}">
+                <span>{{ (trainer_mode or "athlete")|title }} Mode</span>
+                <strong>{{ trainer_current_user.email if trainer_current_user else "Unknown account" }}</strong>
+                {% if trainer_mode == "coach" %}
+                    <small>Coach view uses the athlete dropdown for shared training history.</small>
+                {% else %}
+                    <small>Athlete view shows your own training and coach sharing.</small>
+                {% endif %}
+            </div>
+            {% if trainer_mode == "coach" %}
+                <form method="get" action="/apps/trainer/coach" class="trainer-view-form">
+                    <label for="trainer-athlete-select">Select Athlete</label>
+                    <select id="trainer-athlete-select" name="athlete_user_id">
+                        <option value="0">Choose athlete</option>
+                        {% for athlete in coach_athletes %}
+                            <option value="{{ athlete.athlete_user_id }}" {% if selected_athlete_id == athlete.athlete_user_id %}selected{% endif %}>
+                                {{ athlete.email }}{% if athlete.display_name %} - {{ athlete.display_name }}{% endif %}
+                            </option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="compact">View</button>
+                </form>
+            {% else %}
+                <p>Athlete mode shows only your own workout history.</p>
+            {% endif %}
+        </div>
+    {% endif %}
+
+    {% if active_tab == "role_select" %}
+        <article class="trainer-card trainer-role-card">
+            <span class="trainer-card-meta">Trainer Mode</span>
+            <h3>Choose How To View Trainer</h3>
+            <form method="post" action="/apps/trainer/settings/mode" class="trainer-view-form">
+                <label for="trainer-initial-mode">Mode</label>
+                <select id="trainer-initial-mode" name="mode">
+                    <option value="athlete">Athlete</option>
+                    <option value="coach">Coach</option>
+                </select>
+                <button type="submit" class="compact">Continue</button>
+            </form>
+        </article>
+    {% elif active_tab == "coach" %}
+        <div class="trainer-coach-stack">
+            <article class="trainer-card">
+                <span class="trainer-card-meta">Coach Dashboard</span>
+                <h3>Select Athlete</h3>
+                <p class="trainer-card-note">Signed in as coach {{ trainer_current_user.email if trainer_current_user else "" }}.</p>
+                {% if coach_athletes %}
+                    <form method="get" action="/apps/trainer/coach" class="trainer-select-form">
+                        <select name="athlete_user_id" aria-label="Select linked athlete">
+                            <option value="0">Choose athlete</option>
+                            {% for athlete in coach_athletes %}
+                                <option value="{{ athlete.athlete_user_id }}" {% if selected_coach_athlete and athlete.athlete_user_id == selected_coach_athlete.athlete_user_id %}selected{% endif %}>
+                                    {{ athlete.email }}{% if athlete.display_name %} - {{ athlete.display_name }}{% endif %}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="compact">Open</button>
+                    </form>
+                {% else %}
+                    <p>No athletes have authorized this coach account yet.</p>
+                {% endif %}
+            </article>
+            {% if selected_coach_athlete %}
+                <a class="trainer-card trainer-coach-dashboard-link" href="/apps/trainer?athlete_user_id={{ selected_coach_athlete.athlete_user_id }}">
+                    <span class="trainer-card-meta">Athlete Dashboard</span>
+                    <h3>{{ selected_coach_athlete.email }}{% if selected_coach_athlete.display_name %} - {{ selected_coach_athlete.display_name }}{% endif %}</h3>
+                    <div class="trainer-stat-grid">
+                        <div><span>{{ week_dashboard.run_count }}</span><small>Runs</small></div>
+                        <div><span>{{ week_dashboard.distance_miles|round(1) }}</span><small>Miles</small></div>
+                        <div><span>{{ week_dashboard.ride_count }}</span><small>Rides</small></div>
+                        <div><span>{{ week_dashboard.bike_distance_miles|round(1) }}</span><small>Bike Miles</small></div>
+                    </div>
+                    <p>Open full dashboard and training detail.</p>
+                </a>
+                <article class="trainer-card">
+                    <span class="trainer-card-meta">Assign Workout</span>
+                    <h3>{{ selected_coach_athlete.email }}{% if selected_coach_athlete.display_name %} - {{ selected_coach_athlete.display_name }}{% endif %}</h3>
+                    <form method="post" action="/apps/trainer/workouts/assign" class="trainer-assignment-form">
+                        <input type="hidden" name="athlete_user_id" value="{{ selected_coach_athlete.athlete_user_id }}">
+                        <select name="workout_id" aria-label="Workout template" required>
+                            {% for workout in workouts %}
+                                <option value="{{ workout.id }}">{{ workout.title }}{% if workout.workout_type %} ({{ workout.workout_type }}){% endif %}</option>
+                            {% endfor %}
+                        </select>
+                        <input type="date" name="scheduled_for" aria-label="Workout date">
+                        <input type="text" name="notes" placeholder="Notes" aria-label="Workout notes">
+                        <button type="submit" class="compact">Assign</button>
+                    </form>
+                </article>
+            {% endif %}
+        </div>
+    {% elif active_tab == "coaching" %}
+        <div class="trainer-card-grid">
+            <article class="trainer-card">
+                <span class="trainer-card-meta">Coaching</span>
+                <h3>Add Coach</h3>
+                <p class="trainer-card-note">Signed in as athlete {{ trainer_current_user.email if trainer_current_user else "" }}. Search by coach name or email.</p>
+                <form method="get" action="/apps/trainer/coaching" class="trainer-select-form">
+                    <input type="search" name="coach_search" value="{{ coach_search_query }}" list="trainer-coach-options" placeholder="Search coach name or email" aria-label="Search coach name or email">
+                    <datalist id="trainer-coach-options">
+                        {% for coach in coach_search_results %}
+                            <option value="{{ coach.email }}">{{ coach.display_name or "Unnamed Coach" }} - {{ coach.email }}</option>
+                        {% endfor %}
+                    </datalist>
+                    <button type="submit" class="compact">Search</button>
+                </form>
+                {% if coach_search_results %}
+                    <form method="post" action="/apps/trainer/settings/coaches/grant" class="trainer-select-form">
+                        <input type="hidden" name="next" value="/apps/trainer/coaching">
+                        <label for="trainer-coach-select">Coach</label>
+                        <select id="trainer-coach-select" name="coach_user_id" required>
+                            {% for coach in coach_search_results %}
+                                <option value="{{ coach.id }}">{{ coach.display_name or "Unnamed Coach" }} - {{ coach.email }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="compact">Add Coach</button>
+                    </form>
+                {% elif coach_search_query %}
+                    <p>No coach accounts matched that search.</p>
+                {% else %}
+                    <p>No coach accounts are available yet.</p>
+                {% endif %}
+            </article>
+            <article class="trainer-card">
+                <span class="trainer-card-meta">Linked Coaches</span>
+                <h3>Current Coach Access</h3>
+                {% if coach_grants %}
+                    <ul class="trainer-detail-list">
+                        {% for grant in coach_grants %}
+                            <li>
+                                <strong>{{ grant.display_name or grant.email }}</strong> - {{ grant.email }}
+                                <form method="post" action="/apps/trainer/settings/coaches/{{ grant.id }}/revoke" class="inline-form">
+                                    <input type="hidden" name="next" value="/apps/trainer/coaching">
+                                    <button type="submit" class="secondary compact danger-button">Revoke</button>
+                                </form>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p>No coaches are linked to this athlete account.</p>
+                {% endif %}
+            </article>
+        </div>
+    {% elif active_tab == "home" %}
         <div class="trainer-card-grid trainer-dashboard-grid">
-            {{ week_dashboard_card(week_dashboard, "/apps/trainer", mileage_chart) }}
-            {{ weekly_plan_card(weekly_workout_plan) }}
+            {{ week_dashboard_card(week_dashboard, "/apps/trainer?athlete_user_id=" ~ selected_athlete_id if not is_viewing_own_trainer else "/apps/trainer", mileage_chart) }}
+            {{ weekly_plan_card(weekly_workout_plan, selected_athlete_id if not is_viewing_own_trainer else 0, true) }}
         </div>
         {% if is_viewing_own_trainer and strava_connected %}
             <div class="trainer-card">
@@ -218,20 +375,10 @@
                 </form>
             </div>
         {% endif %}
-        {% if trainer_profile and trainer_profile.mode == "coach" and coach_athletes %}
-            <div class="trainer-card">
-                <h3>Coach View</h3>
-                <div class="trainer-filter-row">
-                    {% for athlete in coach_athletes %}
-                        <a href="/apps/trainer/imports?athlete_user_id={{ athlete.athlete_user_id }}">{{ athlete.display_name or athlete.email }}</a>
-                    {% endfor %}
-                </div>
-            </div>
-        {% endif %}
         <div class="trainer-card">
             <span class="trainer-card-meta">Account</span>
             <h3>{{ request.state.current_user.display_name or request.state.current_user.email }}</h3>
-            <p>{{ trainer_profile.mode|title if trainer_profile else "Athlete" }} mode. Recommended workouts are shared; workout summaries belong to the logged-in athlete unless coach access is granted.</p>
+            <p>{{ trainer_profile.mode|title if trainer_profile else "Athlete" }} mode. Athlete mode shows your own history; coach mode uses the athlete dropdown.</p>
         </div>
     {% elif active_tab == "library" %}
         <div class="trainer-filter-row" aria-label="Workout type filters">
@@ -243,7 +390,7 @@
         {% if workouts %}
             <div class="trainer-card-grid">
                 {% for workout in workouts %}
-                    {{ workout_card(workout) }}
+                    {{ workout_card(workout, trainer_mode != "coach") }}
                 {% endfor %}
             </div>
         {% else %}
@@ -346,7 +493,7 @@
                     {% endfor %}
                 </article>
             {% endif %}
-            {{ week_dashboard_card(week_dashboard, "/apps/trainer/imports", mileage_chart) }}
+            {{ week_dashboard_card(week_dashboard, "/apps/trainer/imports?athlete_user_id=" ~ selected_athlete_id if not is_viewing_own_trainer else "/apps/trainer/imports", mileage_chart) }}
             {% if weekly_run_summaries %}
                 <article class="trainer-card">
                     <span class="trainer-card-meta">Recent Training Load</span>
@@ -480,56 +627,84 @@
     {% elif active_tab == "settings" %}
         <div class="trainer-card-grid">
             <article class="trainer-card">
-                <span class="trainer-card-meta">Mode</span>
-                <h3>Trainer Mode</h3>
-                <form method="post" action="/apps/trainer/settings/mode">
-                    <select name="mode">
-                        <option value="athlete" {% if trainer_profile and trainer_profile.mode == "athlete" %}selected{% endif %}>Athlete</option>
-                        <option value="coach" {% if trainer_profile and trainer_profile.mode == "coach" %}selected{% endif %}>Coach</option>
-                    </select>
-                    <button type="submit" class="compact">Save</button>
-                </form>
+                <span class="trainer-card-meta">Account</span>
+                <h3>{{ trainer_mode|title if trainer_mode else "Trainer" }} Mode</h3>
+                <p>Trainer account mode is managed from admin settings.</p>
             </article>
-            <article class="trainer-card">
-                <span class="trainer-card-meta">Athlete Sharing</span>
-                <h3>Coach Permissions</h3>
-                <form method="post" action="/apps/trainer/settings/coaches/grant">
-                    <input type="email" name="email" placeholder="Coach email" required>
-                    <button type="submit" class="compact">Grant view access</button>
-                </form>
-                {% if coach_grants %}
-                    <ul class="trainer-detail-list">
-                        {% for grant in coach_grants %}
-                            <li>
-                                <strong>{{ grant.display_name or grant.email }}</strong>
-                                <form method="post" action="/apps/trainer/settings/coaches/{{ grant.id }}/revoke" class="inline-form">
-                                    <button type="submit" class="secondary compact danger-button">Revoke</button>
-                                </form>
-                            </li>
-                        {% endfor %}
-                    </ul>
-                {% endif %}
-            </article>
-            <article class="trainer-card">
-                <span class="trainer-card-meta">Shoe Inventory</span>
-                <h3>Running Shoes</h3>
-                <form method="post" action="/apps/trainer/shoes">
-                    <input type="hidden" name="next" value="/apps/trainer/settings">
-                    <input type="text" name="name" placeholder="Shoe nickname" required>
-                    <input type="text" name="brand" placeholder="Brand">
-                    <input type="text" name="model" placeholder="Model">
-                    <input type="number" name="initial_miles" step="0.1" min="0" placeholder="Starting miles">
-                    <input type="text" name="notes" placeholder="Notes">
-                    <button type="submit" class="compact">Save shoe</button>
-                </form>
-                {% if trainer_shoes %}
-                    <ul class="trainer-detail-list">
-                        {% for shoe in trainer_shoes %}
-                            <li><strong>{{ shoe.name }}</strong>{% if shoe.brand or shoe.model %} - {{ shoe.brand }} {{ shoe.model }}{% endif %} - {{ shoe.total_miles|round|int }} mi</li>
-                        {% endfor %}
-                    </ul>
-                {% endif %}
-            </article>
+            {% if trainer_mode == "athlete" %}
+                <article class="trainer-card">
+                    <span class="trainer-card-meta">Athlete Sharing</span>
+                    <h3>Coach Permissions</h3>
+                    <form method="get" action="/apps/trainer/settings">
+                        <input type="text" name="coach_search" value="{{ coach_search_query }}" placeholder="Search coach name or email" required>
+                        <button type="submit" class="compact">Search</button>
+                    </form>
+                    {% if coach_search_query %}
+                        {% if coach_search_results %}
+                            <ul class="trainer-detail-list">
+                                {% for coach in coach_search_results %}
+                                    <li>
+                                        <strong>{{ coach.display_name or "Unnamed Coach" }}</strong> - {{ coach.email }}
+                                        <form method="post" action="/apps/trainer/settings/coaches/grant" class="inline-form">
+                                            <input type="hidden" name="coach_user_id" value="{{ coach.id }}">
+                                            <button type="submit" class="secondary compact">Authorize</button>
+                                        </form>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p>No coach accounts matched that search.</p>
+                        {% endif %}
+                    {% endif %}
+                    {% if coach_grants %}
+                        <ul class="trainer-detail-list">
+                            {% for grant in coach_grants %}
+                                <li>
+                                    <strong>{{ grant.email }}</strong>{% if grant.display_name %} - {{ grant.display_name }}{% endif %}
+                                    <form method="post" action="/apps/trainer/settings/coaches/{{ grant.id }}/revoke" class="inline-form">
+                                        <button type="submit" class="secondary compact danger-button">Revoke</button>
+                                    </form>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+                </article>
+                <article class="trainer-card">
+                    <span class="trainer-card-meta">Shoe Inventory</span>
+                    <h3>Running Shoes</h3>
+                    <form method="post" action="/apps/trainer/shoes">
+                        <input type="hidden" name="next" value="/apps/trainer/settings">
+                        <input type="text" name="name" placeholder="Shoe nickname" required>
+                        <input type="text" name="brand" placeholder="Brand">
+                        <input type="text" name="model" placeholder="Model">
+                        <input type="number" name="initial_miles" step="0.1" min="0" placeholder="Starting miles">
+                        <input type="text" name="notes" placeholder="Notes">
+                        <button type="submit" class="compact">Save shoe</button>
+                    </form>
+                    {% if trainer_shoes %}
+                        <ul class="trainer-detail-list">
+                            {% for shoe in trainer_shoes %}
+                                <li><strong>{{ shoe.name }}</strong>{% if shoe.brand or shoe.model %} - {{ shoe.brand }} {{ shoe.model }}{% endif %} - {{ shoe.total_miles|round|int }} mi</li>
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+                </article>
+            {% elif trainer_mode == "coach" %}
+                <article class="trainer-card">
+                    <span class="trainer-card-meta">Coach Access</span>
+                    <h3>Authorized Athletes</h3>
+                    {% if coach_athletes %}
+                        <ul class="trainer-detail-list">
+                            {% for athlete in coach_athletes %}
+                                <li><strong>{{ athlete.email }}</strong>{% if athlete.display_name %} - {{ athlete.display_name }}{% endif %}</li>
+                            {% endfor %}
+                        </ul>
+                        <a class="button-link secondary-link compact-link" href="/apps/trainer/coach">Open Coach Dashboard</a>
+                    {% else %}
+                        <p>No athletes have authorized this coach account yet.</p>
+                    {% endif %}
+                </article>
+            {% endif %}
         </div>
     {% endif %}
 </section>

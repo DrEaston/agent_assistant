@@ -49,7 +49,7 @@ The script deploys with:
 - service name: `dieter`
 - region: `us-central1`
 - public unauthenticated access
-- minimum instances: `0`
+- minimum instances: `0` by default, or `1` when using the keep-warm option
 - maximum instances: `1`
 - concurrency: `1`
 - memory: `1Gi`
@@ -88,11 +88,31 @@ powershell -ExecutionPolicy Bypass -File scripts\deploy_cloud_run.ps1 `
   -DataPrefix dieter
 ```
 
+To keep `dieter.ai` warm and avoid Cloud Run cold starts, deploy with one
+minimum instance:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\deploy_cloud_run.ps1 `
+  -ProjectId your-project-id `
+  -MinInstances 1
+```
+
+You can also update the live service without a full redeploy:
+
+```powershell
+gcloud run services update dieter `
+  --project your-project-id `
+  --region us-central1 `
+  --min-instances 1
+```
+
 After scheduler or planner schema changes, no manual migration command is needed. The app runs `db.init()` on startup and adds missing SQLite tables/columns automatically.
 
 ## Cost Controls
 
-Use Cloud Run with `--min-instances 0` so it can scale to zero when idle.
+Use Cloud Run with `--min-instances 0` when the lowest cost is more important
+than startup latency. Use `--min-instances 1` for `dieter.ai` when you want the
+site to stay responsive instead of going to sleep.
 This SQLite + Cloud Storage persistence path intentionally uses `--max-instances 1`
 and `--concurrency 1` to avoid concurrent database snapshot overwrites.
 Set a Google Cloud billing budget alert before using it heavily.

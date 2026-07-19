@@ -1,282 +1,214 @@
-# Personal Project Agent
+# Dieter Personal Assistant
 
-A technical project manager with clean separation between backend API and frontend UI.
+Dieter is a modular personal assistant platform built with Python, FastAPI,
+Jinja2, and SQLite. It started as a project planner and grew into a small
+personal operating system with app-specific workflows for planning, scheduling,
+recipes, training support, and feedback-driven implementation.
 
-**Architecture**: FastAPI backend + Jinja2 templates + SQLite database
+The project is intentionally kept in one repository while using app manifests,
+shared navigation, and ownership rules to keep feature areas understandable as
+the codebase grows.
 
-## Features
+## Live Demo
 
-- **Clean API**: JSON REST endpoints at `/api` for programmatic access
-- **Dashboard UI**: Browser-based dashboard showing today's focus
-- **Room Dashboard**: Displays today's recommended project, next action, blockers, active projects
-- **Projects**: Track multiple projects with notes, actions, blockers, and weekly goals
-- **Extensible**: APIs ready for VS Code extension, CLI scripts, or other clients
+The public demo is available at:
 
-## Files
+```text
+https://dieter.ai
+```
 
-- `api.py` - FastAPI backend with JSON API routes + HTML rendering
-- `database.py` - SQLite database layer
-- `templates/` - Jinja2 HTML templates
-- `docs/new_app_page_process.md` - Standard process for adding a new Dieter app/page
-- `main.py` - CLI entry point (legacy, still works)
-- `dashboard.py` - CLI dashboard display logic
-- `menu.py` - CLI menu navigation
-- `projects.db` - SQLite database (auto-created)
-- `Dockerfile` - Docker image configuration
-- `docker-compose.yml` - Docker Compose configuration
-- `requirements.txt` - Python dependencies
+Use **Open Guest Demo** on the homepage to enter the read-only guest profile.
+Guest mode is intended for portfolio/reviewer access: it shows sample Kitchen,
+Scheduler, Trainer, and Studio workflows while disabling writes, private
+integrations, and Codex execution.
 
-## Development Notes
+## What It Demonstrates
 
-When adding a new top-level Dieter app/page, follow `docs/new_app_page_process.md`.
+- FastAPI web app with JSON APIs and server-rendered Jinja2 screens
+- SQLite data layer shared by browser routes, API routes, and CLI-era helpers
+- Modular app shells for Assistant, Kitchen, Music, Trainer, Studio, and the app launcher
+- Mature Kitchen/Recipe and Scheduler workflows with shared navigation, persistence, and regression coverage
+- Optional AI workflows for scheduler/planner edits, recipe cleanup, feedback synthesis, and Codex work packets
+- Optional integrations and prototypes for Spotify, Strava, Google Cloud Run, Cloud Storage, and Secret Manager
+- Regression tests for navigation, scheduler behavior, member approval, recipe/scheduler integration, and app-boundary rules
 
-## Deployment
+## App Areas
 
-For phone access away from home, use the Cloud Run deployment notes in
-`docs/cloud_run_deployment.md`.
+- **Assistant**: project planner, priorities, blockers, scheduler, and action steps
+- **Kitchen**: the most complete app area; recipe import, meal planning, reusable recipe components, grocery lists, and cooking feedback
+- **Scheduler**: mature agenda/checklist workflows embedded in Assistant and surfaced across Kitchen
+- **Trainer**: important in-progress app area for workout planning, Strava imports, shoe tracking, reflections, and coach/athlete views
+- **Music**: early prototype for dictated playlist drafts, editable song rows, and Spotify submission
+- **Studio**: the agentic development console; captures app feedback, synthesizes plans, manages approval, queues Codex runs, and tracks testing feedback
+- **Launcher**: top-level app entry point and shared navigation
 
-Once Google Cloud CLI is authenticated and a project is selected, deploy with:
+Studio is also prepared for external project routing. Dieter issues run against
+this repository. EEG Headband and Calcium Imaging issue areas are configured as
+future external targets; set `EEG_REPO_PATH` or `CALCIUM_IMAGING_REPO_PATH` for
+the local worker to route approved runs to those repos.
+
+## Demo Mode
+
+The public guest profile at `https://dieter.ai` does not require personal data
+or external-service credentials.
+
+For local review, demo mode creates a separate `demo.db` with invented data and
+a demo user. The seeded demo highlights Kitchen/Recipes with Overnight Cinnamon
+Rolls and other sample meals, plus Scheduler, Studio, and Trainer data.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\deploy_cloud_run.ps1 -ProjectId your-project-id
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe scripts\seed_demo_data.py --force
+$env:DB_PATH="demo.db"
+$env:DEMO_MODE="1"
+.\.venv\Scripts\python.exe -m uvicorn api:app --reload
 ```
 
-## How to Run
+If you have a local Dieter database and want the demo to reuse a few lived-in
+examples, copy only sanitized Scheduler, grocery list, and Trainer metrics:
 
-### Prerequisites
-- Python 3.7+ (for CLI)
-- Docker & Docker Compose (for web app)
-- No external dependencies for CLI (uses only standard library)
-
-### Web App (FastAPI) - Quick Start
-
-**Option 1: Docker (Recommended)**
-
-1. Install Docker and Docker Compose
-2. Navigate to project folder:
 ```powershell
-cd c:\Users\curti\repos\agent_assistant
+.\.venv\Scripts\python.exe scripts\seed_demo_data.py --force --source-db projects.db
 ```
 
-3. Start the app:
-```powershell
-docker-compose up
-```
+That copy path omits raw Strava payloads, GPS traces, project/action ownership
+links, and account tokens. If no source rows are available, the demo falls back
+to curated examples such as the mechanic scheduler card and cinnamon-roll
+grocery list.
 
-4. Open browser and go to:
-```
+Open:
+
+```text
 http://localhost:8000
 ```
 
-5. API endpoints available at `/api/*`
+In demo mode, `/` shows the public Dieter landing page. Use **Open Guest Demo**
+for read-only access, or **Member Login** for a real account.
 
-6. To stop:
-```powershell
-docker-compose down
-```
-
-### Local Wi-Fi Access
-
-Use this when you want to open the planner or recipe upload page from a phone or another device on the same Wi-Fi network.
-
-1. Start the app on your laptop:
-```powershell
-.\run_lan.ps1
-```
-
-2. Leave the terminal window open.
-
-3. On your phone, open the `Phone / other Wi-Fi device` URL printed by the script.
-
-The recipe upload page is:
+Local seeded demo login:
 
 ```text
-http://<your-laptop-ip>:8000/apps/recipes/import?project_id=2&action_id=10
+demo@example.com
+demo-password
 ```
 
-If the phone cannot connect, make sure both devices are on the same Wi-Fi network and allow Python/Uvicorn through Windows Firewall when prompted.
+AI actions, Spotify, Strava, and Cloud Run persistence are optional. Without
+their credentials, the core app still loads and the integration-specific actions
+remain unavailable or unconfigured.
+When `DEMO_MODE=1` is set, the app labels itself as a read-only public preview
+and refuses Codex worker polling even if a token is accidentally configured.
 
-**Option 2: Local Python**
+For review, Kitchen/Recipes and Scheduler are the strongest product surfaces.
+Trainer shows the next important product direction. Music/Spotify is included
+as a prototype integration, not as a polished showcase app.
 
-1. Install dependencies:
+Docker Compose is also available for local runtime state:
+
 ```powershell
-C:\Users\curti\AppData\Local\Programs\Python\Python311\python.exe -m pip install fastapi uvicorn jinja2
+docker compose up --build
 ```
 
-2. Run the app:
+Compose stores SQLite data under `data/` and uploads under `uploads/`; both are
+ignored by Git.
+
+## Tests
+
+Run the regression suite with:
+
 ```powershell
-C:\Users\curti\AppData\Local\Programs\Python\Python311\python.exe api.py
+python -m unittest discover -s tests -p "test_*.py"
 ```
 
-3. Open browser to `http://localhost:8000`
+The focused app-boundary checks can also be run directly:
 
-## API Endpoints
-
-All endpoints return JSON and are ready for external clients:
-
-### Dashboard
-- `GET /api/dashboard` - Today's focus data
-
-### Projects
-- `GET /api/projects` - List all projects
-- `GET /api/projects/{id}` - Get project details
-- `POST /api/projects` - Create project
-
-### Notes
-- `GET /api/projects/{id}/notes` - List notes
-- `POST /api/projects/{id}/notes` - Add note
-
-### Actions
-- `GET /api/projects/{id}/actions` - List actions
-- `POST /api/projects/{id}/actions` - Add action
-
-### Blockers
-- `GET /api/projects/{id}/blockers` - List blockers
-- `POST /api/projects/{id}/blockers` - Add blocker
-- `DELETE /api/projects/{id}/blockers/{blocker_id}` - Delete blocker
-
-### Goals
-- `GET /api/projects/{id}/goals` - List goals
-- `POST /api/projects/{id}/goals` - Add goal
-- `POST /api/projects/{id}/goals/{goal_id}/complete` - Mark goal complete
-
-### CLI App - Quick Start
-
-1. Navigate to the project folder:
 ```powershell
-cd c:\Users\curti\repos\agent_assistant
+python -m unittest tests.test_app_pipeline tests.test_app_issue_menu
 ```
 
-2. Run the application:
-```powershell
-C:\Users\curti\AppData\Local\Programs\Python\Python311\python.exe main.py
+## Configuration
+
+Copy `.env.example` to `.env` for local development. The only variable needed
+for the basic demo is `DB_PATH` if you want to use a database other than
+`projects.db`.
+
+Common optional variables:
+
+```text
+DB_PATH=demo.db
+UPLOADS_DIR=uploads
+OPENAI_API_KEY=...
+STRAVA_CLIENT_ID=...
+STRAVA_CLIENT_SECRET=...
+SPOTIFY_CLIENT_ID=...
+SPOTIFY_CLIENT_SECRET=...
+EEG_REPO_PATH=C:\path\to\eeg_repo
+CALCIUM_IMAGING_REPO_PATH=C:\path\to\calcium_imaging_repo
 ```
 
-Or use the batch file:
-```powershell
-.\run.bat
-```
-
-3. Use the menu to manage projects, notes, blockers, actions, and goals.
-
-## Sample Data
-
-On first run, the database is populated with:
-- **3 Projects**: EEG headband, Recipe display app, Calcium imaging analysis
-- **Sample notes** for each project
-- **Sample blockers** with severity levels
-- **Sample recommended actions** with priority levels
-- **Sample weekly goals**
-
-## Web App Features
-
-The FastAPI web app includes:
-
-### Dashboard Page (/)
-- Today's recommended project
-- Next concrete action (highest priority)
-- Summary metrics (projects, blockers, actions, goal progress)
-- Active projects grid
-- All blockers with severity
-- All goals with completion status
-
-### Projects Page (/projects)
-- Create new projects
-- View all projects
-- Link to project details
-
-### Project Detail Page (/projects/{id})
-- View all project data (notes, actions, blockers, goals)
-- Add notes, actions, blockers, and goals
-- Mark goals as complete
-- Remove blockers
-
-## Database Schema
-
-The SQLite database includes:
-- `projects` - Project metadata
-- `notes` - Project notes
-- `blockers` - Project blockers with severity
-- `recommended_actions` - Prioritized next actions
-- `weekly_goals` - Weekly goals with completion status
-
-## Example Usage
-
-```
-📊 PERSONAL PROJECT AGENT - DASHBOARD
-================================================================================
-
-🎯 ACTIVE PROJECTS
-- EEG headband
-- Recipe display app
-- Calcium imaging analysis
-
-⚡ RECOMMENDED NEXT ACTIONS
-🔴 [EEG headband] Research EEG signal amplification circuits
-🔴 [EEG headband] Set up development board
-...
-
-📝 PROJECT NOTES (Latest)
-EEG headband:
-  • Need to research BCI signal processing
-  • Contact hardware supplier for quotes
-...
-```
-
-## Customization
-
-Edit `database.py` `populate_sample_data()` method to customize:
-- Project names
-- Initial notes, blockers, actions, and goals
-
-Or use the web app/CLI to add/modify data after launching.
-
-## Project Structure
-
-```
-agent_assistant/
-├── app.py                  # Streamlit web application
-├── main.py                 # CLI entry point
-├── database.py             # SQLite database operations
-├── dashboard.py            # Dashboard display logic (CLI)
-├── menu.py                 # Interactive CLI menu
-├── requirements.txt        # Python dependencies
-├── Dockerfile              # Docker configuration
-├── docker-compose.yml      # Docker Compose setup
-├── .dockerignore            # Docker ignore file
-├── projects.db             # SQLite database (auto-created)
-└── README.md               # This file
-```
-
-## Technology Stack
-
-- **Backend**: Python 3.11 + FastAPI 0.104
-- **Server**: Uvicorn
-- **Frontend**: Jinja2 templates + HTML/CSS
-- **Database**: SQLite3
-- **Containerization**: Docker & Docker Compose
+Secrets and runtime data should not be committed. Local SQLite databases,
+uploads, temporary files, worker status files, and `.env` are ignored.
 
 ## Architecture
 
+```text
+FastAPI app (api.py)
+  HTML routes rendered with Jinja2
+  JSON routes under /api/*
+  app-specific route groups for Assistant, Kitchen, Music, Trainer, Studio
+
+apps/
+  manifests define app shell metadata, navigation, route prefixes, theme values
+  registry resolves the active app shell and launcher cards
+  pipeline defines app ownership hints for issue/Codex workflows
+
+database.py
+  SQLite schema initialization
+  project, scheduler, recipe, trainer, playlist, user, and feedback operations
+
+templates/ and apps/*/templates/
+  shared templates plus app-owned screens
+
+scripts/
+  deployment, local worker, cleanup, and demo-data utilities
 ```
-FastAPI Backend (api.py)
-├── /api/* JSON REST endpoints (no HTML)
-├── / HTML routes (use Jinja2 templates)
-├── Form submission routes (POST-Redirect-Get pattern)
-└── Database layer (database.py)
-    └── SQLite (projects.db)
 
-Clients can connect to:
-- Browser (renders HTML from / routes)
-- External tools (call /api/* endpoints for JSON)
-- VS Code extension (call /api/* endpoints)
-- CLI scripts (call /api/* endpoints)
-```
+More detail:
 
-## Notes
+- [App boundaries](docs/app_boundaries.md)
+- [New app/page process](docs/new_app_page_process.md)
+- [Cloud Run deployment](docs/cloud_run_deployment.md)
+- [Architecture notes](docs/architecture.md)
+- [Screenshot plan](docs/screenshot_plan.md)
 
-- The web app and CLI share the same SQLite database (`projects.db`)
-- Changes made in one interface are immediately visible in the other
-- Database persists across container restarts when using Docker Compose
-- No authentication required (MVP stage)
-- Sample data is auto-populated on first run
+## Deployment
+
+The app can deploy to Google Cloud Run for personal use. The current production
+deployment model uses:
+
+- Cloud Run service with max instances set to 1
+- optional min instances set to 1 to keep `dieter.ai` warm
+- SQLite restored to `/tmp/projects.db`
+- Cloud Storage snapshots after database commits
+- Cloud Storage sync for uploaded recipe images and thumbnails
+- Secret Manager for API keys
+
+See [Cloud Run deployment](docs/cloud_run_deployment.md) for the full setup.
+
+## Repository Safety
+
+This repository should be publishable without personal data:
+
+- Use `demo.db` for portfolio review.
+- Keep real `projects.db` and uploads out of Git.
+- Keep `.env` out of Git.
+- Use `.env.example` for placeholder configuration only.
+- Replace screenshots if they contain private tasks, recipes, workouts, or account details.
+
+## Current Tradeoffs
+
+Dieter is a personal project that grew quickly. Some shared files, especially
+`api.py` and `database.py`, are intentionally broad right now. The app-boundary
+manifest system and regression tests are the first step toward extracting
+larger route groups into app-owned routers without losing the convenience of a
+single deployable service.

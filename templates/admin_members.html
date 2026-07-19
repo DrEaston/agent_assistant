@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Members - Dieter{% endblock %}
+
+{% block content %}
+<section class="launcher-hero">
+    <span class="launcher-kicker">Administration</span>
+    <h1>Members</h1>
+    <p>Approve new Dieter accounts before they can log in.</p>
+</section>
+
+<section class="detail-section">
+    {% if members %}
+        <div class="feedback-card-list">
+            {% for member in members %}
+                <article class="app-feedback-card">
+                    <div class="feedback-card-header">
+                        <div>
+                            <h3>{{ member.display_name or member.email }}</h3>
+                            <small>{{ member.email }} - {{ member.role }} - {{ member.status }} - Trainer: {{ (member.trainer_mode or "not set")|title }} - Requested: {{ (member.requested_trainer_mode or "athlete")|title }}</small>
+                        </div>
+                        <div class="feedback-header-actions">
+                            <span class="feedback-status-pill">Trainer: {{ (member.trainer_mode or "not set")|title }}</span>
+                            <span class="feedback-status-pill">Requested: {{ (member.requested_trainer_mode or "athlete")|title }}</span>
+                        </div>
+                    </div>
+                    <p class="section-subtitle">
+                        Created {{ member.created_at or "unknown" }}.
+                    </p>
+                    <div class="feedback-card-actions">
+                        {% if member.status != "active" %}
+                            <form method="post" action="/admin/members/{{ member.id }}/status" class="inline-form">
+                                <input type="hidden" name="status" value="active">
+                                <input type="hidden" name="trainer_mode" value="{{ member.requested_trainer_mode or 'athlete' }}">
+                                <button type="submit" class="compact">Approve as {{ (member.requested_trainer_mode or "Athlete")|title }}</button>
+                            </form>
+                            {% if member.requested_trainer_mode == "coach" %}
+                                <form method="post" action="/admin/members/{{ member.id }}/status" class="inline-form">
+                                    <input type="hidden" name="status" value="active">
+                                    <input type="hidden" name="trainer_mode" value="athlete">
+                                    <button type="submit" class="secondary compact">Approve as Athlete</button>
+                                </form>
+                            {% endif %}
+                        {% endif %}
+                        {% if member.status == "pending" %}
+                            <form method="post" action="/admin/members/{{ member.id }}/status" class="inline-form">
+                                <input type="hidden" name="status" value="rejected">
+                                <button type="submit" class="secondary compact">Reject</button>
+                            </form>
+                        {% endif %}
+                        {% if member.status == "active" and member.id != request.state.current_user.id %}
+                            {% if member.trainer_mode != "coach" %}
+                                <form method="post" action="/admin/members/{{ member.id }}/trainer-mode" class="inline-form">
+                                    <input type="hidden" name="trainer_mode" value="coach">
+                                    <button type="submit" class="secondary compact">Make Coach</button>
+                                </form>
+                            {% else %}
+                                <form method="post" action="/admin/members/{{ member.id }}/trainer-mode" class="inline-form">
+                                    <input type="hidden" name="trainer_mode" value="athlete">
+                                    <button type="submit" class="secondary compact">Set Athlete</button>
+                                </form>
+                            {% endif %}
+                            {% if member.role != "admin" %}
+                                <form method="post" action="/admin/members/{{ member.id }}/role" class="inline-form">
+                                    <input type="hidden" name="role" value="admin">
+                                    <button type="submit" class="secondary compact">Make Admin</button>
+                                </form>
+                            {% else %}
+                                <form method="post" action="/admin/members/{{ member.id }}/role" class="inline-form">
+                                    <input type="hidden" name="role" value="user">
+                                    <button type="submit" class="secondary compact">Remove Admin</button>
+                                </form>
+                            {% endif %}
+                            <form method="post" action="/admin/members/{{ member.id }}/status" class="inline-form">
+                                <input type="hidden" name="status" value="disabled">
+                                <button type="submit" class="secondary compact">Disable</button>
+                            </form>
+                        {% endif %}
+                    </div>
+                </article>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="empty-state">
+            <p>No member accounts found.</p>
+        </div>
+    {% endif %}
+</section>
+{% endblock %}

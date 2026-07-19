@@ -6,4 +6,12 @@ __pycache__
 *.pyc
 .env
 .vscode
+*.db
+*.db-*
 *.db-journal
+tmp
+uploads
+data
+codex_feedback_issue_*.md
+codex_worker_status.json
+codex_worker_status.*.json

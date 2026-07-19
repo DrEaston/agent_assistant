@@ -47,6 +47,106 @@
     {% endif %}
 </section>
 
+<section class="project-starter-panel" aria-labelledby="project-starter-heading">
+    <div class="section-header">
+        <div>
+            <h2 id="project-starter-heading">Start a Project</h2>
+            <p class="section-subtitle">Choose a project type, edit the starter brief, then create the planner record.</p>
+        </div>
+        <a class="button-link secondary-link" href="/projects">All Projects</a>
+    </div>
+    {% if created_starter_project_ids %}
+        <div class="starter-created-note">
+            Created the CCT research and technical starter projects for testing.
+        </div>
+    {% endif %}
+    <div class="project-starter-grid">
+        <details class="project-starter-card" open>
+            <summary>
+                <strong>Start new project</strong>
+                <span>Kick off a new AI project</span>
+            </summary>
+            <form method="post" action="/projects/create">
+                <input type="hidden" name="project_type" value="general">
+                <input type="hidden" name="priority_score" value="3">
+                <input type="hidden" name="next" value="detail">
+                <div class="form-group">
+                    <label for="starter-general-name">Project Name</label>
+                    <input type="text" id="starter-general-name" name="name" value="New Project" required>
+                </div>
+                <div class="form-group">
+                    <label for="starter-general-description">Starter Brief</label>
+                    <textarea id="starter-general-description" name="description">Start a new project and help define the goal, scope, and next steps.</textarea>
+                </div>
+                <button type="submit">Create Project</button>
+            </form>
+        </details>
+
+        <details class="project-starter-card">
+            <summary>
+                <strong>Start research project</strong>
+                <span>Research a company</span>
+            </summary>
+            <form method="post" action="/projects/create">
+                <input type="hidden" name="project_type" value="research">
+                <input type="hidden" name="priority_score" value="3">
+                <input type="hidden" name="next" value="detail">
+                <div class="form-group">
+                    <label for="starter-research-name">Project Name</label>
+                    <input type="text" id="starter-research-name" name="name" value="Company Research" required>
+                </div>
+                <div class="form-group">
+                    <label for="starter-research-description">Starter Brief</label>
+                    <textarea id="starter-research-description" name="description">Research the company CCT. Explain what they do, what industry they are in, and any relevant business context.</textarea>
+                </div>
+                <button type="submit">Create Research Project</button>
+            </form>
+        </details>
+
+        <details class="project-starter-card">
+            <summary>
+                <strong>Start technical project</strong>
+                <span>Plan what needs to be built</span>
+            </summary>
+            <form method="post" action="/projects/create">
+                <input type="hidden" name="project_type" value="technical">
+                <input type="hidden" name="priority_score" value="3">
+                <input type="hidden" name="next" value="detail">
+                <div class="form-group">
+                    <label for="starter-technical-name">Project Name</label>
+                    <input type="text" id="starter-technical-name" name="name" value="Technical Scope" required>
+                </div>
+                <div class="form-group">
+                    <label for="starter-technical-description">Starter Brief</label>
+                    <textarea id="starter-technical-description" name="description">Based on the company CCT and its business, outline what I will probably need to build for them, including likely technical requirements, workflows, and risks.</textarea>
+                </div>
+                <button type="submit">Create Technical Project</button>
+            </form>
+        </details>
+
+        <details class="project-starter-card">
+            <summary>
+                <strong>Create a game project</strong>
+                <span>Define a game concept</span>
+            </summary>
+            <form method="post" action="/projects/create">
+                <input type="hidden" name="project_type" value="general">
+                <input type="hidden" name="priority_score" value="3">
+                <input type="hidden" name="next" value="detail">
+                <div class="form-group">
+                    <label for="starter-game-name">Project Name</label>
+                    <input type="text" id="starter-game-name" name="name" value="Zombie Game" required>
+                </div>
+                <div class="form-group">
+                    <label for="starter-game-description">Starter Brief</label>
+                    <textarea id="starter-game-description" name="description">Start a new project for my zombie game and help define the concept, scope, and next steps.</textarea>
+                </div>
+                <button type="submit">Create Game Project</button>
+            </form>
+        </details>
+    </div>
+</section>
+
 <div class="dashboard-grid compact-metrics">
     <div class="metric">
         <div class="metric-value">{{ projects|length }}</div>
