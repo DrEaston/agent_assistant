@@ -47,13 +47,37 @@
     {% endif %}
 </section>
 
-<section class="project-starter-panel" aria-labelledby="project-starter-heading">
+<section class="detail-section planner-projects-panel" aria-labelledby="assistant-projects-heading">
     <div class="section-header">
         <div>
-            <h2 id="project-starter-heading">Start a Project</h2>
-            <p class="section-subtitle">Choose a project type, edit the starter brief, then create the planner record.</p>
+            <h2 id="assistant-projects-heading">Projects</h2>
+            <p class="section-subtitle">Open a major project directly.</p>
         </div>
         <a class="button-link secondary-link" href="/projects">All Projects</a>
+    </div>
+    {% if projects %}
+        <div class="quiet-list">
+            {% for project in projects %}
+                <a href="/projects/{{ project.id }}">
+                    <span>{{ project.name }}</span>
+                    <strong>{{ project.priority_score }}/5</strong>
+                </a>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="empty-state">
+            <p>No active projects yet.</p>
+        </div>
+    {% endif %}
+</section>
+
+<details class="project-starter-panel" aria-labelledby="project-starter-heading">
+    <summary id="project-starter-heading">New Project</summary>
+    <div class="section-header">
+        <div>
+            <h2>Start a Project</h2>
+            <p class="section-subtitle">Choose a project type, edit the starter brief, then create the planner record.</p>
+        </div>
     </div>
     {% if created_starter_project_ids %}
         <div class="starter-created-note">
@@ -145,7 +169,7 @@
             </form>
         </details>
     </div>
-</section>
+</details>
 
 <div class="dashboard-grid compact-metrics">
     <div class="metric">
@@ -205,22 +229,6 @@
     </section>
 
     <section>
-        <h2>Projects</h2>
-        {% if projects %}
-            <div class="quiet-list">
-                {% for project in projects %}
-                    <a href="/projects/{{ project.id }}">
-                        <span>{{ project.name }}</span>
-                        <strong>{{ project.priority_score }}/5</strong>
-                    </a>
-                {% endfor %}
-            </div>
-        {% else %}
-            <div class="empty-state">
-                <p>No active projects yet.</p>
-            </div>
-        {% endif %}
-
         <h2>Blockers</h2>
         {% if blockers %}
             {% for blocker in blockers[:3] %}

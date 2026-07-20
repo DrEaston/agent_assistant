@@ -1395,6 +1395,32 @@
             padding: 1.25rem;
         }
 
+        .project-starter-panel > summary {
+            color: var(--page-theme-text, #334155);
+            cursor: pointer;
+            font-weight: 800;
+            list-style: none;
+        }
+
+        .project-starter-panel > summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .project-starter-panel > summary::after {
+            color: #64748b;
+            content: "Show";
+            float: right;
+            font-size: 0.85rem;
+        }
+
+        .project-starter-panel[open] > summary {
+            margin-bottom: 1rem;
+        }
+
+        .project-starter-panel[open] > summary::after {
+            content: "Hide";
+        }
+
         .project-starter-grid {
             display: grid;
             gap: 1rem;
@@ -6656,6 +6682,73 @@
             white-space: pre-wrap;
             font-family: Consolas, 'Courier New', monospace;
             font-size: 0.92rem;
+        }
+
+        .research-summary-view {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .research-summary-intro {
+            background: #f8fafc;
+            border: 1px solid #d8dee9;
+            border-radius: 8px;
+            color: #334155;
+            padding: 1rem;
+        }
+
+        .research-summary-intro p {
+            margin: 0 0 0.65rem;
+        }
+
+        .research-summary-intro p:last-child {
+            margin-bottom: 0;
+        }
+
+        .research-product-grid {
+            display: grid;
+            gap: 1rem;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        }
+
+        .research-product-card {
+            background: #fff;
+            border: 1px solid #d8dee9;
+            border-left: 4px solid #2563eb;
+            border-radius: 8px;
+            padding: 1rem;
+        }
+
+        .research-product-card h3 {
+            color: #1e293b;
+            margin: 0 0 0.85rem;
+        }
+
+        .research-product-card ul {
+            display: grid;
+            gap: 0.7rem;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .research-product-card li {
+            align-items: flex-start;
+            display: grid;
+            gap: 0.55rem;
+            grid-template-columns: 5rem minmax(0, 1fr);
+        }
+
+        .research-bullet-kind {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 999px;
+            color: #1d4ed8;
+            font-size: 0.78rem;
+            font-weight: 800;
+            line-height: 1;
+            padding: 0.35rem 0.5rem;
+            text-align: center;
         }
 
         .recipe-shell-page .container .detail-section,

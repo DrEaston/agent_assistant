@@ -94,6 +94,22 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn("Report History", template)
         self.assertIn("No research summary yet", template)
 
+    def test_research_summary_page_uses_product_cards_not_raw_packet(self):
+        template = (Path(__file__).resolve().parents[1] / "templates" / "project_research_results.html").read_text(encoding="utf-8")
+
+        self.assertIn("research-summary-view", template)
+        self.assertIn("research-product-card", template)
+        self.assertIn("research-bullet-kind", template)
+        self.assertNotIn('<pre class="work-packet">{{ active_review.content_markdown }}</pre>', template)
+
+    def test_project_summary_prompt_targets_products_data_and_models(self):
+        api_source = (Path(__file__).resolve().parents[1] / "api.py").read_text(encoding="utf-8")
+
+        self.assertIn("product-by-product map for CCT", api_source)
+        self.assertIn("Data challenge:", api_source)
+        self.assertIn("Model approach:", api_source)
+        self.assertIn("Do not invent specific CCT products", api_source)
+
     def test_research_results_page_can_answer_open_questions(self):
         template = (Path(__file__).resolve().parents[1] / "templates" / "project_research_results.html").read_text(encoding="utf-8")
 
@@ -116,6 +132,13 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn("form-working-status", template)
         self.assertIn("form[data-working-message]", template)
         self.assertIn("data-form-working-message", template)
+
+    def test_assistant_landing_puts_projects_before_project_creation(self):
+        template = (Path(__file__).resolve().parents[1] / "templates" / "dashboard.html").read_text(encoding="utf-8")
+
+        self.assertIn("assistant-projects-heading", template)
+        self.assertLess(template.index("assistant-projects-heading"), template.index("project-starter-heading"))
+        self.assertIn("Open a major project directly.", template)
 
 
 if __name__ == "__main__":

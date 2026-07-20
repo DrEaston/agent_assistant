@@ -29,7 +29,38 @@
                 <p class="section-subtitle">Generated {{ active_review.updated_at }} from the current brief, tasks, goals, blockers, and notes.</p>
             </div>
         </div>
-        <pre class="work-packet">{{ active_review.content_markdown }}</pre>
+        <div class="research-summary-view">
+            {% if research_summary.intro %}
+                <div class="research-summary-intro">
+                    {% for paragraph in research_summary.intro %}
+                        <p>{{ paragraph }}</p>
+                    {% endfor %}
+                </div>
+            {% endif %}
+            {% if research_summary.sections %}
+                <div class="research-product-grid">
+                    {% for section in research_summary.sections %}
+                        <article class="research-product-card">
+                            <h3>{{ section.title }}</h3>
+                            {% if section.bullets %}
+                                <ul>
+                                    {% for bullet in section.bullets %}
+                                        <li>
+                                            <span class="research-bullet-kind">{{ bullet.kind }}</span>
+                                            <span>{{ bullet.text }}</span>
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            {% endif %}
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <p>This report did not include structured summary content. Create an updated summary to regenerate it.</p>
+                </div>
+            {% endif %}
+        </div>
         {% if review_questions %}
             <div class="detail-section">
                 <h3>Answer Open Questions</h3>

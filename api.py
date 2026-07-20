@@ -26,6 +26,7 @@ import uuid
 import hashlib
 import base64
 import re
+import html
 import sqlite3
 import threading
 import mimetypes
@@ -4456,14 +4457,17 @@ def build_project_codex_review(project, actions, blockers, goals, notes):
 {note_lines}
 
 ## Review Request
-Review this project plan before implementation. Return:
-1. The clearest objective and likely deliverable.
-2. Missing context or decisions that must be resolved first.
-3. Duplicated, vague, or oversized tasks that should be rewritten.
-4. A prioritized sequence of concrete next actions.
-5. Major product, data, integration, security, and delivery risks.
+Create a clean research summary for this project before implementation. Return:
+1. A short overview of what the project is trying to understand.
+2. A product-by-product map for CCT. For each known CCT product, product line, platform, or module, include bullets for:
+   - Data challenge: what data problem appears likely or already known.
+   - Problem: what business or workflow problem that data challenge creates.
+   - Model approach: what model class or AI approach should address the problem.
+3. Open questions only where the supplied project notes do not identify enough product or data detail.
+4. Recommended next steps to improve the research summary.
+5. Risks around product assumptions, data availability, integrations, and model fit.
 
-Do not implement anything during this review. Keep recommendations specific to the project brief above.
+Do not implement anything during this review. Do not invent specific CCT products if they are not supplied in the brief, tasks, or notes. Keep recommendations specific to the project context above.
 """
 
 def project_review_inputs(project_id):
@@ -4481,7 +4485,7 @@ def save_project_research_review(project_id, review_result):
     slug = f"research-review-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
     db.upsert_project_artifact(
         project_id,
-        title=f"Research Results - {run_stamp}",
+        title=f"Research Summary - {run_stamp}",
         slug=slug,
         content_markdown=review_result,
         artifact_type="research_review",
@@ -4504,6 +4508,66 @@ def format_project_review_answers_note(source_review, questions, answers):
             ])
     return "\n".join(lines)
 
+def project_summary_bullet_kind(text):
+    """Classify one summary bullet for light visual grouping."""
+    lowered = (text or "").lower()
+    if any(token in lowered for token in ["data challenge", "data quality", "data source", "integration", "schema", "etl", "pipeline"]):
+        return "Data"
+    if any(token in lowered for token in ["model", "classification", "forecast", "prediction", "embedding", "llm", "vision", "ocr", "ranking"]):
+        return "Model"
+    if any(token in lowered for token in ["problem", "workflow", "use case", "risk", "decision"]):
+        return "Problem"
+    return "Note"
+
+def project_research_summary_view(markdown):
+    """Convert a research markdown report into clean display sections."""
+    intro = []
+    sections = []
+    current = None
+    in_code_block = False
+    for raw_line in (markdown or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            line = line.lstrip("#/ ").strip()
+            if not line:
+                continue
+        heading_match = re.match(r"^(#{1,4})\s+(.+)$", line)
+        if heading_match:
+            title = re.sub(r"\s+", " ", heading_match.group(2)).strip("` ")
+            lowered = title.lower()
+            if lowered in {"research summary", "product map", "cct product map", "overview"}:
+                current = None
+                continue
+            current = {"title": html.escape(title), "bullets": []}
+            sections.append(current)
+            continue
+        product_match = re.match(r"^(?:product|platform|module|offering)\s*:\s*(.+)$", line, flags=re.IGNORECASE)
+        if product_match:
+            current = {"title": html.escape(f"Product: {product_match.group(1).strip()}"), "bullets": []}
+            sections.append(current)
+            continue
+        cleaned = re.sub(r"^[-*]\s+(?:\[[ xX]\]\s*)?", "", line).strip()
+        cleaned = re.sub(r"^\d+[.)]\s+", "", cleaned).strip()
+        cleaned = cleaned.strip("` ")
+        if not cleaned:
+            continue
+        escaped = html.escape(re.sub(r"\s+", " ", cleaned))
+        item = {"text": escaped, "kind": project_summary_bullet_kind(cleaned)}
+        if current:
+            current["bullets"].append(item)
+        elif len(intro) < 4:
+            intro.append(escaped)
+    sections = [section for section in sections if section["title"] or section["bullets"]]
+    if not sections and intro:
+        sections.append({"title": "Summary", "bullets": [{"text": item, "kind": "Note"} for item in intro]})
+        intro = []
+    return {"intro": intro, "sections": sections}
+
 def run_project_codex_review(review_packet):
     """Run a review-only project evaluation and return the visible result."""
     if not planner_llm_provider:
@@ -4511,11 +4575,14 @@ def run_project_codex_review(review_packet):
     result = planner_llm_provider.chat(
         [{"role": "user", "content": review_packet}],
         (
-            "You are Codex in review-only mode. Evaluate the supplied project packet. "
-            "Do not edit code, claim implementation, or invent missing facts. Give a concise, actionable review "
-            "using these exact headings: Executive Summary, Key Findings, Evidence and Sources, "
-            "Open Questions, Recommendations, and Risks. Under Evidence and Sources, include only sources "
-            "that were actually supplied in the packet; explicitly say when none were supplied."
+            "You are Codex in research-summary mode. Evaluate the supplied project packet. "
+            "Do not edit code, claim implementation, wrap the response in code fences, or invent missing facts. "
+            "Write a clean product research summary using these exact top-level headings: "
+            "Overview, CCT Product Map, Open Questions, Recommended Next Steps, and Risks. "
+            "Under CCT Product Map, create one markdown subheading per known product, product line, platform, "
+            "or module using the form '### Product: <name>'. Under each product, use concise bullets beginning "
+            "with 'Data challenge:', 'Problem:', and 'Model approach:'. If the packet does not name products, "
+            "say that under Open Questions instead of inventing names."
         ),
     )
     return (result or "").strip() or "The review completed without returning any recommendations."
@@ -8890,7 +8957,9 @@ def project_research_results(request: Request, project_id: int, run: str = ""):
     active_review = next((review for review in reviews if review.get("slug") == run), None) if run else None
     if not active_review and reviews:
         active_review = reviews[0]
-    review_questions = extract_feedback_plan_questions(active_review.get("content_markdown") if active_review else "")
+    active_markdown = active_review.get("content_markdown") if active_review else ""
+    review_questions = extract_feedback_plan_questions(active_markdown)
+    research_summary = project_research_summary_view(active_markdown)
     template = jinja_env.get_template("project_research_results.html")
     return HTMLResponse(template.render({
         "request": request,
@@ -8898,6 +8967,7 @@ def project_research_results(request: Request, project_id: int, run: str = ""):
         "reviews": reviews,
         "active_review": active_review,
         "review_questions": review_questions,
+        "research_summary": research_summary,
     }))
 
 
