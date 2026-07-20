@@ -39,10 +39,10 @@
                     <h2>Steps</h2>
                     <p class="section-subtitle">Break this task into smaller things you can finish.</p>
                 </div>
-                <form id="codex-plan-form" method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/codex-plan" class="inline-form">
+                <form id="codex-plan-form" method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/codex-plan" class="inline-form" data-working-message="Codex is creating the plan...">
                     <button type="submit" class="compact">Create Codex Plan</button>
                 </form>
-                <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/steps/review" class="inline-form">
+                <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/steps/review" class="inline-form" data-working-message="Reviewing steps...">
                     <button type="submit" class="secondary compact">Review Steps</button>
                 </form>
                 <details class="inline-create">

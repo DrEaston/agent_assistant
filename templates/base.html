@@ -1334,6 +1334,58 @@
             text-decoration: underline;
         }
 
+        .project-index-list {
+            display: grid;
+            gap: 0.75rem;
+            margin: 1.25rem 0 2rem;
+        }
+
+        .project-index-item {
+            align-items: center;
+            background: #fff;
+            border: 1px solid #d8dee9;
+            border-radius: 8px;
+            color: #1f2937;
+            display: flex;
+            gap: 1rem;
+            justify-content: space-between;
+            padding: 1rem 1.1rem;
+            text-decoration: none;
+        }
+
+        .project-index-item:hover {
+            border-color: #3498db;
+            box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+            text-decoration: none;
+        }
+
+        .project-index-item strong,
+        .project-index-item small {
+            display: block;
+        }
+
+        .project-index-item small,
+        .project-index-meta {
+            color: #64748b;
+            font-size: 0.9rem;
+        }
+
+        .project-index-meta {
+            flex: 0 0 auto;
+            text-align: right;
+        }
+
+        @media (max-width: 700px) {
+            .project-index-item {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .project-index-meta {
+                text-align: left;
+            }
+        }
+
         .project-starter-panel {
             background: #fff;
             border: 1px solid var(--page-theme-border, #dbeafe);
@@ -2206,11 +2258,13 @@
             font-weight: 800;
         }
 
-        .feedback-working-status[hidden] {
+        .feedback-working-status[hidden],
+        .form-working-status[hidden] {
             display: none;
         }
 
-        .feedback-working-spinner {
+        .feedback-working-spinner,
+        .form-working-spinner {
             width: 1rem;
             height: 1rem;
             border: 2px solid rgba(255, 255, 255, 0.45);
@@ -2230,6 +2284,25 @@
             position: relative;
             cursor: wait;
             opacity: 0.82;
+        }
+
+        .form-working-status {
+            position: fixed;
+            left: 50%;
+            bottom: 1rem;
+            transform: translateX(-50%);
+            z-index: 3000;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.65rem;
+            max-width: min(28rem, calc(100vw - 2rem));
+            padding: 0.75rem 1rem;
+            border: 1px solid var(--running-indicator-border);
+            border-radius: 999px;
+            background: var(--running-indicator-strong);
+            color: #fff;
+            box-shadow: 0 16px 40px rgba(15, 23, 42, 0.22);
+            font-weight: 800;
         }
 
         .feedback-ready-details {
@@ -7444,6 +7517,10 @@
         {% endif %}
         {% block content %}{% endblock %}
     </div>
+    <div id="form-working-status" class="form-working-status" role="status" aria-live="polite" hidden>
+        <span class="form-working-spinner" aria-hidden="true"></span>
+        <span data-form-working-message>Working...</span>
+    </div>
     {% if request is defined and request.query_params.get("undo_scheduler_id") %}
         <aside class="undo-toast" data-undo-toast>
             <span>Marked done.</span>
@@ -7490,6 +7567,54 @@
             </div>
         </aside>
     {% endif %}
+    <script>
+        (() => {
+            const status = document.getElementById("form-working-status");
+            const statusMessage = status?.querySelector("[data-form-working-message]");
+            document.querySelectorAll("form[data-working-message]").forEach((form) => {
+                form.addEventListener("submit", (event) => {
+                    if (event.defaultPrevented || (form.checkValidity && !form.checkValidity())) {
+                        return;
+                    }
+                    const submitter = event.submitter || form.querySelector("button[type='submit']");
+                    const message = submitter?.dataset.workingMessage || form.dataset.workingMessage || "Working...";
+                    form.classList.add("is-working");
+                    if (submitter) {
+                        submitter.dataset.originalText = submitter.textContent.trim();
+                        submitter.textContent = message;
+                    }
+                    form.querySelectorAll("button").forEach((button) => {
+                        button.disabled = true;
+                    });
+                    form.querySelectorAll("input:not([type='hidden']), textarea, select").forEach((control) => {
+                        control.readOnly = true;
+                    });
+                    if (status && statusMessage) {
+                        statusMessage.textContent = message;
+                        status.hidden = false;
+                    }
+                });
+            });
+            window.addEventListener("pageshow", () => {
+                document.querySelectorAll("form.is-working[data-working-message]").forEach((form) => {
+                    form.classList.remove("is-working");
+                    form.querySelectorAll("button").forEach((control) => {
+                        control.disabled = false;
+                    });
+                    form.querySelectorAll("input:not([type='hidden']), textarea, select").forEach((control) => {
+                        control.readOnly = false;
+                    });
+                    form.querySelectorAll("button[data-original-text]").forEach((button) => {
+                        button.textContent = button.dataset.originalText;
+                        delete button.dataset.originalText;
+                    });
+                });
+                if (status) {
+                    status.hidden = true;
+                }
+            });
+        })();
+    </script>
     <script>
         (() => {
             const isGuestSession = document.body?.dataset.guestSession === "true";

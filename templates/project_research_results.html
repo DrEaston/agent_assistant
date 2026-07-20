@@ -1,21 +1,21 @@
 {% extends "base.html" %}
 
-{% block title %}Research Results - {{ project.name }} - Dieter{% endblock %}
+{% block title %}Research Summary - {{ project.name }} - Dieter{% endblock %}
 
 {% block content %}
 <div class="breadcrumb">
     <a href="/">Home</a> / <a href="/apps/assistant/planner">Assistant</a> / <a href="/projects">Projects</a> /
-    <a href="/projects/{{ project.id }}">{{ project.name }}</a> / Research Results
+    <a href="/projects/{{ project.id }}">{{ project.name }}</a> / Research Summary
 </div>
 
 <div class="section-header project-heading">
     <div>
-        <h1>Research Results</h1>
+        <h1>Research Summary</h1>
         <p class="section-subtitle">Saved findings and recommendations for {{ project.name }}.</p>
     </div>
     <div class="app-shell-actions">
-        <form method="post" action="/projects/{{ project.id }}/codex-review" class="inline-form">
-            <button type="submit">Run Updated Review</button>
+        <form method="post" action="/projects/{{ project.id }}/codex-review" class="inline-form" data-working-message="Codex is creating the updated summary...">
+            <button type="submit">Create Updated Summary</button>
         </form>
         <a class="button-link secondary-link" href="/projects/{{ project.id }}">Back to Project</a>
     </div>
@@ -33,7 +33,7 @@
         {% if review_questions %}
             <div class="detail-section">
                 <h3>Answer Open Questions</h3>
-                <form method="post" action="/projects/{{ project.id }}/research-results/{{ active_review.slug }}/answer">
+                <form method="post" action="/projects/{{ project.id }}/research-results/{{ active_review.slug }}/answer" data-working-message="Codex is creating a revised summary...">
                     {% for question in review_questions %}
                         <div class="form-group">
                             <label for="review-answer-{{ loop.index }}">{{ question }}</label>
@@ -41,17 +41,17 @@
                             <textarea id="review-answer-{{ loop.index }}" name="answers" rows="3" placeholder="Answer this so Codex can continue the review."></textarea>
                         </div>
                     {% endfor %}
-                    <button type="submit">Answer &amp; Continue Review</button>
+                    <button type="submit">Answer &amp; Create Revised Summary</button>
                 </form>
             </div>
         {% endif %}
     </section>
 {% else %}
     <section class="detail-section empty-state">
-        <h2>No research results yet</h2>
-        <p>Run the first Codex review to create a persistent report.</p>
-        <form method="post" action="/projects/{{ project.id }}/codex-review">
-            <button type="submit">Start Codex Review</button>
+        <h2>No research summary yet</h2>
+        <p>Create the first summary from the current brief, tasks, goals, blockers, and notes.</p>
+        <form method="post" action="/projects/{{ project.id }}/codex-review" data-working-message="Codex is creating the research summary...">
+            <button type="submit">Create Research Summary</button>
         </form>
     </section>
 {% endif %}
