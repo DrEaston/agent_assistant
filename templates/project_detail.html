@@ -7,15 +7,69 @@
     <a href="/">Home</a> / <a href="/apps/assistant/planner">Assistant</a> / <a href="/projects">Projects</a> / {{ project.name }}
 </div>
 
-<h1>{{ project.name }}</h1>
+{% set open_actions = actions|selectattr('status', 'equalto', 'open')|list %}
+{% set completed_actions = actions|selectattr('status', 'equalto', 'done')|list %}
+{% set total_actions = open_actions|length + completed_actions|length %}
 
-<p><span class="badge badge-medium">{{ (project.project_type or 'general')|title }} Project</span></p>
+<div class="section-header project-heading">
+    <div>
+        <h1>{{ project.name }}</h1>
+        <p><span class="badge badge-medium">{{ (project.project_type or 'general')|title }} Project</span></p>
+    </div>
+    <div class="app-shell-actions">
+        <form method="post" action="/projects/{{ project.id }}/codex-review" class="inline-form">
+            <button type="submit">Prepare Codex Review</button>
+        </form>
+        {% if open_actions %}
+            <a class="button-link secondary-link" href="/projects/{{ project.id }}/actions/{{ open_actions[0].id }}">Open Next Task</a>
+        {% endif %}
+    </div>
+</div>
 
 {% if project.description %}
     <p>{{ project.description }}</p>
 {% endif %}
 
+<section class="detail-section" aria-labelledby="project-guide-heading">
+    <div class="section-header">
+        <div>
+            <h2 id="project-guide-heading">How to move this project forward</h2>
+            <p class="section-subtitle">Use the project review for the big picture, then work through one task at a time.</p>
+        </div>
+    </div>
+    <ol class="review-list">
+        <li><strong>Prepare Codex Review</strong> to check the full brief, task list, risks, and missing decisions.</li>
+        <li><strong>Open Next Task</strong> and add concrete checklist steps.</li>
+        <li>On the task page, use <strong>Review Steps</strong> to clean up the checklist or <strong>Create Codex Plan</strong> for an implementation packet.</li>
+    </ol>
+</section>
+
 {% if request.state.current_user and project.user_id == request.state.current_user.id %}
+    <section class="detail-section">
+        <details class="inline-create">
+            <summary>Edit Project</summary>
+            <form method="post" action="/projects/{{ project.id }}/update">
+                <div class="form-group">
+                    <label for="project-name">Project Name</label>
+                    <input type="text" id="project-name" name="name" value="{{ project.name }}" maxlength="80" required>
+                </div>
+                <div class="form-group">
+                    <label for="project-description">Brief</label>
+                    <textarea id="project-description" name="description">{{ project.description or '' }}</textarea>
+                </div>
+                <div class="form-group">
+                    <label for="project-priority">Priority</label>
+                    <select id="project-priority" name="priority_score">
+                        {% for score in range(1, 6) %}
+                            <option value="{{ score }}" {% if project.priority_score == score %}selected{% endif %}>{{ score }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit">Save Project</button>
+            </form>
+        </details>
+    </section>
+
     <section class="detail-section">
         <div class="section-header">
             <div>
@@ -39,10 +93,6 @@
         </form>
     </section>
 {% endif %}
-
-{% set open_actions = actions|selectattr('status', 'equalto', 'open')|list %}
-{% set completed_actions = actions|selectattr('status', 'equalto', 'done')|list %}
-{% set total_actions = open_actions|length + completed_actions|length %}
 
 <div class="dashboard-grid compact-metrics">
     <div class="metric">

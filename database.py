@@ -1652,6 +1652,52 @@ class Database:
         self._commit()
         self.close()
 
+    def merge_projects(self, source_project_id, destination_project_id, destination_name=None, destination_description=None):
+        """Move planner records into one project and remove the empty source project."""
+        if source_project_id == destination_project_id:
+            return destination_project_id
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT id FROM projects WHERE id IN (?, ?)", (source_project_id, destination_project_id))
+        if len(cursor.fetchall()) != 2:
+            self.close()
+            return None
+        for table in (
+            "notes",
+            "blockers",
+            "weekly_goals",
+            "recommended_actions",
+            "project_artifacts",
+            "scheduler_items",
+            "recipe_image_groups",
+            "recipe_images",
+        ):
+            cursor.execute(f"UPDATE {table} SET project_id = ? WHERE project_id = ?", (destination_project_id, source_project_id))
+        cursor.execute(
+            "UPDATE app_feedback_reports SET destination_project_id = ? WHERE destination_project_id = ?",
+            (destination_project_id, source_project_id),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO project_shares (project_id, owner_user_id, shared_with_user_id, permission) "
+            "SELECT ?, owner_user_id, shared_with_user_id, permission FROM project_shares WHERE project_id = ?",
+            (destination_project_id, source_project_id),
+        )
+        cursor.execute("DELETE FROM project_shares WHERE project_id = ?", (source_project_id,))
+        updates = ["updated_at = CURRENT_TIMESTAMP"]
+        values = []
+        if destination_name is not None:
+            updates.append("name = ?")
+            values.append(destination_name)
+        if destination_description is not None:
+            updates.append("description = ?")
+            values.append(destination_description)
+        values.append(destination_project_id)
+        cursor.execute(f"UPDATE projects SET {', '.join(updates)} WHERE id = ?", values)
+        cursor.execute("DELETE FROM projects WHERE id = ?", (source_project_id,))
+        self._commit()
+        self.close()
+        return destination_project_id
+
     def get_project_by_id(self, project_id):
         """Get a specific project."""
         self.connect()

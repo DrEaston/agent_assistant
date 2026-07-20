@@ -4419,6 +4419,53 @@ Implement or advance the selected task steps below. Keep the work scoped to this
 - Run a focused verification after changes and report anything not tested.
 """
 
+def build_project_codex_review(project, actions, blockers, goals, notes):
+    """Build a project-wide review packet that Codex can evaluate in one pass."""
+    open_actions = [action for action in actions if action.get("status") == "open"]
+    action_lines = "\n".join(
+        f"{index}. [{action.get('priority', 'medium').upper()}] {action.get('action', '').strip()}"
+        for index, action in enumerate(open_actions, 1)
+    ) or "No open tasks are recorded. Recommend the smallest useful next tasks."
+    blocker_lines = "\n".join(
+        f"- {blocker.get('description', '').strip()} ({blocker.get('severity', 'medium')})"
+        for blocker in blockers
+    ) or "- None recorded"
+    goal_lines = "\n".join(
+        f"- [{'x' if goal.get('completed') else ' '}] {goal.get('goal', '').strip()}"
+        for goal in goals
+    ) or "- None recorded"
+    note_lines = "\n".join(f"- {note.get('content', '').strip()}" for note in notes[:10]) or "- None recorded"
+    return f"""# Codex Project Review
+
+## Project
+{project.get('name', 'Untitled project')}
+
+## Brief
+{project.get('description') or 'No project brief is recorded.'}
+
+## Open Tasks
+{action_lines}
+
+## Weekly Goals
+{goal_lines}
+
+## Blockers
+{blocker_lines}
+
+## Notes
+{note_lines}
+
+## Review Request
+Review this project plan before implementation. Return:
+1. The clearest objective and likely deliverable.
+2. Missing context or decisions that must be resolved first.
+3. Duplicated, vague, or oversized tasks that should be rewritten.
+4. A prioritized sequence of concrete next actions.
+5. Major product, data, integration, security, and delivery risks.
+
+Do not implement anything during this review. Keep recommendations specific to the project brief above.
+"""
+
 
 # ============================================================================
 # API ROUTES - DASHBOARD
@@ -5755,27 +5802,17 @@ PROJECT_STARTER_TYPES = {
     },
 }
 
-CCT_STARTER_PROJECTS = (
-    {
-        "name": "CCT Research",
-        "description": "Research CCT and summarize what they do, with emphasis on their casino-related business.",
-        "priority_score": 3,
-        "project_type": "research",
-        "actions": (
-            "Identify which company CCT refers to and confirm its casino-related business context",
-            "Summarize what CCT does, its industry, and relevant customers or offerings",
-        ),
-    },
-    {
-        "name": "CCT Technical Scope",
-        "description": "Based on CCT's business, identify what I will probably have to build for them, including likely product, technical, and integration needs.",
-        "priority_score": 3,
-        "project_type": "technical",
-        "actions": (
-            "Map likely user workflows, product surfaces, and operational needs for CCT",
-            "Outline likely technical requirements, integrations, data flows, and delivery risks",
-        ),
-    },
+CCT_PROJECT_NAME = "CCT"
+CCT_PROJECT_DESCRIPTION = (
+    "Research CCT's Casino Insight platform and define the likely product, data, integration, "
+    "AWS, and practical ML work needed to support it."
+)
+CCT_PROJECT_ACTIONS = (
+    "Confirm CCT and its casino business context",
+    "Summarize CCT's products, customers, and offerings",
+    "Map Casino Insight user workflows and operational needs",
+    "Outline technical requirements, integrations, data flows, and risks",
+    "Prioritize data engineering and practical ML opportunities",
 )
 
 def safe_project_type(project_type):
@@ -5794,27 +5831,45 @@ def available_project_name(name):
     return f"{base_name} {uuid.uuid4().hex[:6]}"
 
 def ensure_cct_starter_projects(request):
-    """Create the approved CCT starter projects once for signed-in non-guest users."""
+    """Create one concise CCT project and merge the older split starter projects."""
     current_user = getattr(getattr(request, "state", None), "current_user", None)
     user_role = current_user.get("role") if isinstance(current_user, dict) else getattr(current_user, "role", "")
     if not current_user or user_role == "guest":
         return []
-    created_projects = []
-    for starter in CCT_STARTER_PROJECTS:
-        existing = db.get_project_by_name(starter["name"]) or db.get_any_project_by_name(starter["name"])
-        if existing:
-            continue
-        project_id = db.add_project(
-            starter["name"],
-            starter["description"],
-            starter["priority_score"],
-            starter["project_type"],
-        )
-        db.add_note(project_id, starter["description"])
-        for action in starter["actions"]:
-            db.add_recommended_action(project_id, action, "medium")
-        created_projects.append(project_id)
-    return created_projects
+    unified_id = merge_existing_cct_projects()
+    if unified_id:
+        return [unified_id]
+    project_id = db.add_project(CCT_PROJECT_NAME, CCT_PROJECT_DESCRIPTION, 3, "technical")
+    db.add_note(project_id, CCT_PROJECT_DESCRIPTION)
+    for action in CCT_PROJECT_ACTIONS:
+        db.add_recommended_action(project_id, action, "medium")
+    return [project_id]
+
+def merge_existing_cct_projects():
+    """Idempotently combine the two legacy CCT starters into the concise project."""
+    research = dict_from_row(db.get_any_project_by_name("CCT Research"))
+    technical = dict_from_row(db.get_any_project_by_name("CCT Technical Scope"))
+    unified = dict_from_row(db.get_any_project_by_name(CCT_PROJECT_NAME))
+    if not unified and technical:
+        db.update_project_details(technical["id"], name=CCT_PROJECT_NAME, description=CCT_PROJECT_DESCRIPTION)
+        unified = dict_from_row(db.get_any_project_by_name(CCT_PROJECT_NAME))
+    if not unified and research:
+        db.update_project_details(research["id"], name=CCT_PROJECT_NAME, description=CCT_PROJECT_DESCRIPTION)
+        unified = dict_from_row(db.get_any_project_by_name(CCT_PROJECT_NAME))
+        research = None
+    if (
+        unified
+        and research
+        and research["id"] != unified["id"]
+        and research.get("user_id") == unified.get("user_id")
+    ):
+        db.merge_projects(research["id"], unified["id"], CCT_PROJECT_NAME, CCT_PROJECT_DESCRIPTION)
+    return unified["id"] if unified else None
+
+@app.on_event("startup")
+def merge_legacy_cct_projects_on_startup():
+    """Apply the approved CCT project merge when each app revision starts."""
+    merge_existing_cct_projects()
 
 def safe_redirect_path(path, fallback="/"):
     """Keep form redirects inside this app."""
@@ -8673,6 +8728,7 @@ def delete_trainer_session(session_id: int, next: str = Form("/apps/trainer/upco
 @app.get("/projects")
 def projects_page(request: Request):
     """Projects list page."""
+    ensure_cct_starter_projects(request)
     projects = dicts_from_rows(db.get_all_projects())
     context = {
         "request": request,
@@ -8699,7 +8755,10 @@ def chat_page(request: Request):
 @app.get("/projects/{project_id}")
 def project_detail(request: Request, project_id: int):
     """Project detail page."""
+    cct_project_ids = ensure_cct_starter_projects(request)
     project = dict_from_row(db.get_project_by_id(project_id))
+    if not project and project_id in {15, 16} and cct_project_ids:
+        return RedirectResponse(url=f"/projects/{cct_project_ids[0]}", status_code=303)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
@@ -8714,6 +8773,73 @@ def project_detail(request: Request, project_id: int):
     template = jinja_env.get_template("project_detail.html")
     html = template.render(context)
     return HTMLResponse(html)
+
+
+@app.post("/projects/{project_id}/update")
+def update_project_form(
+    project_id: int,
+    name: str = Form(...),
+    description: str = Form(""),
+    priority_score: int = Form(3),
+):
+    """Update the project identity and brief from its detail page."""
+    project = dict_from_row(db.get_project_by_id(project_id))
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    clean_name = re.sub(r"\s+", " ", (name or "").strip())
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="Project name is required")
+    db.update_project_details(
+        project_id,
+        name=clean_name[:80],
+        description=(description or "").strip(),
+        priority_score=max(1, min(5, priority_score)),
+    )
+    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
+
+
+@app.post("/projects/{project_id}/codex-review")
+def project_codex_review(request: Request, project_id: int):
+    """Preview a project-wide Codex review packet."""
+    project = dict_from_row(db.get_project_by_id(project_id))
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    actions = dicts_from_rows(db.get_recommended_actions(project_id))
+    blockers = dicts_from_rows(db.get_blockers(project_id))
+    goals = dicts_from_rows(db.get_weekly_goals(project_id))
+    notes = dicts_from_rows(db.get_notes(project_id))
+    markdown = build_project_codex_review(project, actions, blockers, goals, notes)
+    template = jinja_env.get_template("project_codex_review.html")
+    return HTMLResponse(template.render({
+        "request": request,
+        "project": project,
+        "markdown": markdown,
+        "saved_path": "",
+    }))
+
+
+@app.post("/projects/{project_id}/codex-review/save")
+def save_project_codex_review(request: Request, project_id: int):
+    """Save the current project-wide Codex review packet."""
+    project = dict_from_row(db.get_project_by_id(project_id))
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    markdown = build_project_codex_review(
+        project,
+        dicts_from_rows(db.get_recommended_actions(project_id)),
+        dicts_from_rows(db.get_blockers(project_id)),
+        dicts_from_rows(db.get_weekly_goals(project_id)),
+        dicts_from_rows(db.get_notes(project_id)),
+    )
+    output_path = Path(f"codex_project_review_{project_id}.md").resolve()
+    output_path.write_text(markdown + "\n", encoding="utf-8")
+    template = jinja_env.get_template("project_codex_review.html")
+    return HTMLResponse(template.render({
+        "request": request,
+        "project": project,
+        "markdown": markdown,
+        "saved_path": str(output_path),
+    }))
 
 
 @app.get("/projects/{project_id}/actions/{action_id}")

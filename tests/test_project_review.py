@@ -1,0 +1,54 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from database import Database
+
+
+class ProjectMergeTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db = Database(str(Path(self.temp_dir.name) / "projects.db"))
+        self.db.init()
+
+    def tearDown(self):
+        if self.db.conn:
+            self.db.conn.close()
+            self.db.conn = None
+        self.temp_dir.cleanup()
+
+    def test_merge_projects_moves_planner_content_and_removes_source(self):
+        source_id = self.db.add_project("CCT Research", "Research brief", 3, "research")
+        destination_id = self.db.add_project("CCT Technical Scope", "Technical brief", 3, "technical")
+        self.db.add_note(source_id, "Research context")
+        self.db.add_recommended_action(source_id, "Confirm CCT", "medium")
+        self.db.add_recommended_action(destination_id, "Map the platform", "high")
+
+        merged_id = self.db.merge_projects(
+            source_id,
+            destination_id,
+            destination_name="CCT",
+            destination_description="Combined brief",
+        )
+
+        self.assertEqual(destination_id, merged_id)
+        self.assertIsNone(self.db.get_project_by_id(source_id))
+        project = dict(self.db.get_project_by_id(destination_id))
+        self.assertEqual("CCT", project["name"])
+        self.assertEqual("Combined brief", project["description"])
+        self.assertEqual(2, len(self.db.get_recommended_actions(destination_id)))
+        self.assertEqual("Research context", self.db.get_notes(destination_id)[0]["content"])
+
+
+class ProjectReviewTemplateTests(unittest.TestCase):
+    def test_project_page_exposes_review_actions_and_guide(self):
+        template = (Path(__file__).resolve().parents[1] / "templates" / "project_detail.html").read_text(encoding="utf-8")
+
+        self.assertIn("Prepare Codex Review", template)
+        self.assertIn("Open Next Task", template)
+        self.assertIn("How to move this project forward", template)
+        self.assertIn("Edit Project", template)
+
+
+if __name__ == "__main__":
+    unittest.main()
