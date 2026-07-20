@@ -167,6 +167,12 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn("overflow-wrap: anywhere", template)
         self.assertIn(".app-shell-actions details", template)
 
+    def test_research_bullet_labels_stack_above_text(self):
+        template = (Path(__file__).resolve().parents[1] / "templates" / "base.html").read_text(encoding="utf-8")
+
+        self.assertIn("grid-template-columns: 1fr", template)
+        self.assertNotIn("grid-template-columns: 4.2rem minmax(0, 1fr)", template)
+
     def test_assistant_landing_puts_projects_before_project_creation(self):
         template = (Path(__file__).resolve().parents[1] / "templates" / "dashboard.html").read_text(encoding="utf-8")
 
