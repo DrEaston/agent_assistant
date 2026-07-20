@@ -23,7 +23,7 @@
 </div>
 
 {% if active_review %}
-    <section class="detail-section success-panel">
+    <section class="detail-section research-deliverable-panel">
         <div class="section-header">
             <div>
                 <h2>{{ active_review.title }}</h2>
@@ -56,21 +56,26 @@
                                     <p class="section-subtitle">Modeling work and data challenges for this area.</p>
                                 </div>
                             </div>
-                            <div class="research-topic-grid">
+                            <div class="research-topic-list">
                                 {% for topic in domain.topics %}
-                                    <article class="research-product-card">
-                                        <h4>{{ topic.title }}</h4>
+                                    <details class="research-topic-card">
+                                        <summary>
+                                            <span>{{ topic.title }}</span>
+                                            {% if topic.bullets %}
+                                                <small>{{ topic.bullets|length }} item{% if topic.bullets|length != 1 %}s{% endif %}</small>
+                                            {% endif %}
+                                        </summary>
                                         {% if topic.bullets %}
                                             <ul>
                                                 {% for bullet in topic.bullets %}
                                                     <li>
-                                                        <span class="research-bullet-kind">{{ bullet.kind }}</span>
-                                                        <span>{{ bullet.text }}</span>
+                                                        <span class="research-bullet-kind research-bullet-kind-{{ bullet.kind|lower }}">{{ bullet.kind }}</span>
+                                                        <p>{{ bullet.text }}</p>
                                                     </li>
                                                 {% endfor %}
                                             </ul>
                                         {% endif %}
-                                    </article>
+                                    </details>
                                 {% endfor %}
                             </div>
                         </section>

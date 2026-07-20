@@ -101,9 +101,11 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn("research-summary-view", template)
         self.assertIn("research-domain-nav", template)
         self.assertIn("research-domain-section", template)
-        self.assertIn("research-topic-grid", template)
-        self.assertIn("research-product-card", template)
+        self.assertIn("research-topic-list", template)
+        self.assertIn("research-topic-card", template)
         self.assertIn("research-bullet-kind", template)
+        self.assertIn("<details class=\"research-topic-card\">", template)
+        self.assertNotIn("research-product-card", template)
         self.assertNotIn('<pre class="work-packet">{{ active_review.content_markdown }}</pre>', template)
 
     def test_research_summary_parser_exposes_clickable_domains(self):
