@@ -30,6 +30,21 @@
             </div>
         </div>
         <pre class="work-packet">{{ active_review.content_markdown }}</pre>
+        {% if review_questions %}
+            <div class="detail-section">
+                <h3>Answer Open Questions</h3>
+                <form method="post" action="/projects/{{ project.id }}/research-results/{{ active_review.slug }}/answer">
+                    {% for question in review_questions %}
+                        <div class="form-group">
+                            <label for="review-answer-{{ loop.index }}">{{ question }}</label>
+                            <input type="hidden" name="questions" value="{{ question }}">
+                            <textarea id="review-answer-{{ loop.index }}" name="answers" rows="3" placeholder="Answer this so Codex can continue the review."></textarea>
+                        </div>
+                    {% endfor %}
+                    <button type="submit">Answer &amp; Continue Review</button>
+                </form>
+            </div>
+        {% endif %}
     </section>
 {% else %}
     <section class="detail-section empty-state">

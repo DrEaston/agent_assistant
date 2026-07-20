@@ -81,6 +81,21 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn("Report History", template)
         self.assertIn("No research results yet", template)
 
+    def test_research_results_page_can_answer_open_questions(self):
+        template = (Path(__file__).resolve().parents[1] / "templates" / "project_research_results.html").read_text(encoding="utf-8")
+
+        self.assertIn("review_questions", template)
+        self.assertIn("Answer Open Questions", template)
+        self.assertIn("Answer &amp; Continue Review", template)
+        self.assertIn('/research-results/{{ active_review.slug }}/answer', template)
+
+    def test_project_review_answer_route_persists_answers_and_reruns(self):
+        api_source = (Path(__file__).resolve().parents[1] / "api.py").read_text(encoding="utf-8")
+
+        self.assertIn('@app.post("/projects/{project_id}/research-results/{slug}/answer")', api_source)
+        self.assertIn("db.add_note(project_id, answer_note)", api_source)
+        self.assertIn("review_result = run_project_codex_review(markdown)", api_source)
+
 
 if __name__ == "__main__":
     unittest.main()

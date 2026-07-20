@@ -4466,6 +4466,44 @@ Review this project plan before implementation. Return:
 Do not implement anything during this review. Keep recommendations specific to the project brief above.
 """
 
+def project_review_inputs(project_id):
+    """Collect the current persisted project context used for project reviews."""
+    return {
+        "actions": dicts_from_rows(db.get_recommended_actions(project_id)),
+        "blockers": dicts_from_rows(db.get_blockers(project_id)),
+        "goals": dicts_from_rows(db.get_weekly_goals(project_id)),
+        "notes": dicts_from_rows(db.get_notes(project_id)),
+    }
+
+def save_project_research_review(project_id, review_result):
+    """Persist one project research review run and return its slug."""
+    run_stamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    slug = f"research-review-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+    db.upsert_project_artifact(
+        project_id,
+        title=f"Research Results - {run_stamp}",
+        slug=slug,
+        content_markdown=review_result,
+        artifact_type="research_review",
+        status="complete",
+    )
+    return slug
+
+def format_project_review_answers_note(source_review, questions, answers):
+    """Format user answers from a project review as durable project context."""
+    lines = [
+        f"Research review answers from {(source_review or {}).get('title') or 'previous review'}:",
+    ]
+    for question, answer in zip(questions or [], answers or []):
+        clean_question = re.sub(r"\s+", " ", (question or "").strip())
+        clean_answer = re.sub(r"\s+", " ", (answer or "").strip())
+        if clean_question and clean_answer:
+            lines.extend([
+                f"- Question: {clean_question}",
+                f"  Answer: {clean_answer}",
+            ])
+    return "\n".join(lines)
+
 def run_project_codex_review(review_packet):
     """Run a review-only project evaluation and return the visible result."""
     if not planner_llm_provider:
@@ -8832,22 +8870,10 @@ def project_codex_review(request: Request, project_id: int):
     project = dict_from_row(db.get_project_by_id(project_id))
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    actions = dicts_from_rows(db.get_recommended_actions(project_id))
-    blockers = dicts_from_rows(db.get_blockers(project_id))
-    goals = dicts_from_rows(db.get_weekly_goals(project_id))
-    notes = dicts_from_rows(db.get_notes(project_id))
-    markdown = build_project_codex_review(project, actions, blockers, goals, notes)
+    review_inputs = project_review_inputs(project_id)
+    markdown = build_project_codex_review(project, **review_inputs)
     review_result = run_project_codex_review(markdown)
-    run_stamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-    slug = f"research-review-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
-    db.upsert_project_artifact(
-        project_id,
-        title=f"Research Results — {run_stamp}",
-        slug=slug,
-        content_markdown=review_result,
-        artifact_type="research_review",
-        status="complete",
-    )
+    slug = save_project_research_review(project_id, review_result)
     return RedirectResponse(url=f"/projects/{project_id}/research-results?run={quote(slug)}", status_code=303)
 
 
@@ -8864,13 +8890,41 @@ def project_research_results(request: Request, project_id: int, run: str = ""):
     active_review = next((review for review in reviews if review.get("slug") == run), None) if run else None
     if not active_review and reviews:
         active_review = reviews[0]
+    review_questions = extract_feedback_plan_questions(active_review.get("content_markdown") if active_review else "")
     template = jinja_env.get_template("project_research_results.html")
     return HTMLResponse(template.render({
         "request": request,
         "project": project,
         "reviews": reviews,
         "active_review": active_review,
+        "review_questions": review_questions,
     }))
+
+
+@app.post("/projects/{project_id}/research-results/{slug}/answer")
+def answer_project_research_questions(
+    request: Request,
+    project_id: int,
+    slug: str,
+    questions: List[str] = Form([]),
+    answers: List[str] = Form([]),
+):
+    """Save answers to review questions and continue the project review."""
+    project = dict_from_row(db.get_project_by_id(project_id))
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    source_review = dict_from_row(db.get_project_artifact(project_id, slug))
+    if not source_review or source_review.get("artifact_type") != "research_review":
+        raise HTTPException(status_code=404, detail="Research review not found")
+    answer_note = format_project_review_answers_note(source_review, questions, answers)
+    if "  Answer:" not in answer_note:
+        return RedirectResponse(url=f"/projects/{project_id}/research-results?run={quote(slug)}", status_code=303)
+    db.add_note(project_id, answer_note)
+    review_inputs = project_review_inputs(project_id)
+    markdown = build_project_codex_review(project, **review_inputs)
+    review_result = run_project_codex_review(markdown)
+    next_slug = save_project_research_review(project_id, review_result)
+    return RedirectResponse(url=f"/projects/{project_id}/research-results?run={quote(next_slug)}", status_code=303)
 
 
 @app.post("/projects/{project_id}/codex-review/save")
@@ -8881,10 +8935,7 @@ def save_project_codex_review(request: Request, project_id: int):
         raise HTTPException(status_code=404, detail="Project not found")
     markdown = build_project_codex_review(
         project,
-        dicts_from_rows(db.get_recommended_actions(project_id)),
-        dicts_from_rows(db.get_blockers(project_id)),
-        dicts_from_rows(db.get_weekly_goals(project_id)),
-        dicts_from_rows(db.get_notes(project_id)),
+        **project_review_inputs(project_id),
     )
     output_path = Path(f"codex_project_review_{project_id}.md").resolve()
     output_path.write_text(markdown + "\n", encoding="utf-8")
