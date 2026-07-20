@@ -18,7 +18,7 @@
     </div>
     <div class="app-shell-actions">
         <form method="post" action="/projects/{{ project.id }}/codex-review" class="inline-form">
-            <button type="submit">Prepare Codex Review</button>
+            <button type="submit">Start Codex Review</button>
         </form>
         {% if open_actions %}
             <a class="button-link secondary-link" href="/projects/{{ project.id }}/actions/{{ open_actions[0].id }}">Open Next Task</a>
@@ -38,7 +38,7 @@
         </div>
     </div>
     <ol class="review-list">
-        <li><strong>Prepare Codex Review</strong> to check the full brief, task list, risks, and missing decisions.</li>
+        <li><strong>Start Codex Review</strong> to check the full brief, task list, risks, and missing decisions.</li>
         <li><strong>Open Next Task</strong> and add concrete checklist steps.</li>
         <li>On the task page, use <strong>Review Steps</strong> to clean up the checklist or <strong>Create Codex Plan</strong> for an implementation packet.</li>
     </ol>

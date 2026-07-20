@@ -4466,6 +4466,20 @@ Review this project plan before implementation. Return:
 Do not implement anything during this review. Keep recommendations specific to the project brief above.
 """
 
+def run_project_codex_review(review_packet):
+    """Run a review-only project evaluation and return the visible result."""
+    if not planner_llm_provider:
+        raise HTTPException(status_code=503, detail="Project review is unavailable because no review model is configured.")
+    result = planner_llm_provider.chat(
+        [{"role": "user", "content": review_packet}],
+        (
+            "You are Codex in review-only mode. Evaluate the supplied project packet. "
+            "Do not edit code, claim implementation, or invent missing facts. Give a concise, actionable review "
+            "with prioritized next steps, open decisions, and risks."
+        ),
+    )
+    return (result or "").strip() or "The review completed without returning any recommendations."
+
 
 # ============================================================================
 # API ROUTES - DASHBOARD
@@ -8800,7 +8814,7 @@ def update_project_form(
 
 @app.post("/projects/{project_id}/codex-review")
 def project_codex_review(request: Request, project_id: int):
-    """Preview a project-wide Codex review packet."""
+    """Run a project-wide Codex review and show the result."""
     project = dict_from_row(db.get_project_by_id(project_id))
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -8809,11 +8823,13 @@ def project_codex_review(request: Request, project_id: int):
     goals = dicts_from_rows(db.get_weekly_goals(project_id))
     notes = dicts_from_rows(db.get_notes(project_id))
     markdown = build_project_codex_review(project, actions, blockers, goals, notes)
+    review_result = run_project_codex_review(markdown)
     template = jinja_env.get_template("project_codex_review.html")
     return HTMLResponse(template.render({
         "request": request,
         "project": project,
         "markdown": markdown,
+        "review_result": review_result,
         "saved_path": "",
     }))
 
@@ -8838,6 +8854,7 @@ def save_project_codex_review(request: Request, project_id: int):
         "request": request,
         "project": project,
         "markdown": markdown,
+        "review_result": "",
         "saved_path": str(output_path),
     }))
 

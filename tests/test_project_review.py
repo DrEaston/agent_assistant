@@ -44,7 +44,7 @@ class ProjectReviewTemplateTests(unittest.TestCase):
     def test_project_page_exposes_review_actions_and_guide(self):
         template = (Path(__file__).resolve().parents[1] / "templates" / "project_detail.html").read_text(encoding="utf-8")
 
-        self.assertIn("Prepare Codex Review", template)
+        self.assertIn("Start Codex Review", template)
         self.assertIn("Open Next Task", template)
         self.assertIn("How to move this project forward", template)
         self.assertIn("Edit Project", template)
