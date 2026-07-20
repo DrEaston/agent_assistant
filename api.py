@@ -4512,6 +4512,31 @@ Forecasting
 General Guidance
 - For every modeling problem, document target variable, observation grain, prediction horizon, feature engineering ideas, missing-data handling, temporal leakage controls, evaluation metrics, explainability, deployment cadence, and why the recommended model is preferred over alternatives."""
 
+def default_research_workspace_guidance(project_name="this project"):
+    """Return the default reusable structure for generated research summaries."""
+    return f"""Research Workspace Template
+
+Use this as the default structure for {project_name} and future research projects:
+
+Overview
+- State what the project is trying to understand and what decision the research should support.
+
+Components / Product Areas
+- Create one top-level section per major product, component, workflow, market segment, or research area.
+- Each section should be usable as a clickable workspace area in the app.
+
+Topics
+- Under each section, create one subheading per concrete topic, modeling problem, operational problem, or implementation question.
+- Put detailed bullets under the subheading rather than in the top-level section.
+
+Bullet Pattern
+- Data challenge: describe the data source, data quality problem, integration issue, grain, horizon, missingness, or leakage risk.
+- Problem: describe the business, workflow, product, or operational problem created by that data challenge.
+- Model approach: recommend the simplest production-ready modeling or analytics approach first, then note stronger alternatives when useful.
+
+Implementation Notes
+- For every modeling topic, include target variable, observation grain, prediction horizon, candidate features, missing-data handling, temporal leakage controls, evaluation metrics, explainability, deployment cadence, and why the recommended approach is preferred."""
+
 def build_project_research_summary_packet(project, actions, blockers, goals, notes):
     """Build a deliverable-oriented research summary packet."""
     action_lines = "\n".join(
@@ -4528,6 +4553,7 @@ def build_project_research_summary_packet(project, actions, blockers, goals, not
         for goal in goals
     ) or "- None recorded"
     note_lines = "\n".join(f"- {note.get('content', '').strip()}" for note in notes[:20]) or "- None recorded"
+    workspace_guidance = default_research_workspace_guidance(project.get("name", "this project"))
     cct_guidance = cct_machine_learning_strategy_guidance() if (project.get("name") or "").strip().lower() == "cct" else ""
     cct_section = f"""
 ## Required CCT ML Strategy Section
@@ -4554,11 +4580,14 @@ def build_project_research_summary_packet(project, actions, blockers, goals, not
 
 ### Project Notes
 {note_lines}
+
+## Default Research Workspace Template
+{workspace_guidance}
 {cct_section}
 ## Required Deliverable
 Create the research summary document itself. Do not summarize these instructions and do not produce a plan for writing the summary.
 
-For CCT, the deliverable must directly describe the different CCT components/product areas and, under each relevant section, connect data challenges to practical model approaches. Use clear markdown headings and concise bullets. Include the required Machine Learning Strategy Research section when CCT context is present.
+Use the Default Research Workspace Template as the standard format for this and future research summaries. The deliverable must directly describe the project components, product areas, workflows, or research areas and, under each relevant section, connect data challenges to practical model approaches. Use clear markdown headings and concise bullets. Include any project-specific required sections when present.
 """
 
 def project_review_inputs(project_id):
@@ -4631,7 +4660,9 @@ def project_summary_domain_for_title(title):
     if any(token in lowered for token in ["known gap", "recommended next", "risk"]):
         return "Research Follow-Up"
     if any(token in lowered for token in ["component", "product", "platform", "module"]):
-        return "CCT Components"
+        return "Components / Product Areas"
+    if any(token in lowered for token in ["workflow", "implementation", "integration", "market", "segment"]):
+        return "Components / Product Areas"
     return "Research Notes"
 
 def project_summary_anchor(title):
@@ -4683,7 +4714,7 @@ def project_research_summary_view(markdown):
                 continue
             if level <= 2:
                 domain_title = project_summary_domain_for_title(title)
-                if domain_title in {"Research Notes", "CCT Components", "Research Follow-Up"} and lowered not in {"known gaps", "recommended next steps", "risks"}:
+                if domain_title in {"Research Notes", "Components / Product Areas", "Research Follow-Up"} and lowered not in {"known gaps", "recommended next steps", "risks"}:
                     domain_title = title
                 current_domain = ensure_domain(domain_title)
                 current = None
@@ -4694,7 +4725,7 @@ def project_research_summary_view(markdown):
             continue
         product_match = re.match(r"^(?:product|platform|module|offering)\s*:\s*(.+)$", line, flags=re.IGNORECASE)
         if product_match:
-            current = add_topic("CCT Components", f"Product: {product_match.group(1).strip()}")
+            current = add_topic("Components / Product Areas", f"Product: {product_match.group(1).strip()}")
             sections.append(current)
             continue
         cleaned = re.sub(r"^[-*]\s+(?:\[[ xX]\]\s*)?", "", line).strip()
@@ -4731,8 +4762,10 @@ def run_project_codex_review(review_packet):
         (
             "You are Codex in research-summary mode. Evaluate the supplied project packet. "
             "Do not edit code, claim implementation, wrap the response in code fences, or invent missing facts. "
-            "Write a clean research workspace document using these top-level headings where applicable: "
-            "Overview, CCT Component Summary, Customer Analytics, Machine Analytics, Forecasting, General Guidance, Known Gaps, and Recommended Next Steps. "
+            "Write a clean research workspace document using the default app template: top-level research areas, "
+            "then nested modeling or implementation topics with Data challenge, Problem, and Model approach bullets. "
+            "Use these top-level headings where applicable: "
+            "Overview, Component Summary, Product Areas, Customer Analytics, Machine Analytics, Forecasting, General Guidance, Known Gaps, and Recommended Next Steps. "
             "Use '## Customer Analytics' for player-return, frequency, time-to-return, survival, lifetime value, and promotion optimization work. "
             "Use '## Machine Analytics' for slot/machine revenue, performance, failure, replacement, conversion, and placement work. "
             "Use '## Forecasting' for kiosk cash, revenue, staffing, and denomination demand. "

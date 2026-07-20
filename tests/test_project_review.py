@@ -128,6 +128,11 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn("Do not invent specific CCT products", api_source)
         self.assertIn("Produce a usable summary document, not a plan", api_source)
         self.assertIn("build_project_research_summary_packet", api_source)
+        self.assertIn("default_research_workspace_guidance", api_source)
+        self.assertIn("Default Research Workspace Template", api_source)
+        self.assertIn("Use the Default Research Workspace Template as the standard format", api_source)
+        self.assertIn("Components / Product Areas", api_source)
+        self.assertIn("default app template", api_source)
         self.assertIn("CCT_SUMMARY_GUIDANCE_NOTE_PREFIX", api_source)
         self.assertIn("Use '## Customer Analytics'", api_source)
 
