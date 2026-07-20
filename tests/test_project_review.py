@@ -139,6 +139,8 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn("assistant-projects-heading", template)
         self.assertLess(template.index("assistant-projects-heading"), template.index("project-starter-heading"))
         self.assertIn("Open a major project directly.", template)
+        self.assertNotIn("Priority Task", template)
+        self.assertNotIn("Priority Project", template)
 
 
 if __name__ == "__main__":

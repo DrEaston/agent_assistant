@@ -3,50 +3,6 @@
 {% block title %}Planner - Dieter Assistant{% endblock %}
 
 {% block content %}
-<section class="focus-panel planner-admin-panel">
-    {% if recommended_project and next_action %}
-        <div class="focus-meta">
-            <span>{{ recommended_project.name }}</span>
-            <span>Priority {{ recommended_project.priority_score }}/5</span>
-        </div>
-
-        <div class="focus-task">
-            <p class="priority-label">Priority Task</p>
-            <h2><a href="/projects/{{ next_action.project_id }}/actions/{{ next_action.id }}">{{ next_action.action }}</a></h2>
-            {% if next_action.steps_total %}
-                <div class="focus-progress-row">
-                    <span>{{ next_action.steps_done }}/{{ next_action.steps_total }} steps complete</span>
-                    <span>{{ next_action.progress_percent }}%</span>
-                </div>
-                <div class="task-progress focus-progress" aria-label="{{ next_action.steps_done }} of {{ next_action.steps_total }} steps complete">
-                    <div class="task-progress-fill" style="width: {{ next_action.progress_percent }}%;"></div>
-                </div>
-            {% endif %}
-        </div>
-
-        {% if next_action.top_open_steps %}
-            <div class="focus-next-steps">
-                <h3>Next Steps</h3>
-                <ol>
-                    {% for step in next_action.top_open_steps %}
-                        <li>{{ step.step }}</li>
-                    {% endfor %}
-                </ol>
-            </div>
-        {% endif %}
-    {% elif recommended_project %}
-        <div class="focus-task">
-            <p class="priority-label">Priority Project</p>
-            <h2>{{ recommended_project.name }}</h2>
-            <p>No open task is defined for this project.</p>
-        </div>
-    {% else %}
-        <div class="focus-task">
-            <p>No active project yet.</p>
-        </div>
-    {% endif %}
-</section>
-
 <section class="detail-section planner-projects-panel" aria-labelledby="assistant-projects-heading">
     <div class="section-header">
         <div>
