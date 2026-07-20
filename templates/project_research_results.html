@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Research Results - {{ project.name }} - Dieter{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    <a href="/">Home</a> / <a href="/apps/assistant/planner">Assistant</a> / <a href="/projects">Projects</a> /
+    <a href="/projects/{{ project.id }}">{{ project.name }}</a> / Research Results
+</div>
+
+<div class="section-header project-heading">
+    <div>
+        <h1>Research Results</h1>
+        <p class="section-subtitle">Saved findings and recommendations for {{ project.name }}.</p>
+    </div>
+    <div class="app-shell-actions">
+        <form method="post" action="/projects/{{ project.id }}/codex-review" class="inline-form">
+            <button type="submit">Run Updated Review</button>
+        </form>
+        <a class="button-link secondary-link" href="/projects/{{ project.id }}">Back to Project</a>
+    </div>
+</div>
+
+{% if active_review %}
+    <section class="detail-section success-panel">
+        <div class="section-header">
+            <div>
+                <h2>{{ active_review.title }}</h2>
+                <p class="section-subtitle">Generated {{ active_review.updated_at }} from the current brief, tasks, goals, blockers, and notes.</p>
+            </div>
+        </div>
+        <pre class="work-packet">{{ active_review.content_markdown }}</pre>
+    </section>
+{% else %}
+    <section class="detail-section empty-state">
+        <h2>No research results yet</h2>
+        <p>Run the first Codex review to create a persistent report.</p>
+        <form method="post" action="/projects/{{ project.id }}/codex-review">
+            <button type="submit">Start Codex Review</button>
+        </form>
+    </section>
+{% endif %}
+
+{% if reviews|length > 1 %}
+    <section class="detail-section">
+        <h2>Report History</h2>
+        <div class="task-list">
+            {% for review in reviews %}
+                <article class="task-item {% if active_review and review.id == active_review.id %}completed{% endif %}">
+                    <div class="task-copy">
+                        <p><a href="/projects/{{ project.id }}/research-results?run={{ review.slug }}">{{ review.title }}</a></p>
+                        <small>{{ review.updated_at }}</small>
+                    </div>
+                </article>
+            {% endfor %}
+        </div>
+    </section>
+{% endif %}
+{% endblock %}

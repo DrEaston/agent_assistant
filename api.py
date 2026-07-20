@@ -4475,7 +4475,9 @@ def run_project_codex_review(review_packet):
         (
             "You are Codex in review-only mode. Evaluate the supplied project packet. "
             "Do not edit code, claim implementation, or invent missing facts. Give a concise, actionable review "
-            "with prioritized next steps, open decisions, and risks."
+            "using these exact headings: Executive Summary, Key Findings, Evidence and Sources, "
+            "Open Questions, Recommendations, and Risks. Under Evidence and Sources, include only sources "
+            "that were actually supplied in the packet; explicitly say when none were supplied."
         ),
     )
     return (result or "").strip() or "The review completed without returning any recommendations."
@@ -5599,6 +5601,10 @@ def api_get_project(project_id: int):
         "actions": dicts_from_rows(db.get_recommended_actions(project_id)),
         "blockers": dicts_from_rows(db.get_blockers(project_id)),
         "goals": dicts_from_rows(db.get_weekly_goals(project_id)),
+        "research_reviews": [
+            artifact for artifact in dicts_from_rows(db.get_project_artifacts(project_id))
+            if artifact.get("artifact_type") == "research_review"
+        ],
     }
 
 
@@ -5815,6 +5821,14 @@ PROJECT_STARTER_TYPES = {
         "brief": "Help determine what probably needs to be built, including product scope, technical requirements, workflows, integrations, and risks.",
     },
 }
+
+RESEARCH_PROJECT_ACTIONS = (
+    "Define the research question and decision this work should support",
+    "Collect authoritative sources and record links in project notes",
+    "Summarize the organization, market, customers, and offerings",
+    "Identify important findings, unknowns, contradictions, and risks",
+    "Turn findings into prioritized recommendations and next steps",
+)
 
 CCT_PROJECT_NAME = "CCT"
 CCT_PROJECT_DESCRIPTION = (
@@ -8824,13 +8838,38 @@ def project_codex_review(request: Request, project_id: int):
     notes = dicts_from_rows(db.get_notes(project_id))
     markdown = build_project_codex_review(project, actions, blockers, goals, notes)
     review_result = run_project_codex_review(markdown)
-    template = jinja_env.get_template("project_codex_review.html")
+    run_stamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    slug = f"research-review-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+    db.upsert_project_artifact(
+        project_id,
+        title=f"Research Results — {run_stamp}",
+        slug=slug,
+        content_markdown=review_result,
+        artifact_type="research_review",
+        status="complete",
+    )
+    return RedirectResponse(url=f"/projects/{project_id}/research-results?run={quote(slug)}", status_code=303)
+
+
+@app.get("/projects/{project_id}/research-results")
+def project_research_results(request: Request, project_id: int, run: str = ""):
+    """Display the latest persistent research report and prior review history."""
+    project = dict_from_row(db.get_project_by_id(project_id))
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    reviews = [
+        artifact for artifact in dicts_from_rows(db.get_project_artifacts(project_id))
+        if artifact.get("artifact_type") == "research_review"
+    ]
+    active_review = next((review for review in reviews if review.get("slug") == run), None) if run else None
+    if not active_review and reviews:
+        active_review = reviews[0]
+    template = jinja_env.get_template("project_research_results.html")
     return HTMLResponse(template.render({
         "request": request,
         "project": project,
-        "markdown": markdown,
-        "review_result": review_result,
-        "saved_path": "",
+        "reviews": reviews,
+        "active_review": active_review,
     }))
 
 
@@ -9722,7 +9761,11 @@ def create_project_form(
     next: str = Form("detail"),
 ):
     """Create project via form."""
-    project_id = db.add_project(available_project_name(name), description, priority_score, safe_project_type(project_type))
+    safe_type = safe_project_type(project_type)
+    project_id = db.add_project(available_project_name(name), description, priority_score, safe_type)
+    if safe_type == "research":
+        for index, action in enumerate(RESEARCH_PROJECT_ACTIONS):
+            db.add_recommended_action(project_id, action, "high" if index == 0 else "medium")
     redirect_url = f"/projects/{project_id}" if next == "detail" else "/projects"
     return RedirectResponse(url=redirect_url, status_code=303)
 

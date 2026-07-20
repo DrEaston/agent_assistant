@@ -39,6 +39,31 @@ class ProjectMergeTests(unittest.TestCase):
         self.assertEqual(2, len(self.db.get_recommended_actions(destination_id)))
         self.assertEqual("Research context", self.db.get_notes(destination_id)[0]["content"])
 
+    def test_research_review_artifacts_preserve_run_history(self):
+        project_id = self.db.add_project("Research", "Brief", 3, "research")
+        self.db.upsert_project_artifact(
+            project_id,
+            "Research Results — First",
+            "research-review-first",
+            "First findings",
+            artifact_type="research_review",
+            status="complete",
+        )
+        self.db.upsert_project_artifact(
+            project_id,
+            "Research Results — Second",
+            "research-review-second",
+            "Updated findings",
+            artifact_type="research_review",
+            status="complete",
+        )
+
+        reviews = [dict(row) for row in self.db.get_project_artifacts(project_id)]
+
+        self.assertEqual(2, len(reviews))
+        self.assertEqual({"First findings", "Updated findings"}, {item["content_markdown"] for item in reviews})
+        self.assertTrue(all(item["artifact_type"] == "research_review" for item in reviews))
+
 
 class ProjectReviewTemplateTests(unittest.TestCase):
     def test_project_page_exposes_review_actions_and_guide(self):
@@ -48,6 +73,13 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn("Open Next Task", template)
         self.assertIn("How to move this project forward", template)
         self.assertIn("Edit Project", template)
+
+    def test_research_results_page_has_rerun_and_history_controls(self):
+        template = (Path(__file__).resolve().parents[1] / "templates" / "project_research_results.html").read_text(encoding="utf-8")
+
+        self.assertIn("Run Updated Review", template)
+        self.assertIn("Report History", template)
+        self.assertIn("No research results yet", template)
 
 
 if __name__ == "__main__":

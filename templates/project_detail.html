@@ -20,6 +20,9 @@
         <form method="post" action="/projects/{{ project.id }}/codex-review" class="inline-form">
             <button type="submit">Start Codex Review</button>
         </form>
+        {% if research_reviews %}
+            <a class="button-link secondary-link" href="/projects/{{ project.id }}/research-results">Research Results</a>
+        {% endif %}
         {% if open_actions %}
             <a class="button-link secondary-link" href="/projects/{{ project.id }}/actions/{{ open_actions[0].id }}">Open Next Task</a>
         {% endif %}
@@ -39,8 +42,8 @@
     </div>
     <ol class="review-list">
         <li><strong>Start Codex Review</strong> to check the full brief, task list, risks, and missing decisions.</li>
-        <li><strong>Open Next Task</strong> and add concrete checklist steps.</li>
-        <li>On the task page, use <strong>Review Steps</strong> to clean up the checklist or <strong>Create Codex Plan</strong> for an implementation packet.</li>
+        <li>Open <strong>Research Results</strong> afterward to revisit the saved report or compare earlier runs.</li>
+        <li><strong>Open Next Task</strong>, add concrete checklist steps, then use <strong>Create Codex Plan</strong> when implementation is ready.</li>
     </ol>
 </section>
 
