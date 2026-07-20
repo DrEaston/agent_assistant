@@ -106,11 +106,16 @@ class ProjectReviewTemplateTests(unittest.TestCase):
     def test_project_summary_prompt_targets_products_data_and_models(self):
         api_source = (Path(__file__).resolve().parents[1] / "api.py").read_text(encoding="utf-8")
 
-        self.assertIn("product-by-product map for CCT", api_source)
+        self.assertIn("Machine Learning Strategy Research", api_source)
+        self.assertIn("Customer Return Prediction", api_source)
+        self.assertIn("Machine Analytics", api_source)
+        self.assertIn("Forecasting", api_source)
         self.assertIn("Data challenge:", api_source)
         self.assertIn("Model approach:", api_source)
         self.assertIn("Do not invent specific CCT products", api_source)
         self.assertIn("Produce a usable summary document, not a plan", api_source)
+        self.assertIn("build_project_research_summary_packet", api_source)
+        self.assertIn("CCT_SUMMARY_GUIDANCE_NOTE_PREFIX", api_source)
 
     def test_research_results_page_improves_summary_without_question_loop(self):
         template = (Path(__file__).resolve().parents[1] / "templates" / "project_research_results.html").read_text(encoding="utf-8")

@@ -4470,6 +4470,95 @@ Create a clean research summary for this project before implementation. Return:
 Do not implement anything during this review. Do not invent specific CCT products if they are not supplied in the brief, tasks, or notes. Keep recommendations specific to the project context above.
 """
 
+def cct_machine_learning_strategy_guidance():
+    """Return the required CCT summary structure for practical ML research."""
+    return """Machine Learning Strategy Research
+
+For every proposed model, identify the simplest production-ready approach before considering more complex methods.
+
+Customer Return Prediction
+- Research and compare binary classification for whether a player returns within 30, 60, or 90 days.
+- Use one row per player at a given scoring date.
+- Recommended baseline: logistic regression.
+- Recommended production model: LightGBM or XGBoost classifier.
+- Return Frequency: predict expected visits over the next 30 or 90 days; compare count regression versus gradient-boosted regression.
+- Time Until Next Visit: predict expected days until a player returns; compare regression against survival-analysis approaches.
+- Survival Analysis: research Cox models, Random Survival Forests, LightGBM Survival, and XGBoost Survival.
+- Determine when survival analysis has advantages over multiple binary classifiers.
+- Evaluate handling of right-censored players who have not yet returned.
+
+Player Lifetime Value
+- Compare direct value regression versus two-stage models: probability of return and expected value conditional on returning.
+
+Promotion Optimization
+- Compare response prediction versus uplift modeling.
+- Determine when causal models are preferable.
+
+Machine Analytics
+- Research practical implementations for daily machine revenue forecasting.
+- Research expected versus actual machine performance.
+- Research underperforming machine detection using model residuals.
+- Research machine failure prediction.
+- Research machine replacement prioritization.
+- Research game conversion recommendations.
+- Research machine placement optimization using historical floor layouts.
+
+Forecasting
+- Compare practical forecasting approaches for kiosk cash demand, casino revenue, staffing requirements, and denomination demand.
+- Evaluate seasonal baselines, LightGBM regression, XGBoost regression, Prophet, ARIMA, and hierarchical forecasting.
+
+General Guidance
+- For every modeling problem, document target variable, observation grain, prediction horizon, feature engineering ideas, missing-data handling, temporal leakage controls, evaluation metrics, explainability, deployment cadence, and why the recommended model is preferred over alternatives."""
+
+def build_project_research_summary_packet(project, actions, blockers, goals, notes):
+    """Build a deliverable-oriented research summary packet."""
+    action_lines = "\n".join(
+        f"- {action.get('action', '').strip()}"
+        for action in actions
+        if action.get("action")
+    ) or "- None recorded"
+    blocker_lines = "\n".join(
+        f"- {blocker.get('description', '').strip()} ({blocker.get('severity', 'medium')})"
+        for blocker in blockers
+    ) or "- None recorded"
+    goal_lines = "\n".join(
+        f"- [{'x' if goal.get('completed') else ' '}] {goal.get('goal', '').strip()}"
+        for goal in goals
+    ) or "- None recorded"
+    note_lines = "\n".join(f"- {note.get('content', '').strip()}" for note in notes[:20]) or "- None recorded"
+    cct_guidance = cct_machine_learning_strategy_guidance() if (project.get("name") or "").strip().lower() == "cct" else ""
+    cct_section = f"""
+## Required CCT ML Strategy Section
+{cct_guidance}
+""" if cct_guidance else ""
+    return f"""# Project Research Summary Packet
+
+## Project
+{project.get('name', 'Untitled project')}
+
+## Brief
+{project.get('description') or 'No project brief is recorded.'}
+
+## Available Context
+
+### Project Tasks
+{action_lines}
+
+### Weekly Goals
+{goal_lines}
+
+### Blockers
+{blocker_lines}
+
+### Project Notes
+{note_lines}
+{cct_section}
+## Required Deliverable
+Create the research summary document itself. Do not summarize these instructions and do not produce a plan for writing the summary.
+
+For CCT, the deliverable must directly describe the different CCT components/product areas and, under each relevant section, connect data challenges to practical model approaches. Use clear markdown headings and concise bullets. Include the required Machine Learning Strategy Research section when CCT context is present.
+"""
+
 def project_review_inputs(project_id):
     """Collect the current persisted project context used for project reviews."""
     return {
@@ -4585,12 +4674,15 @@ def run_project_codex_review(review_packet):
             "You are Codex in research-summary mode. Evaluate the supplied project packet. "
             "Do not edit code, claim implementation, wrap the response in code fences, or invent missing facts. "
             "Write a clean product research summary using these exact top-level headings: "
-            "Overview, CCT Product Map, Known Gaps, Recommended Next Steps, and Risks. "
-            "Under CCT Product Map, create one markdown subheading per known product, product line, platform, "
+            "Overview, CCT Component Summary, Machine Learning Strategy Research, Known Gaps, and Recommended Next Steps. "
+            "Under CCT Component Summary, create one markdown subheading per known product, product line, platform, "
             "or module using the form '### Product: <name>'. Under each product, use concise bullets beginning "
             "with 'Data challenge:', 'Problem:', and 'Model approach:'. If the packet does not name products, "
             "say that under Known Gaps instead of inventing names. Produce a usable summary document, not a plan "
-            "for a future summary."
+            "for a future summary. Never repeat or summarize the prompt instructions. For Machine Learning Strategy "
+            "Research, include practical model-comparison sections for Customer Return Prediction, Player Lifetime "
+            "Value, Promotion Optimization, Machine Analytics, Forecasting, and General Guidance when CCT guidance "
+            "is supplied."
         ),
     )
     return (result or "").strip() or "The review completed without returning any recommendations."
@@ -5955,6 +6047,7 @@ CCT_PROJECT_ACTIONS = (
     "Outline technical requirements, integrations, data flows, and risks",
     "Prioritize data engineering and practical ML opportunities",
 )
+CCT_SUMMARY_GUIDANCE_NOTE_PREFIX = "Required CCT research summary structure:"
 
 def safe_project_type(project_type):
     """Normalize project type for the first planner project-start flow."""
@@ -5982,9 +6075,19 @@ def ensure_cct_starter_projects(request):
         return [unified_id]
     project_id = db.add_project(CCT_PROJECT_NAME, CCT_PROJECT_DESCRIPTION, 3, "technical")
     db.add_note(project_id, CCT_PROJECT_DESCRIPTION)
+    ensure_cct_summary_guidance_note(project_id)
     for action in CCT_PROJECT_ACTIONS:
         db.add_recommended_action(project_id, action, "medium")
     return [project_id]
+
+def ensure_cct_summary_guidance_note(project_id):
+    """Persist the required CCT summary structure once per CCT project."""
+    if not project_id:
+        return
+    notes = dicts_from_rows(db.get_notes(project_id))
+    if any((note.get("content") or "").startswith(CCT_SUMMARY_GUIDANCE_NOTE_PREFIX) for note in notes):
+        return
+    db.add_note(project_id, f"{CCT_SUMMARY_GUIDANCE_NOTE_PREFIX}\n{cct_machine_learning_strategy_guidance()}")
 
 def merge_existing_cct_projects():
     """Idempotently combine the two legacy CCT starters into the concise project."""
@@ -6005,6 +6108,8 @@ def merge_existing_cct_projects():
         and research.get("user_id") == unified.get("user_id")
     ):
         db.merge_projects(research["id"], unified["id"], CCT_PROJECT_NAME, CCT_PROJECT_DESCRIPTION)
+    if unified:
+        ensure_cct_summary_guidance_note(unified["id"])
     return unified["id"] if unified else None
 
 @app.on_event("startup")
@@ -8946,7 +9051,7 @@ def project_codex_review(request: Request, project_id: int):
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     review_inputs = project_review_inputs(project_id)
-    markdown = build_project_codex_review(project, **review_inputs)
+    markdown = build_project_research_summary_packet(project, **review_inputs)
     review_result = run_project_codex_review(markdown)
     slug = save_project_research_review(project_id, review_result)
     return RedirectResponse(url=f"/projects/{project_id}/research-results?run={quote(slug)}", status_code=303)
@@ -8997,7 +9102,7 @@ def answer_project_research_questions(
         return RedirectResponse(url=f"/projects/{project_id}/research-results?run={quote(slug)}", status_code=303)
     db.add_note(project_id, answer_note)
     review_inputs = project_review_inputs(project_id)
-    markdown = build_project_codex_review(project, **review_inputs)
+    markdown = build_project_research_summary_packet(project, **review_inputs)
     review_result = run_project_codex_review(markdown)
     next_slug = save_project_research_review(project_id, review_result)
     return RedirectResponse(url=f"/projects/{project_id}/research-results?run={quote(next_slug)}", status_code=303)
@@ -9018,7 +9123,7 @@ def improve_project_research_summary(
         return RedirectResponse(url=f"/projects/{project_id}/research-results", status_code=303)
     db.add_note(project_id, improvement_note)
     review_inputs = project_review_inputs(project_id)
-    markdown = build_project_codex_review(project, **review_inputs)
+    markdown = build_project_research_summary_packet(project, **review_inputs)
     review_result = run_project_codex_review(markdown)
     next_slug = save_project_research_review(project_id, review_result)
     return RedirectResponse(url=f"/projects/{project_id}/research-results?run={quote(next_slug)}", status_code=303)
