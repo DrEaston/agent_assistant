@@ -4463,7 +4463,7 @@ Create a clean research summary for this project before implementation. Return:
    - Data challenge: what data problem appears likely or already known.
    - Problem: what business or workflow problem that data challenge creates.
    - Model approach: what model class or AI approach should address the problem.
-3. Open questions only where the supplied project notes do not identify enough product or data detail.
+3. Known gaps where the supplied project notes do not identify enough product or data detail.
 4. Recommended next steps to improve the research summary.
 5. Risks around product assumptions, data availability, integrations, and model fit.
 
@@ -4507,6 +4507,13 @@ def format_project_review_answers_note(source_review, questions, answers):
                 f"  Answer: {clean_answer}",
             ])
     return "\n".join(lines)
+
+def format_project_summary_improvement_note(improvement_request):
+    """Format a direct summary improvement request as project context."""
+    clean_request = re.sub(r"\s+", " ", (improvement_request or "").strip())
+    if not clean_request:
+        return ""
+    return f"Research summary improvement request: {clean_request}"
 
 def project_summary_bullet_kind(text):
     """Classify one summary bullet for light visual grouping."""
@@ -4578,11 +4585,12 @@ def run_project_codex_review(review_packet):
             "You are Codex in research-summary mode. Evaluate the supplied project packet. "
             "Do not edit code, claim implementation, wrap the response in code fences, or invent missing facts. "
             "Write a clean product research summary using these exact top-level headings: "
-            "Overview, CCT Product Map, Open Questions, Recommended Next Steps, and Risks. "
+            "Overview, CCT Product Map, Known Gaps, Recommended Next Steps, and Risks. "
             "Under CCT Product Map, create one markdown subheading per known product, product line, platform, "
             "or module using the form '### Product: <name>'. Under each product, use concise bullets beginning "
             "with 'Data challenge:', 'Problem:', and 'Model approach:'. If the packet does not name products, "
-            "say that under Open Questions instead of inventing names."
+            "say that under Known Gaps instead of inventing names. Produce a usable summary document, not a plan "
+            "for a future summary."
         ),
     )
     return (result or "").strip() or "The review completed without returning any recommendations."
@@ -8958,7 +8966,6 @@ def project_research_results(request: Request, project_id: int, run: str = ""):
     if not active_review and reviews:
         active_review = reviews[0]
     active_markdown = active_review.get("content_markdown") if active_review else ""
-    review_questions = extract_feedback_plan_questions(active_markdown)
     research_summary = project_research_summary_view(active_markdown)
     template = jinja_env.get_template("project_research_results.html")
     return HTMLResponse(template.render({
@@ -8966,7 +8973,6 @@ def project_research_results(request: Request, project_id: int, run: str = ""):
         "project": project,
         "reviews": reviews,
         "active_review": active_review,
-        "review_questions": review_questions,
         "research_summary": research_summary,
     }))
 
@@ -8990,6 +8996,27 @@ def answer_project_research_questions(
     if "  Answer:" not in answer_note:
         return RedirectResponse(url=f"/projects/{project_id}/research-results?run={quote(slug)}", status_code=303)
     db.add_note(project_id, answer_note)
+    review_inputs = project_review_inputs(project_id)
+    markdown = build_project_codex_review(project, **review_inputs)
+    review_result = run_project_codex_review(markdown)
+    next_slug = save_project_research_review(project_id, review_result)
+    return RedirectResponse(url=f"/projects/{project_id}/research-results?run={quote(next_slug)}", status_code=303)
+
+
+@app.post("/projects/{project_id}/research-results/improve")
+def improve_project_research_summary(
+    request: Request,
+    project_id: int,
+    improvement_request: str = Form(...),
+):
+    """Save a summary improvement request and regenerate the deliverable."""
+    project = dict_from_row(db.get_project_by_id(project_id))
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    improvement_note = format_project_summary_improvement_note(improvement_request)
+    if not improvement_note:
+        return RedirectResponse(url=f"/projects/{project_id}/research-results", status_code=303)
+    db.add_note(project_id, improvement_note)
     review_inputs = project_review_inputs(project_id)
     markdown = build_project_codex_review(project, **review_inputs)
     review_result = run_project_codex_review(markdown)

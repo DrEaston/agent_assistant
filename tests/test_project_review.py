@@ -89,8 +89,9 @@ class ProjectReviewTemplateTests(unittest.TestCase):
     def test_research_results_page_has_rerun_and_history_controls(self):
         template = (Path(__file__).resolve().parents[1] / "templates" / "project_research_results.html").read_text(encoding="utf-8")
 
-        self.assertIn("Create Updated Summary", template)
-        self.assertIn('data-working-message="Codex is creating the updated summary..."', template)
+        self.assertIn("Regenerate Summary", template)
+        self.assertIn('data-working-message="Codex is regenerating the summary..."', template)
+        self.assertIn("Ask Dieter About This Summary", template)
         self.assertIn("Report History", template)
         self.assertIn("No research summary yet", template)
 
@@ -109,21 +110,22 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn("Data challenge:", api_source)
         self.assertIn("Model approach:", api_source)
         self.assertIn("Do not invent specific CCT products", api_source)
+        self.assertIn("Produce a usable summary document, not a plan", api_source)
 
-    def test_research_results_page_can_answer_open_questions(self):
+    def test_research_results_page_improves_summary_without_question_loop(self):
         template = (Path(__file__).resolve().parents[1] / "templates" / "project_research_results.html").read_text(encoding="utf-8")
 
-        self.assertIn("review_questions", template)
-        self.assertIn("Answer Open Questions", template)
-        self.assertIn("Answer &amp; Create Revised Summary", template)
-        self.assertIn('data-working-message="Codex is creating a revised summary..."', template)
-        self.assertIn('/research-results/{{ active_review.slug }}/answer', template)
+        self.assertIn("Improve This Summary", template)
+        self.assertIn("improvement_request", template)
+        self.assertIn("Regenerate Summary With This Request", template)
+        self.assertNotIn("Answer Open Questions", template)
+        self.assertNotIn("review_questions", template)
 
-    def test_project_review_answer_route_persists_answers_and_reruns(self):
+    def test_project_summary_improvement_route_persists_request_and_reruns(self):
         api_source = (Path(__file__).resolve().parents[1] / "api.py").read_text(encoding="utf-8")
 
-        self.assertIn('@app.post("/projects/{project_id}/research-results/{slug}/answer")', api_source)
-        self.assertIn("db.add_note(project_id, answer_note)", api_source)
+        self.assertIn('@app.post("/projects/{project_id}/research-results/improve")', api_source)
+        self.assertIn("format_project_summary_improvement_note", api_source)
         self.assertIn("review_result = run_project_codex_review(markdown)", api_source)
 
     def test_base_template_has_generic_working_indicator(self):

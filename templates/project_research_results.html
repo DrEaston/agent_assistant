@@ -14,8 +14,9 @@
         <p class="section-subtitle">Saved findings and recommendations for {{ project.name }}.</p>
     </div>
     <div class="app-shell-actions">
-        <form method="post" action="/projects/{{ project.id }}/codex-review" class="inline-form" data-working-message="Codex is creating the updated summary...">
-            <button type="submit">Create Updated Summary</button>
+        <button type="button" class="secondary compact" data-recipe-chat-open>Ask Dieter About This Summary</button>
+        <form method="post" action="/projects/{{ project.id }}/codex-review" class="inline-form" data-working-message="Codex is regenerating the summary...">
+            <button type="submit">Regenerate Summary</button>
         </form>
         <a class="button-link secondary-link" href="/projects/{{ project.id }}">Back to Project</a>
     </div>
@@ -61,21 +62,21 @@
                 </div>
             {% endif %}
         </div>
-        {% if review_questions %}
-            <div class="detail-section">
-                <h3>Answer Open Questions</h3>
-                <form method="post" action="/projects/{{ project.id }}/research-results/{{ active_review.slug }}/answer" data-working-message="Codex is creating a revised summary...">
-                    {% for question in review_questions %}
-                        <div class="form-group">
-                            <label for="review-answer-{{ loop.index }}">{{ question }}</label>
-                            <input type="hidden" name="questions" value="{{ question }}">
-                            <textarea id="review-answer-{{ loop.index }}" name="answers" rows="3" placeholder="Answer this so Codex can continue the review."></textarea>
-                        </div>
-                    {% endfor %}
-                    <button type="submit">Answer &amp; Create Revised Summary</button>
-                </form>
+    </section>
+    <section class="detail-section">
+        <div class="section-header">
+            <div>
+                <h2>Improve This Summary</h2>
+                <p class="section-subtitle">Ask for a specific change, and Dieter will regenerate the deliverable from the project context.</p>
             </div>
-        {% endif %}
+        </div>
+        <form method="post" action="/projects/{{ project.id }}/research-results/improve" data-working-message="Codex is regenerating the summary...">
+            <div class="form-group">
+                <label for="summary-improvement-request">Improvement request</label>
+                <textarea id="summary-improvement-request" name="improvement_request" rows="4" placeholder="Example: add each CCT product as its own section and connect every data challenge to a model approach." required></textarea>
+            </div>
+            <button type="submit">Regenerate Summary With This Request</button>
+        </form>
     </section>
 {% else %}
     <section class="detail-section empty-state">
