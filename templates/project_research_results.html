@@ -38,22 +38,42 @@
                     {% endfor %}
                 </div>
             {% endif %}
-            {% if research_summary.sections %}
-                <div class="research-product-grid">
-                    {% for section in research_summary.sections %}
-                        <article class="research-product-card">
-                            <h3>{{ section.title }}</h3>
-                            {% if section.bullets %}
-                                <ul>
-                                    {% for bullet in section.bullets %}
-                                        <li>
-                                            <span class="research-bullet-kind">{{ bullet.kind }}</span>
-                                            <span>{{ bullet.text }}</span>
-                                        </li>
-                                    {% endfor %}
-                                </ul>
-                            {% endif %}
-                        </article>
+            {% if research_summary.domains %}
+                <nav class="research-domain-nav" aria-label="Research areas">
+                    {% for domain in research_summary.domains %}
+                        <a href="#{{ domain.anchor }}">
+                            <strong>{{ domain.title }}</strong>
+                            <small>{{ domain.topics|length }} topic{% if domain.topics|length != 1 %}s{% endif %}</small>
+                        </a>
+                    {% endfor %}
+                </nav>
+                <div class="research-domain-list">
+                    {% for domain in research_summary.domains %}
+                        <section id="{{ domain.anchor }}" class="research-domain-section">
+                            <div class="section-header">
+                                <div>
+                                    <h3>{{ domain.title }}</h3>
+                                    <p class="section-subtitle">Modeling work and data challenges for this area.</p>
+                                </div>
+                            </div>
+                            <div class="research-topic-grid">
+                                {% for topic in domain.topics %}
+                                    <article class="research-product-card">
+                                        <h4>{{ topic.title }}</h4>
+                                        {% if topic.bullets %}
+                                            <ul>
+                                                {% for bullet in topic.bullets %}
+                                                    <li>
+                                                        <span class="research-bullet-kind">{{ bullet.kind }}</span>
+                                                        <span>{{ bullet.text }}</span>
+                                                    </li>
+                                                {% endfor %}
+                                            </ul>
+                                        {% endif %}
+                                    </article>
+                                {% endfor %}
+                            </div>
+                        </section>
                     {% endfor %}
                 </div>
             {% else %}

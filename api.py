@@ -4476,6 +4476,8 @@ def cct_machine_learning_strategy_guidance():
 
 For every proposed model, identify the simplest production-ready approach before considering more complex methods.
 
+Customer Analytics
+
 Customer Return Prediction
 - Research and compare binary classification for whether a player returns within 30, 60, or 90 days.
 - Use one row per player at a given scoring date.
@@ -4615,12 +4617,50 @@ def project_summary_bullet_kind(text):
         return "Problem"
     return "Note"
 
+def project_summary_domain_for_title(title):
+    """Map a summary heading to the visible research area."""
+    lowered = (title or "").lower()
+    if any(token in lowered for token in ["customer", "player", "return", "lifetime value", "promotion", "uplift", "survival"]):
+        return "Customer Analytics"
+    if any(token in lowered for token in ["machine", "game conversion", "placement", "floor layout"]):
+        return "Machine Analytics"
+    if any(token in lowered for token in ["forecast", "cash demand", "staffing", "denomination", "revenue"]):
+        return "Forecasting"
+    if any(token in lowered for token in ["general guidance", "deployment", "evaluation", "explainability"]):
+        return "General Guidance"
+    if any(token in lowered for token in ["known gap", "recommended next", "risk"]):
+        return "Research Follow-Up"
+    if any(token in lowered for token in ["component", "product", "platform", "module"]):
+        return "CCT Components"
+    return "Research Notes"
+
+def project_summary_anchor(title):
+    """Return a stable fragment id for one summary area."""
+    slug = re.sub(r"[^a-z0-9]+", "-", (title or "").strip().lower()).strip("-")
+    return slug or "summary"
+
 def project_research_summary_view(markdown):
     """Convert a research markdown report into clean display sections."""
     intro = []
     sections = []
+    domains = []
+    domain_lookup = {}
     current = None
+    current_domain = None
     in_code_block = False
+    top_level_skip = {"research summary", "machine learning strategy research", "overview"}
+    def ensure_domain(title):
+        key = (title or "Research Notes").strip()
+        if key not in domain_lookup:
+            domain = {"title": html.escape(key), "anchor": project_summary_anchor(key), "topics": []}
+            domain_lookup[key] = domain
+            domains.append(domain)
+        return domain_lookup[key]
+    def add_topic(domain_title, topic_title):
+        domain = ensure_domain(domain_title)
+        topic = {"title": html.escape(topic_title), "bullets": []}
+        domain["topics"].append(topic)
+        return topic
     for raw_line in (markdown or "").splitlines():
         line = raw_line.strip()
         if not line:
@@ -4634,17 +4674,27 @@ def project_research_summary_view(markdown):
                 continue
         heading_match = re.match(r"^(#{1,4})\s+(.+)$", line)
         if heading_match:
+            level = len(heading_match.group(1))
             title = re.sub(r"\s+", " ", heading_match.group(2)).strip("` ")
             lowered = title.lower()
-            if lowered in {"research summary", "product map", "cct product map", "overview"}:
+            if lowered in top_level_skip:
                 current = None
+                current_domain = None
                 continue
-            current = {"title": html.escape(title), "bullets": []}
-            sections.append(current)
+            if level <= 2:
+                domain_title = project_summary_domain_for_title(title)
+                if domain_title in {"Research Notes", "CCT Components", "Research Follow-Up"} and lowered not in {"known gaps", "recommended next steps", "risks"}:
+                    domain_title = title
+                current_domain = ensure_domain(domain_title)
+                current = None
+            else:
+                domain_title = current_domain["title"] if current_domain else project_summary_domain_for_title(title)
+                current = add_topic(html.unescape(domain_title), title)
+                sections.append(current)
             continue
         product_match = re.match(r"^(?:product|platform|module|offering)\s*:\s*(.+)$", line, flags=re.IGNORECASE)
         if product_match:
-            current = {"title": html.escape(f"Product: {product_match.group(1).strip()}"), "bullets": []}
+            current = add_topic("CCT Components", f"Product: {product_match.group(1).strip()}")
             sections.append(current)
             continue
         cleaned = re.sub(r"^[-*]\s+(?:\[[ xX]\]\s*)?", "", line).strip()
@@ -4656,13 +4706,21 @@ def project_research_summary_view(markdown):
         item = {"text": escaped, "kind": project_summary_bullet_kind(cleaned)}
         if current:
             current["bullets"].append(item)
+        elif current_domain:
+            current = add_topic(html.unescape(current_domain["title"]), html.unescape(current_domain["title"]))
+            current["bullets"].append(item)
+            sections.append(current)
         elif len(intro) < 4:
             intro.append(escaped)
     sections = [section for section in sections if section["title"] or section["bullets"]]
+    for domain in domains:
+        domain["topics"] = [topic for topic in domain["topics"] if topic["title"] or topic["bullets"]]
+    domains = [domain for domain in domains if domain["topics"]]
     if not sections and intro:
         sections.append({"title": "Summary", "bullets": [{"text": item, "kind": "Note"} for item in intro]})
+        domains.append({"title": "Summary", "anchor": "summary", "topics": sections})
         intro = []
-    return {"intro": intro, "sections": sections}
+    return {"intro": intro, "sections": sections, "domains": domains}
 
 def run_project_codex_review(review_packet):
     """Run a review-only project evaluation and return the visible result."""
@@ -4673,10 +4731,12 @@ def run_project_codex_review(review_packet):
         (
             "You are Codex in research-summary mode. Evaluate the supplied project packet. "
             "Do not edit code, claim implementation, wrap the response in code fences, or invent missing facts. "
-            "Write a clean product research summary using these exact top-level headings: "
-            "Overview, CCT Component Summary, Machine Learning Strategy Research, Known Gaps, and Recommended Next Steps. "
-            "Under CCT Component Summary, create one markdown subheading per known product, product line, platform, "
-            "or module using the form '### Product: <name>'. Under each product, use concise bullets beginning "
+            "Write a clean research workspace document using these top-level headings where applicable: "
+            "Overview, CCT Component Summary, Customer Analytics, Machine Analytics, Forecasting, General Guidance, Known Gaps, and Recommended Next Steps. "
+            "Use '## Customer Analytics' for player-return, frequency, time-to-return, survival, lifetime value, and promotion optimization work. "
+            "Use '## Machine Analytics' for slot/machine revenue, performance, failure, replacement, conversion, and placement work. "
+            "Use '## Forecasting' for kiosk cash, revenue, staffing, and denomination demand. "
+            "Under each top-level area, create one '### <modeling problem>' subheading. Under each modeling problem, use concise bullets beginning "
             "with 'Data challenge:', 'Problem:', and 'Model approach:'. If the packet does not name products, "
             "say that under Known Gaps instead of inventing names. Produce a usable summary document, not a plan "
             "for a future summary. Never repeat or summarize the prompt instructions. For Machine Learning Strategy "
