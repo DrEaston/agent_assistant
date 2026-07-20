@@ -159,6 +159,14 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn("form[data-working-message]", template)
         self.assertIn("data-form-working-message", template)
 
+    def test_action_bars_wrap_inside_page_width(self):
+        template = (Path(__file__).resolve().parents[1] / "templates" / "base.html").read_text(encoding="utf-8")
+
+        self.assertIn("flex-wrap: wrap", template)
+        self.assertIn(".project-heading .app-shell-actions", template)
+        self.assertIn("overflow-wrap: anywhere", template)
+        self.assertIn(".app-shell-actions details", template)
+
     def test_assistant_landing_puts_projects_before_project_creation(self):
         template = (Path(__file__).resolve().parents[1] / "templates" / "dashboard.html").read_text(encoding="utf-8")
 

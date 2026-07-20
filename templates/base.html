@@ -254,6 +254,11 @@
             display: flex;
             gap: 1rem;
             justify-content: space-between;
+            min-width: 0;
+        }
+
+        .app-shell-top > div:first-child {
+            min-width: 0;
         }
 
         .app-shell h1 {
@@ -288,15 +293,22 @@
         .app-shell-actions {
             align-items: center;
             display: flex;
+            flex-wrap: wrap;
             gap: 0.65rem;
+            justify-content: flex-end;
+            min-width: 0;
         }
 
-        .app-shell-actions button {
+        .app-shell-actions button,
+        .app-shell-actions .button-link {
             align-items: center;
             display: inline-flex;
             justify-content: center;
+            max-width: 100%;
             min-height: 2.5rem;
-            white-space: nowrap;
+            overflow-wrap: anywhere;
+            text-align: center;
+            white-space: normal;
         }
 
         .app-themed-page .app-shell-actions button,
@@ -1581,6 +1593,31 @@
 
         .section-header h2 {
             margin: 0;
+        }
+
+        .project-heading {
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+
+        .project-heading > div:first-child {
+            min-width: min(100%, 18rem);
+        }
+
+        .project-heading .app-shell-actions {
+            flex: 1 1 20rem;
+            max-width: 100%;
+        }
+
+        .project-heading .app-shell-actions form,
+        .project-heading .app-shell-actions .button-link,
+        .project-heading .app-shell-actions > button {
+            flex: 1 1 11rem;
+        }
+
+        .project-heading .app-shell-actions button,
+        .project-heading .app-shell-actions .button-link {
+            width: 100%;
         }
 
         .section-subtitle {
@@ -7347,6 +7384,26 @@
             .app-shell {
                 padding-left: 1rem;
                 padding-right: 1rem;
+            }
+
+            .app-shell-top {
+                flex-direction: column;
+            }
+
+            .app-shell-actions {
+                align-items: stretch;
+                justify-content: stretch;
+                width: 100%;
+            }
+
+            .app-shell-actions button,
+            .app-shell-actions .button-link,
+            .app-shell-actions details {
+                width: 100%;
+            }
+
+            .project-heading .app-shell-actions {
+                flex-basis: 100%;
             }
 
             .app-shell-band {
