@@ -101,6 +101,9 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn("research-summary-view", template)
         self.assertIn("research-domain-nav", template)
         self.assertIn("research-domain-section", template)
+        self.assertIn("research-section-checkin", template)
+        self.assertIn("Regenerate This Section", template)
+        self.assertIn('name="section_title"', template)
         self.assertIn("research-topic-list", template)
         self.assertIn("research-topic-card", template)
         self.assertIn("research-bullet-kind", template)
@@ -150,6 +153,8 @@ class ProjectReviewTemplateTests(unittest.TestCase):
 
         self.assertIn('@app.post("/projects/{project_id}/research-results/improve")', api_source)
         self.assertIn("format_project_summary_improvement_note", api_source)
+        self.assertIn("section_title: str = Form(\"\")", api_source)
+        self.assertIn("Research summary improvement request for section", api_source)
         self.assertIn("review_result = run_project_codex_review(markdown)", api_source)
 
     def test_base_template_has_generic_working_indicator(self):

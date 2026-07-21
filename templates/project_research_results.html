@@ -55,6 +55,15 @@
                                     <h3>{{ domain.title }}</h3>
                                     <p class="section-subtitle">Modeling work and data challenges for this area.</p>
                                 </div>
+                                <details class="research-section-checkin">
+                                    <summary>Ask Dieter</summary>
+                                    <form method="post" action="/projects/{{ project.id }}/research-results/improve" data-working-message="Codex is regenerating this section...">
+                                        <input type="hidden" name="section_title" value="{{ domain.title }}">
+                                        <label for="section-checkin-{{ domain.anchor }}">Change {{ domain.title }}</label>
+                                        <textarea id="section-checkin-{{ domain.anchor }}" name="improvement_request" rows="3" placeholder="Example: expand the return-prediction modeling detail and add evaluation metrics." required></textarea>
+                                        <button type="submit" class="compact">Regenerate This Section</button>
+                                    </form>
+                                </details>
                             </div>
                             <div class="research-topic-list">
                                 {% for topic in domain.topics %}

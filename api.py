@@ -4628,11 +4628,14 @@ def format_project_review_answers_note(source_review, questions, answers):
             ])
     return "\n".join(lines)
 
-def format_project_summary_improvement_note(improvement_request):
+def format_project_summary_improvement_note(improvement_request, section_title=""):
     """Format a direct summary improvement request as project context."""
     clean_request = re.sub(r"\s+", " ", (improvement_request or "").strip())
+    clean_section = re.sub(r"\s+", " ", (section_title or "").strip())
     if not clean_request:
         return ""
+    if clean_section:
+        return f"Research summary improvement request for section '{clean_section}': {clean_request}"
     return f"Research summary improvement request: {clean_request}"
 
 def project_summary_bullet_kind(text):
@@ -9206,12 +9209,13 @@ def improve_project_research_summary(
     request: Request,
     project_id: int,
     improvement_request: str = Form(...),
+    section_title: str = Form(""),
 ):
     """Save a summary improvement request and regenerate the deliverable."""
     project = dict_from_row(db.get_project_by_id(project_id))
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    improvement_note = format_project_summary_improvement_note(improvement_request)
+    improvement_note = format_project_summary_improvement_note(improvement_request, section_title)
     if not improvement_note:
         return RedirectResponse(url=f"/projects/{project_id}/research-results", status_code=303)
     db.add_note(project_id, improvement_note)

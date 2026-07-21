@@ -6807,6 +6807,63 @@
             scroll-margin-top: 1rem;
         }
 
+        .research-section-checkin {
+            flex: 0 1 18rem;
+            max-width: 100%;
+            position: relative;
+        }
+
+        .research-section-checkin summary {
+            align-items: center;
+            background: #fafaf9;
+            border: 1px solid #d6d3d1;
+            border-radius: 999px;
+            color: #44403c;
+            cursor: pointer;
+            display: inline-flex;
+            font-size: 0.86rem;
+            font-weight: 800;
+            justify-content: center;
+            list-style: none;
+            min-height: 2.25rem;
+            padding: 0.45rem 0.8rem;
+        }
+
+        .research-section-checkin summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .research-section-checkin summary:hover {
+            background: #f5f5f4;
+            border-color: #a8a29e;
+        }
+
+        .research-section-checkin[open] summary {
+            border-radius: 8px 8px 0 0;
+        }
+
+        .research-section-checkin form {
+            background: #fafaf9;
+            border: 1px solid #d6d3d1;
+            border-radius: 0 8px 8px 8px;
+            box-shadow: none;
+            display: grid;
+            gap: 0.6rem;
+            margin: 0;
+            padding: 0.75rem;
+            width: min(24rem, 100%);
+        }
+
+        .research-section-checkin label {
+            color: #44403c;
+            font-size: 0.84rem;
+            font-weight: 800;
+        }
+
+        .research-section-checkin textarea {
+            min-height: 5rem;
+        }
+
         .research-topic-list {
             display: grid;
             gap: 0.65rem;
