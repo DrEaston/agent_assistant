@@ -144,8 +144,11 @@ class AppIssueMenuTests(unittest.TestCase):
     def test_planner_ask_dieter_button_uses_app_shell_action_style(self):
         html = self.render_path("/apps/assistant/planner")
 
-        self.assertIn('class="planner-chat-button" data-recipe-chat-open>Ask Dieter</button>', html)
+        self.assertIn('class="app-shell-chat-button" data-recipe-chat-open>Ask Dieter</button>', html)
+        self.assertIn('class="app-menu"', html)
+        self.assertIn("assistant-shell-actions", html)
         self.assertIn(".app-themed-page .app-shell-actions button", html)
+        self.assertIn(".assistant-shell-actions .app-menu summary", html)
         self.assertIn(".planner-shell-page .container button:not(.recipe-chat-close)", html)
         self.assertNotIn(".planner-shell-page button:not(.recipe-chat-close) {", html)
         self.assertIn('class="app-shell app-shell-planner"', html)
