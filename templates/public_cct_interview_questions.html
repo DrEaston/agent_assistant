@@ -126,28 +126,6 @@
     </div>
 </section>
 
-<section class="detail-section roadmap-page-agent-panel">
-    <div class="section-header">
-        <div>
-            <h2>Ask about this roadmap</h2>
-            <p class="section-subtitle">Ask how the page works, how the app was built, or what the interactive check-ins are doing.</p>
-        </div>
-    </div>
-    <form data-cct-page-question-form>
-        <div class="form-group">
-            <label for="cct-page-question">Page question</label>
-            <textarea id="cct-page-question" name="question" rows="3" placeholder="How was this app built?" required></textarea>
-        </div>
-        <div class="fit-agent-prompts" aria-label="Suggested page questions">
-            <button type="button" data-page-prompt="How was this app built?">How built?</button>
-            <button type="button" data-page-prompt="Can visitors edit the live roadmap?">Can visitors edit?</button>
-            <button type="button" data-page-prompt="What do the update check-ins do?">Check-ins?</button>
-        </div>
-        <button type="submit">Ask Page Agent</button>
-        <div class="roadmap-agent-answer page-agent-answer" data-cct-page-question-output hidden></div>
-    </form>
-</section>
-
 <section class="detail-section fit-agent-panel">
     <div class="section-header">
         <div>
@@ -168,6 +146,28 @@
         </div>
         <button type="submit">Ask Fit Agent</button>
         <div class="roadmap-agent-answer fit-agent-answer" data-cct-fit-output hidden></div>
+    </form>
+</section>
+
+<section class="detail-section roadmap-page-agent-panel">
+    <div class="section-header">
+        <div>
+            <h2>Ask about this roadmap</h2>
+            <p class="section-subtitle">Ask how the page works, how the app was built, or what the interactive check-ins are doing.</p>
+        </div>
+    </div>
+    <form data-cct-page-question-form>
+        <div class="form-group">
+            <label for="cct-page-question">Page question</label>
+            <textarea id="cct-page-question" name="question" rows="3" placeholder="How was this app built?" required></textarea>
+        </div>
+        <div class="fit-agent-prompts" aria-label="Suggested page questions">
+            <button type="button" data-page-prompt="How was this app built?">How built?</button>
+            <button type="button" data-page-prompt="Can visitors edit the live roadmap?">Can visitors edit?</button>
+            <button type="button" data-page-prompt="What do the update check-ins do?">Check-ins?</button>
+        </div>
+        <button type="submit">Ask Page Agent</button>
+        <div class="roadmap-agent-answer page-agent-answer" data-cct-page-question-output hidden></div>
     </form>
 </section>
 

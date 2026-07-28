@@ -161,6 +161,7 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn("data-page-prompt", template)
         self.assertIn("/api/cct-roadmap/page-answer", template)
         self.assertIn("Ask the fit agent", template)
+        self.assertLess(template.index("Ask the fit agent"), template.index("Ask about this roadmap"))
         self.assertIn("Ask one focused question at a time", template)
         self.assertIn("Why would Curtis be a good fit for this job?", template)
         self.assertIn("data-cct-fit-form", template)
