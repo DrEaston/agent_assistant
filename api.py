@@ -319,7 +319,9 @@ async def load_authenticated_user(request: Request, call_next):
         "/api/app-feedback/codex-runs",
         "/api/app-feedback/stalled",
     )
-    public_exact_paths = {"/", "/demo"} if DEMO_MODE else set()
+    public_exact_paths = {"/cct-roadmap"}
+    if DEMO_MODE:
+        public_exact_paths.update({"/", "/demo"})
     token = request.cookies.get(SESSION_COOKIE_NAME, "")
     user = None
     if token:
@@ -9240,6 +9242,7 @@ def project_interview_questions(request: Request, project_id: int):
     }))
 
 
+@app.get("/cct-roadmap")
 @app.get("/public/cct-interview-questions")
 def public_cct_interview_questions(request: Request):
     """Display a polished public CCT technical discussion agenda."""
