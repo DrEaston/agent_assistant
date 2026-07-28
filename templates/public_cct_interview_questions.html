@@ -130,13 +130,19 @@
     <div class="section-header">
         <div>
             <h2>Ask the fit agent</h2>
-            <p class="section-subtitle">Ask how Curtis's background maps to this role. Answers are grounded in the background summary supplied for this brief.</p>
+            <p class="section-subtitle">Ask one focused question at a time. Answers stay short and grounded in Curtis's background.</p>
         </div>
     </div>
     <form data-cct-fit-form>
         <div class="form-group">
             <label for="cct-fit-question">Fit question</label>
             <textarea id="cct-fit-question" name="question" rows="3" placeholder="Why would Curtis be a good fit for this job?" required></textarea>
+        </div>
+        <div class="fit-agent-prompts" aria-label="Suggested fit questions">
+            <button type="button" data-fit-prompt="Why would Curtis be a good fit for this job?">Good fit?</button>
+            <button type="button" data-fit-prompt="How does Curtis's scientific background help with data engineering?">Science edge?</button>
+            <button type="button" data-fit-prompt="How could Curtis help with CCT's AWS migration?">AWS migration?</button>
+            <button type="button" data-fit-prompt="What should Curtis be careful not to overstate?">Keep it honest</button>
         </div>
         <button type="submit">Ask Fit Agent</button>
         <div class="roadmap-agent-answer fit-agent-answer" data-cct-fit-output hidden></div>
@@ -238,6 +244,17 @@
         });
 
         const fitForm = document.querySelector("[data-cct-fit-form]");
+        document.querySelectorAll("[data-fit-prompt]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const textarea = fitForm?.querySelector("textarea[name='question']");
+                if (!textarea) {
+                    return;
+                }
+                textarea.value = button.dataset.fitPrompt || "";
+                textarea.focus();
+            });
+        });
+
         fitForm?.addEventListener("submit", async (event) => {
             event.preventDefault();
             const textarea = fitForm.querySelector("textarea[name='question']");

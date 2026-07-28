@@ -6195,11 +6195,11 @@ CCT_INTERVIEW_QUESTION_SECTIONS = (
     },
 )
 CURTIS_CCT_FIT_BACKGROUND = """
-Curtis Easton is a senior data engineer, scientist, and lifelong learner whose work centers on understanding complex systems and building better ways to work with them.
+Curtis Easton is a data engineer, scientist, and lifelong learner whose work centers on understanding complex systems and building better ways to work with them.
 
 He holds a Ph.D. in Neurobiology and Behavior and an M.S. in Computer Science focused on data science. His scientific background trained him to design experiments, troubleshoot sensitive systems, interpret noisy measurements, question unexpected results, and develop new analytical approaches when existing methods were inadequate.
 
-In current senior data engineering work, Curtis designs and optimizes large-scale cloud data pipelines using Python, PySpark, SQL, and AWS technologies. He has built reusable engineering APIs, metadata-driven transformation frameworks, automated modeling workflows, and systems for tracking data history and lineage.
+In current data engineering work, Curtis designs and optimizes large-scale cloud data pipelines using Python, PySpark, SQL, and AWS technologies. He has built reusable engineering APIs, metadata-driven transformation frameworks, automated modeling workflows, and systems for tracking data history and lineage.
 
 One production workflow that previously required roughly six hours was redesigned to run in about twenty minutes through computational improvements, better data handling, and parallel execution.
 
@@ -6245,18 +6245,19 @@ def cct_fit_agent_response(question):
             "content": (
                 f"[Curtis background]\n{CURTIS_CCT_FIT_BACKGROUND}\n\n"
                 f"Question: {clean_question}\n\n"
-                "Answer from the background only. Be specific, confident, and accurate. "
-                "Do not overstate casino-domain experience; explain how his demonstrated strengths would transfer."
+                "Answer from the background only. Keep it under 90 words or 3 short bullets. "
+                "Be specific, confident, and accurate. Do not call Curtis a senior engineer. "
+                "Do not overstate casino-domain experience; explain how his demonstrated strengths would transfer. "
+                "End with one short follow-up question the user could ask next."
             ),
         }]
-        return planner_llm_provider.chat(messages, "You are a career-fit agent for the CCT roadmap page. Use plain text and concise bullets when useful.")
+        return planner_llm_provider.chat(messages, "You are a concise career-fit agent for the CCT roadmap page. Use plain text. Prefer 2-3 bullets and one follow-up prompt.")
     return (
-        "Curtis looks like a strong fit because he combines production cloud data engineering with scientific problem-solving.\n"
-        "- Direct experience: Python, PySpark, SQL, AWS data pipelines, reusable frameworks, metadata-driven systems, lineage, workflow automation, and optimization.\n"
-        "- Evidence of impact: he reduced one production workflow from roughly six hours to about twenty minutes by simplifying architecture and improving execution.\n"
-        "- Transferable strength: he learns complex domains by understanding the process that generates the data, then builds reliable systems around that understanding.\n"
-        "- CCT relevance: casino analytics likely needs trustworthy ingestion, reconciliation, lineage, exception detection, forecasting, and eventually practical AI/ML on top of centralized data.\n"
-        "- Important boundary: he is still learning the specific casino vendor and regulatory landscape, but his background shows he can ramp into difficult domains quickly."
+        "Curtis is a good fit because:\n"
+        "- He has direct Python, PySpark, SQL, AWS pipeline, metadata, lineage, and workflow-optimization experience.\n"
+        "- He brings scientific debugging habits: tracing noisy systems, validating assumptions, and finding root causes.\n"
+        "- He is still learning casino-specific systems, but his record shows he can ramp into complex domains quickly.\n\n"
+        "Want to ask how that maps to CCT's AWS migration or AI roadmap?"
     )
 
 def is_cct_project(project):
