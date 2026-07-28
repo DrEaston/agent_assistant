@@ -71,6 +71,8 @@ class ProjectReviewTemplateTests(unittest.TestCase):
 
         self.assertIn("Create Research Summary", template)
         self.assertIn("Open Summary Page", template)
+        self.assertIn("Interview Questions", template)
+        self.assertIn("is_cct_project", template)
         self.assertIn('data-working-message="Codex is creating the research summary..."', template)
         self.assertIn("Open Next Task", template)
         self.assertIn("How to move this project forward", template)
@@ -92,8 +94,28 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn("Regenerate Summary", template)
         self.assertIn('data-working-message="Codex is regenerating the summary..."', template)
         self.assertIn("Ask Dieter About This Summary", template)
+        self.assertIn("Interview Questions", template)
         self.assertIn("Report History", template)
         self.assertIn("No research summary yet", template)
+
+    def test_cct_interview_questions_page_exists(self):
+        template = (Path(__file__).resolve().parents[1] / "templates" / "project_interview_questions.html").read_text(encoding="utf-8")
+        api_source = (Path(__file__).resolve().parents[1] / "api.py").read_text(encoding="utf-8")
+        base_template = (Path(__file__).resolve().parents[1] / "templates" / "base.html").read_text(encoding="utf-8")
+
+        self.assertIn('@app.get("/projects/{project_id}/interview-questions")', api_source)
+        self.assertIn("CCT_INTERVIEW_QUESTION_SECTIONS", api_source)
+        self.assertIn("Cloud migration status", api_source)
+        self.assertIn("Data platform architecture", api_source)
+        self.assertIn("AI strategy", api_source)
+        self.assertIn("Role expectations", api_source)
+        self.assertIn("What percentage of my time would be spent on infrastructure", api_source)
+        self.assertIn("CCT Interview Questions", template)
+        self.assertIn("question_sections", template)
+        self.assertIn("interview-question-section", template)
+        self.assertIn("Listen for", template)
+        self.assertIn(".interview-focus-grid", base_template)
+        self.assertIn(".interview-question-section", base_template)
 
     def test_research_summary_page_uses_product_cards_not_raw_packet(self):
         template = (Path(__file__).resolve().parents[1] / "templates" / "project_research_results.html").read_text(encoding="utf-8")

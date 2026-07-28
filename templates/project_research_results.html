@@ -18,6 +18,9 @@
         <form method="post" action="/projects/{{ project.id }}/codex-review" class="inline-form" data-working-message="Codex is regenerating the summary...">
             <button type="submit">Regenerate Summary</button>
         </form>
+        {% if is_cct_project %}
+            <a class="button-link secondary-link" href="/projects/{{ project.id }}/interview-questions">Interview Questions</a>
+        {% endif %}
         <a class="button-link secondary-link" href="/projects/{{ project.id }}">Back to Project</a>
     </div>
 </div>

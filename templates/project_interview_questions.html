@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Interview Questions - {{ project.name }} - Dieter{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    <a href="/">Home</a> / <a href="/apps/assistant/planner">Assistant</a> / <a href="/projects">Projects</a> /
+    <a href="/projects/{{ project.id }}">{{ project.name }}</a> / Interview Questions
+</div>
+
+<div class="section-header project-heading">
+    <div>
+        <h1>CCT Interview Questions</h1>
+        <p class="section-subtitle">Use these to understand the AWS migration, data platform, AI direction, and first-role expectations.</p>
+    </div>
+    <div class="app-shell-actions">
+        <a class="button-link secondary-link" href="/projects/{{ project.id }}/research-results">Open Summary Page</a>
+        <a class="button-link secondary-link" href="/projects/{{ project.id }}">Back to Project</a>
+    </div>
+</div>
+
+<section class="detail-section interview-brief-panel">
+    <div class="section-header">
+        <div>
+            <h2>What this interview should clarify</h2>
+            <p class="section-subtitle">The main goal is to separate platform-building work from analytics/modeling work, then understand where the role fits.</p>
+        </div>
+    </div>
+    <div class="interview-focus-grid">
+        <article>
+            <span>1</span>
+            <p>How far along the AWS migration actually is.</p>
+        </article>
+        <article>
+            <span>2</span>
+            <p>Whether the platform has settled architecture or is still forming.</p>
+        </article>
+        <article>
+            <span>3</span>
+            <p>Whether AI/ML is a real product direction or still exploratory.</p>
+        </article>
+        <article>
+            <span>4</span>
+            <p>What you would own in the first 6–12 months.</p>
+        </article>
+    </div>
+</section>
+
+<div class="interview-question-list">
+    {% for section in question_sections %}
+        <section class="detail-section interview-question-section">
+            <div class="section-header">
+                <div>
+                    <h2>{{ section.title }}</h2>
+                    <p class="section-subtitle">{{ section.focus }}</p>
+                </div>
+            </div>
+            <ol class="interview-questions">
+                {% for question in section.questions %}
+                    <li>{{ question }}</li>
+                {% endfor %}
+            </ol>
+        </section>
+    {% endfor %}
+</div>
+
+<section class="detail-section interview-listening-panel">
+    <div class="section-header">
+        <div>
+            <h2>Listen for</h2>
+            <p class="section-subtitle">These answers help you judge whether the role matches the work you want.</p>
+        </div>
+    </div>
+    <ul class="review-list">
+        <li><strong>Architecture maturity:</strong> named AWS services, clear ownership boundaries, and a realistic migration sequence.</li>
+        <li><strong>Data product maturity:</strong> conformed models, governed metrics, and a plan for usable analytics rather than only ingestion.</li>
+        <li><strong>AI seriousness:</strong> specific customer or internal workflows where ML could be deployed, not just broad enthusiasm.</li>
+        <li><strong>Role clarity:</strong> concrete first projects, success measures, and how much time is spent building versus coordinating.</li>
+    </ul>
+</section>
+{% endblock %}

@@ -6144,6 +6144,50 @@ CCT_PROJECT_ACTIONS = (
     "Prioritize data engineering and practical ML opportunities",
 )
 CCT_SUMMARY_GUIDANCE_NOTE_PREFIX = "Required CCT research summary structure:"
+CCT_INTERVIEW_QUESTION_SECTIONS = (
+    {
+        "title": "Cloud migration status",
+        "focus": "Clarify whether the role is mostly platform migration, pipeline delivery, or analytics enablement.",
+        "questions": (
+            "Where is CCT in the AWS migration today?",
+            "Have most customer on-prem SQL databases already been migrated, or is a significant portion of the work still focused on building the ingestion/infrastructure?",
+            "What percentage of my time would be spent on infrastructure versus building data pipelines, transformation layers, conformed models, and analytics?",
+        ),
+    },
+    {
+        "title": "Data platform architecture",
+        "focus": "Map the current-state stack and the target technical architecture.",
+        "questions": (
+            "What does the current data platform look like?",
+            "Is there a raw landing zone, such as S3?",
+            "Are you using a data lake or table format such as Apache Iceberg?",
+            "Is there a warehouse layer?",
+            "Is there a star schema, semantic layer, or governed business metric layer?",
+            "What are the biggest remaining technical challenges?",
+        ),
+    },
+    {
+        "title": "AI strategy",
+        "focus": "Understand how centralized data may turn into AI, ML, or customer-facing product capabilities.",
+        "questions": (
+            "How is CCT thinking about AI over the next few years?",
+            "Are you planning customer-facing AI or machine learning capabilities on top of the centralized data platform?",
+            "Are engineers encouraged to use tools like GitHub Copilot or other LLM coding assistants for development?",
+        ),
+    },
+    {
+        "title": "Role expectations",
+        "focus": "Get a concrete picture of ownership, ramp-up, and what success means.",
+        "questions": (
+            "What would success look like for this role after the first 6–12 months?",
+            "What projects would you expect me to own first?",
+        ),
+    },
+)
+
+def is_cct_project(project):
+    """Return whether a project should expose CCT-specific prep pages."""
+    return (project or {}).get("name") == CCT_PROJECT_NAME
 
 def safe_project_type(project_type):
     """Normalize project type for the first planner project-start flow."""
@@ -9107,6 +9151,7 @@ def project_detail(request: Request, project_id: int):
     context = {
         "request": request,
         "project": project,
+        "is_cct_project": is_cct_project(project),
         "notes": dicts_from_rows(db.get_notes(project_id)),
         "actions": dicts_from_rows(db.get_recommended_actions(project_id)),
         "blockers": dicts_from_rows(db.get_blockers(project_id)),
@@ -9172,9 +9217,26 @@ def project_research_results(request: Request, project_id: int, run: str = ""):
     return HTMLResponse(template.render({
         "request": request,
         "project": project,
+        "is_cct_project": is_cct_project(project),
         "reviews": reviews,
         "active_review": active_review,
         "research_summary": research_summary,
+    }))
+
+
+@app.get("/projects/{project_id}/interview-questions")
+def project_interview_questions(request: Request, project_id: int):
+    """Display interview-prep questions for the CCT project."""
+    project = dict_from_row(db.get_project_by_id(project_id))
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not is_cct_project(project):
+        raise HTTPException(status_code=404, detail="Interview questions are only configured for the CCT project")
+    template = jinja_env.get_template("project_interview_questions.html")
+    return HTMLResponse(template.render({
+        "request": request,
+        "project": project,
+        "question_sections": CCT_INTERVIEW_QUESTION_SECTIONS,
     }))
 
 
