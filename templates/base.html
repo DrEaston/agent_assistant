@@ -7886,9 +7886,9 @@
 {% set show_guest_home_chat = is_guest_session and show_launcher_shell %}
 {% set page_theme = app_shell.theme if app_shell else none %}
 <body class="{% if page_theme %}app-themed-page{% endif %}{% if app_shell and app_shell.body_class %} {{ app_shell.body_class }}{% endif %}"{% if page_theme %} style="--page-theme-header: {{ page_theme.header }}; --page-theme-color: {{ page_theme.color }}; --page-theme-border: {{ page_theme.border }}; --page-theme-panel: {{ page_theme.panel }}; --page-theme-panel-strong: {{ page_theme.panel_strong }}; --page-theme-text: {{ page_theme.text }}; --page-theme-hover: {{ page_theme.hover }}; --page-theme-subtitle: {{ page_theme.subtitle }};"{% endif %}{% if is_guest_session %} data-guest-session="true"{% endif %}{% if show_guest_home_chat %} data-open-guest-chat="true"{% endif %}>
-    {% if demo_mode or is_guest_session %}
+    {% if is_guest_session %}
         <div class="demo-mode-banner">
-            {% if demo_mode %}Demo Mode{% else %}Guest Mode{% endif %}
+            Guest Mode
             <span>Read-only public preview. External integrations and Codex worker execution are disabled.</span>
         </div>
     {% endif %}

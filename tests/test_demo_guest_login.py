@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -52,6 +53,29 @@ class DemoGuestLoginTests(unittest.TestCase):
             self.assertEqual("apps", api.home_default(request))
             apps.assert_called_once()
             landing.assert_not_called()
+
+    def test_demo_banner_only_uses_guest_session_state(self):
+        template = api.jinja_env.get_template("base.html")
+        anonymous_request = SimpleNamespace(
+            url=SimpleNamespace(path="/cct-roadmap"),
+            query_params={},
+            state=SimpleNamespace(current_user=None),
+        )
+        guest_request = SimpleNamespace(
+            url=SimpleNamespace(path="/apps"),
+            query_params={},
+            state=SimpleNamespace(current_user=SimpleNamespace(role="guest")),
+        )
+
+        anonymous_html = template.render(request=anonymous_request, demo_mode=True)
+        guest_html = template.render(request=guest_request, demo_mode=True)
+        base_source = (Path(__file__).resolve().parents[1] / "templates" / "base.html").read_text(encoding="utf-8")
+
+        self.assertNotIn("demo_mode or is_guest_session", base_source)
+        self.assertNotIn('<div class="demo-mode-banner">', anonymous_html)
+        self.assertNotIn("Demo Mode", anonymous_html)
+        self.assertIn('<div class="demo-mode-banner">', guest_html)
+        self.assertIn("Guest Mode", guest_html)
 
     def test_guest_ask_dieter_answers_about_repository_without_writes(self):
         message = api.DieterActionMessage(
