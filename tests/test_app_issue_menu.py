@@ -64,7 +64,13 @@ class AppIssueMenuTests(unittest.TestCase):
         request = SimpleNamespace(
             url=SimpleNamespace(path=path),
             query_params={},
-            state=SimpleNamespace(current_user=SimpleNamespace(name="Curtis", role=user_role, status="active")),
+            state=SimpleNamespace(
+                current_user=(
+                    SimpleNamespace(name="Curtis", role=user_role, status="active")
+                    if user_role is not None
+                    else None
+                )
+            ),
         )
         context = {"request": request, **extra_context}
         return self.template.render(context)
@@ -153,6 +159,22 @@ class AppIssueMenuTests(unittest.TestCase):
         self.assertNotIn(".planner-shell-page button:not(.recipe-chat-close) {", html)
         self.assertIn('class="app-shell app-shell-planner"', html)
         self.assertNotIn('planner-app-heading"', html)
+
+    def test_public_cct_roadmap_uses_app_shell_hamburger_without_logout(self):
+        html = self.render_path("/cct-roadmap", user_role=None)
+        links = self.parse_links(html)
+        menu_links = [link for link in links if link["in_app_menu"]]
+
+        self.assertIn("CCT Roadmap", html)
+        self.assertIn('class="app-shell app-shell-planner"', html)
+        self.assertIn('aria-label="Open CCT roadmap navigation"', html)
+        self.assertIn('class="app-menu"', html)
+        self.assertNotIn('data-recipe-chat-open>Ask Dieter</button>', html)
+        self.assertNotIn('action="/logout"', html)
+        self.assertIn({"href": "/cct-roadmap", "text": "Roadmap", "in_app_menu": True}, menu_links)
+        self.assertIn({"href": "#cct-fit-agent", "text": "Fit Agent", "in_app_menu": True}, menu_links)
+        self.assertIn({"href": "#cct-questions", "text": "Questions", "in_app_menu": True}, menu_links)
+        self.assertIn({"href": "#cct-page-agent", "text": "How Built", "in_app_menu": True}, menu_links)
 
     def test_assistant_hamburgers_link_to_issue_form_for_admin_and_guest(self):
         for role in ("admin", "guest"):

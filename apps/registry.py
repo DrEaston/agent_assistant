@@ -10,12 +10,52 @@ from apps.music.manifest import APP as MUSIC_APP
 from apps.trainer.manifest import APP as TRAINER_APP
 
 
+CCT_ROADMAP_APP = {
+    "id": "cct-roadmap",
+    "title": "CCT Roadmap",
+    "nav_label": "CCT Roadmap",
+    "home_url": "/cct-roadmap",
+    "exact_paths": ("/cct-roadmap", "/public/cct-interview-questions"),
+    "body_class": "planner-shell-page",
+    "shell_class": "app-shell-planner",
+    "top_class": "",
+    "actions_class": "assistant-shell-actions",
+    "chat_button_class": "app-shell-chat-button",
+    "show_chat_button": False,
+    "show_issue_item": False,
+    "menu_class": "",
+    "icon_class": "",
+    "menu_summary": "Open CCT roadmap navigation",
+    "menu_label": "CCT roadmap navigation",
+    "issue_area": "",
+    "band_label": "CCT roadmap utility navigation",
+    "subtitle": "Technical brief, fit notes, and interview check-ins.",
+    "home_label": "Roadmap",
+    "nav_items": (
+        {"label": "Roadmap", "url": "/cct-roadmap"},
+        {"label": "Fit Agent", "url": "#cct-fit-agent"},
+        {"label": "Questions", "url": "#cct-questions"},
+        {"label": "How Built", "url": "#cct-page-agent"},
+    ),
+    "theme": {
+        "header": "#083344",
+        "color": "#164e63",
+        "border": "#a5f3fc",
+        "panel": "#ecfeff",
+        "panel_strong": "#cffafe",
+        "text": "#155e75",
+        "hover": "#cffafe",
+        "subtitle": "#cffafe",
+    },
+}
+
 APP_MANIFESTS = [
     KITCHEN_APP,
     ISSUES_APP,
     ASSISTANT_APP,
     TRAINER_APP,
     MUSIC_APP,
+    CCT_ROADMAP_APP,
     LAUNCHER_APP,
 ]
 

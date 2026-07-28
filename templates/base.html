@@ -7940,9 +7940,11 @@
                 {% if not show_launcher_shell %}
                     <a href="{{ app_shell.home_url }}">{{ app_shell.home_label }}</a>
                 {% endif %}
-                <form method="post" action="/logout" class="inline-form">
-                    <button type="submit">Log Out</button>
-                </form>
+                {% if request is defined and request.state.current_user %}
+                    <form method="post" action="/logout" class="inline-form">
+                        <button type="submit">Log Out</button>
+                    </form>
+                {% endif %}
             </div>
         </section>
     {% endif %}
