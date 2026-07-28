@@ -129,6 +129,7 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn('@app.get("/public/cct-interview-questions")', api_source)
         self.assertIn("public_cct_interview_questions.html", api_source)
         self.assertIn("CCT technical brief", template)
+        self.assertIn("CCT Data &amp; AI Roadmap", template)
         self.assertIn("Working understanding", template)
         self.assertIn("<ul>", template)
         self.assertIn("Likely migration status", template)
