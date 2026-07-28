@@ -1,41 +1,101 @@
 {% extends "base.html" %}
 
-{% block title %}CCT Technical Discussion Agenda - Dieter{% endblock %}
+{% block title %}CCT Technical Brief - Dieter{% endblock %}
 
 {% block content %}
 <section class="public-interview-hero">
-    <span class="launcher-kicker">CCT technical discussion agenda</span>
-    <h1>AWS migration, data platform, AI strategy, and role alignment</h1>
+    <span class="launcher-kicker">CCT technical brief</span>
+    <h1>Cloud migration, data platform, analytics, and practical AI opportunities</h1>
     <p>
-        A concise set of discussion prompts for clarifying CCT's cloud migration status,
-        target data architecture, AI roadmap, and near-term ownership expectations.
+        A working summary of the likely technical situation, the kinds of problems the role may need
+        to solve, and the questions worth clarifying with CCT leadership.
     </p>
 </section>
 
-<section class="detail-section interview-brief-panel">
+<section class="detail-section cto-brief-summary-panel">
     <div class="section-header">
         <div>
-            <h2>Purpose</h2>
-            <p class="section-subtitle">Use this as a structured conversation guide, not a questionnaire to rush through mechanically.</p>
+            <h2>Working understanding</h2>
+            <p class="section-subtitle">This is framed as a hypothesis from the project research, not as a claim about CCT's internal roadmap.</p>
         </div>
     </div>
-    <div class="interview-focus-grid">
+    <div class="cto-brief-grid">
         <article>
-            <span>1</span>
-            <p>Clarify the current AWS migration phase and remaining platform work.</p>
+            <h3>Likely migration status</h3>
+            <p>
+                CCT appears to be moving from customer-specific, on-prem SQL environments toward a more centralized
+                AWS data platform. The remaining work is likely a mix of ingestion, migration sequencing, data
+                standardization, and building trusted analytics layers on top of the new platform.
+            </p>
         </article>
         <article>
-            <span>2</span>
-            <p>Understand how raw ingestion, lake, warehouse, and semantic layers fit together.</p>
+            <h3>Likely need from the role</h3>
+            <p>
+                The role will probably need to bridge infrastructure and analytics: reliable data pipelines,
+                transformation layers, conformed models, semantic definitions, and pragmatic ML/AI use cases that
+                can be supported by the platform once the data foundation is stable.
+            </p>
         </article>
         <article>
-            <span>3</span>
-            <p>Separate concrete AI/ML plans from exploratory interest.</p>
+            <h3>Likely technical problems</h3>
+            <p>
+                The hard problems are probably data consistency across customers, historical migration from SQL
+                Server systems, entity resolution, schema drift, metric governance, temporal leakage in models,
+                and making casino operations data usable for forecasting, recommendations, and exception detection.
+            </p>
         </article>
         <article>
-            <span>4</span>
-            <p>Align on the role's first projects, ownership scope, and success measures.</p>
+            <h3>Likely product opportunity</h3>
+            <p>
+                Once centralized data is trustworthy, CCT may be able to build stronger customer analytics,
+                machine performance analytics, cash/staffing/revenue forecasting, and decision-support tools for
+                casino operators.
+            </p>
         </article>
+    </div>
+</section>
+
+<section class="detail-section cto-brief-problems-panel">
+    <div class="section-header">
+        <div>
+            <h2>Technical areas to explore</h2>
+            <p class="section-subtitle">These are the areas where the project research suggests the role could create value.</p>
+        </div>
+    </div>
+    <div class="cto-brief-area-list">
+        <article>
+            <h3>Data platform foundation</h3>
+            <ul>
+                <li>Customer database ingestion from on-prem environments into AWS.</li>
+                <li>Raw landing zones, transformation jobs, data quality checks, and repeatable migration patterns.</li>
+                <li>Conformed customer, machine, transaction, promotion, and property-level models.</li>
+            </ul>
+        </article>
+        <article>
+            <h3>Analytics and modeling</h3>
+            <ul>
+                <li>Customer return prediction, visit frequency, time-until-next-visit, and player value models.</li>
+                <li>Machine revenue forecasting, underperformance detection, failure prediction, and floor optimization.</li>
+                <li>Forecasting for cash demand, revenue, staffing, denomination demand, and operational planning.</li>
+            </ul>
+        </article>
+        <article>
+            <h3>Production readiness</h3>
+            <ul>
+                <li>Model targets, observation grains, prediction horizons, leakage controls, and evaluation metrics.</li>
+                <li>Explainability and business trust for operational users.</li>
+                <li>Deployment cadence, monitoring, and feedback loops from casino operations.</li>
+            </ul>
+        </article>
+    </div>
+</section>
+
+<section class="detail-section">
+    <div class="section-header">
+        <div>
+            <h2>Questions for CCT leadership</h2>
+            <p class="section-subtitle">Use these to validate or correct the working assumptions above.</p>
+        </div>
     </div>
 </section>
 
@@ -60,7 +120,7 @@
 <section class="detail-section interview-listening-panel">
     <div class="section-header">
         <div>
-            <h2>Signals to listen for</h2>
+            <h2>What strong answers would clarify</h2>
             <p class="section-subtitle">Strong answers should make the migration sequence, data product goals, and ownership model more concrete.</p>
         </div>
     </div>

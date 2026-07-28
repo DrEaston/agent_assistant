@@ -126,11 +126,18 @@ class ProjectReviewTemplateTests(unittest.TestCase):
 
         self.assertIn('@app.get("/public/cct-interview-questions")', api_source)
         self.assertIn("public_cct_interview_questions.html", api_source)
-        self.assertIn("CCT technical discussion agenda", template)
-        self.assertIn("AWS migration, data platform, AI strategy, and role alignment", template)
-        self.assertIn("Signals to listen for", template)
+        self.assertIn("CCT technical brief", template)
+        self.assertIn("Working understanding", template)
+        self.assertIn("Likely migration status", template)
+        self.assertIn("Likely need from the role", template)
+        self.assertIn("Likely technical problems", template)
+        self.assertIn("Technical areas to explore", template)
+        self.assertIn("Questions for CCT leadership", template)
+        self.assertIn("What strong answers would clarify", template)
         self.assertIn("question_sections", template)
         self.assertIn(".public-interview-hero", base_template)
+        self.assertIn(".cto-brief-grid", base_template)
+        self.assertIn(".cto-brief-area-list", base_template)
 
     def test_research_summary_page_uses_product_cards_not_raw_packet(self):
         template = (Path(__file__).resolve().parents[1] / "templates" / "project_research_results.html").read_text(encoding="utf-8")
