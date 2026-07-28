@@ -126,6 +126,28 @@
     </div>
 </section>
 
+<section class="detail-section roadmap-page-agent-panel">
+    <div class="section-header">
+        <div>
+            <h2>Ask about this roadmap</h2>
+            <p class="section-subtitle">Ask how the page works, how the app was built, or what the interactive check-ins are doing.</p>
+        </div>
+    </div>
+    <form data-cct-page-question-form>
+        <div class="form-group">
+            <label for="cct-page-question">Page question</label>
+            <textarea id="cct-page-question" name="question" rows="3" placeholder="How was this app built?" required></textarea>
+        </div>
+        <div class="fit-agent-prompts" aria-label="Suggested page questions">
+            <button type="button" data-page-prompt="How was this app built?">How built?</button>
+            <button type="button" data-page-prompt="Can visitors edit the live roadmap?">Can visitors edit?</button>
+            <button type="button" data-page-prompt="What do the update check-ins do?">Check-ins?</button>
+        </div>
+        <button type="submit">Ask Page Agent</button>
+        <div class="roadmap-agent-answer page-agent-answer" data-cct-page-question-output hidden></div>
+    </form>
+</section>
+
 <section class="detail-section fit-agent-panel">
     <div class="section-header">
         <div>
@@ -241,6 +263,47 @@
                     button.textContent = "Draft Update";
                 }
             });
+        });
+
+        const pageQuestionForm = document.querySelector("[data-cct-page-question-form]");
+        document.querySelectorAll("[data-page-prompt]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const textarea = pageQuestionForm?.querySelector("textarea[name='question']");
+                if (!textarea) {
+                    return;
+                }
+                textarea.value = button.dataset.pagePrompt || "";
+                textarea.focus();
+            });
+        });
+
+        pageQuestionForm?.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const textarea = pageQuestionForm.querySelector("textarea[name='question']");
+            const output = pageQuestionForm.querySelector("[data-cct-page-question-output]");
+            const button = pageQuestionForm.querySelector("button[type='submit']");
+            const question = textarea?.value.trim() || "";
+            if (!question) {
+                renderAnswer(output, "Ask a question about the roadmap or app first.");
+                return;
+            }
+            button.disabled = true;
+            button.textContent = "Answering...";
+            renderAnswer(output, "Answering from the roadmap/app context...");
+            try {
+                const response = await fetch("/api/cct-roadmap/page-answer", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({question}),
+                });
+                const data = await response.json();
+                renderAnswer(output, data.assistant_message || data.detail || "No response was generated.");
+            } catch (error) {
+                renderAnswer(output, `Could not answer page question: ${error}`);
+            } finally {
+                button.disabled = false;
+                button.textContent = "Ask Page Agent";
+            }
         });
 
         const fitForm = document.querySelector("[data-cct-fit-form]");

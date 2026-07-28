@@ -411,6 +411,9 @@ class CctRoadmapUpdateMessage(BaseModel):
 class CctFitQuestionMessage(BaseModel):
     question: str
 
+class CctRoadmapQuestionMessage(BaseModel):
+    question: str
+
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -6209,6 +6212,15 @@ For CCT, the relevant strengths are cloud data engineering, pipeline optimizatio
 
 Answer accurately and confidently without exaggeration. Distinguish direct production experience in Python, PySpark, AWS data engineering, metadata-driven systems, workflow automation, and pipeline optimization from areas he is actively learning, such as specific casino vendors and regulatory processes.
 """
+CCT_ROADMAP_APP_CONTEXT = """
+This CCT roadmap page is a public Dieter page for a technical discussion brief. It summarizes working assumptions about CCT's AWS migration, data platform, analytics opportunities, likely technical problems, and questions for CCT leadership.
+
+The page was built as part of a custom Dieter web app. At a high level, the app uses Python/FastAPI routes, Jinja HTML templates, CSS styling in the shared base template, JavaScript fetch calls for interactive forms, and Cloud Run deployment. The public route is /cct-roadmap.
+
+The interactive check-ins do not rewrite the public page automatically. They draft suggested updates from new information or interview answers. The fit agent answers questions from Curtis's background. This general roadmap assistant can explain the page, the app, or how the interaction model works.
+
+Keep answers brief, transparent, and non-sensitive. Do not mention secrets, infrastructure credentials, private repository internals, or anything that would imply public visitors can edit the live site.
+"""
 
 def cct_roadmap_update_response(section, content):
     """Draft a suggested roadmap update from new public-page information."""
@@ -6258,6 +6270,38 @@ def cct_fit_agent_response(question):
         "- He brings scientific debugging habits: tracing noisy systems, validating assumptions, and finding root causes.\n"
         "- He is still learning casino-specific systems, but his record shows he can ramp into complex domains quickly.\n\n"
         "Want to ask how that maps to CCT's AWS migration or AI roadmap?"
+    )
+
+def cct_roadmap_page_answer(question):
+    """Answer general questions about the public CCT roadmap page and app."""
+    clean_question = re.sub(r"\s+", " ", (question or "").strip())
+    if not clean_question:
+        return "Ask a question about the roadmap, the interactive check-ins, or how this page was built."
+    if planner_llm_provider:
+        messages = [{
+            "role": "user",
+            "content": (
+                f"[Roadmap/app context]\n{CCT_ROADMAP_APP_CONTEXT}\n\n"
+                f"Question: {clean_question}\n\n"
+                "Answer from the context only. Keep it short, practical, and safe for a public visitor."
+            ),
+        }]
+        return planner_llm_provider.chat(messages, "You are a concise public explainer for the CCT roadmap page. Do not expose private implementation details.")
+    lowered = clean_question.lower()
+    if any(token in lowered for token in ["built", "made", "created", "stack", "app"]):
+        return (
+            "This page is part of Dieter, a custom web app built with Python/FastAPI, Jinja templates, shared CSS, "
+            "and small JavaScript forms. The interactive controls call scoped public endpoints that draft answers or updates, "
+            "then the app is deployed on Cloud Run."
+        )
+    if any(token in lowered for token in ["edit", "update", "change", "save"]):
+        return (
+            "The public controls draft suggested updates; they do not directly edit the live roadmap. "
+            "That keeps the page useful for collecting new information without letting public visitors overwrite the brief."
+        )
+    return (
+        "This roadmap is a public technical brief for discussing CCT's likely AWS migration, data-platform needs, "
+        "analytics opportunities, role expectations, and follow-up questions."
     )
 
 def is_cct_project(project):
@@ -9341,6 +9385,15 @@ def api_cct_fit_answer(message: CctFitQuestionMessage):
     return {
         "assistant_message": cct_fit_agent_response(message.question),
         "grounded_context": "curtis_cct_fit_background",
+    }
+
+
+@app.post("/api/cct-roadmap/page-answer")
+def api_cct_roadmap_page_answer(message: CctRoadmapQuestionMessage):
+    """Answer general public questions about the CCT roadmap page."""
+    return {
+        "assistant_message": cct_roadmap_page_answer(message.question),
+        "grounded_context": "cct_roadmap_app_context",
     }
 
 
