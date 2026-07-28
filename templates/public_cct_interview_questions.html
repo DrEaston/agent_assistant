@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}CCT Technical Discussion Agenda - Dieter{% endblock %}
+
+{% block content %}
+<section class="public-interview-hero">
+    <span class="launcher-kicker">CCT technical discussion agenda</span>
+    <h1>AWS migration, data platform, AI strategy, and role alignment</h1>
+    <p>
+        A concise set of discussion prompts for clarifying CCT's cloud migration status,
+        target data architecture, AI roadmap, and near-term ownership expectations.
+    </p>
+</section>
+
+<section class="detail-section interview-brief-panel">
+    <div class="section-header">
+        <div>
+            <h2>Purpose</h2>
+            <p class="section-subtitle">Use this as a structured conversation guide, not a questionnaire to rush through mechanically.</p>
+        </div>
+    </div>
+    <div class="interview-focus-grid">
+        <article>
+            <span>1</span>
+            <p>Clarify the current AWS migration phase and remaining platform work.</p>
+        </article>
+        <article>
+            <span>2</span>
+            <p>Understand how raw ingestion, lake, warehouse, and semantic layers fit together.</p>
+        </article>
+        <article>
+            <span>3</span>
+            <p>Separate concrete AI/ML plans from exploratory interest.</p>
+        </article>
+        <article>
+            <span>4</span>
+            <p>Align on the role's first projects, ownership scope, and success measures.</p>
+        </article>
+    </div>
+</section>
+
+<div class="interview-question-list">
+    {% for section in question_sections %}
+        <section class="detail-section interview-question-section">
+            <div class="section-header">
+                <div>
+                    <h2>{{ section.title }}</h2>
+                    <p class="section-subtitle">{{ section.focus }}</p>
+                </div>
+            </div>
+            <ol class="interview-questions">
+                {% for question in section.questions %}
+                    <li>{{ question }}</li>
+                {% endfor %}
+            </ol>
+        </section>
+    {% endfor %}
+</div>
+
+<section class="detail-section interview-listening-panel">
+    <div class="section-header">
+        <div>
+            <h2>Signals to listen for</h2>
+            <p class="section-subtitle">Strong answers should make the migration sequence, data product goals, and ownership model more concrete.</p>
+        </div>
+    </div>
+    <ul class="review-list">
+        <li><strong>Clear migration state:</strong> which workloads have moved, which remain on-prem, and what is blocking the next phase.</li>
+        <li><strong>Coherent architecture:</strong> named storage, transformation, warehouse, orchestration, and semantic-layer choices.</li>
+        <li><strong>Practical AI roadmap:</strong> specific use cases tied to centralized data, evaluation, deployment, and customer value.</li>
+        <li><strong>Defined role scope:</strong> concrete first projects, decision rights, team interfaces, and 6–12 month success criteria.</li>
+    </ul>
+</section>
+{% endblock %}

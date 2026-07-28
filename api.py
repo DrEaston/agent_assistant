@@ -9240,6 +9240,16 @@ def project_interview_questions(request: Request, project_id: int):
     }))
 
 
+@app.get("/public/cct-interview-questions")
+def public_cct_interview_questions(request: Request):
+    """Display a polished public CCT technical discussion agenda."""
+    template = jinja_env.get_template("public_cct_interview_questions.html")
+    return HTMLResponse(template.render({
+        "request": request,
+        "question_sections": CCT_INTERVIEW_QUESTION_SECTIONS,
+    }))
+
+
 @app.post("/projects/{project_id}/research-results/{slug}/answer")
 def answer_project_research_questions(
     request: Request,

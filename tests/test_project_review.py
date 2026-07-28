@@ -111,11 +111,26 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn("Role expectations", api_source)
         self.assertIn("What percentage of my time would be spent on infrastructure", api_source)
         self.assertIn("CCT Interview Questions", template)
+        self.assertIn("CTO Share Version", template)
+        self.assertIn("/public/cct-interview-questions", template)
         self.assertIn("question_sections", template)
         self.assertIn("interview-question-section", template)
         self.assertIn("Listen for", template)
         self.assertIn(".interview-focus-grid", base_template)
         self.assertIn(".interview-question-section", base_template)
+
+    def test_public_cct_interview_questions_page_exists(self):
+        template = (Path(__file__).resolve().parents[1] / "templates" / "public_cct_interview_questions.html").read_text(encoding="utf-8")
+        api_source = (Path(__file__).resolve().parents[1] / "api.py").read_text(encoding="utf-8")
+        base_template = (Path(__file__).resolve().parents[1] / "templates" / "base.html").read_text(encoding="utf-8")
+
+        self.assertIn('@app.get("/public/cct-interview-questions")', api_source)
+        self.assertIn("public_cct_interview_questions.html", api_source)
+        self.assertIn("CCT technical discussion agenda", template)
+        self.assertIn("AWS migration, data platform, AI strategy, and role alignment", template)
+        self.assertIn("Signals to listen for", template)
+        self.assertIn("question_sections", template)
+        self.assertIn(".public-interview-hero", base_template)
 
     def test_research_summary_page_uses_product_cards_not_raw_packet(self):
         template = (Path(__file__).resolve().parents[1] / "templates" / "project_research_results.html").read_text(encoding="utf-8")
