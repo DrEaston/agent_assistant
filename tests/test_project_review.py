@@ -164,6 +164,7 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn("Ask the fit agent", template)
         self.assertIn('id="cct-fit-agent"', template)
         self.assertIn('id="cct-questions"', template)
+        self.assertLess(template.index("Ask the fit agent"), template.index("Technical areas to explore"))
         self.assertLess(template.index("Ask the fit agent"), template.index("Ask about this roadmap"))
         self.assertIn("Ask one focused question at a time", template)
         self.assertIn("Why would Curtis be a good fit for this job?", template)
