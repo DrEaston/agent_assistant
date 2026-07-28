@@ -27,6 +27,15 @@
                 <li>Likely still balancing ingestion, migration sequencing, and data standardization.</li>
                 <li>Trusted analytics layers may still be forming on top of the platform.</li>
             </ul>
+            <details class="roadmap-update-checkin">
+                <summary>Update this assumption</summary>
+                <form data-roadmap-update-form data-section="Likely migration status">
+                    <label>New information or interview response</label>
+                    <textarea name="content" rows="3" placeholder="Example: Most customer SQL databases are still on-prem; ingestion patterns are the main blocker."></textarea>
+                    <button type="submit" class="compact">Draft Update</button>
+                    <div class="roadmap-agent-answer" data-roadmap-update-output hidden></div>
+                </form>
+            </details>
         </article>
         <article>
             <h3>Likely need from the role</h3>
@@ -35,6 +44,15 @@
                 <li>Build reliable pipelines, transformation layers, and conformed models.</li>
                 <li>Identify pragmatic ML/AI use cases once the data foundation is stable.</li>
             </ul>
+            <details class="roadmap-update-checkin">
+                <summary>Update this assumption</summary>
+                <form data-roadmap-update-form data-section="Likely need from the role">
+                    <label>New information or interview response</label>
+                    <textarea name="content" rows="3" placeholder="Example: The first project is a semantic layer for standardized casino metrics."></textarea>
+                    <button type="submit" class="compact">Draft Update</button>
+                    <div class="roadmap-agent-answer" data-roadmap-update-output hidden></div>
+                </form>
+            </details>
         </article>
         <article>
             <h3>Likely technical problems</h3>
@@ -43,6 +61,15 @@
                 <li>Entity resolution, schema drift, and governed business metrics.</li>
                 <li>Model leakage, forecasting quality, recommendations, and exception detection.</li>
             </ul>
+            <details class="roadmap-update-checkin">
+                <summary>Update this assumption</summary>
+                <form data-roadmap-update-form data-section="Likely technical problems">
+                    <label>New information or interview response</label>
+                    <textarea name="content" rows="3" placeholder="Example: Schema drift across customer systems is more difficult than model design right now."></textarea>
+                    <button type="submit" class="compact">Draft Update</button>
+                    <div class="roadmap-agent-answer" data-roadmap-update-output hidden></div>
+                </form>
+            </details>
         </article>
         <article>
             <h3>Likely product opportunity</h3>
@@ -51,6 +78,15 @@
                 <li>Machine performance analytics and underperformance detection.</li>
                 <li>Cash, staffing, revenue forecasting, and operator decision support.</li>
             </ul>
+            <details class="roadmap-update-checkin">
+                <summary>Update this assumption</summary>
+                <form data-roadmap-update-form data-section="Likely product opportunity">
+                    <label>New information or interview response</label>
+                    <textarea name="content" rows="3" placeholder="Example: AI roadmap is internal decision support first, customer-facing features later."></textarea>
+                    <button type="submit" class="compact">Draft Update</button>
+                    <div class="roadmap-agent-answer" data-roadmap-update-output hidden></div>
+                </form>
+            </details>
         </article>
     </div>
 </section>
@@ -90,6 +126,23 @@
     </div>
 </section>
 
+<section class="detail-section fit-agent-panel">
+    <div class="section-header">
+        <div>
+            <h2>Ask the fit agent</h2>
+            <p class="section-subtitle">Ask how Curtis's background maps to this role. Answers are grounded in the background summary supplied for this brief.</p>
+        </div>
+    </div>
+    <form data-cct-fit-form>
+        <div class="form-group">
+            <label for="cct-fit-question">Fit question</label>
+            <textarea id="cct-fit-question" name="question" rows="3" placeholder="Why would Curtis be a good fit for this job?" required></textarea>
+        </div>
+        <button type="submit">Ask Fit Agent</button>
+        <div class="roadmap-agent-answer fit-agent-answer" data-cct-fit-output hidden></div>
+    </form>
+</section>
+
 <section class="detail-section">
     <div class="section-header">
         <div>
@@ -113,6 +166,15 @@
                     <li>{{ question }}</li>
                 {% endfor %}
             </ol>
+            <details class="roadmap-update-checkin question-response-checkin">
+                <summary>Draft summary update from answer notes</summary>
+                <form data-roadmap-update-form data-section="{{ section.title }}">
+                    <label>Paste answer notes from this topic</label>
+                    <textarea name="content" rows="3" placeholder="Example: Their AWS platform is live for new customers, but legacy migrations are still active."></textarea>
+                    <button type="submit" class="compact">Draft Update</button>
+                    <div class="roadmap-agent-answer" data-roadmap-update-output hidden></div>
+                </form>
+            </details>
         </section>
     {% endfor %}
 </div>
@@ -131,4 +193,79 @@
         <li><strong>Defined role scope:</strong> concrete first projects, decision rights, team interfaces, and 6–12 month success criteria.</li>
     </ul>
 </section>
+<script>
+    (() => {
+        const renderAnswer = (target, text) => {
+            if (!target) {
+                return;
+            }
+            target.hidden = false;
+            target.textContent = text || "No response was generated.";
+        };
+
+        document.querySelectorAll("[data-roadmap-update-form]").forEach((form) => {
+            form.addEventListener("submit", async (event) => {
+                event.preventDefault();
+                const textarea = form.querySelector("textarea[name='content']");
+                const output = form.querySelector("[data-roadmap-update-output]");
+                const button = form.querySelector("button[type='submit']");
+                const content = textarea?.value.trim() || "";
+                if (!content) {
+                    renderAnswer(output, "Add a note first, then I can draft an update.");
+                    return;
+                }
+                button.disabled = true;
+                button.textContent = "Drafting...";
+                renderAnswer(output, "Drafting an update from this information...");
+                try {
+                    const response = await fetch("/api/cct-roadmap/summary-update", {
+                        method: "POST",
+                        headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify({
+                            section: form.dataset.section || "CCT roadmap",
+                            content,
+                        }),
+                    });
+                    const data = await response.json();
+                    renderAnswer(output, data.assistant_message || data.detail || "No response was generated.");
+                } catch (error) {
+                    renderAnswer(output, `Could not draft update: ${error}`);
+                } finally {
+                    button.disabled = false;
+                    button.textContent = "Draft Update";
+                }
+            });
+        });
+
+        const fitForm = document.querySelector("[data-cct-fit-form]");
+        fitForm?.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const textarea = fitForm.querySelector("textarea[name='question']");
+            const output = fitForm.querySelector("[data-cct-fit-output]");
+            const button = fitForm.querySelector("button[type='submit']");
+            const question = textarea?.value.trim() || "";
+            if (!question) {
+                renderAnswer(output, "Ask a fit question first.");
+                return;
+            }
+            button.disabled = true;
+            button.textContent = "Answering...";
+            renderAnswer(output, "Answering from Curtis's background...");
+            try {
+                const response = await fetch("/api/cct-roadmap/fit-answer", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({question}),
+                });
+                const data = await response.json();
+                renderAnswer(output, data.assistant_message || data.detail || "No response was generated.");
+            } catch (error) {
+                renderAnswer(output, `Could not answer fit question: ${error}`);
+            } finally {
+                button.disabled = false;
+                button.textContent = "Ask Fit Agent";
+            }
+        });
+    })();
+</script>
 {% endblock %}

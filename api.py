@@ -316,6 +316,7 @@ async def load_authenticated_user(request: Request, call_next):
         "/public",
         "/apps/planner",
         "/dashboard",
+        "/api/cct-roadmap",
         "/api/app-feedback/codex-runs",
         "/api/app-feedback/stalled",
     )
@@ -402,6 +403,13 @@ class DieterActionMessage(BaseModel):
     confirmation_token: str = ""
     previous_action_plan: str = ""
     conversation_history: Optional[List[dict]] = None
+
+class CctRoadmapUpdateMessage(BaseModel):
+    section: str = ""
+    content: str
+
+class CctFitQuestionMessage(BaseModel):
+    question: str
 
 
 # ============================================================================
@@ -6186,6 +6194,70 @@ CCT_INTERVIEW_QUESTION_SECTIONS = (
         ),
     },
 )
+CURTIS_CCT_FIT_BACKGROUND = """
+Curtis Easton is a senior data engineer, scientist, and lifelong learner whose work centers on understanding complex systems and building better ways to work with them.
+
+He holds a Ph.D. in Neurobiology and Behavior and an M.S. in Computer Science focused on data science. His scientific background trained him to design experiments, troubleshoot sensitive systems, interpret noisy measurements, question unexpected results, and develop new analytical approaches when existing methods were inadequate.
+
+In current senior data engineering work, Curtis designs and optimizes large-scale cloud data pipelines using Python, PySpark, SQL, and AWS technologies. He has built reusable engineering APIs, metadata-driven transformation frameworks, automated modeling workflows, and systems for tracking data history and lineage.
+
+One production workflow that previously required roughly six hours was redesigned to run in about twenty minutes through computational improvements, better data handling, and parallel execution.
+
+Curtis is well suited to environments undergoing technical transformation because he is comfortable learning unfamiliar domains, understanding the business process behind the data, and translating that understanding into reliable software.
+
+For CCT, the relevant strengths are cloud data engineering, pipeline optimization, metadata and lineage, reproducibility, domain learning, casino reconciliation and exception-detection curiosity, practical AI/ML interest, and a platform-oriented mindset focused on reusable systems rather than one-off ETL.
+
+Answer accurately and confidently without exaggeration. Distinguish direct production experience in Python, PySpark, AWS data engineering, metadata-driven systems, workflow automation, and pipeline optimization from areas he is actively learning, such as specific casino vendors and regulatory processes.
+"""
+
+def cct_roadmap_update_response(section, content):
+    """Draft a suggested roadmap update from new public-page information."""
+    clean_section = re.sub(r"\s+", " ", (section or "Roadmap").strip())[:80]
+    clean_content = re.sub(r"\s+", " ", (content or "").strip())
+    if not clean_content:
+        return "Add a note first, then I can draft a suggested update."
+    if planner_llm_provider:
+        messages = [{
+            "role": "user",
+            "content": (
+                f"Roadmap section: {clean_section}\n"
+                f"New information or interview response:\n{clean_content}\n\n"
+                "Draft a concise suggested update for the CCT roadmap page. Use 2-4 bullets. "
+                "Call out whether this confirms, changes, or raises a question about the current assumption."
+            ),
+        }]
+        return planner_llm_provider.chat(messages, "You update a public CCT technical roadmap brief. Be concise, cautious, and practical.")
+    return (
+        f"Suggested update for {clean_section}:\n"
+        f"- New information to incorporate: {clean_content[:360]}{'...' if len(clean_content) > 360 else ''}\n"
+        "- Re-check whether the current assumption should be marked confirmed, revised, or still uncertain.\n"
+        "- If this came from an interview answer, connect it to migration status, platform architecture, AI strategy, or role expectations."
+    )
+
+def cct_fit_agent_response(question):
+    """Answer a Curtis/CCT fit question from the embedded background."""
+    clean_question = re.sub(r"\s+", " ", (question or "").strip())
+    if not clean_question:
+        return "Ask a fit question first, such as: Why would Curtis be a good fit for this job?"
+    if planner_llm_provider:
+        messages = [{
+            "role": "user",
+            "content": (
+                f"[Curtis background]\n{CURTIS_CCT_FIT_BACKGROUND}\n\n"
+                f"Question: {clean_question}\n\n"
+                "Answer from the background only. Be specific, confident, and accurate. "
+                "Do not overstate casino-domain experience; explain how his demonstrated strengths would transfer."
+            ),
+        }]
+        return planner_llm_provider.chat(messages, "You are a career-fit agent for the CCT roadmap page. Use plain text and concise bullets when useful.")
+    return (
+        "Curtis looks like a strong fit because he combines production cloud data engineering with scientific problem-solving.\n"
+        "- Direct experience: Python, PySpark, SQL, AWS data pipelines, reusable frameworks, metadata-driven systems, lineage, workflow automation, and optimization.\n"
+        "- Evidence of impact: he reduced one production workflow from roughly six hours to about twenty minutes by simplifying architecture and improving execution.\n"
+        "- Transferable strength: he learns complex domains by understanding the process that generates the data, then builds reliable systems around that understanding.\n"
+        "- CCT relevance: casino analytics likely needs trustworthy ingestion, reconciliation, lineage, exception detection, forecasting, and eventually practical AI/ML on top of centralized data.\n"
+        "- Important boundary: he is still learning the specific casino vendor and regulatory landscape, but his background shows he can ramp into difficult domains quickly."
+    )
 
 def is_cct_project(project):
     """Return whether a project should expose CCT-specific prep pages."""
@@ -9251,6 +9323,24 @@ def public_cct_interview_questions(request: Request):
         "request": request,
         "question_sections": CCT_INTERVIEW_QUESTION_SECTIONS,
     }))
+
+
+@app.post("/api/cct-roadmap/summary-update")
+def api_cct_roadmap_summary_update(message: CctRoadmapUpdateMessage):
+    """Draft a suggested public roadmap update from new information."""
+    return {
+        "assistant_message": cct_roadmap_update_response(message.section, message.content),
+        "section": message.section,
+    }
+
+
+@app.post("/api/cct-roadmap/fit-answer")
+def api_cct_fit_answer(message: CctFitQuestionMessage):
+    """Answer CCT fit questions from Curtis's embedded background."""
+    return {
+        "assistant_message": cct_fit_agent_response(message.question),
+        "grounded_context": "curtis_cct_fit_background",
+    }
 
 
 @app.post("/projects/{project_id}/research-results/{slug}/answer")

@@ -7120,6 +7120,88 @@
             line-height: 1.5;
         }
 
+        .roadmap-update-checkin {
+            border-top: 1px solid #e2e8f0;
+            margin-top: 0.9rem;
+            padding-top: 0.75rem;
+        }
+
+        .roadmap-update-checkin summary {
+            color: #0369a1;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 900;
+            list-style: none;
+        }
+
+        .roadmap-update-checkin summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .roadmap-update-checkin summary::before {
+            content: "+";
+            display: inline-block;
+            font-weight: 900;
+            margin-right: 0.35rem;
+        }
+
+        .roadmap-update-checkin[open] summary::before {
+            content: "–";
+        }
+
+        .roadmap-update-checkin form {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            display: grid;
+            gap: 0.55rem;
+            margin-top: 0.65rem;
+            padding: 0.75rem;
+        }
+
+        .roadmap-update-checkin label {
+            color: #334155;
+            font-size: 0.82rem;
+            font-weight: 900;
+        }
+
+        .roadmap-update-checkin textarea {
+            min-height: 4.75rem;
+        }
+
+        .question-response-checkin {
+            margin-top: 1rem;
+        }
+
+        .fit-agent-panel {
+            background: linear-gradient(135deg, #f5f3ff 0%, #eef2ff 100%);
+            border-color: #c4b5fd;
+        }
+
+        .fit-agent-panel form {
+            background: rgba(255, 255, 255, 0.74);
+            border: 1px solid #ddd6fe;
+            border-radius: 12px;
+            padding: 1rem;
+        }
+
+        .roadmap-agent-answer {
+            background: #fff;
+            border: 1px solid #bae6fd;
+            border-left: 4px solid #0369a1;
+            border-radius: 8px;
+            color: #334155;
+            line-height: 1.55;
+            padding: 0.75rem;
+            white-space: pre-wrap;
+        }
+
+        .fit-agent-answer {
+            border-color: #c4b5fd;
+            border-left-color: #7c3aed;
+            margin-top: 0.85rem;
+        }
+
         .recipe-shell-page .container .detail-section,
         .recipe-shell-page .container .recipe-home-hero,
         .recipe-shell-page .container .component-picker-panel,
