@@ -7131,7 +7131,7 @@
             border-radius: 12px;
             display: grid;
             gap: 1rem;
-            grid-template-columns: minmax(0, 1.2fr) minmax(220px, 0.8fr);
+            grid-template-columns: minmax(0, 1fr);
             margin-bottom: 1rem;
             padding: 1rem;
         }
@@ -7149,22 +7149,26 @@
         }
 
         .cct-platform-context ul {
-            display: flex;
-            flex-wrap: wrap;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
             gap: 0.45rem;
             list-style: none;
             margin: 0;
             padding: 0;
+            width: 100%;
         }
 
         .cct-platform-context li {
             background: #fff;
             border: 1px solid #e2e8f0;
-            border-radius: 999px;
+            border-radius: 12px;
             color: #334155;
             font-size: 0.82rem;
             font-weight: 800;
-            padding: 0.35rem 0.6rem;
+            line-height: 1.25;
+            min-width: 0;
+            padding: 0.45rem 0.6rem;
+            text-align: center;
         }
 
         .cct-product-bubble-list {
@@ -7221,6 +7225,29 @@
             color: #0f766e;
             font-weight: 800;
             margin-left: auto;
+        }
+
+        @media (max-width: 560px) {
+            .cct-platform-context {
+                padding: 0.85rem;
+            }
+
+            .cct-platform-context ul {
+                grid-template-columns: repeat(auto-fit, minmax(7.25rem, 1fr));
+            }
+
+            .cct-product-bubble summary {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .cct-product-bubble summary small {
+                margin-left: 0;
+            }
+
+            .cct-product-bubble summary::after {
+                align-self: flex-start;
+            }
         }
 
         .cct-product-content {

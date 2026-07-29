@@ -185,7 +185,7 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertNotIn("AI / analytics path", template)
         self.assertIn("CCT product map", template)
         self.assertIn('id="cct-product-map"', template)
-        self.assertIn("Casino Insight is the umbrella", template)
+        self.assertIn("Casino Insight product suite", template)
         self.assertIn("cct-platform-context", template)
         self.assertNotIn("<span>Casino Insight Platform</span>", template)
         self.assertIn("Insight Cash", template)
