@@ -70,12 +70,14 @@ class ProjectMergeTests(unittest.TestCase):
             "CTO said variance detection is the key issue.",
             "Suggested update: emphasize variance detection.",
             source="test",
+            author_name="Chris",
         )
 
         notes = [dict(row) for row in self.db.get_cct_roadmap_notes()]
 
         self.assertEqual(note_id, notes[0]["id"])
         self.assertEqual("Insight Cash", notes[0]["section"])
+        self.assertEqual("Chris", notes[0]["author_name"])
         self.assertEqual("CTO said variance detection is the key issue.", notes[0]["submitted_text"])
         self.assertEqual("Suggested update: emphasize variance detection.", notes[0]["drafted_update"])
         self.assertEqual("test", notes[0]["source"])
@@ -146,7 +148,10 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn('@app.get("/public/cct-interview-questions")', api_source)
         self.assertIn('@app.post("/api/cct-roadmap/summary-update")', api_source)
         self.assertIn("db.add_cct_roadmap_note", api_source)
+        self.assertIn("Add your name so Curtis knows who wrote the note.", api_source)
+        self.assertIn("author_name=author_name", api_source)
         self.assertIn('"saved": True', api_source)
+        self.assertIn('"author_name": author_name', api_source)
         self.assertIn('"note_id": note_id', api_source)
         self.assertIn('@app.post("/api/cct-roadmap/fit-answer")', api_source)
         self.assertIn('@app.post("/api/cct-roadmap/page-answer")', api_source)
@@ -208,6 +213,9 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn("What strong answers would clarify", template)
         self.assertIn("question_sections", template)
         self.assertIn("data-roadmap-update-form", template)
+        self.assertIn('input name="author_name"', template)
+        self.assertIn("Add your name first so Curtis knows who wrote the note.", template)
+        self.assertIn("from ${data.author_name}", template)
         self.assertIn("/api/cct-roadmap/summary-update", template)
         self.assertIn("Save notes from this topic", template)
         self.assertIn("Save Notes &amp; Draft Update", template)

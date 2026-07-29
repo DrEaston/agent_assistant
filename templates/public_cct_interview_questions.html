@@ -242,8 +242,10 @@
             <details class="roadmap-update-checkin question-response-checkin">
                 <summary>Save notes from this topic</summary>
                 <form data-roadmap-update-form data-section="{{ section.title }}">
+                    <label>Your name</label>
+                    <input name="author_name" type="text" autocomplete="name" placeholder="Example: Chris" required>
                     <label>Notes from the conversation</label>
-                    <textarea name="content" rows="3" placeholder="Example: AWS platform is live for new customers, but legacy migrations are still active."></textarea>
+                    <textarea name="content" rows="3" placeholder="Example: AWS platform is live for new customers, but legacy migrations are still active." required></textarea>
                     <button type="submit" class="compact">Save Notes &amp; Draft Update</button>
                     <div class="roadmap-agent-answer" data-roadmap-update-output hidden></div>
                 </form>
@@ -278,7 +280,7 @@
 
         const savedSuffix = (data) => (
             data?.saved
-            ? `\n\nNotes saved for Curtis to review later${data.note_id ? ` (#${data.note_id})` : ""}.`
+            ? `\n\nNotes saved for Curtis to review later${data.author_name ? ` from ${data.author_name}` : ""}${data.note_id ? ` (#${data.note_id})` : ""}.`
             : ""
         );
 
@@ -286,11 +288,19 @@
             form.addEventListener("submit", async (event) => {
                 event.preventDefault();
                 const textarea = form.querySelector("textarea[name='content']");
+                const authorInput = form.querySelector("input[name='author_name']");
                 const output = form.querySelector("[data-roadmap-update-output]");
                 const button = form.querySelector("button[type='submit']");
                 const content = textarea?.value.trim() || "";
+                const authorName = authorInput?.value.trim() || "";
+                if (!authorName) {
+                    renderAnswer(output, "Add your name first so Curtis knows who wrote the note.");
+                    authorInput?.focus();
+                    return;
+                }
                 if (!content) {
                     renderAnswer(output, "Add notes first, then I can save them and draft a possible update.");
+                    textarea?.focus();
                     return;
                 }
                 button.disabled = true;
@@ -301,6 +311,7 @@
                         method: "POST",
                         headers: {"Content-Type": "application/json"},
                         body: JSON.stringify({
+                            author_name: authorName,
                             section: form.dataset.section || "CCT roadmap",
                             content,
                         }),

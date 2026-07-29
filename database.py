@@ -218,6 +218,7 @@ class Database:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS cct_roadmap_notes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                author_name TEXT DEFAULT '',
                 section TEXT DEFAULT '',
                 submitted_text TEXT NOT NULL,
                 drafted_update TEXT DEFAULT '',
@@ -901,6 +902,7 @@ class Database:
         self._ensure_column(cursor, "trainer_workout_sessions", "assigned_by_coach_user_id", "INTEGER")
         self._ensure_column(cursor, "trainer_workout_sessions", "assigned_athlete_user_id", "INTEGER")
         self._ensure_column(cursor, "playlist_drafts", "collection_id", "INTEGER")
+        self._ensure_column(cursor, "cct_roadmap_notes", "author_name", "TEXT DEFAULT ''")
         self._repair_sample_data_links(cursor)
         self._deprioritize_overlong_actions(cursor)
         self._ensure_recipe_import_steps(cursor)
@@ -1779,16 +1781,17 @@ class Database:
         self._commit()
         self.close()
 
-    def add_cct_roadmap_note(self, section, submitted_text, drafted_update="", source="public-roadmap"):
+    def add_cct_roadmap_note(self, section, submitted_text, drafted_update="", source="public-roadmap", author_name=""):
         """Save a CCT roadmap conversation note for later review."""
         self.connect()
         cursor = self.conn.cursor()
         cursor.execute(
             """
-            INSERT INTO cct_roadmap_notes (section, submitted_text, drafted_update, source)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO cct_roadmap_notes (author_name, section, submitted_text, drafted_update, source)
+            VALUES (?, ?, ?, ?, ?)
             """,
             (
+                (author_name or "").strip()[:120],
                 (section or "").strip()[:120],
                 (submitted_text or "").strip(),
                 (drafted_update or "").strip(),

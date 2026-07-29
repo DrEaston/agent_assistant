@@ -405,6 +405,7 @@ class DieterActionMessage(BaseModel):
     conversation_history: Optional[List[dict]] = None
 
 class CctRoadmapUpdateMessage(BaseModel):
+    author_name: str = ""
     section: str = ""
     content: str
 
@@ -9381,15 +9382,20 @@ def public_cct_interview_questions(request: Request):
 @app.post("/api/cct-roadmap/summary-update")
 def api_cct_roadmap_summary_update(message: CctRoadmapUpdateMessage):
     """Save CCT conversation notes and draft a suggested roadmap update."""
+    author_name = message.author_name.strip()
+    if not author_name:
+        raise HTTPException(status_code=400, detail="Add your name so Curtis knows who wrote the note.")
     assistant_message = cct_roadmap_update_response(message.section, message.content)
     note_id = db.add_cct_roadmap_note(
         message.section,
         message.content,
         assistant_message,
         source="public-cct-roadmap-conversation-note",
+        author_name=author_name,
     )
     return {
         "assistant_message": assistant_message,
+        "author_name": author_name,
         "section": message.section,
         "saved": True,
         "note_id": note_id,
