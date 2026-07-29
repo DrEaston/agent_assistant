@@ -114,38 +114,143 @@
     </form>
 </section>
 
-<section class="detail-section cto-brief-problems-panel">
+<section id="cct-product-map" class="detail-section cto-brief-problems-panel">
     <div class="section-header">
         <div>
-            <h2>Technical areas to explore</h2>
-            <p class="section-subtitle">These are the areas where the project research suggests the role could create value.</p>
+            <h2>CCT product map</h2>
+            <p class="section-subtitle">Technical opportunities organized around CCT's own Casino Insight product areas.</p>
         </div>
     </div>
-    <div class="cto-brief-area-list">
-        <article>
-            <h3>Data platform foundation</h3>
-            <ul>
-                <li>Customer database ingestion from on-prem environments into AWS.</li>
-                <li>Raw landing zones, transformation jobs, data quality checks, and repeatable migration patterns.</li>
-                <li>Conformed customer, machine, transaction, promotion, and property-level models.</li>
-            </ul>
-        </article>
-        <article>
-            <h3>Analytics and modeling</h3>
-            <ul>
-                <li>Customer return prediction, visit frequency, time-until-next-visit, and player value models.</li>
-                <li>Machine revenue forecasting, underperformance detection, failure prediction, and floor optimization.</li>
-                <li>Forecasting for cash demand, revenue, staffing, denomination demand, and operational planning.</li>
-            </ul>
-        </article>
-        <article>
-            <h3>Production readiness</h3>
-            <ul>
-                <li>Model targets, observation grains, prediction horizons, leakage controls, and evaluation metrics.</li>
-                <li>Explainability and business trust for operational users.</li>
-                <li>Deployment cadence, monitoring, and feedback loops from casino operations.</li>
-            </ul>
-        </article>
+    <p class="cct-source-note">
+        Product labels and functional areas are summarized from CCT's public site:
+        <a href="https://cct.io/" rel="noopener">Casino Insight</a>,
+        <a href="https://cct.io/insight-cash/" rel="noopener">Insight Cash</a>, and
+        <a href="https://cct.io/insight-intelligence/" rel="noopener">Insight Intelligence</a>.
+    </p>
+    <div class="cct-product-bubble-list">
+        <details class="cct-product-bubble" open>
+            <summary>
+                <span>Casino Insight Platform</span>
+                <small>Foundation across casino operations</small>
+            </summary>
+            <div class="cct-product-content">
+                <div>
+                    <h3>Core relationship</h3>
+                    <ul>
+                        <li>CCT frames Casino Insight as a cross-property platform spanning operational and financial functions.</li>
+                        <li>The function map includes Executives &amp; Finance, Cage &amp; Vault, Audit &amp; Compliance, Slots &amp; Tables, Marketing &amp; Players, and Hotel &amp; F&amp;B.</li>
+                        <li>The platform story depends on reliable integration, shared definitions, and trusted reporting across those domains.</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3>Likely technical work</h3>
+                    <ul>
+                        <li>Build canonical models for property, customer, transaction, machine, promotion, and department-level activity.</li>
+                        <li>Create ingestion patterns for legacy/on-prem systems moving toward AWS.</li>
+                        <li>Define semantic metrics so finance, audit, operations, and marketing see the same numbers.</li>
+                    </ul>
+                </div>
+            </div>
+        </details>
+
+        <details class="cct-product-bubble" open>
+            <summary>
+                <span>Insight Cash</span>
+                <small>Cage, vault, audit, reconciliation</small>
+            </summary>
+            <div class="cct-product-content">
+                <div>
+                    <h3>Core relationship</h3>
+                    <ul>
+                        <li>Insight Cash appears closest to the operational-control center of the product suite.</li>
+                        <li>It connects cage, vault, kiosk, audit, compliance, and accounting workflows.</li>
+                        <li>CCT emphasizes many integrations, configurable workflows, variance tracking, transaction history, and journal-entry support.</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3>Likely technical work</h3>
+                    <ul>
+                        <li>Ingest and normalize cash, kiosk, cage, vault, and accounting events from many source systems.</li>
+                        <li>Build reconciliation rules, variance detection, audit lineage, and exception workflows.</li>
+                        <li>Support traceable transaction history and downstream finance/compliance reporting.</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3>Future analytics / AI</h3>
+                    <ul>
+                        <li>Predict cash demand, kiosk refill needs, and abnormal variance patterns.</li>
+                        <li>Prioritize exceptions by risk, operational impact, and likely root cause.</li>
+                        <li>Use explainable anomaly detection before considering more complex models.</li>
+                    </ul>
+                </div>
+            </div>
+        </details>
+
+        <details class="cct-product-bubble">
+            <summary>
+                <span>Insight Analytics</span>
+                <small>KPIs, operations, customers, machine performance</small>
+            </summary>
+            <div class="cct-product-content">
+                <div>
+                    <h3>Core relationship</h3>
+                    <ul>
+                        <li>Insight Analytics is the reporting and KPI layer across gaming and non-gaming operations.</li>
+                        <li>CCT highlights operating reports, performance views, customizable KPIs, and cross-department analysis.</li>
+                        <li>This is where the data platform becomes visible to executives, operators, marketing, and finance teams.</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3>Likely technical work</h3>
+                    <ul>
+                        <li>Conform source data into consistent grains for player, machine, transaction, promotion, and department-level analysis.</li>
+                        <li>Build star schemas, metric catalogs, data quality checks, and role-specific dashboards.</li>
+                        <li>Separate raw ingestion from trusted semantic models so reports are explainable and repeatable.</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3>Future analytics / AI</h3>
+                    <ul>
+                        <li>Customer return prediction, visit frequency, time-until-next-visit, and player value modeling.</li>
+                        <li>Machine underperformance detection, floor performance analysis, and conversion recommendations.</li>
+                        <li>Promotion response and uplift modeling once campaign and outcome data are reliable.</li>
+                    </ul>
+                </div>
+            </div>
+        </details>
+
+        <details class="cct-product-bubble">
+            <summary>
+                <span>Insight Intelligence</span>
+                <small>Predictive models and operational forecasting</small>
+            </summary>
+            <div class="cct-product-content">
+                <div>
+                    <h3>Core relationship</h3>
+                    <ul>
+                        <li>CCT describes Insight Intelligence as its predictive product direction.</li>
+                        <li>Kiosk Intelligence is presented as live, with Player Intelligence and Operational Intelligence listed as coming next.</li>
+                        <li>This product area depends most directly on the quality of the underlying platform and historical data.</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3>Likely technical work</h3>
+                    <ul>
+                        <li>Define targets, observation grains, horizons, leakage controls, and evaluation metrics for every model.</li>
+                        <li>Create reusable feature pipelines from the same conformed models that support analytics.</li>
+                        <li>Monitor model drift, prediction quality, and operational adoption after deployment.</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3>Future analytics / AI</h3>
+                    <ul>
+                        <li>Kiosk cash forecasting and refill optimization.</li>
+                        <li>Player return, value, segmentation, and next-best-action style recommendations.</li>
+                        <li>Operational forecasts for staffing, revenue, denomination demand, and exception prioritization.</li>
+                    </ul>
+                </div>
+            </div>
+        </details>
     </div>
 </section>
 

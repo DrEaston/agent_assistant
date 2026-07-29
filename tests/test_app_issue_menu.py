@@ -173,6 +173,7 @@ class AppIssueMenuTests(unittest.TestCase):
         self.assertNotIn('action="/logout"', html)
         self.assertIn({"href": "/cct-roadmap", "text": "Roadmap", "in_app_menu": True}, menu_links)
         self.assertIn({"href": "#cct-fit-agent", "text": "Fit Agent", "in_app_menu": True}, menu_links)
+        self.assertIn({"href": "#cct-product-map", "text": "Product Map", "in_app_menu": True}, menu_links)
         self.assertIn({"href": "#cct-questions", "text": "Questions", "in_app_menu": True}, menu_links)
         self.assertIn({"href": "#cct-page-agent", "text": "How Built", "in_app_menu": True}, menu_links)
 

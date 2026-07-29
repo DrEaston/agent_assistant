@@ -34,6 +34,7 @@ CCT_ROADMAP_APP = {
     "nav_items": (
         {"label": "Roadmap", "url": "/cct-roadmap"},
         {"label": "Fit Agent", "url": "#cct-fit-agent"},
+        {"label": "Product Map", "url": "#cct-product-map"},
         {"label": "Questions", "url": "#cct-questions"},
         {"label": "How Built", "url": "#cct-page-agent"},
     ),

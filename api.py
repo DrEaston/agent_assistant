@@ -6215,6 +6215,8 @@ Answer accurately and confidently without exaggeration. Distinguish direct produ
 CCT_ROADMAP_APP_CONTEXT = """
 This CCT roadmap page is a public Dieter page for a technical discussion brief. It summarizes working assumptions about CCT's AWS migration, data platform, analytics opportunities, likely technical problems, and questions for CCT leadership.
 
+The roadmap is organized around CCT's public product language: Casino Insight as the platform, Insight Cash for cage/vault/audit/reconciliation workflows, Insight Analytics for reporting and KPIs across gaming and non-gaming operations, and Insight Intelligence for predictive forecasting and operational intelligence. CCT's public function map includes Executives & Finance, Cage & Vault, Audit & Compliance, Slots & Tables, Marketing & Players, and Hotel & F&B.
+
 The page was built as part of a custom Dieter web app. At a high level, the app uses Python/FastAPI routes, Jinja HTML templates, CSS styling in the shared base template, JavaScript fetch calls for interactive forms, and Cloud Run deployment. The public route is /cct-roadmap.
 
 The interactive check-ins do not rewrite the public page automatically. They draft suggested updates from new information or interview answers. The fit agent answers questions from Curtis's background. This general roadmap assistant can explain the page, the app, or how the interaction model works.
