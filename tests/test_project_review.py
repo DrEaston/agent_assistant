@@ -70,14 +70,14 @@ class ProjectMergeTests(unittest.TestCase):
             "CTO said variance detection is the key issue.",
             "Suggested update: emphasize variance detection.",
             source="test",
-            author_name="Chris",
+            author_name="Notetaker",
         )
 
         notes = [dict(row) for row in self.db.get_cct_roadmap_notes()]
 
         self.assertEqual(note_id, notes[0]["id"])
         self.assertEqual("Insight Cash", notes[0]["section"])
-        self.assertEqual("Chris", notes[0]["author_name"])
+        self.assertEqual("Notetaker", notes[0]["author_name"])
         self.assertEqual("CTO said variance detection is the key issue.", notes[0]["submitted_text"])
         self.assertEqual("Suggested update: emphasize variance detection.", notes[0]["drafted_update"])
         self.assertEqual("test", notes[0]["source"])
