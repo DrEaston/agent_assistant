@@ -97,6 +97,15 @@
                     </ul>
                 </div>
             </div>
+            <details class="product-agent-checkin">
+                <summary>Ask about Insight Cash</summary>
+                <form data-product-question-form data-product="Insight Cash">
+                    <label>Product question</label>
+                    <textarea name="question" rows="3" placeholder="Example: why does Insight Cash need reconciliation?"></textarea>
+                    <button type="submit" class="compact">Ask Product Agent</button>
+                    <div class="roadmap-agent-answer product-agent-answer" data-product-question-output hidden></div>
+                </form>
+            </details>
         </details>
 
         <details class="cct-product-bubble">
@@ -130,6 +139,15 @@
                     </ul>
                 </div>
             </div>
+            <details class="product-agent-checkin">
+                <summary>Ask about Insight Analytics</summary>
+                <form data-product-question-form data-product="Insight Analytics">
+                    <label>Product question</label>
+                    <textarea name="question" rows="3" placeholder="Example: what is a KPI?"></textarea>
+                    <button type="submit" class="compact">Ask Product Agent</button>
+                    <div class="roadmap-agent-answer product-agent-answer" data-product-question-output hidden></div>
+                </form>
+            </details>
         </details>
 
         <details class="cct-product-bubble">
@@ -163,6 +181,15 @@
                     </ul>
                 </div>
             </div>
+            <details class="product-agent-checkin">
+                <summary>Ask about Insight Intelligence</summary>
+                <form data-product-question-form data-product="Insight Intelligence">
+                    <label>Product question</label>
+                    <textarea name="question" rows="3" placeholder="Example: what does predictive forecasting mean here?"></textarea>
+                    <button type="submit" class="compact">Ask Product Agent</button>
+                    <div class="roadmap-agent-answer product-agent-answer" data-product-question-output hidden></div>
+                </form>
+            </details>
         </details>
     </div>
 </section>
@@ -279,6 +306,40 @@
                 } finally {
                     button.disabled = false;
                     button.textContent = "Draft Update";
+                }
+            });
+        });
+
+        document.querySelectorAll("[data-product-question-form]").forEach((form) => {
+            form.addEventListener("submit", async (event) => {
+                event.preventDefault();
+                const textarea = form.querySelector("textarea[name='question']");
+                const output = form.querySelector("[data-product-question-output]");
+                const button = form.querySelector("button[type='submit']");
+                const question = textarea?.value.trim() || "";
+                const product = form.dataset.product || "this CCT product";
+                if (!question) {
+                    renderAnswer(output, "Ask a product question first, such as: what is KPI?");
+                    return;
+                }
+                button.disabled = true;
+                button.textContent = "Answering...";
+                renderAnswer(output, `Answering in the context of ${product}...`);
+                try {
+                    const response = await fetch("/api/cct-roadmap/page-answer", {
+                        method: "POST",
+                        headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify({
+                            question: `In the context of ${product}, ${question}`,
+                        }),
+                    });
+                    const data = await response.json();
+                    renderAnswer(output, data.assistant_message || data.detail || "No response was generated.");
+                } catch (error) {
+                    renderAnswer(output, `Could not answer product question: ${error}`);
+                } finally {
+                    button.disabled = false;
+                    button.textContent = "Ask Product Agent";
                 }
             });
         });
