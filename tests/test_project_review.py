@@ -198,7 +198,7 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn("question_sections", template)
         self.assertIn("data-roadmap-update-form", template)
         self.assertIn("/api/cct-roadmap/summary-update", template)
-        self.assertIn("Save CTO notes from this topic", template)
+        self.assertIn("Save notes from this topic", template)
         self.assertIn("Save Notes &amp; Draft Update", template)
         self.assertIn("Notes saved for Curtis to review later", template)
         self.assertIn("savedSuffix", template)
