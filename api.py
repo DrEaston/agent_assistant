@@ -6206,7 +6206,7 @@ He holds a Ph.D. in Neurobiology and Behavior and an M.S. in Computer Science fo
 
 In current data engineering work, Curtis designs and optimizes large-scale cloud data pipelines using Python, PySpark, SQL, and AWS technologies. He has built reusable engineering APIs, metadata-driven transformation frameworks, automated modeling workflows, and systems for tracking data history and lineage.
 
-One production workflow was substantially redesigned to reduce compute time and cut end-to-end rerun burden by an order of magnitude through computational improvements, better data handling, and parallel execution.
+One production workflow was substantially redesigned to reduce compute time, make the process more error-proof, and lower the likelihood of costly reruns through computational improvements, better data handling, validation, and parallel execution.
 
 Curtis is well suited to environments undergoing technical transformation because he is comfortable learning unfamiliar domains, understanding the business process behind the data, and translating that understanding into reliable software.
 
