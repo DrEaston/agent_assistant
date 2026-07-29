@@ -215,6 +215,17 @@ class Database:
             )
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS cct_roadmap_notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                section TEXT DEFAULT '',
+                submitted_text TEXT NOT NULL,
+                drafted_update TEXT DEFAULT '',
+                source TEXT DEFAULT 'public-roadmap',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         # Blockers table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS blockers (
@@ -1767,6 +1778,39 @@ class Database:
         cursor.execute("INSERT INTO notes (project_id, content) VALUES (?, ?)", (project_id, content))
         self._commit()
         self.close()
+
+    def add_cct_roadmap_note(self, section, submitted_text, drafted_update="", source="public-roadmap"):
+        """Save a CCT roadmap conversation note for later review."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO cct_roadmap_notes (section, submitted_text, drafted_update, source)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                (section or "").strip()[:120],
+                (submitted_text or "").strip(),
+                (drafted_update or "").strip(),
+                (source or "public-roadmap").strip()[:80],
+            ),
+        )
+        self._commit()
+        note_id = cursor.lastrowid
+        self.close()
+        return note_id
+
+    def get_cct_roadmap_notes(self, limit=100):
+        """Return saved CCT roadmap conversation notes."""
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT * FROM cct_roadmap_notes ORDER BY created_at DESC, id DESC LIMIT ?",
+            (max(1, min(500, int(limit or 100))),),
+        )
+        notes = cursor.fetchall()
+        self.close()
+        return notes
 
     def upsert_project_artifact(
         self,

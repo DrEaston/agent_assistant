@@ -64,6 +64,22 @@ class ProjectMergeTests(unittest.TestCase):
         self.assertEqual({"First findings", "Updated findings"}, {item["content_markdown"] for item in reviews})
         self.assertTrue(all(item["artifact_type"] == "research_review" for item in reviews))
 
+    def test_cct_roadmap_notes_are_saved_for_later_review(self):
+        note_id = self.db.add_cct_roadmap_note(
+            "Insight Cash",
+            "CTO said variance detection is the key issue.",
+            "Suggested update: emphasize variance detection.",
+            source="test",
+        )
+
+        notes = [dict(row) for row in self.db.get_cct_roadmap_notes()]
+
+        self.assertEqual(note_id, notes[0]["id"])
+        self.assertEqual("Insight Cash", notes[0]["section"])
+        self.assertEqual("CTO said variance detection is the key issue.", notes[0]["submitted_text"])
+        self.assertEqual("Suggested update: emphasize variance detection.", notes[0]["drafted_update"])
+        self.assertEqual("test", notes[0]["source"])
+
 
 class ProjectReviewTemplateTests(unittest.TestCase):
     def test_project_page_exposes_review_actions_and_guide(self):
@@ -129,6 +145,9 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn('@app.get("/cct-roadmap")', api_source)
         self.assertIn('@app.get("/public/cct-interview-questions")', api_source)
         self.assertIn('@app.post("/api/cct-roadmap/summary-update")', api_source)
+        self.assertIn("db.add_cct_roadmap_note", api_source)
+        self.assertIn('"saved": True', api_source)
+        self.assertIn('"note_id": note_id', api_source)
         self.assertIn('@app.post("/api/cct-roadmap/fit-answer")', api_source)
         self.assertIn('@app.post("/api/cct-roadmap/page-answer")', api_source)
         self.assertIn("CCT_ROADMAP_APP_CONTEXT", api_source)
@@ -179,6 +198,10 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         self.assertIn("question_sections", template)
         self.assertIn("data-roadmap-update-form", template)
         self.assertIn("/api/cct-roadmap/summary-update", template)
+        self.assertIn("Save CTO notes from this topic", template)
+        self.assertIn("Save Notes &amp; Draft Update", template)
+        self.assertIn("Notes saved for Curtis to review later", template)
+        self.assertIn("savedSuffix", template)
         self.assertIn("Ask about this roadmap", template)
         self.assertIn('id="cct-page-agent"', template)
         self.assertIn("How was this app built?", template)

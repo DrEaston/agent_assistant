@@ -240,11 +240,11 @@
                 {% endfor %}
             </ol>
             <details class="roadmap-update-checkin question-response-checkin">
-                <summary>Draft summary update from answer notes</summary>
+                <summary>Save CTO notes from this topic</summary>
                 <form data-roadmap-update-form data-section="{{ section.title }}">
-                    <label>Paste answer notes from this topic</label>
-                    <textarea name="content" rows="3" placeholder="Example: Their AWS platform is live for new customers, but legacy migrations are still active."></textarea>
-                    <button type="submit" class="compact">Draft Update</button>
+                    <label>Notes from the conversation</label>
+                    <textarea name="content" rows="3" placeholder="Example: AWS platform is live for new customers, but legacy migrations are still active."></textarea>
+                    <button type="submit" class="compact">Save Notes &amp; Draft Update</button>
                     <div class="roadmap-agent-answer" data-roadmap-update-output hidden></div>
                 </form>
             </details>
@@ -276,6 +276,12 @@
             target.textContent = text || "No response was generated.";
         };
 
+        const savedSuffix = (data) => (
+            data?.saved
+            ? `\n\nNotes saved for Curtis to review later${data.note_id ? ` (#${data.note_id})` : ""}.`
+            : ""
+        );
+
         document.querySelectorAll("[data-roadmap-update-form]").forEach((form) => {
             form.addEventListener("submit", async (event) => {
                 event.preventDefault();
@@ -284,12 +290,12 @@
                 const button = form.querySelector("button[type='submit']");
                 const content = textarea?.value.trim() || "";
                 if (!content) {
-                    renderAnswer(output, "Add a note first, then I can draft an update.");
+                    renderAnswer(output, "Add notes first, then I can save them and draft a possible update.");
                     return;
                 }
                 button.disabled = true;
-                button.textContent = "Drafting...";
-                renderAnswer(output, "Drafting an update from this information...");
+                button.textContent = "Saving...";
+                renderAnswer(output, "Saving notes and drafting a possible roadmap update...");
                 try {
                     const response = await fetch("/api/cct-roadmap/summary-update", {
                         method: "POST",
@@ -300,12 +306,12 @@
                         }),
                     });
                     const data = await response.json();
-                    renderAnswer(output, data.assistant_message || data.detail || "No response was generated.");
+                    renderAnswer(output, `${data.assistant_message || data.detail || "No response was generated."}${savedSuffix(data)}`);
                 } catch (error) {
                     renderAnswer(output, `Could not draft update: ${error}`);
                 } finally {
                     button.disabled = false;
-                    button.textContent = "Draft Update";
+                    button.textContent = "Save Notes & Draft Update";
                 }
             });
         });

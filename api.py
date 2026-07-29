@@ -6225,7 +6225,7 @@ Keep answers brief, transparent, and non-sensitive. Do not mention secrets, infr
 """
 
 def cct_roadmap_update_response(section, content):
-    """Draft a suggested roadmap update from new public-page information."""
+    """Draft a suggested roadmap update from saved conversation notes."""
     clean_section = re.sub(r"\s+", " ", (section or "Roadmap").strip())[:80]
     clean_content = re.sub(r"\s+", " ", (content or "").strip())
     if not clean_content:
@@ -9374,10 +9374,19 @@ def public_cct_interview_questions(request: Request):
 
 @app.post("/api/cct-roadmap/summary-update")
 def api_cct_roadmap_summary_update(message: CctRoadmapUpdateMessage):
-    """Draft a suggested public roadmap update from new information."""
+    """Save CCT conversation notes and draft a suggested roadmap update."""
+    assistant_message = cct_roadmap_update_response(message.section, message.content)
+    note_id = db.add_cct_roadmap_note(
+        message.section,
+        message.content,
+        assistant_message,
+        source="public-cct-roadmap-conversation-note",
+    )
     return {
-        "assistant_message": cct_roadmap_update_response(message.section, message.content),
+        "assistant_message": assistant_message,
         "section": message.section,
+        "saved": True,
+        "note_id": note_id,
     }
 
 
