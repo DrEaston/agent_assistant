@@ -6173,6 +6173,7 @@ CCT_INTERVIEW_QUESTION_SECTIONS = (
         "questions": (
             "What does the current data platform look like?",
             "Is there a raw landing zone, such as S3?",
+            "How are you thinking about AWS Glue, Lambda, dbt, DuckDB, or other transformation/orchestration choices?",
             "Are you using a data lake or table format such as Apache Iceberg?",
             "Is there a warehouse layer?",
             "Is there a star schema, semantic layer, or governed business metric layer?",
@@ -6194,6 +6195,7 @@ CCT_INTERVIEW_QUESTION_SECTIONS = (
         "questions": (
             "What would success look like for this role after the first 6–12 months?",
             "What projects would you expect me to own first?",
+            "Which engineering practices are most important to establish early: testing, versioning, lineage, deployment standards, or code review?",
         ),
     },
 )
@@ -6208,14 +6210,18 @@ One production workflow that previously required roughly six hours was redesigne
 
 Curtis is well suited to environments undergoing technical transformation because he is comfortable learning unfamiliar domains, understanding the business process behind the data, and translating that understanding into reliable software.
 
-For CCT, the relevant strengths are cloud data engineering, pipeline optimization, metadata and lineage, reproducibility, domain learning, casino reconciliation and exception-detection curiosity, practical AI/ML interest, and a platform-oriented mindset focused on reusable systems rather than one-off ETL.
+The CCT Cloud Data Engineer role appears to emphasize greenfield AWS data-platform buildout: Python, SQL, AWS Glue, AWS Lambda, S3, cloud-native data pipelines, data lake/lakehouse patterns, conversion of SQL-heavy or stored-procedure logic into Python/cloud workflows, and establishing practices such as testing, versioning, lineage, and modern transformation standards.
 
-Answer accurately and confidently without exaggeration. Distinguish direct production experience in Python, PySpark, AWS data engineering, metadata-driven systems, workflow automation, and pipeline optimization from areas he is actively learning, such as specific casino vendors and regulatory processes.
+For CCT, the relevant strengths are cloud data engineering, Python and SQL pipeline work, AWS-oriented engineering, pipeline optimization, metadata and lineage, reproducibility, domain learning, casino reconciliation and exception-detection curiosity, practical AI/ML interest, and a platform-oriented mindset focused on reusable systems rather than one-off ETL.
+
+Answer accurately and confidently without exaggeration. Distinguish direct production experience in Python, PySpark, SQL, AWS data engineering, metadata-driven systems, workflow automation, and pipeline optimization from role-specific tools or areas he may need to ramp into, such as AWS Glue, AWS Lambda, dbt, DuckDB, specific casino vendors, and regulatory processes.
 """
 CCT_ROADMAP_APP_CONTEXT = """
 This CCT roadmap page is a public Dieter page for a technical discussion brief. It summarizes working assumptions about CCT's AWS migration, data platform, analytics opportunities, likely technical problems, and questions for CCT leadership.
 
 The roadmap is organized around CCT's public product language: Casino Insight as the platform, Insight Cash for cage/vault/audit/reconciliation workflows, Insight Analytics for reporting and KPIs across gaming and non-gaming operations, and Insight Intelligence for predictive forecasting and operational intelligence. CCT's public function map includes Executives & Finance, Cage & Vault, Audit & Compliance, Slots & Tables, Marketing & Players, and Hotel & F&B.
+
+The role description emphasizes a greenfield Cloud Data Engineer opportunity: building AWS-native data pipelines and a modern data foundation using Python, SQL, AWS Glue, AWS Lambda, S3, data lake/lakehouse patterns, testing, versioning, lineage, and cloud-native transformation practices.
 
 The page was built as part of a custom Dieter web app. At a high level, the app uses Python/FastAPI routes, Jinja HTML templates, CSS styling in the shared base template, JavaScript fetch calls for interactive forms, and Cloud Run deployment. The public route is /cct-roadmap.
 
