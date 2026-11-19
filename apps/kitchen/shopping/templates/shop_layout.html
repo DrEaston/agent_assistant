@@ -1,0 +1,38 @@
+{% extends "tg_base.html" %}
+{% block head %}
+<style>
+:root { --accent: #3f6212; --accent-soft: #eef6e0; }
+.primary:hover { background: #365314; }
+.top { background: #22301a; color: #fff; padding: 1rem 1rem 1.1rem; }
+.top-inner, .wrap { max-width: 46rem; margin: 0 auto; }
+.top a.back { color: #d9e6c8; text-decoration: none; font-weight: 600; font-size: .9rem; }
+.top h1 { font-size: 1.45rem; margin-top: .35rem; }
+.top .sub { color: #d9e6c8; margin-top: .25rem; }
+.wrap { padding: 1.1rem 1rem 2rem; }
+section { margin-bottom: 1.6rem; scroll-margin-top: 4.5rem; }
+.section-title { font-size: .8rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 0 0 .5rem; }
+.list-row { display: flex; gap: .75rem; align-items: center; justify-content: space-between; padding: .8rem 0;
+  border-bottom: 1px solid var(--line); }
+.list-row:last-child { border-bottom: 0; }
+.list-row a.title { font-weight: 700; color: var(--ink); text-decoration: none; }
+.list-row a.title:hover { color: var(--accent); }
+.meter { height: 6px; border-radius: 999px; background: #ece4d8; overflow: hidden; margin-top: .35rem; max-width: 14rem; }
+.meter > span { display: block; height: 100%; background: var(--accent); }
+.confirm > summary { list-style: none; }
+.confirm > summary::-webkit-details-marker { display: none; }
+.confirm[open] > summary { display: none; }
+.empty { text-align: center; padding: 1.5rem 1rem; color: var(--muted); }
+</style>
+{% block page_head %}{% endblock %}
+{% endblock %}
+{% block feedback %}
+{% if reported %}<p class="banner ok" style="max-width:40rem;margin:1rem auto">Thanks. Your report went to Dieter Studio.</p>{% endif %}
+<details class="feedback card" id="report">
+  <summary>Something wrong or confusing? Report a problem</summary>
+  <form method="post" action="/apps/recipes/grocery-lists/feedback" class="stack" style="margin-top:.75rem">
+    <input type="hidden" name="page" value="{{ page_url }}">
+    <textarea name="text" required placeholder="What happened, and what did you expect?" style="min-height:5rem"></textarea>
+    <button type="submit">Send to Dieter Studio</button>
+  </form>
+</details>
+{% endblock %}

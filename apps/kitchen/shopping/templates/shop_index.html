@@ -1,0 +1,51 @@
+{% extends "shop_layout.html" %}
+{% block title %}Shopping lists{% endblock %}
+{% macro list_rows(lists, done=False) -%}
+  {% for g in lists %}
+  <div class="list-row">
+    <div style="flex:1;min-width:0">
+      <a class="title" href="/apps/recipes/grocery-lists/{{ g.id }}">{{ g.title }}</a>
+      <div class="muted small">
+        {%- if done %}Done {{ g.done_at or g.created }}{% else %}Made {{ g.created }}{% endif %}
+        {%- if g.meal_titles %} · {{ g.meal_titles|join(', ') }}{% endif %}</div>
+      {% if not done and g.total %}
+      <div class="meter" aria-hidden="true"><span style="width: {{ ((g.total - g.left) / g.total * 100)|round|int }}%"></span></div>
+      {% endif %}
+    </div>
+    {% if not done %}<span class="pill">{% if g.total %}{{ g.left }} left{% else %}empty{% endif %}</span>{% endif %}
+    {% if done %}
+    <details class="confirm">
+      <summary class="button quiet">Delete</summary>
+      <form method="post" action="/apps/recipes/grocery-lists/{{ g.id }}/delete" class="row">
+        <button type="submit" class="danger">Delete list</button>
+      </form>
+    </details>
+    {% endif %}
+  </div>
+  {% endfor %}
+{%- endmacro %}
+{% block body %}
+<header class="top">
+  <div class="top-inner">
+    <a class="back" href="/apps/recipes#meal-plan">← Kitchen</a>
+    <div class="row" style="justify-content:space-between">
+      <h1>Shopping lists</h1>
+      <a class="button primary" href="/apps/recipes/grocery-lists/new">New list</a>
+    </div>
+  </div>
+</header>
+<main class="wrap">
+  <section>
+    <h2 class="section-title">In progress</h2>
+    <div class="card">
+      {% if active %}{{ list_rows(active) }}{% else %}<p class="empty">No lists in progress.</p>{% endif %}
+    </div>
+  </section>
+  {% if done %}
+  <section>
+    <h2 class="section-title">Done</h2>
+    <div class="card">{{ list_rows(done, True) }}</div>
+  </section>
+  {% endif %}
+</main>
+{% endblock %}

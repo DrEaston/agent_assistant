@@ -10,7 +10,7 @@ import re
 import uuid
 from datetime import datetime, timedelta
 
-from apps.kitchen import ingredients
+from apps.kitchen import shopping_list
 
 TEMP_TOLERANCE_F = 25           # dishes within 25°F can share an oven
 DISHES_PER_OVEN = 3
@@ -341,85 +341,10 @@ def format_duration(minutes):
 
 # ---------------------------------------------------------------- shopping list
 
-GROCERY_SECTIONS = (
-    ("Produce", ("potato", "onion", "celery", "lemon", "orange", "apple", "cranberr", "green bean", "sprout",
-                 "lettuce", "cucumber", "tomato", "thyme", "rosemary", "sage", "parsley", "garlic", "carrot",
-                 "herb", "mushroom", "shallot")),
-    ("Meat", ("turkey", "sausage", "bacon", "chicken")),
-    ("Dairy & eggs", ("butter", "milk", "cream", "egg", "cheese", "half-and-half", "whipped")),
-    ("Bakery & bread", ("bread", "roll", "crust", "loaf", "stuffing cubes", "pie shell")),
-    ("Pantry & baking", ("flour", "sugar", "salt", "pepper", "spice", "cinnamon", "vanilla", "stock", "broth",
-                         "oil", "vinegar", "soy", "puree", "starter", "vinaigrette", "fried onion")),
-)
-
-
-def grocery_section(line):
-    text = line.lower()
-    if "drippings" in text or "starter" in text:
-        return None  # made, not bought
-    if "smokies" in text:
-        return "Meat"
-    if any(word in text for word in ("fried onion", "powder", "panko", "macaroni", "pasta", "mustard",
-                                     "paprika", "hot sauce")) or " can " in f" {text} ":
-        return "Pantry & baking"
-    if "stuffing cubes" in text or "pie shell" in text:
-        return "Bakery & bread"
-    for name, words in GROCERY_SECTIONS:
-        if any(word in text for word in words):
-            return name
-    return "Other"
-
-
-def normalize_key(line):
-    return re.sub(r"[^a-z0-9]+", " ", line.lower()).strip()
-
-
-PANTRY_CHECK = "Check the pantry"
-
-
 def build_grocery_list(dishes, extra_items=()):
-    """One line per ingredient with the amounts added up across dishes.
-
-    Each item: text (name), amount (total to buy), parts (per-dish amounts), section.
-    Staples like salt and flour go under "Check the pantry" instead of the buy sections.
-    """
-    found = {}
-    for dish in dishes:
-        for raw in (dish.get("ingredients_text") or "").splitlines():
-            line = raw.strip(" -•*\t")
-            if not normalize_key(line) or is_heading(line) or ingredients.is_not_bought(line):
-                continue
-            for part in ingredients.split_line(line):
-                parsed = ingredients.parse_line(part)
-                entry = found.setdefault(parsed["item"], {"name": parsed["name"], "lines": [], "by_dish": {}})
-                entry["lines"].append(parsed)
-                entry["by_dish"].setdefault(dish["name"], []).append(parsed)
-    merged = {}
-    for item_key, entry in found.items():
-        first = entry["lines"][0]
-        if item_key in ingredients.STAPLES:
-            section = PANTRY_CHECK
-        else:
-            section = grocery_section(f"{entry['name']} {first['text']}") or "Other"
-        key = f"item-{normalize_key(item_key)}"
-        merged[key] = {
-            "key": key, "text": entry["name"], "extra_id": None, "section": section,
-            "amount": ingredients.combine(entry["lines"], buy=True),
-            "dishes": list(entry["by_dish"]),
-            "parts": [{"dish": name, "amount": ingredients.combine(lines)}
-                      for name, lines in entry["by_dish"].items()],
-        }
-    for extra in extra_items:
-        key = f"extra-{extra['id']}"
-        merged[key] = {"key": key, "text": extra["text"], "dishes": [], "extra_id": extra["id"],
-                       "section": grocery_section(extra["text"]) or "Other", "amount": "", "parts": []}
-    order = [name for name, _ in GROCERY_SECTIONS] + ["Other", PANTRY_CHECK]
-    sections = []
-    for name in order:
-        items = sorted((i for i in merged.values() if i["section"] == name), key=lambda i: i["text"].lower())
-        if items:
-            sections.append({"name": name, "items": items})
-    return sections
+    """One line per ingredient with amounts added up across dishes (see apps/kitchen/shopping_list.py)."""
+    return shopping_list.build_shopping_list(
+        ((dish["name"], dish.get("ingredients_text") or "") for dish in dishes), extra_items)
 
 
 # ---------------------------------------------------------------- recipe text helpers

@@ -52,12 +52,13 @@ ITEMS = (
     ("evaporated-milk", "Evaporated milk", ("evaporated milk",)),
     ("whipped-cream", "Whipped cream", ("whipped cream", "whipping cream to serve")),
     ("cream-cheese", "Cream cheese", ("cream cheese",)),
-    ("cream", "Heavy cream or half-and-half", ("half-and-half", "heavy cream", "whipping cream")),
-    ("milk", "Whole milk", ("whole milk", "milk")),
-    ("cheddar", "Sharp cheddar", ("cheddar",)),
+    ("cream", "Cream", ("half-and-half", "heavy cream", "whipping cream")),
+    ("milk", "Milk", ("whole milk", "milk")),
+    ("cheddar", "Cheddar", ("cheddar",)),
     ("gruyere", "Gruyère", ("gruyère", "gruyere")),
     ("parmesan", "Parmesan", ("parmesan",)),
-    ("butter", "Unsalted butter", ("butter",)),
+    ("butter", "Butter", ("butter",)),
+    ("egg-noodles", "Egg noodles", ("egg noodle",)),
     ("eggs", "Eggs", ("egg",)),
     ("rice-flour", "Rice flour", ("rice flour",)),
     ("flour", "Flour", ("flour",)),
@@ -71,18 +72,20 @@ ITEMS = (
     ("celery", "Celery", ("celery",)),
     ("carrot", "Carrots", ("carrot",)),
     ("lemon", "Lemons", ("lemon",)),
-    ("potato", "Yukon Gold potatoes", ("potato",)),
-    ("broth", "Low-sodium broth", ("broth", "stock")),
+    ("sweet-potato", "Sweet potatoes", ("sweet potato",)),
+    ("potato", "Potatoes", ("potato",)),
+    ("broth", "Broth", ("broth", "stock")),
     ("stuffing", "Stuffing cubes", ("stuffing cubes", "stuffing mix")),
     ("smokies", "Little Smokies", ("smokies",)),
     ("turkey", "Turkey", ("turkey",)),
     ("pasta", "Pasta", ("macaroni", "cavatappi", "pasta", "noodles")),
     ("panko", "Panko", ("panko", "breadcrumbs", "bread crumbs")),
     ("dry-mustard", "Dry mustard", ("dry mustard", "mustard powder")),
-    ("paprika", "Smoked paprika", ("paprika",)),
+    ("paprika", "Paprika", ("paprika",)),
     ("hot-sauce", "Hot sauce", ("hot sauce",)),
-    ("salt", "Kosher salt", ("salt",)),
-    ("pepper", "Black pepper", ("black pepper", "white or black pepper", "pepper")),
+    ("salt", "Salt", ("salt",)),
+    ("pepper", "Black pepper", ("black pepper", "white pepper", "white or black pepper", "ground pepper",
+                                "peppercorn")),
     ("oil", "Oil", ("oil",)),
     ("herbs", "Fresh thyme, rosemary, and sage", ("thyme", "rosemary", "sage")),
 )
@@ -136,11 +139,29 @@ def identify(text):
 
 
 def is_not_bought(line):
-    """Water, pan drippings, and sourdough starter are made or on tap, not bought."""
-    text = line.lower()
+    """Water, pan drippings, sourdough starter, and recipe-card notes are not things to buy."""
+    text = line.lower().strip()
     if "starter" in text or ("drippings" in text and "broth" not in text and "stock" not in text):
         return True
+    # A sentence like "Chicken breasts can be substituted for pork chops." is a note, not an item.
+    if text.endswith(".") and len(text.split()) > 4 and not _AMOUNT.match(text):
+        return True
     return re.search(r"\bwater\b", text) is not None and "chestnut" not in text
+
+
+# Recipe cards often put the amount last, per serving size: "Potatoes (12 oz | 24 oz)".
+# The first amount is the smaller (2-serving) one.
+_TRAILING_AMOUNT = re.compile(r"^(?P<name>.*?\S)\s*\(\s*(?P<amount>[^()|]*\d[^()|]*?)\s*(?:\|[^()]*)?\)\s*$")
+
+
+def _amount_first(text):
+    """'Garlic (2 cloves | 4 cloves)' -> '2 cloves Garlic'. Lines that already start with an amount are left alone."""
+    if _AMOUNT.match(text):
+        return text
+    match = _TRAILING_AMOUNT.match(text)
+    if match and _AMOUNT.match(match.group("amount")):
+        return f"{match.group('amount')} {match.group('name')}"
+    return text
 
 
 def split_line(line):
@@ -150,8 +171,8 @@ def split_line(line):
 
 
 def parse_line(line):
-    """Parse one ingredient line. qty is None when there's no leading amount."""
-    text = _clean(line)
+    """Parse one ingredient line. qty is None when there's no amount."""
+    text = _amount_first(_clean(line))
     qty = None
     unit = ""
     rest = text

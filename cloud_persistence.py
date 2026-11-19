@@ -19,6 +19,8 @@ class CloudStoragePersistence:
         self.uploads_dir = Path(uploads_dir)
         self.prefix = (prefix or "dieter").strip().strip("/")
         self._lock = threading.RLock()
+        self._timer_lock = threading.Lock()
+        self._timer = None
         self._client = None
         self._bucket = None
         self.enabled = bool(self.bucket_name)
@@ -106,6 +108,39 @@ class CloudStoragePersistence:
                 return True
             finally:
                 tmp_path.unlink(missing_ok=True)
+
+    def schedule_backup(self, delay=2.0):
+        """Back up a couple of seconds after the last change instead of on every commit.
+
+        A burst of commits (checking off five groceries) becomes one upload, and requests
+        no longer wait on Cloud Storage. Call flush() at shutdown so nothing pending is lost.
+        """
+        if not self.enabled:
+            return
+        with self._timer_lock:
+            if self._timer is not None:
+                return  # a backup is already coming and will include this change
+            self._timer = threading.Timer(delay, self._run_scheduled_backup)
+            self._timer.daemon = True
+            self._timer.start()
+
+    def _run_scheduled_backup(self):
+        with self._timer_lock:
+            self._timer = None  # changes made during the upload schedule a fresh backup
+        try:
+            self.backup_database()
+        except Exception as exc:
+            print(f"Warning: scheduled database backup failed: {exc}")
+
+    def flush(self):
+        """Run any pending backup now (used at shutdown)."""
+        with self._timer_lock:
+            timer, self._timer = self._timer, None
+        if timer is not None:
+            timer.cancel()
+            self.backup_database()
+            return True
+        return False
 
     def sync_upload_file(self, path):
         """Upload one file under uploads_dir to Cloud Storage."""

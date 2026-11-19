@@ -1,0 +1,41 @@
+{% extends "shop_layout.html" %}
+{% block title %}New shopping list{% endblock %}
+{% block page_head %}
+<style>
+.pick { display: flex; gap: .75rem; align-items: center; padding: .7rem 0; border-bottom: 1px solid var(--line); cursor: pointer; font-weight: 600; font-size: 1rem; }
+.pick:last-child { border-bottom: 0; }
+.pick input { width: 1.4rem; height: 1.4rem; accent-color: var(--accent); flex: none; }
+</style>
+{% endblock %}
+{% block body %}
+<header class="top">
+  <div class="top-inner">
+    <a class="back" href="/apps/recipes#meal-plan">← Kitchen</a>
+    <h1>New shopping list</h1>
+    <div class="sub">Pick the meals you're shopping for. Amounts are added up for you.</div>
+  </div>
+</header>
+<main class="wrap">
+  <form method="post" action="/apps/recipes/grocery-lists/create" class="stack">
+    <input type="hidden" name="picked" value="1">
+    <div class="field">
+      <label for="title">Name</label>
+      <input type="text" id="title" name="title" value="{{ title }}" maxlength="120">
+    </div>
+    <section>
+      <h2 class="section-title">Meals on your plan</h2>
+      <div class="card">
+        {% for meal in meals %}
+        <label class="pick"><input type="checkbox" name="meal_id" value="{{ meal.id }}" checked> {{ meal.title }}</label>
+        {% else %}
+        <p class="empty">Your meal plan is empty. You can still make a list and type items in.</p>
+        {% endfor %}
+      </div>
+    </section>
+    <div class="row">
+      <button type="submit" class="primary">Make the list</button>
+      <a class="button quiet" href="/apps/recipes#meal-plan">Cancel</a>
+    </div>
+  </form>
+</main>
+{% endblock %}

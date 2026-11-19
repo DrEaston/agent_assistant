@@ -62,3 +62,22 @@ class CombineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RecipeCardTests(unittest.TestCase):
+    def test_amount_at_the_end_uses_the_two_serving_amount(self):
+        p = parse_line("Potatoes (12 oz | 24 oz)")
+        self.assertEqual((p["qty"], p["unit"], p["item"]), (12, "oz", "potato"))
+        p = parse_line("Garlic (2 cloves | 4 cloves)")
+        self.assertEqual((p["qty"], p["unit"], p["item"]), (2, "clove", "garlic"))
+        self.assertEqual(parse_line("Butter (1 TBSP | 2 TBSP)")["unit"], "tbsp")
+        self.assertEqual(parse_line("Broccoli (1 | 2)")["qty"], 1)
+        self.assertIsNone(parse_line("Kosher Salt")["qty"])
+        # A note in parentheses is not an amount, and leading amounts win.
+        self.assertIsNone(parse_line("Lemon (for serving)")["qty"])
+        self.assertEqual(parse_line("1 stick (113 g) butter")["unit"], "stick")
+
+    def test_card_notes_are_skipped(self):
+        self.assertTrue(is_not_bought("Chicken Breasts can be substituted for pork chops."))
+        self.assertFalse(is_not_bought("Chicken Stock Concentrate (1 | 2)"))
+        self.assertEqual(total("Potatoes (12 oz | 24 oz)", "Potatoes (12 oz | 24 oz)"), "1 1/2 lb")

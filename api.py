@@ -52,6 +52,7 @@ from apps.kitchen.stalled_issue_evaluation import (
 )
 from apps.kitchen.import_images import UnsupportedRecipeImage, is_heic, normalize_recipe_image
 from apps.kitchen.thanksgiving.router import configure as configure_thanksgiving, router as thanksgiving_router
+from apps.kitchen.shopping import router as shopping
 from apps.registry import app_shell_for_path, global_nav_apps, launcher_cards
 from apps.pipeline import (
     project_id_for_area,
@@ -117,7 +118,7 @@ db.init()
 if db.get_project_count() == 0:
     db.populate_sample_data()
 if cloud_persistence.enabled:
-    db.after_commit = cloud_persistence.backup_database
+    db.after_commit = cloud_persistence.schedule_backup
     try:
         cloud_persistence.seed_if_empty()
     except Exception as exc:
@@ -126,6 +127,14 @@ if cloud_persistence.enabled:
 # Thanksgiving planner: self-contained Kitchen slice with its own router and templates.
 configure_thanksgiving(db)
 app.include_router(thanksgiving_router)
+# Shopping lists read recipes and the meal plan through these (defined further down this file).
+shopping.configure(
+    db,
+    meal_sources=lambda ids: shopping_meal_sources(ids),
+    pending_meals=lambda: shopping_pending_meals(),
+    component_sources=lambda ids: shopping_component_sources(ids),
+)
+app.include_router(shopping.router)
 
 # Initialize LLM service
 try:
@@ -745,68 +754,6 @@ def prepare_meal_plan_items(items):
         prepared.append(item_data)
     return prepared
 
-def prepare_grocery_lists(lists):
-    """Parse stored grocery-list records for rendering."""
-    prepared = []
-    for grocery_list in lists:
-        list_data = dict(grocery_list)
-        try:
-            list_data["meal_plan_item_ids"] = json.loads(list_data.get("meal_plan_item_ids_json") or "[]")
-        except json.JSONDecodeError:
-            list_data["meal_plan_item_ids"] = []
-        try:
-            list_data["items"] = json.loads(list_data.get("items_json") or "[]")
-        except json.JSONDecodeError:
-            list_data["items"] = []
-        for index, item in enumerate(list_data["items"]):
-            if isinstance(item, dict):
-                item["item_index"] = index
-                item["status"] = item.get("status") or "need"
-        prepared.append(list_data)
-    return prepared
-
-def cookable_meal_plan_items_for_grocery_list(grocery_list, linked_items_by_id=None):
-    """Return linked meal-plan items that represent recipes/meals needing cooking."""
-    if linked_items_by_id is None:
-        linked_items = prepare_meal_plan_items(db.get_recipe_meal_plan_items(None, 250))
-        linked_items_by_id = {item["id"]: item for item in linked_items}
-    cookable = []
-    for item_id in grocery_list.get("meal_plan_item_ids", []):
-        item = linked_items_by_id.get(item_id)
-        if item and item.get("source_kind") != "manual_item":
-            cookable.append(item)
-    return cookable
-
-def annotate_grocery_list_cook_counts(grocery_lists):
-    """Attach recipe-to-cook counts for list summaries."""
-    linked_items = prepare_meal_plan_items(db.get_recipe_meal_plan_items(None, 250))
-    linked_items_by_id = {item["id"]: item for item in linked_items}
-    for grocery_list in grocery_lists:
-        cookable = cookable_meal_plan_items_for_grocery_list(grocery_list, linked_items_by_id)
-        grocery_list["cookable_meal_plan_items"] = cookable
-        grocery_list["recipes_to_cook_count"] = len([item for item in cookable if item.get("status") != "cooked"])
-        grocery_list["recipes_total_count"] = len(cookable)
-    return grocery_lists
-
-def refresh_grocery_list_completion(list_id):
-    """Mark a grocery list done when all linked cookable recipes are cooked."""
-    row = dict_from_row(db.get_recipe_grocery_list(list_id))
-    if not row:
-        return None
-    grocery_list = prepare_grocery_lists([row])[0]
-    cookable = cookable_meal_plan_items_for_grocery_list(grocery_list)
-    if cookable and all(item.get("status") == "cooked" for item in cookable):
-        if grocery_list.get("status") != "done":
-            db.update_recipe_grocery_list_status(list_id, "done")
-            grocery_list["status"] = "done"
-    elif grocery_list.get("status") == "done" and any(item.get("status") != "cooked" for item in cookable):
-        db.update_recipe_grocery_list_status(list_id, "active")
-        grocery_list["status"] = "active"
-    grocery_list["cookable_meal_plan_items"] = cookable
-    grocery_list["recipes_to_cook_count"] = len([item for item in cookable if item.get("status") != "cooked"])
-    grocery_list["recipes_total_count"] = len(cookable)
-    return grocery_list
-
 def split_ingredient_lines(ingredients_text):
     """Split recipe ingredient text into useful grocery-line candidates."""
     return [
@@ -1118,290 +1065,72 @@ def format_baking_ingredient_sections(section_values):
             blocks.append(f"{label}:\n" + "\n".join(f"- {line}" for line in lines))
     return "\n\n".join(blocks)
 
-def normalize_grocery_name(ingredient):
-    """Normalize an ingredient line enough to combine repeats."""
-    return re.sub(
-        r"[^a-z0-9]+",
-        " ",
-        re.sub(
-            r"\b(cup|cups|tbsp|tablespoons?|tsp|teaspoons?|oz|ounces?|lb|lbs|pounds?|g|grams?|cloves?|small|medium|large|pinch|packet|packets|can|cans)\b",
-            "",
-            re.sub(
-                r"^[\d\s./]+",
-                "",
-                re.sub(
-                    r"\([^)]*\)",
-                    "",
-                    (ingredient or "").lower(),
-                ),
-            ),
-        ),
-    ).strip()
-
-def extract_grocery_quantity(ingredient):
-    """Pull a compact quantity phrase from the start of an ingredient line."""
-    match = re.match(
-        r"^([\d\s./]+(?:cup|cups|tbsp|tablespoons?|tsp|teaspoons?|oz|ounces?|lb|lbs|pounds?|g|grams?|cloves?|pinch|packet|packets|can|cans)?)",
-        ingredient or "",
-        flags=re.IGNORECASE,
-    )
-    return match.group(1).strip() if match else ""
-
-def title_case_grocery_name(ingredient):
-    """Format normalized grocery names for display."""
-    return " ".join(word.capitalize() for word in (ingredient or "").split())
-
-BAD_GROCERY_OPTION_PHRASES = [
-    "calories",
-    "contains",
-    "custom plate option",
-    "if modified meal",
-    "optional modification",
-    "optional modifications",
-    "optional protein",
-    "optional swap",
-    "pantry needed",
-    "what we send",
-    "what you ll need",
-    "what you'll need",
-    "you ll also need",
-    "you'll also need",
-    "pasta cooking water",
-    "reserved pasta cooking water",
-]
-
-GROCERY_OPTION_NAME_FIXES = {
-    "bunch thyme": "thyme",
-    "cr me fra che": "creme fraiche",
-    "frank s hot sauce": "franks hot sauce",
-    "frank s seasoning": "franks seasoning",
-}
-
-def clean_available_grocery_candidate(candidate):
-    """Return a dropdown-safe ingredient name, or blank for OCR/instruction noise."""
-    text = re.sub(r"\([^)]*\)", " ", candidate or "")
-    text = re.sub(r"[\n\r]+", " ", text)
-    text = re.sub(r"\b\d+\b", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    lowered = text.lower()
-    if not lowered:
+def component_shopping_text(component_id):
+    """A meal part's ingredients as lines, using the structured amounts when the importer found them."""
+    row = dict_from_row(db.get_recipe_component(component_id))
+    if not row:
         return ""
-    if any(phrase in lowered for phrase in BAD_GROCERY_OPTION_PHRASES):
-        return ""
-    if re.search(r"\bor\b", lowered):
-        return ""
-
-    normalized = normalize_grocery_name(text)
-    if not normalized:
-        return ""
-    normalized = GROCERY_OPTION_NAME_FIXES.get(normalized, normalized)
-    words = normalized.split()
-    if len(words) > 5:
-        return ""
-    return title_case_grocery_name(normalized)
-
-GROCERY_CATEGORY_RULES = [
-    ("meat_seafood", "Meat & Seafood", [
-        "chicken", "pork", "beef", "steak", "sausage", "bacon", "shrimp",
-        "turkey", "salmon", "fish", "tilapia", "cod", "meat", "prosciutto",
-    ]),
-    ("produce", "Produce", [
-        "apple", "avocado", "broccoli", "brussels", "carrot", "celery",
-        "cucumber", "garlic", "ginger", "green bean", "kale", "lemon",
-        "lime", "mushroom", "onion", "pepper", "potato", "scallion",
-        "shallot", "spinach", "sweet potato", "tomato", "zucchini",
-    ]),
-    ("dairy", "Dairy", [
-        "butter", "cheddar", "cheese", "cream", "creme", "feta", "milk",
-        "mozzarella", "parmesan", "sour cream", "yogurt",
-    ]),
-    ("canned_goods", "Canned & Jarred", [
-        "beans", "cannellini", "chickpea", "tomato paste", "diced tomato",
-        "crushed tomato", "jam", "stock concentrate", "concentrate",
-    ]),
-    ("sauces_condiments", "Sauces & Condiments", [
-        "balsamic", "bbq", "dijon", "honey", "hot sauce", "ketchup",
-        "mayo", "mayonnaise", "mustard", "soy sauce", "vinegar", "worcestershire",
-    ]),
-    ("seasonings", "Seasonings", [
-        "black pepper", "chili powder", "cumin", "curry", "garlic powder",
-        "italian seasoning", "oregano", "paprika", "pepper", "salt",
-        "seasoning", "spice", "thyme", "turmeric",
-    ]),
-    ("grains_pasta", "Grains, Pasta & Bread", [
-        "bread", "breadcrumbs", "bun", "ciabatta", "couscous", "flour", "noodle",
-        "panko", "pasta", "rice", "tortilla",
-    ]),
-    ("pantry", "Pantry", [
-        "cornstarch", "oil", "olive oil", "sugar",
-    ]),
-]
-
-def grocery_category_for_item(item):
-    """Assign a grocery item to a store-friendly shopping category."""
-    if item.get("category"):
-        category = item.get("category")
-        for category_key, category_label, _ in GROCERY_CATEGORY_RULES:
-            if category == category_key:
-                return category_key, category_label
-    name = (item.get("name") or "").lower()
-    for category_key, category_label, terms in GROCERY_CATEGORY_RULES:
-        if any(term in name for term in terms):
-            return category_key, category_label
-    return "other", "Other"
-
-def group_grocery_items_by_category(items):
-    """Group grocery items by shopping category while preserving category order."""
-    grouped = {
-        category_key: {
-            "key": category_key,
-            "label": category_label,
-            "items": [],
-        }
-        for category_key, category_label, _ in GROCERY_CATEGORY_RULES
-    }
-    grouped["other"] = {"key": "other", "label": "Other", "items": []}
-
-    for item in items:
-        category_key, category_label = grocery_category_for_item(item)
-        grouped.setdefault(category_key, {"key": category_key, "label": category_label, "items": []})
-        grouped[category_key]["items"].append(item)
-
-    return [
-        section for section in grouped.values()
-        if section["items"]
-    ]
-
-def build_available_grocery_items(complete_meals, components):
-    """Build a searchable ingredient list from imported recipes and components."""
-    available_items = set()
-
-    def add_candidate(candidate):
-        cleaned = clean_available_grocery_candidate(candidate)
-        if cleaned:
-            available_items.add(cleaned)
-
-    for component in components:
-        for ingredient in component.get("structured_ingredients") or []:
-            add_candidate(ingredient.get("name") or ingredient.get("source_text") or "")
-        for line in split_ingredient_lines(component.get("display_ingredients_text") or ""):
-            add_candidate(line)
-
-    for meal in complete_meals:
-        if meal.get("status") != "ready" or meal.get("is_placeholder"):
-            continue
-        for line in split_ingredient_lines(meal.get("display_ingredients_text") or ""):
-            add_candidate(line)
-
-    return sorted(available_items)
-
-def build_available_grocery_options(available_items):
-    """Attach grocery categories to available ingredients for UI filtering."""
-    options = []
-    for item in available_items:
-        category_key, category_label = grocery_category_for_item({"name": item})
-        options.append({
-            "name": item,
-            "category": category_key,
-            "category_label": category_label,
-        })
-    return options
-
-def add_grocery_item(items_by_key, name, quantity="", note="", source="", category=""):
-    """Accumulate grocery item quantities and recipe sources."""
-    key = normalize_grocery_name(name) or (name or "").strip().lower()
-    if not key:
-        return
-    if key not in items_by_key:
-        items_by_key[key] = {
-            "name": title_case_grocery_name(key),
-            "quantities": [],
-            "notes": [],
-            "sources": [],
-        }
-    item = items_by_key[key]
-    if category and not item.get("category"):
-        item["category"] = category
-    if quantity and quantity not in item["quantities"]:
-        item["quantities"].append(quantity)
-    if note and note not in item["notes"]:
-        item["notes"].append(note)
-    if source and source not in item["sources"]:
-        item["sources"].append(source)
-
-def grocery_items_from_component(component, source_title):
-    """Build grocery entries from a component using structured amounts when available."""
-    entries = []
+    component = prepare_recipe_components([row])[0]
     structured = component.get("structured_ingredients") or []
     if structured:
+        lines = []
         for ingredient in structured:
-            quantity = " ".join(
-                value for value in [ingredient.get("amount", ""), ingredient.get("unit", "")]
+            name = str(ingredient.get("name") or ingredient.get("source_text") or "").strip()
+            amount = " ".join(
+                value for value in (str(ingredient.get("amount") or "").strip(), str(ingredient.get("unit") or "").strip())
                 if value
-            ).strip()
-            entries.append({
-                "name": ingredient.get("name") or ingredient.get("source_text") or "",
-                "quantity": quantity,
-                "note": ingredient.get("preparation") or "",
-                "source": source_title,
-            })
-        return entries
+            )
+            if name:
+                lines.append(f"{amount} {name}".strip())
+        return "\n".join(lines)
+    return component.get("display_ingredients_text") or component.get("ingredients_text") or ""
 
-    for line in split_ingredient_lines(component.get("display_ingredients_text") or component.get("ingredients_text") or ""):
-        entries.append({
-            "name": normalize_grocery_name(line) or line,
-            "quantity": extract_grocery_quantity(line),
-            "note": "",
-            "source": source_title,
-        })
-    return entries
-
-def build_grocery_items_for_plan(meal_plan_items):
-    """Create a consolidated grocery list from pending meal-plan items."""
-    items_by_key = {}
-    for plan_item in meal_plan_items:
-        if plan_item.get("source_kind") == "manual_item":
-            for manual_item in plan_item.get("component_ids") or []:
-                if not isinstance(manual_item, dict):
-                    continue
-                add_grocery_item(
-                    items_by_key,
-                    manual_item.get("name", ""),
-                    manual_item.get("quantity", ""),
-                    manual_item.get("note", ""),
-                    plan_item.get("title") or "Manual item",
-                    manual_item.get("category", ""),
-                )
-        elif plan_item.get("source_kind") == "complete_meal" and plan_item.get("source_id"):
-            meal = dict_from_row(db.get_recipe_complete_meal(plan_item["source_id"]))
-            if not meal:
-                continue
-            meal = prepare_recipe_complete_meals([meal])[0]
-            source_title = meal.get("display_title") or plan_item.get("title") or "Meal"
-            for line in split_ingredient_lines(meal.get("display_ingredients_text") or ""):
-                add_grocery_item(
-                    items_by_key,
-                    normalize_grocery_name(line) or line,
-                    extract_grocery_quantity(line),
-                    "",
-                    source_title,
-                )
+def shopping_meal_sources(meal_ids):
+    """Ingredient text for each meal-plan item on a shopping list, read live so recipe edits show up."""
+    sources = []
+    for item_id in meal_ids:
+        row = dict_from_row(db.get_recipe_meal_plan_item(item_id))
+        if not row:
+            continue
+        item = prepare_meal_plan_items([row])[0]
+        kind = item.get("source_kind")
+        title = item.get("title") or "Meal"
+        text = ""
+        if kind == "complete_meal" and item.get("source_id"):
+            meal = dict_from_row(db.get_recipe_complete_meal(item["source_id"]))
+            if meal:
+                text = prepare_recipe_complete_meals([meal])[0].get("display_ingredients_text") or ""
+        elif kind == "manual_item":
+            title = title.removeprefix("Manual item: ")
+            text = "\n".join(
+                f"{str(entry.get('quantity') or '').strip()} {str(entry.get('name') or '').strip()}".strip()
+                for entry in item["component_ids"] if isinstance(entry, dict)
+            )
         else:
-            for component_id in plan_item.get("component_ids") or []:
-                component = dict_from_row(db.get_recipe_component(component_id))
-                if not component:
-                    continue
-                component = prepare_recipe_components([component])[0]
-                source_title = component.get("display_title") or plan_item.get("title") or "Meal part"
-                for entry in grocery_items_from_component(component, source_title):
-                    add_grocery_item(
-                        items_by_key,
-                        entry["name"],
-                        entry["quantity"],
-                        entry["note"],
-                        entry["source"],
-                    )
-    return sorted(items_by_key.values(), key=lambda item: item["name"])
+            text = "\n".join(component_shopping_text(component_id) for component_id in item["component_ids"]
+                             if not isinstance(component_id, dict))
+        sources.append({"id": item["id"], "title": title, "text": text,
+                        "url": item.get("source_url") or "", "status": item.get("status")})
+    return sources
+
+def shopping_pending_meals():
+    """Meals waiting on the meal plan, for picking what goes on a shopping list."""
+    return [
+        {"id": item["id"], "title": (item.get("title") or "Meal").removeprefix("Manual item: ")}
+        for item in prepare_meal_plan_items(db.get_recipe_meal_plan_items("pending"))
+    ]
+
+def shopping_component_sources(component_ids):
+    """(title, ingredients) for meal parts picked in the meal builder, for its shopping preview."""
+    sources = []
+    for component_id in component_ids:
+        row = dict_from_row(db.get_recipe_component(component_id))
+        if row:
+            component = prepare_recipe_components([row])[0]
+            sources.append((component.get("display_title") or component.get("title") or "Meal part",
+                            component_shopping_text(component_id)))
+    return sources
+
 
 def parse_recipe_app_chat_content(content):
     """Extract page and user message from the recipe app drawer payload."""
@@ -4209,11 +3938,8 @@ def empty_recipe_app_context(project=None, import_action=None):
         "complete_meals": [],
         "components": [],
         "component_sections": [],
-        "available_grocery_items": [],
-        "available_grocery_options": [],
         "meal_plan_items": [],
         "grocery_lists": [],
-        "done_grocery_lists": [],
         "stats": {
             "total_pairs": 0,
             "scraped_pairs": 0,
@@ -4270,13 +3996,8 @@ def get_recipe_app_context(include_library=True, run_maintenance=True):
     complete_meals = prepare_recipe_complete_meals(db.get_recipe_complete_meals())
     components = prepare_recipe_components(db.get_recipe_components())
     component_sections = group_recipe_components(components)
-    available_grocery_items = build_available_grocery_items(complete_meals, components)
-    available_grocery_options = build_available_grocery_options(available_grocery_items)
     meal_plan_items = prepare_meal_plan_items(db.get_recipe_meal_plan_items("pending"))
-    for grocery_list in prepare_grocery_lists(db.get_recipe_grocery_lists(50, "active")):
-        refresh_grocery_list_completion(grocery_list["id"])
-    grocery_lists = annotate_grocery_list_cook_counts(prepare_grocery_lists(db.get_recipe_grocery_lists(8, "active")))
-    done_grocery_lists = annotate_grocery_list_cook_counts(prepare_grocery_lists(db.get_recipe_grocery_lists(8, "done")))
+    grocery_lists = shopping.active_summaries(8)
     scraped_pairs = sum(1 for group in groups if group.get("extraction_status") == "extracted")
     sections = sum(len(group.get("sections", [])) for group in groups)
     complete_meals_ready = sum(1 for meal in complete_meals if meal.get("status") == "ready")
@@ -4290,11 +4011,8 @@ def get_recipe_app_context(include_library=True, run_maintenance=True):
         "featured_complete_meals": featured_recipe_meals(complete_meals),
         "components": components,
         "component_sections": component_sections,
-        "available_grocery_items": available_grocery_items,
-        "available_grocery_options": available_grocery_options,
         "meal_plan_items": meal_plan_items,
         "grocery_lists": grocery_lists,
-        "done_grocery_lists": done_grocery_lists,
         "stats": {
             "total_pairs": len(groups),
             "scraped_pairs": scraped_pairs,
@@ -5667,7 +5385,7 @@ def kitchen_observation_check(route):
         "/apps/recipes": recipe_home_page,
         "/apps/recipes/create-meal": recipe_create_meal_page,
         "/apps/recipes/manage": recipe_manage_page,
-        "/apps/recipes/grocery-lists": recipe_grocery_lists_page,
+        "/apps/recipes/grocery-lists": shopping.lists_page,
         "/apps/recipes/import": recipe_import_page,
     }
     handler = routes.get(path, recipe_home_page)
@@ -6385,6 +6103,14 @@ def merge_existing_cct_projects():
     if unified:
         ensure_cct_summary_guidance_note(unified["id"])
     return unified["id"] if unified else None
+
+@app.on_event("shutdown")
+def flush_cloud_backup_on_shutdown():
+    """Cloud Run sends SIGTERM before stopping an instance; upload any pending database backup."""
+    try:
+        cloud_persistence.flush()
+    except Exception as exc:
+        print(f"Warning: final database backup failed: {exc}")
 
 @app.on_event("startup")
 def merge_legacy_cct_projects_on_startup():
@@ -9710,7 +9436,6 @@ def recipe_home_page(request: Request):
         "component_sections": recipe_app["component_sections"],
         "meal_plan_items": recipe_app["meal_plan_items"],
         "grocery_lists": recipe_app["grocery_lists"],
-        "done_grocery_lists": recipe_app["done_grocery_lists"],
         "stats": recipe_app["stats"],
         "recipe_view": "home",
     })
@@ -9734,7 +9459,6 @@ def recipe_create_meal_page(request: Request):
         "component_sections": recipe_app["component_sections"],
         "meal_plan_items": recipe_app["meal_plan_items"],
         "grocery_lists": recipe_app["grocery_lists"],
-        "done_grocery_lists": recipe_app["done_grocery_lists"],
         "stats": recipe_app["stats"],
         "recipe_view": "create_meal",
     })
@@ -9758,24 +9482,6 @@ def recipe_manage_page(request: Request):
         "stats": recipe_app["stats"],
     })
     template = jinja_env.get_template("recipe_manage.html")
-    html = template.render(context)
-    return HTMLResponse(html)
-
-
-@app.get("/apps/recipes/grocery-lists")
-def recipe_grocery_lists_page(request: Request):
-    """Recipe app archive of completed grocery lists."""
-    recipe_app = get_recipe_app_context(include_library=False, run_maintenance=False)
-    if not recipe_app["project"]:
-        raise HTTPException(status_code=404, detail="Recipe app project not found")
-
-    done_grocery_lists = annotate_grocery_list_cook_counts(
-        prepare_grocery_lists(db.get_recipe_grocery_lists(100, "done"))
-    )
-    context = recipe_app_page_context(request, recipe_app, {
-        "done_grocery_lists": done_grocery_lists,
-    })
-    template = jinja_env.get_template("recipe_grocery_lists.html")
     html = template.render(context)
     return HTMLResponse(html)
 
@@ -10135,155 +9841,6 @@ def remove_meal_plan_item_form(item_id: int):
     return RedirectResponse(url="/apps/recipes#meal-plan", status_code=303)
 
 
-@app.post("/apps/recipes/grocery-lists/create")
-def create_recipe_grocery_list_form():
-    """Create a persistent grocery list from all pending meal-plan items."""
-    meal_plan_items = prepare_meal_plan_items(db.get_recipe_meal_plan_items("pending"))
-    if not meal_plan_items:
-        return RedirectResponse(url="/apps/recipes#meal-plan", status_code=303)
-    grocery_items = build_grocery_items_for_plan(meal_plan_items)
-    title = f"Grocery list {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-    list_id = db.create_recipe_grocery_list(
-        title,
-        [item["id"] for item in meal_plan_items],
-        grocery_items,
-    )
-    return RedirectResponse(url=f"/apps/recipes/grocery-lists/{list_id}", status_code=303)
-
-
-@app.get("/apps/recipes/grocery-lists/{list_id}")
-def recipe_grocery_list_page(request: Request, list_id: int):
-    """Show one generated grocery list record."""
-    recipe_app = get_recipe_app_context(include_library=False, run_maintenance=False)
-    grocery_list = dict_from_row(db.get_recipe_grocery_list(list_id))
-    if not recipe_app["project"] or not grocery_list:
-        raise HTTPException(status_code=404, detail="Grocery list not found")
-    refresh_grocery_list_completion(list_id)
-    grocery_list = prepare_grocery_lists([dict_from_row(db.get_recipe_grocery_list(list_id))])[0]
-    needed_grocery_items = [
-        item for item in grocery_list["items"]
-        if item.get("status") != "gotten"
-    ]
-    needed_grocery_sections = group_grocery_items_by_category(needed_grocery_items)
-    gotten_grocery_items = [
-        item for item in grocery_list["items"]
-        if item.get("status") == "gotten"
-    ]
-    linked_items = prepare_meal_plan_items(db.get_recipe_meal_plan_items(None, 250))
-    linked_items_by_id = {item["id"]: item for item in linked_items}
-    linked_cookable_items = cookable_meal_plan_items_for_grocery_list(grocery_list, linked_items_by_id)
-    context = recipe_app_page_context(request, recipe_app, {
-        "grocery_list": grocery_list,
-        "needed_grocery_items": needed_grocery_items,
-        "needed_grocery_sections": needed_grocery_sections,
-        "gotten_grocery_items": gotten_grocery_items,
-        "linked_meal_plan_items": linked_cookable_items,
-    })
-    template = jinja_env.get_template("recipe_grocery_list.html")
-    html = template.render(context)
-    return HTMLResponse(html)
-
-
-@app.post("/apps/recipes/grocery-lists/{list_id}/delete")
-def delete_recipe_grocery_list_form(list_id: int):
-    """Delete an old grocery list record."""
-    deleted = db.delete_recipe_grocery_list(list_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Grocery list not found")
-    return RedirectResponse(url="/apps/recipes#meal-plan", status_code=303)
-
-
-def append_manual_grocery_item(list_id, item_name, quantity="", note="", category=""):
-    """Append a manually entered grocery item to an existing grocery list."""
-    grocery_list = dict_from_row(db.get_recipe_grocery_list(list_id))
-    if not grocery_list:
-        raise HTTPException(status_code=404, detail="Grocery list not found")
-    name = item_name.strip()
-    if not name:
-        return False
-    try:
-        items = json.loads(grocery_list.get("items_json") or "[]")
-    except json.JSONDecodeError:
-        items = []
-
-    manual_item = {
-        "name": title_case_grocery_name(normalize_grocery_name(name) or name),
-        "quantities": [quantity.strip()] if quantity.strip() else [],
-        "notes": [note.strip()] if note.strip() else [],
-        "sources": ["Manual"],
-        "status": "need",
-        "source_kind": "manual",
-    }
-    allowed_categories = {category_key for category_key, _, _ in GROCERY_CATEGORY_RULES}
-    if category in allowed_categories:
-        manual_item["category"] = category
-    items.append(manual_item)
-    db.update_recipe_grocery_list_items(list_id, items)
-    return True
-
-
-@app.post("/apps/recipes/grocery-lists/items/add")
-def add_manual_grocery_item_to_current_form(
-    item_name: str = Form(...),
-    quantity: str = Form(""),
-    note: str = Form(""),
-    category: str = Form(""),
-):
-    """Add a manual grocery item to the pending meal plan."""
-    name = item_name.strip()
-    if not name:
-        return RedirectResponse(url="/apps/recipes#meal-plan", status_code=303)
-    display_name = title_case_grocery_name(normalize_grocery_name(name) or name)
-    allowed_categories = {category_key for category_key, _, _ in GROCERY_CATEGORY_RULES}
-    manual_item = {
-        "name": display_name,
-        "quantity": quantity.strip(),
-        "note": note.strip(),
-        "category": category if category in allowed_categories else "",
-    }
-    db.add_recipe_meal_plan_item(
-        "manual_item",
-        f"Manual item: {display_name}",
-        component_ids=[manual_item],
-    )
-    return RedirectResponse(url="/apps/recipes#meal-plan", status_code=303)
-
-
-@app.post("/apps/recipes/grocery-lists/{list_id}/items/add")
-def add_manual_grocery_item_form(
-    list_id: int,
-    item_name: str = Form(...),
-    quantity: str = Form(""),
-    note: str = Form(""),
-    category: str = Form(""),
-):
-    """Add a manual item to a grocery list."""
-    append_manual_grocery_item(list_id, item_name, quantity, note, category)
-    return RedirectResponse(url=f"/apps/recipes/grocery-lists/{list_id}", status_code=303)
-
-
-@app.post("/apps/recipes/grocery-lists/{list_id}/items/{item_index}/status")
-def update_recipe_grocery_item_status_form(
-    list_id: int,
-    item_index: int,
-    status: str = Form(...),
-):
-    """Mark a grocery list item as needed or gotten."""
-    grocery_list = dict_from_row(db.get_recipe_grocery_list(list_id))
-    if not grocery_list:
-        raise HTTPException(status_code=404, detail="Grocery list not found")
-    try:
-        items = json.loads(grocery_list.get("items_json") or "[]")
-    except json.JSONDecodeError:
-        items = []
-    if item_index < 0 or item_index >= len(items) or not isinstance(items[item_index], dict):
-        raise HTTPException(status_code=404, detail="Grocery item not found")
-    if status not in {"need", "gotten"}:
-        raise HTTPException(status_code=400, detail="Unsupported grocery item status")
-    items[item_index]["status"] = status
-    db.update_recipe_grocery_list_items(list_id, items)
-    return RedirectResponse(url=f"/apps/recipes/grocery-lists/{list_id}", status_code=303)
-
 def record_meal_plan_cooked_feedback(item, feedback):
     """Persist cooking feedback for a meal-plan item and mirror recipe feedback when possible."""
     feedback = (feedback or "").strip()
@@ -10311,31 +9868,6 @@ def record_meal_plan_cooked_feedback(item, feedback):
             before,
             "user-feedback",
         )
-
-
-@app.post("/apps/recipes/grocery-lists/{list_id}/meal-plan/{item_id}/cooked")
-def mark_grocery_list_meal_plan_item_cooked_form(
-    list_id: int,
-    item_id: int,
-    feedback: str = Form(""),
-):
-    """Record cooking feedback from a grocery list and mark the meal cooked."""
-    grocery_list = dict_from_row(db.get_recipe_grocery_list(list_id))
-    if not grocery_list:
-        raise HTTPException(status_code=404, detail="Grocery list not found")
-    item = dict_from_row(db.get_recipe_meal_plan_item(item_id))
-    if not item:
-        raise HTTPException(status_code=404, detail="Meal plan item not found")
-    try:
-        linked_ids = json.loads(grocery_list.get("meal_plan_item_ids_json") or "[]")
-    except json.JSONDecodeError:
-        linked_ids = []
-    if item_id not in linked_ids:
-        raise HTTPException(status_code=400, detail="Meal is not linked to this grocery list")
-    record_meal_plan_cooked_feedback(item, feedback)
-    db.mark_recipe_meal_plan_item_cooked(item_id)
-    refresh_grocery_list_completion(list_id)
-    return RedirectResponse(url=f"/apps/recipes/grocery-lists/{list_id}", status_code=303)
 
 
 @app.post("/apps/recipes/meal-plan/{item_id}/cooked")

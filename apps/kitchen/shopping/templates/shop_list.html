@@ -1,0 +1,248 @@
+{% extends "shop_layout.html" %}
+{% block title %}{{ grocery_list.title or "Shopping list" }}{% endblock %}
+{% block page_head %}
+<style>
+.progress { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line);
+  padding: .6rem 1rem calc(.6rem + 0px); }
+.progress-inner { max-width: 46rem; margin: 0 auto; display: flex; align-items: center; gap: .9rem; }
+.progress .meter { flex: 1; max-width: none; margin: 0; height: 8px; }
+.progress strong { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.add-form { display: flex; gap: .5rem; }
+.add-form input { flex: 1; min-width: 0; }
+.aisle + .aisle { margin-top: 1.1rem; }
+.aisle h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 0 0 .25rem; }
+.aisle .hint { margin: 0 0 .3rem; font-size: .85rem; }
+.item { display: flex; align-items: center; border-bottom: 1px solid var(--line); }
+.aisle .item:last-child { border-bottom: 0; }
+.item form.toggle { flex: 1; margin: 0; min-width: 0; }
+.item-btn { width: 100%; justify-content: flex-start; text-align: left; border: 0; border-radius: 0; background: transparent;
+  padding: .65rem .1rem; min-height: 52px; gap: .8rem; font-weight: 400; align-items: center; }
+.item-btn:hover { background: #fbf8f3; }
+.box { flex: none; width: 28px; height: 28px; border-radius: 50%; border: 2px solid #c9bba8; display: inline-flex;
+  align-items: center; justify-content: center; color: transparent; font-size: .95rem; font-weight: 800; background: #fff;
+  transition: background .12s, border-color .12s; }
+.item.got .box { background: var(--accent); border-color: var(--accent); color: #fff; }
+.item-text { display: flex; flex-direction: column; min-width: 0; }
+.name { font-weight: 600; }
+.amount { font-weight: 700; color: var(--accent); margin-left: .4rem; }
+.from { color: var(--muted); font-size: .82rem; margin-top: .1rem; }
+.item.got .name, .item.got .amount { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1.5px; }
+.item.got .amount { font-weight: 600; }
+.remove { min-height: 44px; min-width: 44px; padding: 0; }
+.pantry { background: #fcfaf6; }
+.meal { display: flex; align-items: center; gap: .5rem; padding: .55rem 0; border-bottom: 1px solid var(--line); }
+.meal:last-of-type { border-bottom: 0; }
+.meal a, .meal span.t { flex: 1; font-weight: 600; color: var(--ink); text-decoration: none; }
+.meal a:hover { color: var(--accent); }
+.toast { position: fixed; left: 50%; bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
+  background: #2a2118; color: #fff; padding: .6rem 1rem; border-radius: 10px; font-size: .9rem; z-index: 20; }
+.finish { text-align: center; }
+</style>
+{% endblock %}
+{% block body %}
+{% set is_done = grocery_list.status == "done" %}
+<header class="top">
+  <div class="top-inner">
+    <a class="back" href="/apps/recipes/grocery-lists">← All lists</a>
+    <h1>{{ grocery_list.title or "Shopping list" }}</h1>
+    <div class="sub">Made {{ created }}{% if meals %} · {{ meals|length }} meal{% if meals|length != 1 %}s{% endif %}{% endif %}</div>
+  </div>
+</header>
+
+{% if total %}
+<div class="progress" aria-live="polite">
+  <div class="progress-inner">
+    <strong id="left">{% if left %}{{ left }} left{% else %}All done{% endif %}</strong>
+    <div class="meter" aria-hidden="true"><span id="meter" style="width: {{ ((total - left) / total * 100)|round|int }}%"></span></div>
+    <span class="muted small" id="of">{{ total - left }} of {{ total }}</span>
+  </div>
+</div>
+{% endif %}
+
+<main class="wrap">
+  {% if is_done %}
+  <div class="banner ok row" style="justify-content:space-between">This list is done.
+    <form method="post" action="/apps/recipes/grocery-lists/{{ grocery_list.id }}/reopen"><button type="submit">Reopen</button></form>
+  </div>
+  {% endif %}
+
+  <section>
+    <form method="post" action="/apps/recipes/grocery-lists/{{ grocery_list.id }}/extras/add" class="add-form">
+      <input type="text" name="text" placeholder="Add something (paper towels, 2 lemons…)" aria-label="Add an item" required>
+      <button type="submit" class="primary">Add</button>
+    </form>
+  </section>
+
+  <section id="list">
+    {% if sections %}
+    <div class="card" style="padding-top:.8rem">
+      {% for section in sections %}
+      <div class="aisle{% if section.name == pantry_name %} pantry{% endif %}" data-aisle="{{ section.name }}">
+        <h3>{{ section.name }}</h3>
+        {% if section.name == pantry_name %}<p class="hint muted">Most kitchens have these. Check before you go.</p>{% endif %}
+        {% for item in section["items"] %}
+        {% set got = item.key in checked %}
+        <div class="item{% if got %} got{% endif %}" data-key="{{ item.key }}" data-counts="{{ 0 if section.name == pantry_name else 1 }}">
+          <form class="toggle" method="post" action="/apps/recipes/grocery-lists/{{ grocery_list.id }}/check">
+            <input type="hidden" name="key" value="{{ item.key }}">
+            <input type="hidden" name="done" value="{{ '' if got else '1' }}">
+            <button type="submit" class="item-btn" role="checkbox" aria-checked="{{ 'true' if got else 'false' }}">
+              <span class="box" aria-hidden="true">✓</span>
+              <span class="item-text">
+                <span><span class="name">{{ item.text }}</span>{% if item.amount %}<span class="amount">{{ item.amount }}</span>{% endif %}</span>
+                {% if item.parts|length > 1 %}
+                <span class="from">{% for part in item.parts %}{{ part.dish }}{% if part.amount %} {{ part.amount }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</span>
+                {% elif item.dishes %}<span class="from">{{ item.dishes[0] }}</span>{% endif %}
+              </span>
+            </button>
+          </form>
+          {% if item.extra_id %}
+          <form method="post" action="/apps/recipes/grocery-lists/{{ grocery_list.id }}/extras/{{ item.extra_id }}/delete">
+            <button type="submit" class="quiet remove" aria-label="Remove {{ item.text }}">✕</button>
+          </form>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="card empty">Nothing on this list yet. Add a meal below or type an item above.</div>
+    {% endif %}
+  </section>
+
+  {% if not is_done and sections %}
+  <section class="finish">
+    <form method="post" action="/apps/recipes/grocery-lists/{{ grocery_list.id }}/done">
+      <button type="submit" class="{{ 'primary' if not left else '' }}">Done shopping</button>
+    </form>
+  </section>
+  {% endif %}
+
+  <section id="meals">
+    <h2 class="section-title">Meals on this list</h2>
+    <div class="card">
+      {% for meal in meals %}
+      <div class="meal">
+        {% if meal.url %}<a href="{{ meal.url }}">{{ meal.title }}</a>{% else %}<span class="t">{{ meal.title }}</span>{% endif %}
+        {% if meal.status == "cooked" %}<span class="pill">cooked</span>{% endif %}
+        <form method="post" action="/apps/recipes/grocery-lists/{{ grocery_list.id }}/meals/{{ meal.id }}/remove">
+          <button type="submit" class="quiet remove" aria-label="Take {{ meal.title }} off this list">✕</button>
+        </form>
+      </div>
+      {% else %}
+      <p class="muted" style="margin:0">No meals yet.</p>
+      {% endfor %}
+      {% if addable_meals %}
+      <form method="post" action="/apps/recipes/grocery-lists/{{ grocery_list.id }}/meals/add" class="add-form" style="margin-top:.8rem">
+        <select name="meal_id" aria-label="Meal to add" style="flex:1;min-width:0">
+          {% for meal in addable_meals %}<option value="{{ meal.id }}">{{ meal.title }}</option>{% endfor %}
+        </select>
+        <button type="submit">Add meal</button>
+      </form>
+      {% endif %}
+    </div>
+  </section>
+
+  <section>
+    <div class="row" style="justify-content:space-between">
+      <details class="confirm">
+        <summary class="button quiet">Rename</summary>
+        <form method="post" action="/apps/recipes/grocery-lists/{{ grocery_list.id }}/rename" class="add-form">
+          <input type="text" name="title" value="{{ grocery_list.title }}" aria-label="List name" maxlength="120" required>
+          <button type="submit">Save</button>
+        </form>
+      </details>
+      <details class="confirm">
+        <summary class="button quiet danger">Delete list</summary>
+        <form method="post" action="/apps/recipes/grocery-lists/{{ grocery_list.id }}/delete" class="row">
+          <span class="muted">Delete this list for good?</span>
+          <button type="submit" class="danger">Delete</button>
+        </form>
+      </details>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(() => {
+  const listId = {{ grocery_list.id }};
+  let signature = {{ signature|tojson }};
+  const recent = new Map();  // key -> time of a local tap, so a poll doesn't undo it mid-flight
+  const toast = document.getElementById("toast");
+
+  function showToast(text) {
+    toast.textContent = text;
+    toast.hidden = false;
+    clearTimeout(showToast.t);
+    showToast.t = setTimeout(() => { toast.hidden = true; }, 3500);
+  }
+
+  function setRow(row, got) {
+    row.classList.toggle("got", got);
+    row.querySelector(".item-btn").setAttribute("aria-checked", got ? "true" : "false");
+    row.querySelector("input[name=done]").value = got ? "" : "1";
+  }
+
+  function updateCount() {
+    const rows = [...document.querySelectorAll('.item[data-counts="1"]')];
+    if (!rows.length) return;
+    const got = rows.filter((r) => r.classList.contains("got")).length;
+    const left = rows.length - got;
+    document.getElementById("left").textContent = left ? `${left} left` : "All done";
+    document.getElementById("of").textContent = `${got} of ${rows.length}`;
+    document.getElementById("meter").style.width = `${Math.round((got / rows.length) * 100)}%`;
+  }
+
+  document.querySelectorAll("form.toggle").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const row = form.closest(".item");
+      const key = row.dataset.key;
+      const got = !row.classList.contains("got");
+      setRow(row, got);
+      updateCount();
+      recent.set(key, Date.now());
+      try {
+        const response = await fetch(`/apps/recipes/grocery-lists/${listId}/check`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({key, done: got}),
+        });
+        if (!response.ok) throw new Error(response.status);
+      } catch (error) {
+        setRow(row, !got);
+        updateCount();
+        showToast("Couldn't save that. Check your connection and tap again.");
+      }
+    });
+  });
+
+  // Keep two phones in sync while shopping together.
+  async function poll() {
+    if (document.hidden) return;
+    try {
+      const response = await fetch(`/apps/recipes/grocery-lists/${listId}/state`, {cache: "no-store"});
+      if (!response.ok) return;
+      const state = await response.json();
+      if (state.signature !== signature) {
+        const typing = document.activeElement && ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName);
+        if (!typing) location.reload();
+        return;
+      }
+      const checked = new Set(state.checked);
+      const now = Date.now();
+      document.querySelectorAll(".item[data-key]").forEach((row) => {
+        if (now - (recent.get(row.dataset.key) || 0) < 5000) return;
+        const got = checked.has(row.dataset.key);
+        if (got !== row.classList.contains("got")) setRow(row, got);
+      });
+      updateCount();
+    } catch (error) { /* offline for a moment; try again next tick */ }
+  }
+  setInterval(poll, 5000);
+  document.addEventListener("visibilitychange", poll);
+})();
+</script>
+{% endblock %}

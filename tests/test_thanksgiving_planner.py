@@ -151,11 +151,11 @@ class RecipeSectionTests(unittest.TestCase):
     def test_mac_and_cheese_shopping_and_oven(self):
         sections = planner.build_grocery_list([dict(preset_dish("mac"), id=1)])
         where = {i["text"]: s["name"] for s in sections for i in s["items"]}
-        self.assertEqual(where["Little Smokies"], "Meat")
+        self.assertEqual(where["Little Smokies"], "Meat & seafood")
         self.assertEqual(where["Garlic powder"], "Check the pantry")
-        self.assertEqual(where["Pasta"], "Pantry & baking")
-        self.assertEqual(where["Sharp cheddar"], "Dairy & eggs")
-        self.assertEqual(where["Panko"], "Pantry & baking")
+        self.assertEqual(where["Elbow macaroni or cavatappi"], "Pantry & baking")
+        self.assertEqual(where["Sharp cheddar cheese"], "Dairy & eggs")
+        self.assertEqual(where["Panko breadcrumbs"], "Pantry & baking")
         tasks = planner.build_timeline({"dinner_at": DINNER}, menu_dishes())
         bake = find(tasks, "Mac", "bake")
         self.assertEqual(bake["start"], datetime(2026, 11, 26, 15, 15))  # after the turkey comes out
@@ -164,11 +164,12 @@ class RecipeSectionTests(unittest.TestCase):
     def test_whole_menu_totals(self):
         sections = planner.build_grocery_list(menu_dishes())
         items = {i["text"]: i for s in sections for i in s["items"]}
-        self.assertEqual(items["Unsalted butter"]["amount"], "5 1/2 sticks (about 1 1/3 lb)")
+        self.assertEqual(items["Butter"]["amount"], "5 1/2 sticks (about 1 1/3 lb)")
+        self.assertEqual(items["Yukon Gold potatoes"]["amount"], "4 lb")
         self.assertEqual(items["Onions"]["amount"], "4")  # 2 + 1/2 + 1, rounded up
         self.assertEqual(items["Celery"]["amount"], "7 ribs")
         self.assertEqual(items["Eggs"]["amount"], "3")
-        self.assertEqual(items["Low-sodium broth"]["amount"], "1 quart (4 cups) + some")
+        self.assertEqual(items["Broth"]["amount"], "1 quart (4 cups) + some")
         self.assertEqual(items["Whole milk"]["amount"], "1 quart (4 cups)")
         self.assertEqual(items["Lemons"]["amount"], "1")
         self.assertNotIn("Water", items)
