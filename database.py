@@ -821,6 +821,7 @@ class Database:
         self._ensure_column(cursor, "recipe_image_groups", "user_id", "INTEGER")
         self._ensure_column(cursor, "recipe_image_groups", "layout", "TEXT DEFAULT 'front_back'")
         self._ensure_column(cursor, "recipe_extractions", "user_id", "INTEGER")
+        self._ensure_column(cursor, "recipe_extractions", "details_json", "TEXT DEFAULT '{}'")
         self._ensure_column(cursor, "recipe_complete_meals", "user_id", "INTEGER")
         self._ensure_column(cursor, "recipe_complete_meals", "quality_notes_json", "TEXT DEFAULT '[]'")
         self._ensure_column(cursor, "recipe_complete_meals", "source_kind", "TEXT DEFAULT 'card'")
@@ -2501,6 +2502,7 @@ class Database:
                 recipe_extractions.ingredients_text,
                 recipe_extractions.instructions_text,
                 recipe_extractions.sections_json,
+                recipe_extractions.details_json,
                 recipe_extractions.error AS extraction_error
             FROM recipe_image_groups
             LEFT JOIN recipe_extractions
@@ -2591,6 +2593,7 @@ class Database:
         sections_json="[]",
         raw_response="",
         error="",
+        details_json="{}",
     ):
         """Create or update OCR/extraction output for a recipe image group."""
         self.connect()
@@ -2598,8 +2601,9 @@ class Database:
         cursor.execute(
             """
             INSERT INTO recipe_extractions
-                (group_id, status, ingredients_text, instructions_text, sections_json, raw_response, error, updated_at, user_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+                (group_id, status, ingredients_text, instructions_text, sections_json, raw_response, error,
+                 details_json, updated_at, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
             ON CONFLICT(group_id) DO UPDATE SET
                 status = excluded.status,
                 ingredients_text = excluded.ingredients_text,
@@ -2607,10 +2611,12 @@ class Database:
                 sections_json = excluded.sections_json,
                 raw_response = excluded.raw_response,
                 error = excluded.error,
+                details_json = excluded.details_json,
                 user_id = COALESCE(recipe_extractions.user_id, excluded.user_id),
                 updated_at = CURRENT_TIMESTAMP
             """,
-            (group_id, status, ingredients_text, instructions_text, sections_json, raw_response, error, self._active_user_id()),
+            (group_id, status, ingredients_text, instructions_text, sections_json, raw_response, error,
+             details_json or "{}", self._active_user_id()),
         )
         self._commit()
         self.close()
@@ -2692,8 +2698,10 @@ class Database:
     @staticmethod
     def _build_complete_meal_quality_notes(group, image_roles):
         notes = []
-        is_pdf_import = group["layout"] == "pdf"
-        if not is_pdf_import:
+        # Only two-sided recipe cards need both a front and a back image. Single photos,
+        # multi-page recipes, and PDFs are complete on their own.
+        is_card_import = (group["layout"] or "front_back") == "front_back"
+        if is_card_import:
             if "front" not in image_roles:
                 notes.append("Add or label a front image for ingredients.")
             if "back" not in image_roles:
@@ -2909,10 +2917,18 @@ class Database:
             ORDER BY id ASC
             """
         ).fetchall()
+        # Only exact copies are removed: same owner, same title, same ingredients and steps.
+        # Two different recipes that share a name ("Stuffing") are both kept.
         meal_groups = {}
         for meal in meals:
-            key = self._normalized_recipe_title(meal["title"])
-            if key:
+            title_key = self._normalized_recipe_title(meal["edited_title"] or meal["title"])
+            if title_key:
+                key = (
+                    meal["user_id"],
+                    title_key,
+                    self._normalized_recipe_title(meal["edited_ingredients_text"] or meal["ingredients_text"]),
+                    self._normalized_recipe_title(meal["edited_instructions_text"] or meal["instructions_text"]),
+                )
                 meal_groups.setdefault(key, []).append(meal)
 
         deleted_meals = 0
@@ -2943,12 +2959,17 @@ class Database:
         components = cursor.execute("SELECT * FROM recipe_components ORDER BY id ASC").fetchall()
         component_groups = {}
         for component in components:
+            title_key = self._normalized_recipe_title(component["edited_title"] or component["title"])
+            if not title_key:
+                continue
             key = (
-                self._normalized_recipe_title(component["title"]),
+                component["user_id"],
+                title_key,
                 component["component_type"] or "other",
+                self._normalized_recipe_title(component["edited_ingredients_text"] or component["ingredients_text"]),
+                self._normalized_recipe_title(component["edited_instructions_text"] or component["instructions_text"]),
             )
-            if key[0]:
-                component_groups.setdefault(key, []).append(component)
+            component_groups.setdefault(key, []).append(component)
 
         deleted_components = 0
         for duplicates in component_groups.values():

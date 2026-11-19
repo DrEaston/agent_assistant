@@ -20,14 +20,23 @@
     <div class="import-subsection">
         <div>
             <h3>Upload Recipes</h3>
-            <p class="section-subtitle">Upload front/back recipe photos in order, or upload a recipe PDF as a standalone import.</p>
+            <p class="section-subtitle">Photos, cookbook pages, or PDFs (a website saved as PDF works well). Each PDF is always its own recipe.</p>
         </div>
+        {% if upload_error %}
+            <p class="import-upload-error" role="alert">{{ upload_error|e }}</p>
+        {% endif %}
         <form method="post" action="/apps/recipes/import/upload" enctype="multipart/form-data" class="upload-form">
             <input type="hidden" name="project_id" value="{{ project.id }}">
             <input type="hidden" name="action_id" value="{{ action.id }}">
+            <fieldset class="import-mode-options">
+                <legend>How are the photos organized?</legend>
+                <label><input type="radio" name="import_mode" value="single" checked> Each photo is its own recipe</label>
+                <label><input type="radio" name="import_mode" value="pages"> All these photos are pages of one recipe</label>
+                <label><input type="radio" name="import_mode" value="cards"> Two-sided recipe cards (front, back, front, back…)</label>
+            </fieldset>
             <div class="form-group">
                 <label for="files">Images or PDFs</label>
-                <input type="file" id="files" name="files" accept="image/*,application/pdf,.pdf" multiple required>
+                <input type="file" id="files" name="files" accept="image/*,.heic,.heif,application/pdf,.pdf" multiple required>
             </div>
             <button type="submit">Upload Recipes</button>
         </form>
@@ -40,7 +49,8 @@
                 <p class="section-subtitle">Only uploaded files that have not been scanned show here.</p>
             </div>
             {% if recipe_image_groups %}
-                <form method="post" action="/apps/recipes/import/extract" class="plain-form" id="scrape-form">
+                <form method="post" action="/apps/recipes/import/extract" class="plain-form" id="scrape-form"
+                      data-pending-ids="{{ (waiting_groups + bad_uploads)|map(attribute='id')|list|tojson|forceescape }}">
                     <input type="hidden" name="project_id" value="{{ project.id }}">
                     <input type="hidden" name="action_id" value="{{ action.id }}">
                     <button type="submit" {% if not waiting_groups and not bad_uploads %}disabled{% endif %}>
@@ -81,7 +91,7 @@
                                     <strong>{{ group.label or "Recipe import" }}</strong>
                                     <small>
                                         {{ group.layout|replace("_", " ")|upper }} -
-                                        {{ (group.extraction_status or group.status)|upper }}
+                                        <span class="scan-status" data-scan-status="{{ group.id }}">{{ (group.extraction_status or group.status)|upper }}</span>
                                     </small>
                                 </div>
                             </div>
@@ -115,12 +125,16 @@
                                 <h3>Bad uploads</h3>
                                 <ul class="compact-file-list">
                                     {% for group in bad_uploads %}
-                                        <li>
-                                            <span>ERROR</span>
-                                            <a href="#pair-{{ group.id }}">{{ group.label or "Recipe import" }}</a>
+                                        <li id="pair-{{ group.id }}">
+                                            <span class="scan-status" data-scan-status="{{ group.id }}">ERROR</span>
+                                            <span>{{ group.label or "Recipe import" }}</span>
+                                            {% for image in group.images %}
+                                                <a href="/uploads/{{ image.filename }}" target="_blank" rel="noopener">{{ image.original_filename }}</a>
+                                            {% endfor %}
                                             {% if group.extraction_error %}
-                                                <small>{{ group.extraction_error }}</small>
+                                                <small>{{ group.extraction_error|e }}</small>
                                             {% endif %}
+                                            <button type="button" class="scan-retry" data-retry-group="{{ group.id }}">Retry</button>
                                         </li>
                                     {% endfor %}
                                 </ul>
@@ -141,6 +155,15 @@
                                             {% if group.imported_meal_status %}
                                                 <small>{{ group.imported_meal_status|replace("_", " ")|upper }}</small>
                                             {% endif %}
+                                            {% set d = group.details or {} %}
+                                            {% if d.prep_minutes or d.cook_minutes or d.oven_temp_f or d.servings %}
+                                                <small>
+                                                    {% if d.servings %}Serves {{ d.servings|e }}{% endif %}
+                                                    {% if d.prep_minutes %} · Prep {{ d.prep_minutes }} min{% endif %}
+                                                    {% if d.cook_minutes %} · Cook {{ d.cook_minutes }} min{% endif %}
+                                                    {% if d.oven_temp_f %} · {{ d.oven_temp_f }}°F{% endif %}
+                                                </small>
+                                            {% endif %}
                                         </li>
                                     {% endfor %}
                                 </ul>
@@ -157,24 +180,87 @@
     </div>
 </section>
 
+<style>
+    .import-upload-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; padding: 0.75rem 1rem; border-radius: 8px; }
+    .import-mode-options { border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.5rem 0.9rem 0.75rem; margin: 0 0 0.75rem; }
+    .import-mode-options label { display: block; padding: 0.3rem 0; font-weight: normal; }
+    .scan-status.is-ok { color: #166534; font-weight: 600; }
+    .scan-status.is-error { color: #b91c1c; font-weight: 600; }
+    .scan-status.is-busy { color: #6d28d9; font-weight: 600; }
+</style>
 <script>
-    const scrapeForm = document.getElementById("scrape-form");
-    if (scrapeForm) {
-        scrapeForm.addEventListener("submit", () => {
-            const panel = document.querySelector(".extraction-progress-panel");
-            const button = scrapeForm.querySelector("button");
-            const statusText = document.getElementById("scrape-status-text");
-            const helperText = document.getElementById("scrape-helper-text");
-            const fill = document.getElementById("scrape-progress-fill");
-            const processed = panel ? panel.dataset.processed : "0";
-            const total = panel ? panel.dataset.total : "0";
+    (function () {
+        const scrapeForm = document.getElementById("scrape-form");
+        if (!scrapeForm) return;
+        const projectId = scrapeForm.querySelector("[name=project_id]").value;
+        const actionId = scrapeForm.querySelector("[name=action_id]").value;
+        const panel = document.querySelector(".extraction-progress-panel");
+        const button = scrapeForm.querySelector("button");
+        const statusText = document.getElementById("scrape-status-text");
+        const helperText = document.getElementById("scrape-helper-text");
+        const fill = document.getElementById("scrape-progress-fill");
+        let busy = false;
 
+        function setStatus(groupId, text, cls) {
+            document.querySelectorAll(`[data-scan-status="${groupId}"]`).forEach((el) => {
+                el.textContent = text;
+                el.classList.remove("is-ok", "is-error", "is-busy");
+                if (cls) el.classList.add(cls);
+            });
+        }
+
+        async function scanOne(groupId) {
+            setStatus(groupId, "SCANNING…", "is-busy");
+            const body = new FormData();
+            body.append("project_id", projectId);
+            body.append("action_id", actionId);
+            try {
+                const response = await fetch(`/apps/recipes/import/groups/${groupId}/extract`, { method: "POST", body });
+                const data = await response.json();
+                if (data.status === "extracted") {
+                    setStatus(groupId, data.meal_title ? `DONE: ${data.meal_title}` : "DONE", "is-ok");
+                    return true;
+                }
+                setStatus(groupId, `ERROR: ${data.error || "scan failed"}`, "is-error");
+            } catch (err) {
+                setStatus(groupId, "ERROR: connection problem, try Retry", "is-error");
+            }
+            return false;
+        }
+
+        async function scanAll(ids) {
+            if (busy || !ids.length) return;
+            busy = true;
             button.disabled = true;
-            button.textContent = "Scanning...";
-            statusText.textContent = `${processed}/${total} files scanned - scanning unfinished files`;
-            helperText.textContent = "You can refresh later; already scanned files will be skipped and unfinished files can be resumed.";
             fill.classList.add("progress-fill-active");
+            const already = Number(panel ? panel.dataset.processed : 0);
+            const total = Number(panel ? panel.dataset.total : ids.length);
+            let done = 0, failed = 0;
+            for (const id of ids) {
+                statusText.textContent = `Scanning ${done + failed + 1} of ${ids.length}…`;
+                helperText.textContent = "Each recipe is scanned separately. If one fails, the rest keep going.";
+                const ok = await scanOne(id);
+                ok ? done++ : failed++;
+                const pct = total ? Math.round(((already + done) / total) * 100) : 100;
+                fill.style.width = `${pct}%`;
+            }
+            fill.classList.remove("progress-fill-active");
+            statusText.textContent = `Finished: ${done} scanned` + (failed ? `, ${failed} failed` : "");
+            helperText.textContent = failed
+                ? "Failed scans are listed under Import history with a Retry button. Reloading…"
+                : "All done. Reloading…";
+            setTimeout(() => window.location.reload(), failed ? 2500 : 1200);
+        }
+
+        scrapeForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            let ids = [];
+            try { ids = JSON.parse(scrapeForm.dataset.pendingIds || "[]"); } catch (e) { ids = []; }
+            scanAll(ids);
         });
-    }
+        document.querySelectorAll("[data-retry-group]").forEach((retry) => {
+            retry.addEventListener("click", () => scanAll([Number(retry.dataset.retryGroup)]));
+        });
+    })();
 </script>
 {% endblock %}

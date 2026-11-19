@@ -8,10 +8,14 @@ import re
 from pathlib import Path
 
 
-RECIPE_EXTRACTION_PROMPT = """You are extracting recipes from uploaded recipe card images.
+RECIPE_EXTRACTION_PROMPT = """You are extracting a recipe from uploaded images or PDF text: recipe
+cards, cookbook pages, handwritten family recipes, or saved web pages.
 
-The front image usually contains ingredients. The back image usually contains
-instructions. Extra pages may contain overflow, side dishes, notes, or variants.
+For two-sided recipe cards, the front image usually contains ingredients and the
+back image usually contains instructions. For other layouts, treat every image
+as a page of the same recipe, in the order given. Extra pages may contain
+overflow, side dishes, notes, or variants. Ignore website navigation, ads,
+comments, and unrelated recipes.
 
 Return only JSON with this shape:
 {
@@ -26,8 +30,24 @@ Return only JSON with this shape:
       "instructions": []
     }
   ],
+  "details": {
+    "servings": "",
+    "prep_minutes": null,
+    "cook_minutes": null,
+    "total_minutes": null,
+    "oven_temp_f": null,
+    "make_ahead": ""
+  },
   "uncertain": []
 }
+
+Details rules:
+- Fill "details" only from what the recipe states. Use null or "" when it
+  doesn't say. Do not guess times or temperatures.
+- Minutes are whole numbers (convert "1 hour 15 minutes" to 75).
+- "oven_temp_f" is the main baking/roasting temperature in Fahrenheit.
+- "make_ahead" is a short quote or paraphrase of any make-ahead or storage
+  advice ("Can be made 2 days ahead and refrigerated").
 
 Title rules:
 - "title" must be the visible or best inferred recipe name, not a category.
@@ -44,8 +64,8 @@ Section rules:
 
 Text rules:
 - Preserve wording when possible.
-- The front image usually contains ingredients.
-- The back image usually contains instructions.
+- Put one ingredient per line in "ingredients_text" and one step per line in
+  "instructions_text".
 - Page breaks can split section headings from their ingredients or steps. If a
   heading such as "Icing", "Glaze", "Filling", "Sauce", "Crust", or "Chicken"
   appears at the end of one page, attach the following ingredient or instruction
@@ -136,8 +156,24 @@ Return only JSON with this shape:
       "instructions": []
     }
   ],
+  "details": {
+    "servings": "",
+    "prep_minutes": null,
+    "cook_minutes": null,
+    "total_minutes": null,
+    "oven_temp_f": null,
+    "make_ahead": ""
+  },
   "uncertain": []
 }
+
+Details rules:
+- Fill "details" only from what the recipe states. Use null or "" when it
+  doesn't say. Do not guess times or temperatures.
+- Minutes are whole numbers (convert "1 hour 15 minutes" to 75).
+- "oven_temp_f" is the main baking/roasting temperature in Fahrenheit.
+- "make_ahead" is a short quote or paraphrase of any make-ahead or storage
+  advice ("Can be made 2 days ahead and refrigerated").
 
 Rules:
 - Do not invent ingredients, amounts, times, or temperatures.
@@ -306,6 +342,8 @@ class RecipeOCRService:
             cleaned_payload = self._cleanup_payload_for_bake_mode(client, payload)
             if cleaned_payload:
                 cleanup_raw_response = cleaned_payload.pop("_raw_response", "")
+                if not cleaned_payload.get("details"):
+                    cleaned_payload["details"] = payload.get("details", {})
                 payload = self._normalize_payload(cleaned_payload)
             stored_raw_response = raw_response
             if cleanup_raw_response:
@@ -321,6 +359,7 @@ class RecipeOCRService:
                 "ingredients_text": payload.get("ingredients_text", ""),
                 "instructions_text": payload.get("instructions_text", ""),
                 "sections_json": json.dumps(payload.get("sections", [])),
+                "details_json": json.dumps(payload.get("details", {})),
                 "raw_response": stored_raw_response,
             }
         except Exception as exc:
@@ -568,7 +607,31 @@ class RecipeOCRService:
 
         payload["title"] = title
         payload["sections"] = sections
+        payload["details"] = RecipeOCRService._normalize_details(payload.get("details"))
         return payload
+
+    @staticmethod
+    def _normalize_details(details):
+        """Keep only well-formed timing/serving details; never invent values."""
+        details = details if isinstance(details, dict) else {}
+
+        def whole_number(value, low, high):
+            if isinstance(value, bool) or value in (None, ""):
+                return None
+            match = re.search(r"\d+(?:\.\d+)?", str(value))
+            if not match:
+                return None
+            number = int(round(float(match.group(0))))
+            return number if low <= number <= high else None
+
+        return {
+            "servings": str(details.get("servings") or "").strip()[:60],
+            "prep_minutes": whole_number(details.get("prep_minutes"), 1, 24 * 60),
+            "cook_minutes": whole_number(details.get("cook_minutes"), 1, 24 * 60),
+            "total_minutes": whole_number(details.get("total_minutes"), 1, 7 * 24 * 60),
+            "oven_temp_f": whole_number(details.get("oven_temp_f"), 150, 600),
+            "make_ahead": str(details.get("make_ahead") or "").strip()[:300],
+        }
 
     @staticmethod
     def _repair_page_break_section_text(text):
@@ -621,6 +684,13 @@ class RecipeOCRService:
                 f"Uploaded assets: {roles}.\n"
                 f"{PDF_RECIPE_EXTRACTION_NOTE}"
             )
+        if group.get("layout") in ("single", "pages"):
+            return (
+                f"Extract structured recipe text from {label}.\n"
+                f"Uploaded pages, in order: {roles}.\n"
+                "These images are all pages of ONE recipe (for example a cookbook page or a "
+                "handwritten card). Do not assume a front/back card layout."
+            )
         return (
             f"Extract structured recipe text from {label}.\n"
             f"Uploaded image roles: {roles}.\n"
@@ -660,6 +730,11 @@ class RecipeOCRService:
 
     @staticmethod
     def _image_data_url(image_path):
-        content_type = mimetypes.guess_type(str(image_path))[0] or "image/jpeg"
-        encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        from apps.kitchen.import_images import downscaled_data_for_model
+
+        data, content_type = downscaled_data_for_model(image_path)
+        if data is None:
+            data = image_path.read_bytes()
+            content_type = mimetypes.guess_type(str(image_path))[0] or "image/jpeg"
+        encoded = base64.b64encode(data).decode("ascii")
         return f"data:{content_type};base64,{encoded}"

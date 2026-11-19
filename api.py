@@ -50,6 +50,7 @@ from apps.kitchen.stalled_issue_evaluation import (
     existing_plan_matches,
     stalled_eligibility,
 )
+from apps.kitchen.import_images import UnsupportedRecipeImage, is_heic, normalize_recipe_image
 from apps.registry import app_shell_for_path, global_nav_apps, launcher_cards
 from apps.pipeline import (
     project_id_for_area,
@@ -9939,10 +9940,15 @@ def recipe_import_page(request: Request):
         meal = meals_by_source_group.get(group.get("id"))
         group["imported_meal_id"] = meal.get("id") if meal else None
         group["imported_meal_status"] = meal.get("status") if meal else ""
+        try:
+            group["details"] = json.loads(group.get("details_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            group["details"] = {}
 
     context = recipe_app_page_context(request, recipe_app, {
         "project": project,
         "action": action,
+        "upload_error": request.query_params.get("upload_error", ""),
         "recipe_image_groups": recipe_image_groups,
         "recipe_image_roles": [
             {"value": "front", "label": "Front"},
@@ -10488,21 +10494,36 @@ async def upload_recipe_images_form(
     project_id: int = Form(...),
     action_id: int = Form(...),
     files: List[UploadFile] = File(...),
+    import_mode: str = Form("single"),
 ):
-    """Upload recipe image/PDF files to the recipe app import queue."""
+    """Upload recipe image/PDF files to the recipe app import queue.
+
+    import_mode:
+      single - each photo is its own recipe (default)
+      pages  - all photos in this upload are pages of one recipe
+      cards  - photos alternate front/back of two-sided recipe cards
+    PDFs are always one recipe per file.
+    """
     action = dict_from_row(db.get_recommended_action(action_id))
     if not action or action["project_id"] != project_id:
         raise HTTPException(status_code=404, detail="Task not found")
+    if import_mode not in ("single", "pages", "cards"):
+        import_mode = "single"
 
     groups = db.get_recipe_image_groups(action_id)
     group_count = len(groups)
     open_group_id = None
+    pages_group_id = None
+    upload_errors = []
 
-    for group in groups:
-        sides = {image["side"] for image in group["images"]}
-        if "front" in sides and "back" not in sides:
-            open_group_id = group["id"]
-            break
+    if import_mode == "cards":
+        for group in groups:
+            if (group.get("layout") or "front_back") != "front_back":
+                continue
+            sides = {image["side"] for image in group["images"]}
+            if "front" in sides and "back" not in sides:
+                open_group_id = group["id"]
+                break
 
     for upload in files:
         if not upload.filename:
@@ -10511,7 +10532,7 @@ async def upload_recipe_images_form(
         extension = Path(original_name).suffix.lower()
         content_type = upload.content_type or mimetypes.guess_type(original_name)[0] or ""
         is_pdf = content_type == "application/pdf" or extension == ".pdf"
-        is_image = content_type.startswith("image/")
+        is_image = content_type.startswith("image/") or is_heic(original_name, content_type)
         if not is_image and not is_pdf:
             continue
 
@@ -10565,23 +10586,44 @@ async def upload_recipe_images_form(
                 )
             continue
 
-        if open_group_id:
-            image_group_id = open_group_id
-            side = "back"
-            open_group_id = None
+        # Normalize first (rotation, size, HEIC) so a bad file never creates an empty recipe.
+        try:
+            image_bytes, extension = normalize_recipe_image(await upload.read(), original_name, content_type)
+        except UnsupportedRecipeImage as exc:
+            upload_errors.append(str(exc))
+            continue
+        content_type = "image/jpeg"
+        recipe_label = Path(original_name).stem or f"Recipe {group_count + 1}"
+
+        if import_mode == "cards":
+            if open_group_id:
+                image_group_id = open_group_id
+                side = "back"
+                open_group_id = None
+            else:
+                group_count += 1
+                image_group_id = db.create_recipe_image_group(
+                    project_id,
+                    action_id,
+                    f"Recipe pair {group_count}",
+                )
+                side = "front"
+        elif import_mode == "pages":
+            if pages_group_id is None:
+                group_count += 1
+                pages_group_id = db.create_recipe_image_group(project_id, action_id, recipe_label, layout="pages")
+                side = "front"
+            else:
+                side = "extra"
+            image_group_id = pages_group_id
         else:
             group_count += 1
-            image_group_id = db.create_recipe_image_group(
-                project_id,
-                action_id,
-                f"Recipe pair {group_count}",
-            )
+            image_group_id = db.create_recipe_image_group(project_id, action_id, recipe_label, layout="single")
             side = "front"
 
         stored_name = f"{uuid.uuid4().hex}{extension}"
         destination = recipe_uploads_dir / stored_name
-        with destination.open("wb") as handle:
-            shutil.copyfileobj(upload.file, handle)
+        destination.write_bytes(image_bytes)
         try:
             cloud_persistence.sync_upload_file(destination)
         except Exception as exc:
@@ -10597,13 +10639,64 @@ async def upload_recipe_images_form(
             side,
         )
 
-        if side == "front":
+        if import_mode == "cards" and side == "front":
             open_group_id = image_group_id
 
-    return RedirectResponse(
-        url="/apps/recipes/import",
-        status_code=303,
+    url = "/apps/recipes/import"
+    if upload_errors:
+        url += "?" + urlencode({"upload_error": " ".join(upload_errors)[:900]})
+    return RedirectResponse(url=url, status_code=303)
+
+
+def run_recipe_group_extraction(group):
+    """Scan one recipe group and store the result. Returns the extraction status."""
+    db.upsert_recipe_extraction(
+        group["id"],
+        "processing",
+        group.get("ingredients_text", "") or "",
+        group.get("instructions_text", "") or "",
+        group.get("sections_json", "[]") or "[]",
+        "",
+        "",
+        group.get("details_json", "{}") or "{}",
     )
+    result = recipe_ocr_service.extract_group(group)
+    db.upsert_recipe_extraction(
+        group["id"],
+        result["status"],
+        result.get("ingredients_text", ""),
+        result.get("instructions_text", ""),
+        result.get("sections_json", "[]"),
+        result.get("raw_response", ""),
+        result.get("error", ""),
+        result.get("details_json", "{}"),
+    )
+    return result
+
+
+@app.post("/apps/recipes/import/groups/{group_id}/extract")
+def extract_one_recipe_group(group_id: int, project_id: int = Form(...), action_id: int = Form(...)):
+    """Scan a single uploaded recipe. Used by the import page to scan one at a time with progress."""
+    action = dict_from_row(db.get_recommended_action(action_id))
+    if not action or action["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    group = next((g for g in db.get_recipe_image_groups(action_id) if g["id"] == group_id), None)
+    if not group:
+        raise HTTPException(status_code=404, detail="Recipe upload not found")
+    result = run_recipe_group_extraction(group)
+    db.sync_recipe_complete_meals_from_extractions()
+    meal = next(
+        (m for m in dicts_from_rows(db.get_recipe_complete_meals()) if m.get("source_group_id") == group_id),
+        None,
+    )
+    return JSONResponse({
+        "group_id": group_id,
+        "status": result["status"],
+        "error": result.get("error", ""),
+        "meal_id": meal["id"] if meal else None,
+        "meal_title": (meal.get("edited_title") or meal.get("title")) if meal else "",
+        "meal_status": meal.get("status") if meal else "",
+    })
 
 @app.post("/apps/recipes/import/extract")
 def extract_recipe_images_form(
@@ -10615,29 +10708,12 @@ def extract_recipe_images_form(
     if not action or action["project_id"] != project_id:
         raise HTTPException(status_code=404, detail="Task not found")
 
+    # No-JavaScript fallback. The import page normally scans one recipe per request instead.
     groups = db.get_recipe_image_groups(action_id)
     for group in groups:
         if group.get("extraction_status") == "extracted":
             continue
-        db.upsert_recipe_extraction(
-            group["id"],
-            "processing",
-            group.get("ingredients_text", ""),
-            group.get("instructions_text", ""),
-            group.get("sections_json", "[]"),
-            "",
-            "",
-        )
-        result = recipe_ocr_service.extract_group(group)
-        db.upsert_recipe_extraction(
-            group["id"],
-            result["status"],
-            result.get("ingredients_text", ""),
-            result.get("instructions_text", ""),
-            result.get("sections_json", "[]"),
-            result.get("raw_response", ""),
-            result.get("error", ""),
-        )
+        run_recipe_group_extraction(group)
 
     db.sync_recipe_complete_meals_from_extractions()
 
