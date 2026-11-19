@@ -159,14 +159,18 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(r.status_code, 303)
         return tg_router.store().get_plan()
 
-    def test_setup_page_then_plan_page(self):
-        r = self.client.get("/thanksgiving")
-        self.assertIn("Create the plan", r.text)
-        self.assertIn("Curtis, Parrisa", r.text)
-        plan = self.setup_plan()
-        self.assertEqual(len(tg_router.store().get_dishes(plan["id"])), len(OUR_MENU))
+    def test_first_visit_creates_plan_with_menu(self):
         r = self.client.get("/thanksgiving")
         self.assertEqual(r.status_code, 200)
+        plan = tg_router.store().get_plan()
+        self.assertEqual(plan["cooks"], "Curtis, Parrisa")
+        self.assertEqual(plan["dinner_at"], "2026-11-26T16:00")
+        dishes = tg_router.store().get_dishes(plan["id"])
+        self.assertEqual(len(dishes), len(OUR_MENU))
+        turkey = next(d for d in dishes if d["category"] == "turkey")
+        self.assertEqual(next(s for s in turkey["steps"] if s["id"] == "out")["cook"], "Parrisa")
+        self.client.get("/thanksgiving")
+        self.assertEqual(len(tg_router.store().get_dishes(plan["id"])), len(OUR_MENU))  # not duplicated
         self.assertIn("Roast the turkey", r.text)
         self.assertIn("Shopping list", r.text)
         self.assertIn("Yukon Gold", r.text)

@@ -161,12 +161,24 @@ def library_recipe(meal_id):
 
 # ---------------------------------------------------------------- plan page
 
+def create_default_plan(request):
+    """First visit: create the plan with our menu so there is nothing to set up."""
+    me = current_user_name(request)
+    plan_id = store().create_plan(DEFAULT_DINNER, f"{me}, Parrisa", 1)
+    for key in OUR_MENU:
+        dish = preset_dish(key)
+        if key == "turkey":
+            # Curtis is racing Thursday morning; someone at home pulls the turkey out at 11:15.
+            for step in dish["steps"]:
+                if step["id"] == "out":
+                    step["cook"] = "Parrisa"
+        store().add_dish(plan_id, dish)
+    return store().get_plan()
+
+
 @router.get("/thanksgiving", response_class=HTMLResponse)
 def plan_page(request: Request):
-    plan = store().get_plan()
-    if not plan:
-        return render("tg_setup.html", default_cooks=f"{current_user_name(request)}, Parrisa",
-                      default_date=DEFAULT_DINNER[:10], default_time=DEFAULT_DINNER[11:])
+    plan = store().get_plan() or create_default_plan(request)
     context = plan_context(plan)
     day_choices = []
     for offset in range(7, -1, -1):
@@ -356,9 +368,7 @@ def _int(values, index):
 
 @router.get("/thanksgiving/cook", response_class=HTMLResponse)
 def cook_page(request: Request):
-    plan = store().get_plan()
-    if not plan:
-        return back()
+    plan = store().get_plan() or create_default_plan(request)
     return render("tg_cook.html", plan=plan, cooks=parse_cooks(plan["cooks"]), page_url="/thanksgiving/cook")
 
 
