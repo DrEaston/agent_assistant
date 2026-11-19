@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{% block title %}Thanksgiving{% endblock %} · Dieter</title>
+<style>
+:root {
+  --bg: #faf6f0; --panel: #ffffff; --ink: #2a2118; --muted: #74685b; --line: #e8ded1;
+  --accent: #c2410c; --accent-soft: #fff1e6; --ok: #3f6212; --ok-soft: #eef6e0;
+  --warn: #b91c1c; --warn-soft: #fdecec; --info-soft: #eef2ff;
+  --radius: 14px; --shadow: 0 1px 2px rgba(42,33,24,.06), 0 4px 16px rgba(42,33,24,.05);
+  --oven: #c2410c; --stove: #0369a1;
+  font-size: 16px;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+h1, h2, h3 { line-height: 1.2; margin: 0; }
+h2 { font-size: 1.25rem; }
+h3 { font-size: 1.05rem; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button, .button {
+  display: inline-flex; align-items: center; justify-content: center; gap: .4rem;
+  min-height: 44px; padding: .5rem 1rem; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--panel); cursor: pointer; text-decoration: none; color: var(--ink); font-weight: 600;
+}
+button:hover, .button:hover { border-color: #cdbca8; }
+.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.primary:hover { background: #9a3412; }
+.quiet { background: transparent; border-color: transparent; color: var(--muted); font-weight: 500; }
+.danger { color: var(--warn); }
+input[type=text], input[type=date], input[type=time], input[type=number], select, textarea {
+  min-height: 44px; padding: .45rem .7rem; border: 1px solid var(--line); border-radius: 10px; background: #fff;
+  max-width: 100%;
+}
+textarea { width: 100%; min-height: 8rem; }
+label { font-weight: 600; font-size: .9rem; }
+.field { display: flex; flex-direction: column; gap: .3rem; }
+.muted { color: var(--muted); }
+.small { font-size: .875rem; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 1.1rem 1.2rem; }
+.stack > * + * { margin-top: .75rem; }
+.row { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+.pill { display: inline-flex; align-items: center; gap: .3rem; padding: .1rem .55rem; border-radius: 999px;
+  font-size: .78rem; font-weight: 700; background: #f3ece3; color: var(--muted); white-space: nowrap; }
+.cook-pill { color: #fff; }
+.kind-oven { background: #fde7da; color: var(--oven); }
+.kind-stove { background: #e0f0fa; color: var(--stove); }
+.kind-passive { background: #f1f1ef; color: #6b6b66; }
+.kind-check { background: var(--info-soft); color: #4338ca; }
+.kind-shop { background: var(--ok-soft); color: var(--ok); }
+.banner { padding: .8rem 1rem; border-radius: 12px; }
+.banner.warn { background: var(--warn-soft); color: #7f1d1d; }
+.banner.ok { background: var(--ok-soft); color: #365314; }
+details > summary { cursor: pointer; }
+.feedback { margin: 2.5rem auto 1rem; max-width: 40rem; }
+.feedback summary { color: var(--muted); font-size: .9rem; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+{% block head %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+{% block body %}{% endblock %}
+{% block feedback %}
+<details class="feedback card" id="report">
+  <summary>Something wrong or confusing? Report a problem</summary>
+  <form method="post" action="/thanksgiving/feedback" class="stack" style="margin-top:.75rem">
+    <input type="hidden" name="page" value="{{ page_url or '/thanksgiving' }}">
+    <textarea name="text" required placeholder="What happened, and what did you expect?" style="min-height:5rem"></textarea>
+    <button type="submit">Send to Dieter Studio</button>
+  </form>
+</details>
+{% endblock %}
+</body>
+</html>

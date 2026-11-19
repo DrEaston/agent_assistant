@@ -51,6 +51,7 @@ from apps.kitchen.stalled_issue_evaluation import (
     stalled_eligibility,
 )
 from apps.kitchen.import_images import UnsupportedRecipeImage, is_heic, normalize_recipe_image
+from apps.kitchen.thanksgiving.router import configure as configure_thanksgiving, router as thanksgiving_router
 from apps.registry import app_shell_for_path, global_nav_apps, launcher_cards
 from apps.pipeline import (
     project_id_for_area,
@@ -121,6 +122,10 @@ if cloud_persistence.enabled:
         cloud_persistence.seed_if_empty()
     except Exception as exc:
         print(f"Warning: Cloud persistence seed failed - {exc}")
+
+# Thanksgiving planner: self-contained Kitchen slice with its own router and templates.
+configure_thanksgiving(db)
+app.include_router(thanksgiving_router)
 
 # Initialize LLM service
 try:

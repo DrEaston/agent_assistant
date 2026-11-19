@@ -1,0 +1,345 @@
+{% extends "tg_base.html" %}
+{% block title %}Cook mode{% endblock %}
+{% block head %}
+<style>
+body { overflow-x: hidden; }
+.bar-top { position: sticky; top: 0; z-index: 20; background: #2a2118; color: #fff; padding: .6rem 1rem;
+  padding-top: calc(.6rem + env(safe-area-inset-top, 0px)); display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+.bar-top .clock { font-size: 1.4rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.bar-top .sub { color: #e7dccd; font-size: .9rem; }
+.bar-top .spacer { flex: 1; }
+.bar-top a, .bar-top button { color: #fff; background: transparent; border-color: rgba(255,255,255,.25); min-height: 40px; }
+.bar-top button[aria-pressed=true] { background: #fff; color: #2a2118; }
+.offline { background: #7f1d1d; color: #fff; padding: .4rem 1rem; text-align: center; font-weight: 600; }
+#alerts { position: sticky; top: 64px; z-index: 15; display: flex; flex-direction: column; gap: .5rem; padding: 0 1rem; }
+.alert { background: #fff7ed; border: 2px solid var(--accent); border-radius: 14px; padding: .75rem 1rem;
+  box-shadow: 0 6px 24px rgba(194,65,12,.25); display: flex; flex-wrap: wrap; gap: .5rem .9rem; align-items: center; animation: pulse 1.6s ease-in-out infinite; }
+.alert.timer { border-color: #4338ca; background: #eef2ff; }
+.alert .what { flex: 1 1 16rem; }
+.alert .what strong { font-size: 1.1rem; }
+@keyframes pulse { 50% { box-shadow: 0 6px 30px rgba(194,65,12,.5); } }
+.layout { display: grid; grid-template-columns: 16rem 1fr 20rem; gap: 1rem; padding: 1rem; max-width: 96rem; margin: 0 auto; }
+.tabs { display: flex; flex-direction: column; gap: .4rem; }
+.tab { text-align: left; justify-content: flex-start; flex-direction: column; align-items: flex-start; gap: .1rem; padding: .6rem .8rem; position: relative; }
+.tab[aria-selected=true] { border: 2px solid #2a2118; background: #fff; }
+.tab .next { font-size: .8rem; color: var(--muted); font-weight: 500; }
+.tab .badge { position: absolute; top: -6px; right: -6px; background: var(--warn); color: #fff; border-radius: 999px;
+  min-width: 22px; height: 22px; font-size: .75rem; display: grid; place-items: center; padding: 0 5px; }
+.tab .stripe { position: absolute; left: 0; top: 8px; bottom: 8px; width: 4px; border-radius: 4px; }
+.recipe h2 { font-size: 1.6rem; }
+.steps { list-style: none; margin: 0; padding: 0; }
+.step { display: grid; grid-template-columns: 48px 1fr; gap: .2rem .75rem; padding: .7rem 0; border-bottom: 1px solid var(--line); }
+.step.done .s-title { text-decoration: line-through; color: var(--muted); }
+.step.due { background: #fff7ed; border-radius: 10px; }
+.step .check { width: 44px; height: 44px; font-size: 1.3rem; padding: 0; }
+.step.done .check { background: var(--ok-soft); color: var(--ok); }
+.s-when { font-size: .85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.s-title { font-weight: 700; font-size: 1.05rem; }
+.s-actions { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .35rem; }
+.s-actions button { min-height: 38px; padding: .3rem .7rem; font-size: .9rem; }
+.ingredients { columns: 2 14rem; padding-left: 0; list-style: none; }
+.ingredients li { break-inside: avoid; padding: .3rem .2rem; cursor: pointer; border-radius: 6px; }
+.ingredients li.got { color: var(--muted); text-decoration: line-through; }
+.instructions { padding-left: 1.3rem; }
+.instructions li { padding: .35rem 0; }
+.chip { min-height: 32px; padding: .1rem .6rem; font-size: .82rem; border-radius: 999px; margin-left: .3rem; }
+.side h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 .5rem; }
+.up { padding: .45rem 0; border-top: 1px solid var(--line); cursor: pointer; }
+.up:first-of-type { border-top: 0; }
+.up .when { font-size: .8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.late { color: var(--warn) !important; font-weight: 700; }
+.timer-row { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .4rem 0; }
+.timer-row .left { font-size: 1.3rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+#start { position: fixed; inset: 0; z-index: 50; background: rgba(42,33,24,.85); display: grid; place-items: center; padding: 1rem; }
+#start .card { max-width: 28rem; text-align: center; }
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: 1fr; }
+  .tabs { flex-direction: row; overflow-x: auto; padding-bottom: .3rem; }
+  .tab { min-width: 10rem; flex: 0 0 auto; }
+  .side { order: 3; }
+}
+</style>
+{% endblock %}
+{% block body %}
+<div id="start"><div class="card stack">
+  <h2>Cook mode</h2>
+  <p>Keeps the screen awake and plays a chime when a step is due on any recipe. Use it on the desktop and the tablet together: checkmarks, timers, and alerts sync between them.</p>
+  <button class="primary" id="start-btn" type="button">Start cooking</button>
+  <a href="/thanksgiving" class="small">Back to the plan</a>
+</div></div>
+
+<header class="bar-top">
+  <span class="clock" id="clock">--:--</span>
+  <span class="sub" id="dinner-label"></span>
+  <span class="spacer"></span>
+  <span class="row" role="group" aria-label="Whose steps" id="filter"></span>
+  <a class="button" href="/thanksgiving">Plan</a>
+  <a class="button" href="#report">Report problem</a>
+</header>
+<div class="offline" id="offline" hidden>Can't reach Dieter. Retrying… (timers keep counting on this screen)</div>
+<div id="alerts" aria-live="assertive"></div>
+
+<div class="layout">
+  <nav class="tabs" id="tabs" role="tablist" aria-label="Recipes"></nav>
+  <main class="card recipe" id="recipe"><p class="muted">Loading…</p></main>
+  <aside class="side stack">
+    <div class="card" id="timers-card"><h3>Timers</h3><div id="timers"></div>
+      <form id="timer-form" class="row" style="margin-top:.5rem">
+        <input type="number" id="timer-min" min="1" max="600" placeholder="Min" style="width:5.5rem" aria-label="Timer minutes">
+        <button type="submit">Start timer</button>
+      </form></div>
+    <div class="card"><h3>Coming up</h3><div id="upcoming"></div></div>
+    <div class="card" id="conflicts-card" hidden><h3>Heads up</h3><div id="conflicts" class="small"></div></div>
+  </aside>
+</div>
+{% endblock %}
+{% block feedback %}
+<details class="feedback card" id="report">
+  <summary>Something wrong or confusing? Report a problem</summary>
+  <form id="report-form" class="stack" style="margin-top:.75rem">
+    <textarea name="text" required placeholder="What happened, and what did you expect?" style="min-height:5rem"></textarea>
+    <button type="submit">Send to Dieter Studio</button>
+    <span id="report-sent" class="small muted" hidden>Thanks, sent.</span>
+  </form>
+</details>
+<script>
+(function () {
+  const POLL_MS = 4000, ALERT_WINDOW_MS = 6 * 3600e3, CHIME_EVERY_MS = 15000;
+  let state = null, skew = 0, selected = null, filter = "", lastRecipeSig = "", lastChime = 0, audio = null;
+  const pendingDone = new Map();   // optimistic step toggles until the server confirms
+  const handled = new Map();       // alert key -> when it was handled here (hidden until the server catches up)
+  const got = new Set(JSON.parse(safeGet("tg-got") || "[]"));
+  selected = Number(safeGet("tg-dish")) || null;
+  filter = safeGet("tg-cook") || "";
+
+  function safeGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function safeSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  const $ = (id) => document.getElementById(id);
+  const lastHTML = new Map();      // redraw a section only when its markup changes, so taps aren't lost
+  const setHTML = (id, html) => { if (lastHTML.get(id) !== html) { $(id).innerHTML = html; lastHTML.set(id, html); } };
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const now = () => Date.now() + skew;
+  function rel(ms) {
+    const m = Math.round((ms - now()) / 60000);
+    if (m === 0) return "now";
+    if (m > 0) return m < 60 ? `in ${m} min` : m < 1440 ? `in ${Math.floor(m / 60)}h ${m % 60}m` : `in ${Math.round(m / 1440)} days`;
+    return -m < 60 ? `${-m} min late` : `${Math.round(-m / 60)}h late`;
+  }
+  function mmss(ms) { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; }
+  async function post(url, body) {
+    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  }
+
+  // ---------- data
+  function isDone(step) { return pendingDone.has(step.key) ? pendingDone.get(step.key) : step.done; }
+  function allSteps() { return state ? state.dishes.flatMap(d => d.steps.map(s => ({ ...s, dish: d }))) : []; }
+  function color(name) { return (state && state.colors[name]) || "#6b7280"; }
+  function pill(name) { return name ? `<span class="pill cook-pill" style="background:${esc(color(name))}">${esc(name)}</span>` : ""; }
+
+  function activeAlerts() {
+    if (!state) return [];
+    const t = now(), out = [];
+    for (const s of allSteps()) {
+      if (isDone(s) || s.start_ms > t || t - s.start_ms > ALERT_WINDOW_MS || handled.has(s.key)) continue;
+      const a = state.alerts[s.key];
+      if (a && (a.state === "ack" || (a.state === "snooze" && a.until_ms > t))) continue;
+      out.push({ key: s.key, type: "step", dish: s.dish, step: s });
+    }
+    for (const tm of state.timers) {
+      if (tm.ends_ms > t || handled.has("timer:" + tm.id)) continue;
+      out.push({ key: "timer:" + tm.id, type: "timer", timer: tm, dish: state.dishes.find(d => d.id === tm.dish_id) });
+    }
+    return out;
+  }
+
+  // ---------- rendering
+  function renderFilter() {
+    const opts = ["", ...(state ? state.cooks : [])];
+    setHTML("filter", opts.map(c => `<button type="button" data-cook="${esc(c)}" aria-pressed="${c === filter}">${c ? esc(c) : "Everyone"}</button>`).join(""));
+  }
+  function nextStep(dish) { return dish.steps.find(s => !isDone(s) && s.end_ms > now()) || dish.steps.find(s => !isDone(s)); }
+  function visibleDishes() {
+    return state.dishes.filter(d => !filter || !d.cook || d.cook === filter || d.steps.some(s => s.cook === filter));
+  }
+  function renderTabs(alerts) {
+    const dishes = visibleDishes().slice().sort((a, b) => ((nextStep(a) || {}).start_ms || 9e15) - ((nextStep(b) || {}).start_ms || 9e15));
+    if (!selected || !state.dishes.some(d => d.id === selected)) selected = dishes[0] && dishes[0].id;
+    setHTML("tabs", dishes.map(d => {
+      const n = nextStep(d), count = alerts.filter(a => a.dish && a.dish.id === d.id).length;
+      return `<button class="tab" role="tab" data-dish="${d.id}" aria-selected="${d.id === selected}">
+        <span class="stripe" style="background:${esc(color(d.cook))}"></span>
+        <span>${esc(d.name)}</span>
+        <span class="next">${n ? `${esc(n.clock)} · ${esc(rel(n.start_ms))}` : "All steps done ✓"}</span>
+        ${count ? `<span class="badge" aria-label="${count} alerts">${count}</span>` : ""}</button>`;
+    }).join(""));
+  }
+  function renderRecipe(force) {
+    const dish = state.dishes.find(d => d.id === selected);
+    if (!dish) { $("recipe").innerHTML = '<p class="muted">No dishes yet. Add them in the plan.</p>'; return; }
+    const sig = JSON.stringify([dish, [...pendingDone], Math.floor(now() / 30000)]);
+    if (!force && sig === lastRecipeSig) return;
+    lastRecipeSig = sig;
+    const t = now();
+    const steps = dish.steps.map(s => {
+      const due = !isDone(s) && s.start_ms <= t && s.end_ms > t;
+      return `<li class="step${isDone(s) ? " done" : ""}${due ? " due" : ""}">
+        <button class="check" data-done="${esc(s.key)}" aria-label="${isDone(s) ? "Mark not done" : "Mark done"}: ${esc(s.title)}">${isDone(s) ? "✓" : ""}</button>
+        <div><div class="s-when">${esc(s.day)} · ${esc(s.clock)}${s.minutes ? ` · ${s.minutes} min` : ""}${s.temp ? ` · ${s.temp}°F` : ""} ${isDone(s) ? "" : `· <span class="${s.start_ms < t && !due ? "late" : ""}">${esc(rel(s.start_ms))}</span>`}</div>
+          <div class="s-title">${esc(s.title)} ${s.cook && s.cook !== dish.cook ? pill(s.cook) : ""}</div>
+          ${s.detail ? `<div class="small muted">${esc(s.detail)}</div>` : ""}
+          ${s.minutes && !isDone(s) ? `<div class="s-actions"><button data-timer="${s.minutes}" data-label="${esc(dish.name + ": " + s.title)}">⏱ ${s.minutes} min timer</button></div>` : ""}
+        </div></li>`;
+    }).join("");
+    const ingredients = dish.ingredients.map((line, i) => {
+      const k = dish.id + ":" + i;
+      return `<li data-got="${esc(k)}" class="${got.has(k) ? "got" : ""}">${esc(line)}</li>`;
+    }).join("");
+    const instructions = dish.instructions.map(line => `<li>${esc(line.text)}${line.timers.map(m =>
+      `<button class="chip" data-timer="${m}" data-label="${esc(dish.name)}">⏱ ${m} min</button>`).join("")}</li>`).join("");
+    $("recipe").innerHTML = `<div class="stack">
+      <div class="row"><h2>${esc(dish.name)}</h2>${pill(dish.cook)}</div>
+      ${dish.notes ? `<p class="muted">${esc(dish.notes)}</p>` : ""}
+      <h3>Schedule</h3><ol class="steps">${steps || '<li class="muted">No timed steps.</li>'}</ol>
+      ${ingredients ? `<h3>Ingredients <span class="small muted">(tap to cross off)</span></h3><ul class="ingredients">${ingredients}</ul>` : ""}
+      ${instructions ? `<h3>Recipe</h3><ol class="instructions">${instructions}</ol>` : ""}</div>`;
+  }
+  function renderAlerts(alerts) {
+    setHTML("alerts", alerts.map(a => {
+      const goto = a.dish && a.dish.id !== selected ? `<button data-goto="${a.dish.id}">Go to ${esc(a.dish.name)}</button>` : "";
+      if (a.type === "timer") return `<div class="alert timer" role="alert"><div class="what">⏱ <strong>${esc(a.timer.label)}</strong><div class="small">Timer finished</div></div>
+          ${goto}<button class="primary" data-dismiss-timer="${a.timer.id}">Stop timer</button></div>`;
+      const s = a.step;
+      return `<div class="alert" role="alert"><div class="what"><strong>${esc(s.title)}</strong> ${pill(s.cook)}
+          <div class="small">${esc(a.dish.name)} · ${esc(s.clock)} · ${esc(rel(s.start_ms))}${s.temp ? ` · ${s.temp}°F` : ""}</div></div>
+        ${goto}<button class="primary" data-done="${esc(s.key)}">Done</button>
+        <button data-ack="${esc(s.key)}">On it</button><button class="quiet" data-snooze="${esc(s.key)}">5 min</button></div>`;
+    }).join(""));
+  }
+  function renderSide() {
+    const t = now();
+    setHTML("timers", state.timers.length ? state.timers.map(tm => `<div class="timer-row">
+        <div><div class="left">${tm.ends_ms > t ? mmss(tm.ends_ms - t) : "0:00"}</div><div class="small muted">${esc(tm.label)}</div></div>
+        <button class="quiet" data-dismiss-timer="${tm.id}" aria-label="Cancel timer">✕</button></div>`).join("")
+      : '<p class="small muted">No timers running.</p>');
+    const upcoming = allSteps().filter(s => !isDone(s) && s.start_ms > t - 60000 && (!filter || !s.cook || s.cook === filter))
+      .sort((a, b) => a.start_ms - b.start_ms).slice(0, 8);
+    setHTML("upcoming", upcoming.map(s => `<div class="up" data-goto="${s.dish.id}">
+        <div class="when">${esc(s.day)} ${esc(s.clock)} · ${esc(rel(s.start_ms))}</div>
+        <div><strong>${esc(s.title)}</strong> ${pill(s.cook)}</div><div class="small muted">${esc(s.dish.name)}</div></div>`).join("")
+      || '<p class="small muted">Nothing left. Enjoy!</p>');
+    $("conflicts-card").hidden = !state.conflicts.length;
+    setHTML("conflicts", state.conflicts.map(c => `<p>${esc(c)}</p>`).join(""));
+  }
+  function renderAll(forceRecipe) {
+    if (!state) return;
+    const d = new Date(now());
+    $("clock").textContent = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    $("dinner-label").textContent = `Dinner ${state.dinner_label} · ${rel(state.dinner_ms)}`;
+    const alerts = activeAlerts();
+    renderAlerts(alerts); renderTabs(alerts); renderRecipe(forceRecipe); renderSide();
+    if (alerts.length && now() - lastChime > CHIME_EVERY_MS) { lastChime = now(); chime(); }
+  }
+
+  // ---------- sound, vibration, wake lock
+  function chime() {
+    try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (e) {}
+    if (!audio) return;
+    [0, 0.25, 0.5].forEach((delay, i) => {
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.frequency.value = [660, 880, 990][i]; o.connect(g); g.connect(audio.destination);
+      const t0 = audio.currentTime + delay;
+      g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22); o.start(t0); o.stop(t0 + 0.25);
+    });
+  }
+  let wakeLock = null;
+  async function keepAwake() {
+    try { if ("wakeLock" in navigator && document.visibilityState === "visible") wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+  }
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { keepAwake(); poll(); } });
+  $("start-btn").addEventListener("click", () => {
+    try { audio = new (window.AudioContext || window.webkitAudioContext)(); chime(); } catch (e) {}
+    keepAwake(); $("start").hidden = true;
+  });
+
+  // ---------- server sync
+  async function poll() {
+    try {
+      const r = await fetch("/thanksgiving/api/state", { cache: "no-store" });
+      if (r.status === 401 || r.redirected) { location.href = "/login?next=/thanksgiving/cook"; return; }
+      if (!r.ok) throw new Error(r.status);
+      const data = await r.json();
+      skew = data.now_ms - Date.now();
+      for (const [key, val] of pendingDone) {
+        const step = data.dishes.flatMap(d => d.steps).find(s => s.key === key);
+        if (!step || step.done === val) pendingDone.delete(key);
+      }
+      for (const [key, at] of handled) if (Date.now() - at > 15000) handled.delete(key);
+      const first = !state;
+      state = data; $("offline").hidden = true;
+      if (first) renderFilter();
+      renderAll();
+    } catch (e) { $("offline").hidden = false; }
+  }
+  async function act(fn) { try { await fn(); } catch (e) { $("offline").hidden = false; } poll(); }
+
+  // ---------- interactions
+  document.addEventListener("click", (ev) => {
+    const el = ev.target.closest("button, li[data-got], .up[data-goto]");
+    if (!el || !state) return;
+    if (el.dataset.cook !== undefined && el.closest("#filter")) {
+      filter = el.dataset.cook; safeSet("tg-cook", filter); renderFilter(); renderAll(true);
+    } else if (el.dataset.dish) {
+      selected = Number(el.dataset.dish); safeSet("tg-dish", selected); renderAll(true); window.scrollTo({ top: 0 });
+    } else if (el.dataset.goto) {
+      selected = Number(el.dataset.goto); safeSet("tg-dish", selected); renderAll(true); window.scrollTo({ top: 0 });
+    } else if (el.dataset.done) {
+      const key = el.dataset.done, step = allSteps().find(s => s.key === key);
+      const value = step ? !isDone(step) : true;
+      pendingDone.set(key, value); handled.set(key, Date.now()); renderAll(true);
+      act(() => post("/thanksgiving/api/steps/done", { key, done: value }));
+    } else if (el.dataset.ack) {
+      handled.set(el.dataset.ack, Date.now()); renderAll();
+      act(() => post("/thanksgiving/api/alerts", { key: el.dataset.ack, state: "ack" }));
+    } else if (el.dataset.snooze) {
+      handled.set(el.dataset.snooze, Date.now()); renderAll();
+      act(() => post("/thanksgiving/api/alerts", { key: el.dataset.snooze, state: "snooze", minutes: 5 }));
+    } else if (el.dataset.timer) {
+      const minutes = Number(el.dataset.timer), dish = state.dishes.find(d => d.id === selected);
+      state.timers.push({ id: -Date.now(), dish_id: dish && dish.id, label: el.dataset.label || "Timer", ends_ms: now() + minutes * 60000 });
+      renderAll();
+      act(() => post("/thanksgiving/api/timers", { dish_id: dish && dish.id, label: el.dataset.label, minutes }));
+    } else if (el.dataset.dismissTimer) {
+      const id = Number(el.dataset.dismissTimer);
+      handled.set("timer:" + id, Date.now()); state.timers = state.timers.filter(t => t.id !== id); renderAll();
+      if (id > 0) act(() => post(`/thanksgiving/api/timers/${id}/dismiss`));
+    } else if (el.dataset.got) {
+      const k = el.dataset.got; got.has(k) ? got.delete(k) : got.add(k); safeSet("tg-got", JSON.stringify([...got]));
+      el.classList.toggle("got");
+    }
+  });
+  $("timer-form").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const minutes = Number($("timer-min").value);
+    if (!minutes) return;
+    const dish = state && state.dishes.find(d => d.id === selected);
+    $("timer-min").value = "";
+    act(() => post("/thanksgiving/api/timers", { dish_id: dish && dish.id, label: dish ? dish.name : "Timer", minutes }));
+  });
+  $("report-form").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const text = ev.target.text.value.trim();
+    if (!text) return;
+    post("/thanksgiving/api/feedback", { text, page: "/thanksgiving/cook" })
+      .then(() => { ev.target.text.value = ""; $("report-sent").hidden = false; })
+      .catch(() => { $("offline").hidden = false; });
+  });
+
+  poll();
+  setInterval(poll, POLL_MS);
+  setInterval(() => renderAll(), 1000);
+})();
+</script>
+{% endblock %}

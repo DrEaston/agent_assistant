@@ -1,0 +1,356 @@
+{% extends "tg_base.html" %}
+{% block title %}Thanksgiving plan{% endblock %}
+{% block head %}
+<style>
+.top { background: #2a2118; color: #fff; padding: 1rem 1rem 0; }
+.top-inner, .wrap { max-width: 72rem; margin: 0 auto; }
+.top h1 { font-size: 1.4rem; }
+.top .sub { color: #e7dccd; margin-top: .2rem; }
+.top .row { justify-content: space-between; }
+.cook-link { background: var(--accent); border-color: var(--accent); color: #fff; font-size: 1.05rem; }
+.tabs { display: flex; gap: .25rem; margin-top: .9rem; overflow-x: auto; }
+.tabs a { color: #e7dccd; text-decoration: none; padding: .6rem .9rem; border-radius: 10px 10px 0 0; font-weight: 600; white-space: nowrap; }
+.tabs a:hover { background: rgba(255,255,255,.08); color: #fff; }
+.wrap { padding: 1.25rem 1rem; }
+section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
+.section-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: .6rem; margin-bottom: .75rem; }
+.now-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .75rem; }
+.now-grid h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: .4rem; }
+.now-item { padding: .35rem 0; border-top: 1px solid var(--line); }
+.now-item:first-of-type { border-top: 0; }
+.overdue h3 { color: var(--warn); }
+.day { margin-bottom: 1.25rem; }
+.day-head { display: flex; gap: .6rem; align-items: baseline; padding: .5rem 0; position: sticky; top: 0; background: var(--bg); z-index: 1; }
+.day-head h3 { font-size: 1.1rem; }
+.task { display: grid; grid-template-columns: 44px 5.5rem 1fr; gap: .25rem .75rem; align-items: start;
+  padding: .6rem .5rem; border-bottom: 1px solid var(--line); }
+.task.done .t-title, .task.done .t-time { color: var(--muted); text-decoration: line-through; }
+.task.overdue .t-time { color: var(--warn); font-weight: 700; }
+.task form { margin: 0; }
+.check { width: 40px; height: 40px; min-height: 40px; padding: 0; border-radius: 10px; font-size: 1.2rem; }
+.task.done .check { background: var(--ok-soft); border-color: #bcd9a0; color: var(--ok); }
+.t-time { font-variant-numeric: tabular-nums; font-weight: 600; padding-top: .5rem; }
+.t-title { font-weight: 600; }
+.t-meta { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .25rem; align-items: center; }
+.t-detail { color: var(--muted); font-size: .9rem; margin-top: .2rem; }
+.filter { display: flex; gap: .4rem; flex-wrap: wrap; }
+.filter button[aria-pressed=true] { background: #2a2118; color: #fff; border-color: #2a2118; }
+.chart { position: relative; }
+.chart-lane { display: grid; grid-template-columns: 4.5rem 1fr; gap: .5rem; align-items: center; margin: .3rem 0; }
+.chart-row { position: relative; height: 30px; background: #f6f0e8; border-radius: 6px; }
+.bar { position: absolute; top: 3px; height: 24px; border-radius: 5px; color: #fff; font-size: .72rem; font-weight: 700;
+  padding: 0 .35rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; line-height: 24px; }
+.bar.oven { background: var(--oven); } .bar.stove { background: var(--stove); }
+.ticks { position: relative; height: 1.2rem; margin-left: 5rem; font-size: .72rem; color: var(--muted); }
+.ticks span { position: absolute; transform: translateX(-50%); }
+.add-grid { display: flex; flex-wrap: wrap; gap: .4rem; }
+.dishes { display: grid; grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); gap: .9rem; }
+.dish h3 { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.dish-steps { margin: .5rem 0 0; padding: 0; list-style: none; font-size: .9rem; }
+.dish-steps li { padding: .15rem 0; display: flex; gap: .5rem; }
+.dish-steps .when { color: var(--muted); min-width: 7.5rem; font-variant-numeric: tabular-nums; }
+.editor { margin-top: .75rem; border-top: 1px solid var(--line); padding-top: .75rem; }
+.editor summary { font-weight: 600; color: var(--accent); }
+.step-edit { display: grid; grid-template-columns: 1.6fr 1fr 2.5fr .8fr 1.2fr .8fr 1.2fr auto; gap: .35rem; align-items: center;
+  padding: .4rem 0; border-bottom: 1px dashed var(--line); }
+.step-edit input, .step-edit select { min-height: 38px; padding: .3rem .45rem; width: 100%; }
+.step-edit .detail { grid-column: 1 / -1; }
+.step-head { font-size: .75rem; color: var(--muted); font-weight: 700; border-bottom: 0; padding-bottom: 0; }
+.editor-wide { grid-column: 1 / -1; }
+.dish-open { grid-column: 1 / -1; }
+.grocery-section h3 { margin: 1rem 0 .4rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.grocery { display: flex; gap: .6rem; align-items: center; padding: .35rem 0; border-bottom: 1px solid var(--line); }
+.grocery.done .g-text { color: var(--muted); text-decoration: line-through; }
+.grocery .g-from { color: var(--muted); font-size: .8rem; }
+@media (max-width: 720px) {
+  .task { grid-template-columns: 44px 1fr; }
+  .t-time { grid-column: 2; padding-top: 0; }
+  .t-body { grid-column: 2; }
+  .step-edit { grid-template-columns: 1fr 1fr; }
+  .step-edit .s-title { grid-column: 1 / -1; }
+  .step-head { display: none; }
+  .dishes { grid-template-columns: 1fr; }
+}
+</style>
+{% endblock %}
+{% block body %}
+{% macro cook_pill(name) -%}
+  {%- if name %}<span class="pill cook-pill" style="background: {{ colors.get(name, '#6b7280') }}">{{ name }}</span>{% endif -%}
+{%- endmacro %}
+{% macro kind_pill(task) -%}
+  {%- if task.kind in ('oven', 'stove', 'passive', 'check', 'shop') -%}
+  <span class="pill kind-{{ task.kind }}">{{ step_kinds[task.kind] }}{% if task.temp %} {{ task.temp }}°F{% endif %}</span>
+  {%- endif -%}
+{%- endmacro %}
+
+<header class="top">
+  <div class="top-inner">
+    <div class="row">
+      <div>
+        <h1>Thanksgiving</h1>
+        <div class="sub">Dinner {{ planner.short_date(dinner) }} at {{ planner.format_clock(dinner) }}
+          {%- if days_until > 1 %} · {{ days_until }} days to go{% elif days_until == 1 %} · tomorrow{% elif days_until == 0 %} · today{% endif %}</div>
+      </div>
+      <a class="button cook-link" href="/thanksgiving/cook">Open cook mode →</a>
+    </div>
+    <nav class="tabs" aria-label="Sections">
+      <a href="#now">Now</a><a href="#timeline">Timeline</a><a href="#menu">Menu</a>
+      <a href="#shopping">Shopping</a><a href="#settings">Settings</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+<section id="now">
+  <div class="now-grid">
+    {% if status.overdue %}
+    <div class="card overdue"><h3>Overdue</h3>
+      {% for t in status.overdue[-4:] %}<div class="now-item"><strong>{{ t.title }}</strong>
+        <div class="small muted">{{ t.dish_name }} · was {{ planner.short_date(t.start) }} {{ planner.format_clock(t.start) }}</div></div>{% endfor %}
+      {% if status.overdue|length > 4 %}<p class="small muted">+ {{ status.overdue|length - 4 }} more in the timeline</p>{% endif %}
+    </div>
+    {% endif %}
+    <div class="card"><h3>Happening now</h3>
+      {% for t in status.current %}<div class="now-item"><strong>{{ t.title }}</strong>
+        <div class="small muted">{{ t.dish_name }} · until {{ planner.format_clock(t.end) }}</div></div>
+      {% else %}<p class="muted small">Nothing in progress.</p>{% endfor %}
+    </div>
+    <div class="card"><h3>Up next</h3>
+      {% for t in status.next %}<div class="now-item"><strong>{{ t.title }}</strong> {{ cook_pill(t.cook) }}
+        <div class="small muted">{{ t.dish_name }} · {{ planner.short_date(t.start) }} {{ planner.format_clock(t.start) }}</div></div>
+      {% else %}<p class="muted small">All done. Enjoy dinner!</p>{% endfor %}
+    </div>
+  </div>
+  {% if conflicts %}
+  <div class="banner warn stack" style="margin-top:.9rem">
+    <strong>Schedule clashes to fix</strong>
+    {% for w in conflicts %}<div class="small">{{ planner.short_date(w.when) }} {{ planner.format_clock(w.when) }}: {{ w.text }}</div>{% endfor %}
+  </div>
+  {% endif %}
+  {% if not cooks or dishes|selectattr('cook')|list|length < dishes|length %}
+  <p class="small muted" style="margin-top:.6rem">Tip: assign each dish to a cook in the Menu so cook mode can show “my steps”.</p>
+  {% endif %}
+</section>
+
+<section id="timeline">
+  <div class="section-head">
+    <h2>Timeline</h2>
+    <div class="filter" role="group" aria-label="Show steps for">
+      <button type="button" data-filter="" aria-pressed="true">Everyone</button>
+      {% for c in cooks %}<button type="button" data-filter="{{ c }}" aria-pressed="false">{{ c }}</button>{% endfor %}
+    </div>
+  </div>
+  {% for day in days %}
+  <div class="day">
+    <div class="day-head"><h3>{{ day.label }}</h3><span class="muted small">{{ day.subtitle }}</span></div>
+    {% if day.date == dinner.date() and dinner_day_chart %}
+    <div class="card chart" style="margin-bottom:.6rem">
+      <div class="small muted" style="margin-bottom:.3rem">Oven and stove on Thanksgiving</div>
+      {% for lane_name, rows in (('Oven', dinner_day_chart.oven), ('Stove', dinner_day_chart.stove)) %}
+        {% for row in rows %}
+        <div class="chart-lane"><span class="small muted">{% if loop.first %}{{ lane_name }}{% endif %}</span>
+          <div class="chart-row">{% for b in row %}<div class="bar {{ b.kind }}" style="left: {{ b.left }}%; width: {{ b.width }}%"
+              title="{{ b.dish_name }}: {{ b.title }} {{ planner.format_clock(b.start) }}–{{ planner.format_clock(b.end) }}">{{ b.dish_name }}{% if b.temp %} {{ b.temp }}°{% endif %}</div>{% endfor %}</div></div>
+        {% endfor %}
+      {% endfor %}
+      <div class="ticks">{% for t in dinner_day_chart.ticks %}<span style="left: {{ t.left }}%">{{ t.label }}</span>{% endfor %}</div>
+    </div>
+    {% endif %}
+    {% for t in day.tasks %}
+    {% set is_overdue = not t.done and t.end <= now and t.kind != 'passive' %}
+    <div class="task{% if t.done %} done{% endif %}{% if is_overdue %} overdue{% endif %}" id="task-{{ t.key|replace(':', '-') }}" data-cook="{{ t.cook }}">
+      <form method="post" action="/thanksgiving/steps/toggle">
+        <input type="hidden" name="key" value="{{ t.key }}">
+        <input type="hidden" name="anchor" value="task-{{ t.key|replace(':', '-') }}">
+        {% if not t.done %}<input type="hidden" name="done" value="1">{% endif %}
+        <button class="check" type="submit" aria-label="{% if t.done %}Mark not done{% else %}Mark done{% endif %}: {{ t.title }}">{% if t.done %}✓{% endif %}</button>
+      </form>
+      <div class="t-time">{{ planner.format_clock(t.start) }}</div>
+      <div class="t-body">
+        <div class="t-title">{{ t.title }}</div>
+        <div class="t-meta"><span class="small muted">{{ t.dish_name }}</span>{{ cook_pill(t.cook) }}{{ kind_pill(t) }}
+          {% if t.minutes %}<span class="small muted">{{ planner.format_duration(t.minutes) }}</span>{% endif %}</div>
+        {% if t.detail %}<div class="t-detail">{{ t.detail }}</div>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">Add dishes in the Menu to build the timeline.</p>
+  {% endfor %}
+</section>
+
+<section id="menu">
+  <div class="section-head"><h2>Menu</h2></div>
+  <div class="card stack" style="margin-bottom:1rem">
+    <strong>Add a dish</strong>
+    <form method="post" action="/thanksgiving/dishes/add" class="add-grid">
+      {% for key, label in presets %}<button type="submit" name="preset" value="{{ key }}">+ {{ label }}</button>{% endfor %}
+    </form>
+    <div class="row">
+      {% if library %}
+      <form method="post" action="/thanksgiving/dishes/add" class="row">
+        <select name="meal_id" aria-label="Recipe from the Kitchen library" required>
+          <option value="">From your Kitchen recipes…</option>
+          {% for r in library %}<option value="{{ r.id }}">{{ r.title }}</option>{% endfor %}
+        </select>
+        <button type="submit">Add recipe</button>
+      </form>
+      {% endif %}
+      <form method="post" action="/thanksgiving/dishes/add" class="row">
+        <input type="text" name="name" placeholder="Or type a dish name" aria-label="Dish name" required>
+        <button type="submit">Add</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="dishes">
+  {% for dish in dishes %}
+    <article class="card dish" id="dish-{{ dish.id }}">
+      <h3>{{ dish.name }} {{ cook_pill(dish.cook) }}{% if not dish.cook %}<span class="pill">Unassigned</span>{% endif %}</h3>
+      {% if dish.notes %}<p class="small muted" style="margin:.3rem 0 0">{{ dish.notes }}</p>{% endif %}
+      <ul class="dish-steps">
+        {% for t in tasks if t.dish_id == dish.id %}
+          {% if loop.index <= 6 %}<li><span class="when">{{ planner.short_date(t.start)[:3] }} {{ planner.format_clock(t.start) }}</span><span>{{ t.title }}</span></li>{% endif %}
+          {% if loop.last and loop.length > 6 %}<li class="muted">+ {{ loop.length - 6 }} more steps</li>{% endif %}
+        {% endfor %}
+      </ul>
+
+      <details class="editor">
+        <summary>Edit dish, recipe, and steps</summary>
+        <form method="post" action="/thanksgiving/dishes/{{ dish.id }}/save" class="stack" style="margin-top:.75rem">
+          <div class="row">
+            <div class="field" style="flex:2 1 12rem"><label>Name</label><input type="text" name="name" value="{{ dish.name }}"></div>
+            <div class="field"><label>Cook</label>
+              <select name="cook"><option value="">Unassigned</option>
+                {% for c in cooks %}<option value="{{ c }}" {% if dish.cook == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+              </select></div>
+            <div class="field"><label>Type</label>
+              <select name="category">{% for value, label in categories %}<option value="{{ value }}" {% if dish.category == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+          </div>
+          <div class="field"><label>Steps</label>
+            <div class="step-edit step-head"><span>Day</span><span>Time</span><span>Step</span><span>Min</span><span>Type</span><span>°F</span><span>Who</span><span>Remove</span></div>
+            {% for step in dish.steps %}
+              {% set when = planner.resolve_anchor(step.anchor, dinner) %}
+              <div class="step-edit">
+                <input type="hidden" name="step_id" value="{{ step.id }}">
+                <select name="step_day" aria-label="Day">{% for d in day_choices %}<option value="{{ d.offset }}" {% if planner.day_offset_of(when, dinner) == d.offset %}selected{% endif %}>{{ d.label }}</option>{% endfor %}</select>
+                <input type="time" name="step_time" value="{{ when.strftime('%H:%M') }}" aria-label="Time">
+                <input class="s-title" type="text" name="step_title" value="{{ step.title }}" aria-label="Step">
+                <input type="number" name="step_minutes" value="{{ step.minutes }}" min="0" aria-label="Minutes">
+                <select name="step_kind" aria-label="Type">{% for k, label in step_kinds.items() %}<option value="{{ k }}" {% if step.kind == k %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+                <input type="number" name="step_temp" value="{{ step.temp or '' }}" min="0" placeholder="°F" aria-label="Oven temperature">
+                <select name="step_cook" aria-label="Who"><option value="">Dish cook</option>{% for c in cooks %}<option value="{{ c }}" {% if step.cook == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select>
+                <label class="small" style="font-weight:500"><input type="checkbox" name="step_remove" value="{{ step.id }}"> Remove</label>
+                <input class="detail" type="text" name="step_detail" value="{{ step.detail }}" placeholder="Note (optional)" aria-label="Step note">
+              </div>
+            {% endfor %}
+            <div class="step-edit">
+              <select name="new_step_day" aria-label="New step day">{% for d in day_choices %}<option value="{{ d.offset }}" {% if d.offset == 0 %}selected{% endif %}>{{ d.label }}</option>{% endfor %}</select>
+              <input type="time" name="new_step_time" value="12:00" aria-label="New step time">
+              <input class="s-title" type="text" name="new_step_title" placeholder="+ Add a step" aria-label="New step">
+              <input type="number" name="new_step_minutes" placeholder="Min" min="0" aria-label="New step minutes">
+              <select name="new_step_kind" aria-label="New step type">{% for k, label in step_kinds.items() %}<option value="{{ k }}">{{ label }}</option>{% endfor %}</select>
+              <input type="number" name="new_step_temp" placeholder="°F" min="0" aria-label="New step oven temperature">
+            </div>
+            <p class="small muted">Thanksgiving-day steps move with dinner time. Earlier days keep their clock time.</p>
+          </div>
+          <div class="field"><label>Ingredients (one per line)</label><textarea name="ingredients_text">{{ dish.ingredients_text }}</textarea></div>
+          <div class="field"><label>Recipe steps (one per line)</label><textarea name="instructions_text">{{ dish.instructions_text }}</textarea></div>
+          <div class="field"><label>Notes</label><input type="text" name="notes" value="{{ dish.notes }}"></div>
+          <div class="row"><button class="primary" type="submit">Save dish</button></div>
+        </form>
+        {% if dish.category == 'turkey' %}
+        <form method="post" action="/thanksgiving/dishes/{{ dish.id }}/turkey" class="row card" style="margin-top:.75rem">
+          <div class="field"><label>Turkey weight (lb)</label><input type="number" step="0.5" name="weight_lb" value="13" min="4" max="40"></div>
+          <label class="row" style="font-weight:500"><input type="checkbox" name="frozen" value="1" checked> Frozen (needs thawing)</label>
+          <button type="submit">Recalculate turkey timing</button>
+          <span class="small muted">Replaces the turkey steps with times for this weight.</span>
+        </form>
+        {% endif %}
+        <form method="post" action="/thanksgiving/dishes/{{ dish.id }}/delete" style="margin-top:.75rem">
+          <button class="quiet danger" type="submit" data-confirm="Delete {{ dish.name }} and its steps?">Delete dish</button>
+        </form>
+      </details>
+    </article>
+  {% else %}
+    <p class="muted">No dishes yet. Add some above.</p>
+  {% endfor %}
+  </div>
+</section>
+
+<section id="shopping">
+  <div class="section-head"><h2>Shopping list</h2>
+    <form method="post" action="/thanksgiving/groceries/add" class="row">
+      <input type="text" name="text" placeholder="Add an item" aria-label="Add a shopping item" required>
+      <button type="submit">Add</button>
+    </form>
+  </div>
+  <div class="card">
+  {% for section in groceries %}
+    <div class="grocery-section"><h3>{{ section.name }}</h3>
+    {% for item in section["items"] %}
+      {% set got = item.key in grocery_checked %}
+      <div class="grocery{% if got %} done{% endif %}">
+        <form method="post" action="/thanksgiving/groceries/toggle">
+          <input type="hidden" name="key" value="{{ item.key }}">{% if not got %}<input type="hidden" name="done" value="1">{% endif %}
+          <button class="check" type="submit" aria-label="{% if got %}Not bought{% else %}Got it{% endif %}: {{ item.text }}">{% if got %}✓{% endif %}</button>
+        </form>
+        <div style="flex:1"><span class="g-text">{{ item.text }}</span>
+          {% if item.dishes %}<div class="g-from">{{ item.dishes|join(', ') }}</div>{% endif %}</div>
+        {% if item.extra_id %}<form method="post" action="/thanksgiving/groceries/{{ item.extra_id }}/delete"><button class="quiet" type="submit" aria-label="Remove {{ item.text }}">✕</button></form>{% endif %}
+      </div>
+    {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted">Ingredients from your dishes show up here.</p>
+  {% endfor %}
+  </div>
+</section>
+
+<section id="settings">
+  <div class="section-head"><h2>Settings</h2></div>
+  <form method="post" action="/thanksgiving/settings" class="card row">
+    <div class="field"><label>Dinner date</label><input type="date" name="dinner_date" value="{{ dinner.strftime('%Y-%m-%d') }}" required></div>
+    <div class="field"><label>Dinner time</label><input type="time" name="dinner_time" value="{{ dinner.strftime('%H:%M') }}" required></div>
+    <div class="field" style="flex:1 1 14rem"><label>Cooks (comma separated)</label><input type="text" name="cooks" value="{{ plan.cooks }}"></div>
+    <div class="field"><label>Ovens</label><select name="ovens"><option value="1" {% if plan.ovens == 1 %}selected{% endif %}>1</option><option value="2" {% if plan.ovens == 2 %}selected{% endif %}>2</option></select></div>
+    <button class="primary" type="submit">Save</button>
+  </form>
+</section>
+</main>
+
+<script>
+(function () {
+  // Cook filter for the timeline (remembered per device).
+  const buttons = document.querySelectorAll("[data-filter]");
+  function apply(name) {
+    buttons.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.filter === name)));
+    document.querySelectorAll(".task").forEach(row => {
+      row.hidden = !!name && row.dataset.cook !== name && row.dataset.cook !== "";
+    });
+    try { localStorage.setItem("tg-filter", name); } catch (e) {}
+  }
+  buttons.forEach(b => b.addEventListener("click", () => apply(b.dataset.filter)));
+  let saved = "";
+  try { saved = localStorage.getItem("tg-filter") || ""; } catch (e) {}
+  if ([...buttons].some(b => b.dataset.filter === saved)) apply(saved);
+
+  // In-page confirmation for deletes (no browser dialogs).
+  document.querySelectorAll("[data-confirm]").forEach(btn => {
+    btn.addEventListener("click", (event) => {
+      if (btn.dataset.armed) return;
+      event.preventDefault();
+      btn.dataset.armed = "1";
+      btn.textContent = "Tap again to delete";
+      setTimeout(() => { delete btn.dataset.armed; btn.textContent = "Delete dish"; }, 4000);
+    });
+  });
+
+  // Open the editor for a dish linked by #dish-N.
+  const target = location.hash && document.querySelector(location.hash + " details.editor");
+  if (target) target.open = true;
+})();
+</script>
+{% endblock %}

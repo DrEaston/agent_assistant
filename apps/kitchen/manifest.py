@@ -18,6 +18,7 @@ APP = {
     "subtitle": "Plan meals, build grocery lists, and interactive recipes",
     "home_label": "Kitchen Home",
     "nav_items": (
+        {"label": "Thanksgiving", "url": "/thanksgiving"},
         {"label": "Meal Plan", "url": "/apps/recipes"},
         {"label": "Past Grocery Lists", "url": "/apps/recipes/grocery-lists"},
         {"label": "Create New Meal", "url": "/apps/recipes/create-meal"},
