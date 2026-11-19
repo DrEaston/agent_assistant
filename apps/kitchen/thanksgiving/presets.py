@@ -18,9 +18,10 @@ CATEGORIES = (
 )
 
 
-def _s(step_id, anchor, title, minutes=5, kind="hands", temp=0, detail=""):
+def _s(step_id, anchor, title, minutes=5, kind="hands", temp=0, detail="", section=""):
+    """A step. `section` names the recipe section (heading) this step needs, e.g. "Crust"."""
     return {"id": step_id, "anchor": anchor, "title": title, "minutes": minutes, "kind": kind,
-            "temp": temp, "detail": detail, "cook": ""}
+            "temp": temp, "detail": detail, "cook": "", "section": section}
 
 
 TURKEY_INGREDIENTS = """1 pre-brined turkey (13 lb), thawed
@@ -99,16 +100,43 @@ Bake 25 minutes at 500°F with the lid on.
 Lid off, 450°F, 15 minutes. Go 3 to 5 minutes longer for a darker crust (205 to 210°F inside).
 Cool at least 1 hour before slicing."""
 
-PIE_INGREDIENTS = """1 pie shell (made ahead and frozen in the plate)
+# Lines ending in ":" are section headings (shown as headings, skipped on the shopping list).
+PIE_INGREDIENTS = """Crust:
+1 1/4 cups (160 g) all-purpose flour
+1 tsp sugar
+1/2 tsp salt
+1 stick (113 g) very cold unsalted butter
+4 to 6 tbsp ice water
+Filling:
 15 oz can pumpkin puree (not pie filling)
 3/4 cup sugar
 2 tsp pumpkin pie spice
 1/2 tsp salt
 2 large eggs
 12 oz can evaporated milk
+To serve:
 whipped cream"""
 
-PIE_INSTRUCTIONS = """Shell: roll, fit, and crimp. Wrap tightly and freeze in the plate. Bake from frozen.
+PIE_INSTRUCTIONS = """Crust:
+Whisk the flour, sugar, and salt in a bowl. Cut the cold butter into 1/2-inch cubes.
+Toss the butter in the flour, then press each cube flat between your fingertips. Stop when you have pea-size bits and some flat, coin-size pieces. Those flat pieces are what make it flaky.
+Drizzle in 4 tbsp ice water and toss with a fork. Add more, 1 tbsp at a time, just until a handful holds together when squeezed. It should look shaggy, not smooth.
+For extra layers: press the dough into a rough rectangle, fold it in thirds like a letter, then pat it into a disk.
+Wrap and refrigerate at least 1 hour (or 30 minutes in the freezer).
+Roll on a floured counter into a 12-inch circle, turning it often so it doesn't stick. If it gets soft or sticky, chill it 10 minutes.
+Ease it into a 9-inch pie plate without stretching. Trim to a 1/2-inch overhang, fold the edge under, and crimp.
+Wrap the shell tightly in plastic, then foil, and freeze it in the plate. Bake it from frozen.
+Blind bake:
+Line the frozen shell with parchment and fill it with pie weights or dried beans. Bake at 400°F for 20 minutes.
+Lift out the weights and bake 5 to 10 minutes more, until the bottom looks dry.
+Filling and bake:
+Whisk the pumpkin, sugar, spice, salt, eggs, and evaporated milk until smooth. Pour into the warm shell.
+Bake at 425°F for 15 minutes.
+Lower to 350°F and bake 40 to 50 minutes, until the edges are set and the center barely jiggles. Cover the crust edge with foil if it browns too fast.
+Cool on a rack about 2 hours, then refrigerate loosely covered. Serve with whipped cream."""
+
+# Text of earlier versions, so saved dishes that were never edited can be upgraded in place.
+OLD_PIE_INSTRUCTIONS = """Shell: roll, fit, and crimp. Wrap tightly and freeze in the plate. Bake from frozen.
 Blind bake: line the frozen shell with parchment and pie weights. Bake at 400°F for 20 minutes.
 Remove the weights and bake 5 to 10 minutes more, until the bottom looks dry.
 Whisk the pumpkin, sugar, spice, salt, eggs, and evaporated milk until smooth. Pour into the warm shell.
@@ -144,15 +172,36 @@ def _sourdough_steps():
 
 def _pie_steps():
     return [
-        _s("shell", "D-7 20:00", "Make the pie shell and freeze it in the plate", 30),
-        _s("blind1", "D-1 11:00", "Blind bake the frozen shell with weights", 20, "oven", 400),
-        _s("filling", "D-1 11:05", "Whisk the pumpkin filling", 10),
-        _s("blind2", "D-1 11:20", "Weights out, bake until the bottom is dry", 8, "oven", 400),
-        _s("bake1", "D-1 11:30", "Pour filling in, bake at 425°F", 15, "oven", 425),
-        _s("bake2", "D-1 11:45", "Lower to 350°F and bake until barely jiggly", 45, "oven", 350),
+        _s("dough", "D-7 19:00", "Make the butter crust dough and chill it", 20,
+           detail="Keep everything cold. Chill at least 1 hour.", section="Crust"),
+        _s("shell", "D-7 20:15", "Roll, crimp, and freeze the pie shell", 20,
+           detail="Freeze it in the plate, wrapped in plastic and foil.", section="Crust"),
+        _s("blind1", "D-1 11:00", "Blind bake the frozen shell with weights", 20, "oven", 400, section="Blind bake"),
+        _s("filling", "D-1 11:05", "Whisk the pumpkin filling", 10, section="Filling"),
+        _s("blind2", "D-1 11:20", "Weights out, bake until the bottom is dry", 8, "oven", 400, section="Blind bake"),
+        _s("bake1", "D-1 11:30", "Pour filling in, bake at 425°F", 15, "oven", 425, section="Filling"),
+        _s("bake2", "D-1 11:45", "Lower to 350°F and bake until barely jiggly", 45, "oven", 350, section="Filling"),
         _s("cool", "D-1 12:30", "Cool the pie on a rack", 120, "passive"),
         _s("chill", "D-1 14:30", "Refrigerate the pie", 2),
     ]
+
+
+def upgrade_saved_dish(dish):
+    """Return updated fields for a saved preset dish whose recipe was never edited, else None."""
+    if dish.get("name") == "Pumpkin pie" and (dish.get("instructions_text") or "").strip() == OLD_PIE_INSTRUCTIONS:
+        old = {s.get("id"): s for s in dish.get("steps") or []}
+        steps = []
+        for step in _pie_steps():
+            if step["id"] in old and step["id"] not in ("dough", "shell"):
+                # Keep the user's timing and assignments on steps that already existed.
+                kept = dict(old[step["id"]])
+                kept["section"] = step["section"]
+                steps.append(kept)
+            else:
+                step["cook"] = old.get("shell", {}).get("cook", "")
+                steps.append(step)
+        return {"ingredients_text": PIE_INGREDIENTS, "instructions_text": PIE_INSTRUCTIONS, "steps": steps}
+    return None
 
 
 def _potato_steps():

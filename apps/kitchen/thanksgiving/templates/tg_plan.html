@@ -33,6 +33,21 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
 .t-title { font-weight: 600; }
 .t-meta { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .25rem; align-items: center; }
 .t-detail { color: var(--muted); font-size: .9rem; margin-top: .2rem; }
+.t-more > summary { list-style: none; cursor: pointer; }
+.t-more > summary::-webkit-details-marker { display: none; }
+.t-open { display: inline-block; margin-left: .4rem; padding: 0 .5rem; border-radius: 999px; font-size: .75rem;
+  font-weight: 700; color: var(--accent); background: var(--accent-soft); vertical-align: middle; }
+.t-open::after { content: " ▾"; }
+.t-more[open] .t-open::after { content: " ▴"; }
+.recipe-view { display: grid; grid-template-columns: minmax(12rem, 1fr) 2fr; gap: .5rem 1.5rem; margin-top: .6rem;
+  padding: .8rem 1rem; background: #fffaf4; border: 1px solid var(--line); border-radius: 12px; font-size: .95rem; }
+.recipe-view h4 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 .3rem; }
+.recipe-view h5 { font-size: .95rem; margin: .6rem 0 .2rem; }
+.recipe-view ul, .recipe-view ol { margin: 0; padding-left: 1.2rem; }
+.recipe-view li { padding: .15rem 0; }
+.full-recipe, .view-recipe { margin-top: .6rem; }
+.full-recipe > summary, .view-recipe > summary { font-weight: 600; color: var(--accent); }
+@media (max-width: 720px) { .recipe-view { grid-template-columns: 1fr; } }
 .filter { display: flex; gap: .4rem; flex-wrap: wrap; }
 .filter button[aria-pressed=true] { background: #2a2118; color: #fff; border-color: #2a2118; }
 .chart { position: relative; }
@@ -76,6 +91,22 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
 {% block body %}
 {% macro cook_pill(name) -%}
   {%- if name %}<span class="pill cook-pill" style="background: {{ colors.get(name, '#6b7280') }}">{{ name }}</span>{% endif -%}
+{%- endmacro %}
+{% macro render_sections(ing, ins) -%}
+<div class="recipe-view">
+  {% if ing %}<div><h4>Ingredients</h4>{% for s in ing %}{% if s.heading %}<h5>{{ s.heading }}</h5>{% endif %}<ul>{% for line in s.lines %}<li>{{ line }}</li>{% endfor %}</ul>{% endfor %}</div>{% endif %}
+  {% if ins %}<div><h4>How to</h4>{% for s in ins %}{% if s.heading %}<h5>{{ s.heading }}</h5>{% endif %}<ol>{% for line in s.lines %}<li>{{ line }}</li>{% endfor %}</ol>{% endfor %}</div>{% endif %}
+</div>
+{%- endmacro %}
+{% macro recipe_block(dish, section='') -%}
+  {%- set ing = planner.sections_for_step(dish.ingredient_sections, section) -%}
+  {%- set ins = planner.sections_for_step(dish.instruction_sections, section) -%}
+  {%- if ing or ins -%}
+    {{ render_sections(ing, ins) }}
+    <details class="full-recipe"><summary>Full {{ dish.name|lower }} recipe</summary>{{ render_sections(dish.ingredient_sections, dish.instruction_sections) }}</details>
+  {%- else -%}
+    {{ render_sections(dish.ingredient_sections, dish.instruction_sections) }}
+  {%- endif -%}
 {%- endmacro %}
 {% macro kind_pill(task) -%}
   {%- if task.kind in ('oven', 'stove', 'passive', 'check', 'shop') -%}
@@ -167,11 +198,15 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
         <button class="check" type="submit" aria-label="{% if t.done %}Mark not done{% else %}Mark done{% endif %}: {{ t.title }}">{% if t.done %}✓{% endif %}</button>
       </form>
       <div class="t-time">{{ planner.format_clock(t.start) }}</div>
+      {% set d = dishes_by_id.get(t.dish_id) %}
       <div class="t-body">
-        <div class="t-title">{{ t.title }}</div>
+        {% set has_recipe = d and (d.ingredient_sections or d.instruction_sections) %}
+        {% if has_recipe %}<details class="t-more"><summary>{% endif %}
+        <div class="t-title">{{ t.title }}{% if has_recipe %} <span class="t-open">Recipe</span>{% endif %}</div>
         <div class="t-meta"><span class="small muted">{{ t.dish_name }}</span>{{ cook_pill(t.cook) }}{{ kind_pill(t) }}
           {% if t.minutes %}<span class="small muted">{{ planner.format_duration(t.minutes) }}</span>{% endif %}</div>
         {% if t.detail %}<div class="t-detail">{{ t.detail }}</div>{% endif %}
+        {% if has_recipe %}</summary>{{ recipe_block(d, t.section) }}</details>{% endif %}
       </div>
     </div>
     {% endfor %}
@@ -216,6 +251,10 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
           {% if loop.last and loop.length > 6 %}<li class="muted">+ {{ loop.length - 6 }} more steps</li>{% endif %}
         {% endfor %}
       </ul>
+
+      {% if dish.ingredient_sections or dish.instruction_sections %}
+      <details class="view-recipe"><summary>View recipe</summary>{{ render_sections(dish.ingredient_sections, dish.instruction_sections) }}</details>
+      {% endif %}
 
       <details class="editor">
         <summary>Edit dish, recipe, and steps</summary>

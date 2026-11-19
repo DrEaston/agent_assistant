@@ -99,7 +99,11 @@ def plan_context(plan, now=None):
     done = s.get_checked(plan["id"], "step")
     for task in tasks:
         task["done"] = task["key"] in done
+    for dish in dishes:
+        dish["ingredient_sections"] = planner.recipe_sections(dish["ingredients_text"])
+        dish["instruction_sections"] = planner.recipe_sections(dish["instructions_text"])
     return {
+        "dishes_by_id": {d["id"]: d for d in dishes},
         "plan": plan,
         "dinner": dinner,
         "now": now,
@@ -245,6 +249,7 @@ async def save_dish(dish_id: int, request: Request):
     temps, step_cooks = form.getlist("step_temp"), form.getlist("step_cook")
     details = form.getlist("step_detail")
     removed = set(form.getlist("step_remove"))
+    existing_steps = {s.get("id"): s for s in existing["steps"]}
     steps = []
     for i, step_id in enumerate(ids):
         if step_id in removed or not (titles[i] if i < len(titles) else "").strip():
@@ -258,6 +263,7 @@ async def save_dish(dish_id: int, request: Request):
             "temp": max(_int(temps, i), 0),
             "cook": (step_cooks[i] if i < len(step_cooks) else "").strip(),
             "detail": (details[i] if i < len(details) else "").strip()[:300],
+            "section": existing_steps.get(step_id, {}).get("section", ""),
         })
     if (form.get("new_step_title") or "").strip():
         steps.append({
@@ -388,7 +394,7 @@ def cook_state():
             "temp": task["temp"], "minutes": task["minutes"], "cook": task["cook"],
             "start_ms": to_ms(task["start"]), "end_ms": to_ms(task["end"]),
             "clock": planner.format_clock(task["start"]), "day": planner.short_date(task["start"]),
-            "done": task["key"] in done,
+            "done": task["key"] in done, "section": task["section"],
         })
     return JSONResponse({
         "now_ms": int(time.time() * 1000),
@@ -399,8 +405,8 @@ def cook_state():
         "dishes": [{
             "id": d["id"], "name": d["name"], "cook": d["cook"], "category": d["category"],
             "notes": d["notes"],
-            "ingredients": [line.strip() for line in (d["ingredients_text"] or "").splitlines() if line.strip()],
-            "instructions": planner.instruction_lines(d["instructions_text"]),
+            "ingredient_sections": planner.recipe_sections(d["ingredients_text"]),
+            "instruction_sections": planner.recipe_sections(d["instructions_text"], with_timers=True),
             "steps": by_dish.get(d["id"], []),
         } for d in dishes],
         "timers": [{"id": t["id"], "dish_id": t["dish_id"], "label": t["label"], "ends_ms": t["ends_at_ms"]}

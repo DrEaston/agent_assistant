@@ -75,7 +75,29 @@ class ThanksgivingStore:
             conn.executescript(SCHEMA)
             conn.commit()
             self._ready = True
+            self._upgrade_saved_dishes(conn)
         return conn
+
+    def _upgrade_saved_dishes(self, conn):
+        """Bring never-edited preset dishes up to the current recipe text (e.g. the pie crust)."""
+        from .presets import upgrade_saved_dish
+
+        changed = False
+        for row in conn.execute("SELECT * FROM tg_dishes").fetchall():
+            dish = dict(row)
+            try:
+                dish["steps"] = json.loads(dish.get("steps_json") or "[]")
+            except json.JSONDecodeError:
+                continue
+            update = upgrade_saved_dish(dish)
+            if update:
+                conn.execute(
+                    "UPDATE tg_dishes SET ingredients_text = ?, instructions_text = ?, steps_json = ? WHERE id = ?",
+                    (update["ingredients_text"], update["instructions_text"], json.dumps(update["steps"]), dish["id"]),
+                )
+                changed = True
+        if changed:
+            self._commit()
 
     def _commit(self):
         self.db._commit()

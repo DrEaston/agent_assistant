@@ -181,6 +181,7 @@ def build_timeline(plan, dishes, cooks=()):
                 "dish_name": dish["name"],
                 "cook": (step.get("cook") or dish.get("cook") or "").strip(),
                 "anchor": step.get("anchor"),
+                "section": step.get("section") or "",
             })
     tasks.sort(key=lambda t: (t["start"], t["end"], t["dish_name"], t["title"]))
     return tasks
@@ -374,7 +375,7 @@ def build_grocery_list(dishes, extra_items=()):
         for raw in (dish.get("ingredients_text") or "").splitlines():
             line = raw.strip(" -•*\t")
             key = normalize_key(line)
-            if not key:
+            if not key or is_heading(line):
                 continue
             section = grocery_section(line)
             if section is None:
@@ -397,6 +398,36 @@ def build_grocery_list(dishes, extra_items=()):
 
 
 # ---------------------------------------------------------------- recipe text helpers
+
+def is_heading(line):
+    """A recipe section heading is a short line ending in ':' (e.g. 'Crust:')."""
+    line = (line or "").strip()
+    return line.endswith(":") and len(line) <= 40
+
+
+def recipe_sections(text, with_timers=False):
+    """Split recipe text into [{heading, lines}] using 'Heading:' lines. Text before any heading has heading ''."""
+    sections = []
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if is_heading(line):
+            sections.append({"heading": line[:-1].strip(), "lines": []})
+            continue
+        if not sections:
+            sections.append({"heading": "", "lines": []})
+        sections[-1]["lines"].append(instruction_lines(line)[0] if with_timers else line)
+    return [s for s in sections if s["lines"]]
+
+
+def sections_for_step(sections, section_name):
+    """The sections a step needs: those whose heading starts with the step's section name. Empty = all."""
+    name = (section_name or "").strip().lower()
+    if not name:
+        return []
+    return [s for s in sections if s["heading"].lower().startswith(name)]
+
 
 _DURATION = re.compile(r"(\d+)(?:\s*(?:to|-|–)\s*(\d+))?\s*(minutes?|mins?|hours?|hrs?)\b", re.IGNORECASE)
 

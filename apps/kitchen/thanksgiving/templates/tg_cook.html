@@ -40,6 +40,10 @@ body { overflow-x: hidden; }
 .ingredients { columns: 2 14rem; padding-left: 0; list-style: none; }
 .ingredients li { break-inside: avoid; padding: .3rem .2rem; cursor: pointer; border-radius: 6px; }
 .ingredients li.got { color: var(--muted); text-decoration: line-through; }
+.recipe h4 { font-size: .95rem; margin: .8rem 0 .2rem; color: var(--accent); }
+.s-recipe { margin-top: .45rem; background: #fffaf4; border: 1px solid var(--line); border-radius: 10px; padding: .4rem .8rem; }
+.s-recipe > summary { font-weight: 700; color: var(--accent); min-height: 32px; display: flex; align-items: center; }
+.s-recipe .ingredients { columns: 1; }
 .instructions { padding-left: 1.3rem; }
 .instructions li { padding: .35rem 0; }
 .chip { min-height: 32px; padding: .1rem .6rem; font-size: .82rem; border-radius: 999px; margin-left: .3rem; }
@@ -109,6 +113,11 @@ body { overflow-x: hidden; }
   const pendingDone = new Map();   // optimistic step toggles until the server confirms
   const handled = new Map();       // alert key -> when it was handled here (hidden until the server catches up)
   const got = new Set(JSON.parse(safeGet("tg-got") || "[]"));
+  const openRecipes = new Set();   // step recipe panels left open survive redraws
+  document.addEventListener("toggle", (ev) => {
+    const key = ev.target.dataset && ev.target.dataset.openKey;
+    if (key) ev.target.open ? openRecipes.add(key) : openRecipes.delete(key);
+  }, true);
   selected = Number(safeGet("tg-dish")) || null;
   filter = safeGet("tg-cook") || "";
 
@@ -190,20 +199,38 @@ body { overflow-x: hidden; }
           <div class="s-title">${esc(s.title)} ${s.cook && s.cook !== dish.cook ? pill(s.cook) : ""}</div>
           ${s.detail ? `<div class="small muted">${esc(s.detail)}</div>` : ""}
           ${s.minutes && !isDone(s) ? `<div class="s-actions"><button data-timer="${s.minutes}" data-label="${esc(dish.name + ": " + s.title)}">⏱ ${s.minutes} min timer</button></div>` : ""}
+          ${stepRecipe(dish, s)}
         </div></li>`;
     }).join("");
-    const ingredients = dish.ingredients.map((line, i) => {
-      const k = dish.id + ":" + i;
-      return `<li data-got="${esc(k)}" class="${got.has(k) ? "got" : ""}">${esc(line)}</li>`;
-    }).join("");
-    const instructions = dish.instructions.map(line => `<li>${esc(line.text)}${line.timers.map(m =>
-      `<button class="chip" data-timer="${m}" data-label="${esc(dish.name)}">⏱ ${m} min</button>`).join("")}</li>`).join("");
+    const ingredients = ingredientsHTML(dish, dish.ingredient_sections);
+    const instructions = instructionsHTML(dish, dish.instruction_sections);
     $("recipe").innerHTML = `<div class="stack">
       <div class="row"><h2>${esc(dish.name)}</h2>${pill(dish.cook)}</div>
       ${dish.notes ? `<p class="muted">${esc(dish.notes)}</p>` : ""}
       <h3>Schedule</h3><ol class="steps">${steps || '<li class="muted">No timed steps.</li>'}</ol>
-      ${ingredients ? `<h3>Ingredients <span class="small muted">(tap to cross off)</span></h3><ul class="ingredients">${ingredients}</ul>` : ""}
-      ${instructions ? `<h3>Recipe</h3><ol class="instructions">${instructions}</ol>` : ""}</div>`;
+      ${ingredients ? `<h3>Ingredients <span class="small muted">(tap to cross off)</span></h3>${ingredients}` : ""}
+      ${instructions ? `<h3>Recipe</h3>${instructions}` : ""}</div>`;
+  }
+  function sectionsFor(list, name) {
+    name = (name || "").toLowerCase();
+    return name ? list.filter(sec => sec.heading.toLowerCase().startsWith(name)) : [];
+  }
+  function ingredientsHTML(dish, sections) {
+    return sections.map(sec => `${sec.heading ? `<h4>${esc(sec.heading)}</h4>` : ""}<ul class="ingredients">${sec.lines.map(line => {
+      const k = `${dish.id}:${sec.heading}|${line}`;
+      return `<li data-got="${esc(k)}" class="${got.has(k) ? "got" : ""}">${esc(line)}</li>`;
+    }).join("")}</ul>`).join("");
+  }
+  function instructionsHTML(dish, sections) {
+    return sections.map(sec => `${sec.heading ? `<h4>${esc(sec.heading)}</h4>` : ""}<ol class="instructions">${sec.lines.map(line =>
+      `<li>${esc(line.text)}${line.timers.map(m => `<button class="chip" data-timer="${m}" data-label="${esc(dish.name)}">⏱ ${m} min</button>`).join("")}</li>`
+    ).join("")}</ol>`).join("");
+  }
+  function stepRecipe(dish, step) {
+    const ing = sectionsFor(dish.ingredient_sections, step.section), ins = sectionsFor(dish.instruction_sections, step.section);
+    if (!ing.length && !ins.length) return "";
+    return `<details class="s-recipe" data-open-key="${esc(step.key)}"${openRecipes.has(step.key) ? " open" : ""}>
+      <summary>Recipe for this step</summary>${ingredientsHTML(dish, ing)}${instructionsHTML(dish, ins)}</details>`;
   }
   function renderAlerts(alerts) {
     setHTML("alerts", alerts.map(a => {

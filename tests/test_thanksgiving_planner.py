@@ -124,6 +124,47 @@ class HelperTests(unittest.TestCase):
         self.assertEqual([l["timers"] for l in lines], [[30], [60], []])
 
 
+class RecipeSectionTests(unittest.TestCase):
+    def test_pie_has_crust_section_and_step_mapping(self):
+        pie = preset_dish("pie")
+        ing = planner.recipe_sections(pie["ingredients_text"])
+        ins = planner.recipe_sections(pie["instructions_text"])
+        self.assertEqual([s["heading"] for s in ing], ["Crust", "Filling", "To serve"])
+        crust_steps = planner.sections_for_step(ins, "Crust")
+        self.assertEqual(len(crust_steps), 1)
+        self.assertIn("coin-size", " ".join(crust_steps[0]["lines"]))
+        self.assertEqual([s["heading"] for s in planner.sections_for_step(ins, "Filling")], ["Filling and bake"])
+        self.assertEqual(planner.sections_for_step(ins, ""), [])
+
+    def test_crust_is_made_tonight_in_two_steps(self):
+        tasks = planner.build_timeline({"dinner_at": DINNER}, [dict(preset_dish("pie"), id=1)])
+        self.assertEqual(find(tasks, "pie", "dough")["start"], datetime(2026, 11, 19, 19, 0))
+        self.assertEqual(find(tasks, "pie", "shell")["start"], datetime(2026, 11, 19, 20, 15))
+        self.assertEqual(find(tasks, "pie", "shell")["section"], "Crust")
+
+    def test_headings_stay_off_the_shopping_list(self):
+        sections = planner.build_grocery_list([dict(preset_dish("pie"), id=1)])
+        texts = [i["text"] for s in sections for i in s["items"]]
+        self.assertNotIn("Crust:", texts)
+        self.assertIn("1 stick (113 g) very cold unsalted butter", texts)
+
+    def test_unedited_old_pie_is_upgraded_keeping_assignments(self):
+        from apps.kitchen.thanksgiving import presets
+        old_steps = [{"id": "shell", "anchor": "D-7 20:00", "title": "Make the pie shell", "minutes": 30,
+                      "kind": "hands", "cook": "Curtis"},
+                     {"id": "bake1", "anchor": "D-1 12:00", "title": "Bake", "minutes": 15, "kind": "oven",
+                      "temp": 425, "cook": "Parrisa"}]
+        old = {"name": "Pumpkin pie", "instructions_text": presets.OLD_PIE_INSTRUCTIONS, "steps": old_steps}
+        update = presets.upgrade_saved_dish(old)
+        self.assertIn("Crust:", update["instructions_text"])
+        steps = {s["id"]: s for s in update["steps"]}
+        self.assertEqual(steps["dough"]["cook"], "Curtis")
+        self.assertEqual(steps["bake1"]["anchor"], "D-1 12:00")  # user's timing kept
+        self.assertEqual(steps["bake1"]["cook"], "Parrisa")
+        edited = dict(old, instructions_text="My own pie notes")
+        self.assertIsNone(presets.upgrade_saved_dish(edited))
+
+
 class RouteTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -174,6 +215,49 @@ class RouteTests(unittest.TestCase):
         self.assertIn("Roast the turkey", r.text)
         self.assertIn("Shopping list", r.text)
         self.assertIn("Yukon Gold", r.text)
+
+    def test_steps_expand_to_their_recipe_section(self):
+        self.client.get("/thanksgiving")
+        page = self.client.get("/thanksgiving").text
+        self.assertIn("Roll, crimp, and freeze the pie shell", page)
+        self.assertIn('class="t-open"', page)
+        self.assertIn("coin-size pieces", page)
+        state = self.client.get("/thanksgiving/api/state").json()
+        pie = next(d for d in state["dishes"] if d["name"] == "Pumpkin pie")
+        self.assertEqual([s["heading"] for s in pie["instruction_sections"]][0], "Crust")
+        self.assertEqual(next(s for s in pie["steps"] if s["key"].endswith(":dough"))["section"], "Crust")
+
+    def test_saved_old_pie_upgrades_on_startup(self):
+        from apps.kitchen.thanksgiving import presets
+        self.client.get("/thanksgiving")
+        plan = tg_router.store().get_plan()
+        pie = next(d for d in tg_router.store().get_dishes(plan["id"]) if d["name"] == "Pumpkin pie")
+        pie["instructions_text"] = presets.OLD_PIE_INSTRUCTIONS
+        tg_router.store().update_dish(plan["id"], pie["id"], pie)
+        tg_router.configure(self.db)  # simulates a server restart
+        upgraded = tg_router.store().get_dish(plan["id"], pie["id"])
+        self.assertIn("Crust:", upgraded["instructions_text"])
+
+    def test_editing_a_dish_keeps_step_sections(self):
+        self.client.get("/thanksgiving")
+        plan = tg_router.store().get_plan()
+        pie = next(d for d in tg_router.store().get_dishes(plan["id"]) if d["name"] == "Pumpkin pie")
+        data = {"name": pie["name"], "cook": "", "category": "dessert", "ingredients_text": pie["ingredients_text"],
+                "instructions_text": pie["instructions_text"], "notes": "",
+                "step_id": [], "step_day": [], "step_time": [], "step_title": [], "step_minutes": [],
+                "step_kind": [], "step_temp": [], "step_cook": [], "step_detail": []}
+        dinner = planner.parse_dt(plan["dinner_at"])
+        for s in pie["steps"]:
+            when = planner.resolve_anchor(s["anchor"], dinner)
+            data["step_id"].append(s["id"]); data["step_day"].append(str(planner.day_offset_of(when, dinner)))
+            data["step_time"].append(when.strftime("%H:%M")); data["step_title"].append(s["title"])
+            data["step_minutes"].append(str(s["minutes"])); data["step_kind"].append(s["kind"])
+            data["step_temp"].append(str(s.get("temp") or "")); data["step_cook"].append("")
+            data["step_detail"].append(s.get("detail", ""))
+        self.client.post(f"/thanksgiving/dishes/{pie['id']}/save", data=data)
+        saved = tg_router.store().get_dish(plan["id"], pie["id"])
+        self.assertEqual(next(s for s in saved["steps"] if s["id"] == "dough")["section"], "Crust")
+        self.assertEqual([s["anchor"] for s in saved["steps"]], [s["anchor"] for s in pie["steps"]])
 
     def test_text_is_escaped(self):
         self.setup_plan()
