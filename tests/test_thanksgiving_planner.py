@@ -148,6 +148,18 @@ class RecipeSectionTests(unittest.TestCase):
         self.assertNotIn("Crust:", texts)
         self.assertIn("1 stick (113 g) very cold unsalted butter", texts)
 
+    def test_mac_and_cheese_shopping_and_oven(self):
+        sections = planner.build_grocery_list([dict(preset_dish("mac"), id=1)])
+        where = {i["text"]: s["name"] for s in sections for i in s["items"]}
+        self.assertEqual(where["1 package (12 to 14 oz) Little Smokies"], "Meat")
+        self.assertEqual(where["1/2 tsp garlic powder"], "Pantry & baking")
+        self.assertEqual(where["1 lb elbow macaroni or cavatappi"], "Pantry & baking")
+        self.assertEqual(where["12 oz sharp cheddar cheese (block, not pre-shredded)"], "Dairy & eggs")
+        tasks = planner.build_timeline({"dinner_at": DINNER}, menu_dishes())
+        bake = find(tasks, "Mac", "bake")
+        self.assertEqual(bake["start"], datetime(2026, 11, 26, 15, 15))  # after the turkey comes out
+        self.assertEqual(find(tasks, "Mac", "practice")["start"], datetime(2026, 11, 19, 17, 30))
+
     def test_unedited_old_pie_is_upgraded_keeping_assignments(self):
         from apps.kitchen.thanksgiving import presets
         old_steps = [{"id": "shell", "anchor": "D-7 20:00", "title": "Make the pie shell", "minutes": 30,
@@ -237,6 +249,20 @@ class RouteTests(unittest.TestCase):
         tg_router.configure(self.db)  # simulates a server restart
         upgraded = tg_router.store().get_dish(plan["id"], pie["id"])
         self.assertIn("Crust:", upgraded["instructions_text"])
+
+    def test_mac_and_cheese_joins_existing_plan_once(self):
+        self.client.get("/thanksgiving")
+        plan = tg_router.store().get_plan()
+        mac = next(d for d in tg_router.store().get_dishes(plan["id"]) if d["name"] == "Mac and cheese")
+        tg_router.store().delete_dish(plan["id"], mac["id"])  # a plan made before mac existed
+        tg_router.configure(self.db)
+        names = [d["name"] for d in tg_router.store().get_dishes(plan["id"])]
+        self.assertEqual(names.count("Mac and cheese"), 1)
+        mac = next(d for d in tg_router.store().get_dishes(plan["id"]) if d["name"] == "Mac and cheese")
+        tg_router.store().delete_dish(plan["id"], mac["id"])  # user removes it: it stays gone
+        tg_router.configure(self.db)
+        names = [d["name"] for d in tg_router.store().get_dishes(plan["id"])]
+        self.assertNotIn("Mac and cheese", names)
 
     def test_editing_a_dish_keeps_step_sections(self):
         self.client.get("/thanksgiving")

@@ -96,8 +96,35 @@ class ThanksgivingStore:
                     (update["ingredients_text"], update["instructions_text"], json.dumps(update["steps"]), dish["id"]),
                 )
                 changed = True
+        changed = self._add_later_dishes(conn) or changed
         if changed:
             self._commit()
+
+    def _add_later_dishes(self, conn):
+        """Add dishes that joined the menu after a plan was made, once per plan (deleting one keeps it gone)."""
+        from .presets import LATER_ADDITIONS, preset_dish
+
+        changed = False
+        for plan in conn.execute("SELECT id FROM tg_plans").fetchall():
+            plan_id = plan["id"]
+            for marker, key in LATER_ADDITIONS:
+                done = conn.execute("SELECT 1 FROM tg_checks WHERE plan_id = ? AND kind = 'migration' AND item_key = ?",
+                                    (plan_id, marker)).fetchone()
+                if done:
+                    continue
+                dish = preset_dish(key)
+                exists = conn.execute("SELECT 1 FROM tg_dishes WHERE plan_id = ? AND name = ?",
+                                      (plan_id, dish["name"])).fetchone()
+                if not exists:
+                    conn.execute(
+                        """INSERT INTO tg_dishes (plan_id, name, category, cook, ingredients_text, instructions_text,
+                                                  notes, steps_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (plan_id, dish["name"], dish["category"], "", dish["ingredients_text"],
+                         dish["instructions_text"], dish["notes"], json.dumps(dish["steps"])))
+                conn.execute("INSERT INTO tg_checks (plan_id, kind, item_key) VALUES (?, 'migration', ?)",
+                             (plan_id, marker))
+                changed = True
+        return changed
 
     def _commit(self):
         self.db._commit()

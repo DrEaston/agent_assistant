@@ -355,7 +355,10 @@ def grocery_section(line):
     text = line.lower()
     if "drippings" in text or "starter" in text:
         return None  # made, not bought
-    if "fried onion" in text or " can " in f" {text} ":
+    if "smokies" in text:
+        return "Meat"
+    if any(word in text for word in ("fried onion", "powder", "panko", "macaroni", "pasta", "mustard",
+                                     "paprika", "hot sauce")) or " can " in f" {text} ":
         return "Pantry & baking"
     if "stuffing cubes" in text or "pie shell" in text:
         return "Bakery & bread"

@@ -135,6 +135,45 @@ Bake at 425°F for 15 minutes.
 Lower to 350°F and bake 40 to 50 minutes, until the edges are set and the center barely jiggles. Cover the crust edge with foil if it browns too fast.
 Cool on a rack about 2 hours, then refrigerate loosely covered. Serve with whipped cream."""
 
+MAC_INGREDIENTS = """Mac and cheese:
+1 lb elbow macaroni or cavatappi
+1 package (12 to 14 oz) Little Smokies
+Sauce:
+5 tbsp unsalted butter
+1/3 cup all-purpose flour
+4 cups whole milk
+1 tsp dry mustard
+1/2 tsp smoked paprika
+1/2 tsp garlic powder
+a few dashes hot sauce
+kosher salt and black pepper
+12 oz sharp cheddar cheese (block, not pre-shredded)
+4 oz Gruyère cheese (or Monterey Jack)
+Topping:
+1 cup panko breadcrumbs
+2 tbsp unsalted butter, melted"""
+
+MAC_INSTRUCTIONS = """Smokies:
+Cut the smokies into coins. Brown them in a dry skillet over medium-high, 4 to 5 minutes. Set aside.
+Pasta:
+Boil the pasta in well-salted water 2 minutes less than the package says. Drain; don't rinse.
+Sauce:
+Shred the cheese yourself (bagged cheese has starch that makes the sauce grainy). Save 1/2 cup cheddar for the top.
+Warm the milk in the microwave, 2 to 3 minutes. Warm milk is what keeps the sauce from going lumpy.
+Roux: melt 5 tbsp butter in a big pot over medium. Whisk in the flour and cook 2 minutes, whisking, until it smells toasty but is still pale.
+Pour in the warm milk a splash at a time, whisking the whole time. Simmer 5 to 8 minutes, whisking often, until it coats a spoon.
+Take the pot off the heat. Whisk in the mustard, paprika, garlic powder, hot sauce, 1 tsp salt, and pepper.
+Stir in the cheese a handful at a time until smooth. Off the heat keeps it silky.
+Assemble:
+Fold in the pasta and smokies. Taste for salt. The sauce should look too loose: the pasta soaks it up.
+Spread in a buttered 9x13 dish.
+To make ahead: cool, cover, and refrigerate up to 2 days. Keep the topping separate.
+Bake:
+Mix the panko with the melted butter and the saved cheddar. Scatter over the top.
+Made fresh: bake at 400°F for 20 to 25 minutes, until bubbling at the edges and golden on top.
+From the fridge: sit out 45 minutes, bake covered at 400°F for 20 minutes, then uncovered 15 minutes.
+Rest 10 minutes before serving."""
+
 # Text of earlier versions, so saved dishes that were never edited can be upgraded in place.
 OLD_PIE_INSTRUCTIONS = """Shell: roll, fit, and crimp. Wrap tightly and freeze in the plate. Bake from frozen.
 Blind bake: line the frozen shell with parchment and pie weights. Bake at 400°F for 20 minutes.
@@ -224,6 +263,19 @@ def _stuffing_steps():
     ]
 
 
+def _mac_steps():
+    return [
+        _s("practice", "D-7 17:30", "Practice run: mac and cheese, baked fresh", 75,
+           detail="Taste it and note any changes for Thursday."),
+        _s("make", "D-1 17:00", "Make the mac and cheese and refrigerate", 60,
+           detail="Smokies, pasta, cheese sauce, assemble. Keep the topping separate."),
+        _s("out", "T-90", "Mac and cheese out of the fridge", 2),
+        _s("bake", "T-45", "Top the mac and cheese, bake covered at 400°F", 20, "oven", 400, section="Bake"),
+        _s("uncover", "T-25", "Uncover the mac and cheese to brown", 15, "oven", 400, section="Bake"),
+        _s("rest", "T-10", "Rest the mac and cheese", 10, "passive"),
+    ]
+
+
 def _gravy_steps():
     return [_s("make", "T-35", "Make the gravy from the drippings", 15, "stove")]
 
@@ -255,6 +307,9 @@ def preset_dish(key, dinner=None):
     if key == "sourdough":
         return _dish("Sourdough", "bread", SOURDOUGH_INGREDIENTS, SOURDOUGH_INSTRUCTIONS, _sourdough_steps(),
                      notes="Starter lives in the fridge, so it gets two feedings.")
+    if key == "mac":
+        return _dish("Mac and cheese", "side", MAC_INGREDIENTS, MAC_INSTRUCTIONS, _mac_steps(),
+                     notes="With Little Smokies.")
     if key == "pie":
         return _dish("Pumpkin pie", "dessert", PIE_INGREDIENTS, PIE_INSTRUCTIONS, _pie_steps())
     if key == "house":
@@ -277,10 +332,14 @@ SIMPLE_SIDES = {
     "salad": ("Green salad", "2 heads lettuce\n1 cucumber\ncherry tomatoes\nvinaigrette", 15, "none", 0, 0),
 }
 
-OUR_MENU = ("house", "turkey", "potatoes", "gravy", "stuffing", "sourdough", "pie")
+OUR_MENU = ("house", "turkey", "potatoes", "gravy", "stuffing", "mac", "sourdough", "pie")
+
+# Dishes added to the menu after plans already existed: (migration key, preset key).
+LATER_ADDITIONS = (("add-mac", "mac"),)
 
 PRESET_BUTTONS = (
     ("turkey", "Turkey"), ("potatoes", "Mashed potatoes"), ("gravy", "Gravy"), ("stuffing", "Stuffing"),
+    ("mac", "Mac and cheese"),
     ("sourdough", "Sourdough"), ("pie", "Pumpkin pie"), ("green_beans", "Green beans"),
     ("cranberry", "Cranberry sauce"), ("rolls", "Rolls"), ("brussels", "Brussels sprouts"),
     ("salad", "Salad"), ("house", "House prep"),
