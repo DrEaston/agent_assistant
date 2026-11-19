@@ -69,13 +69,80 @@ def friendly_date(value):
     return f"{when.strftime('%a %b')} {when.day}"
 
 
+# ---------------------------------------------------------------- Thanksgiving dishes
+
+def _thanksgiving():
+    """The user's Thanksgiving plan and dishes, or (None, []) when there is no plan."""
+    from apps.kitchen.thanksgiving import router as tg_router
+    try:
+        plan = tg_router.store().get_plan()
+    except RuntimeError:
+        return None, []
+    if not plan:
+        return None, []
+    return plan, tg_router.store().get_dishes(plan["id"])
+
+
+def _dish_parts(dish):
+    """Ingredient section headings, when a dish has separate parts (pie: Crust, Filling, To serve)."""
+    from apps.kitchen.thanksgiving import planner
+    headings = [s["heading"] for s in planner.recipe_sections(dish.get("ingredients_text") or "") if s["heading"]]
+    return headings if len(headings) > 1 else []
+
+
+def thanksgiving_choices():
+    """Dishes (and dish parts) you can shop for: [{"value": "7:", "label": "Pumpkin pie", "parts": [...]}]."""
+    _, dishes = _thanksgiving()
+    choices = []
+    for dish in dishes:
+        if not (dish.get("ingredients_text") or "").strip():
+            continue
+        parts = _dish_parts(dish)
+        choices.append({"value": f"{dish['id']}:", "label": dish["name"], "parts": [
+            {"value": f"{dish['id']}:{part}", "label": f"{part} only"} for part in parts]})
+    return choices
+
+
+def _valid_dish_values():
+    return {c["value"] for choice in thanksgiving_choices() for c in [choice] + choice["parts"]}
+
+
+def parse_dish_pick(value):
+    dish_id, _, part = str(value or "").partition(":")
+    return {"dish_id": int(dish_id), "part": part.strip()[:60]} if dish_id.isdigit() else None
+
+
+def dish_sources(dish_parts):
+    """[{"key", "title", "text", "url"}] read live from the Thanksgiving plan."""
+    from apps.kitchen.thanksgiving import planner
+    if not dish_parts:
+        return []
+    _, dishes = _thanksgiving()
+    by_id = {d["id"]: d for d in dishes}
+    entries = []
+    for pick in dish_parts:
+        dish = by_id.get(pick["dish_id"])
+        if not dish:
+            continue
+        text = dish.get("ingredients_text") or ""
+        title = dish["name"]
+        if pick["part"]:
+            sections = [s for s in planner.recipe_sections(text) if s["heading"] == pick["part"]]
+            text = "\n".join(line for s in sections for line in s["lines"])
+            title = f"{dish['name']} ({pick['part'].lower()})"
+        entries.append({"key": f"{dish['id']}:{pick['part']}", "title": title, "text": text,
+                        "url": "/thanksgiving#menu"})
+    return entries
+
+
 # ---------------------------------------------------------------- building a list
 
 def list_context(grocery_list):
     """Everything a list page needs: meals, aisle sections, checkmarks, counts."""
     s = store()
     meals = _state["meal_sources"](grocery_list["meal_ids"])
-    sources = [(meal["title"], meal["text"]) for meal in meals]
+    dishes = dish_sources(grocery_list.get("dish_parts") or [])
+    sources = [(meal["title"], meal["text"]) for meal in meals] + [(d["title"], d["text"]) for d in dishes]
     if (grocery_list.get("format") or 1) < 2:
         live = shopping_list.build_shopping_list(sources)
         live_keys = {item["key"] for section in live for item in section["items"]}
@@ -88,11 +155,20 @@ def list_context(grocery_list):
                 for item in section["items"]]
     on_list = set(grocery_list["meal_ids"])
     addable = [m for m in _state["pending_meals"]() if m["id"] not in on_list]
+    dish_keys = {d["key"] for d in dishes}
+    addable_dishes = []
+    for choice in thanksgiving_choices():
+        options = [choice] + [dict(p, label=f"{choice['label']}: {p['label'].lower()}") for p in choice["parts"]]
+        for option in options:
+            if option["value"] not in dish_keys:
+                addable_dishes.append({"value": option["value"], "label": option["label"]})
     return {
         "grocery_list": grocery_list,
         "created": friendly_date(grocery_list.get("created_at")),
         "meals": meals,
+        "dishes": dishes,
         "addable_meals": addable,
+        "addable_dishes": addable_dishes,
         "sections": sections,
         "checked": checked,
         "left": sum(1 for k in buy_keys if k not in checked),
@@ -112,7 +188,8 @@ def summary(grocery_list):
     context = list_context(grocery_list)
     return {"id": grocery_list["id"], "title": grocery_list.get("title") or "Shopping list",
             "created": context["created"], "left": context["left"], "total": context["total"],
-            "meal_titles": [m["title"] for m in context["meals"]], "status": grocery_list.get("status"),
+            "meal_titles": [m["title"] for m in context["meals"] + context["dishes"]],
+            "status": grocery_list.get("status"),
             "done_at": friendly_date(grocery_list.get("done_at")) if grocery_list.get("done_at") else ""}
 
 
@@ -132,19 +209,28 @@ def lists_page(request: Request):
 
 @router.get(BASE + "/new", response_class=HTMLResponse)
 def new_list_page():
-    return render("shop_new.html", meals=_state["pending_meals"](), title=default_title(), page_url=BASE + "/new")
+    return render("shop_new.html", meals=_state["pending_meals"](), dishes=thanksgiving_choices(),
+                  title=default_title(), page_url=BASE + "/new")
 
 
 @router.post(BASE + "/create")
 async def create_list(request: Request):
     form = await request.form()
     pending = {m["id"] for m in _state["pending_meals"]()}
+    dish_parts = []
     if "picked" in form:
         meal_ids = [int(v) for v in form.getlist("meal_id") if str(v).isdigit() and int(v) in pending]
+        valid = _valid_dish_values()
+        for value in form.getlist("dish"):
+            pick = parse_dish_pick(value)
+            if pick and str(value) in valid and pick not in dish_parts:
+                dish_parts.append(pick)
+        whole = {d["dish_id"] for d in dish_parts if not d["part"]}
+        dish_parts = [d for d in dish_parts if not d["part"] or d["dish_id"] not in whole]  # no double counting
     else:
         meal_ids = sorted(pending)  # the old one-tap button: everything on the meal plan
     title = str(form.get("title") or "").strip() or default_title()
-    list_id = store().create_list(title, meal_ids)
+    list_id = store().create_list(title, meal_ids, dish_parts)
     return to_list(list_id)
 
 
@@ -198,10 +284,26 @@ def delete_extra(list_id: int, extra_id: int):
 
 
 @router.post(BASE + "/{list_id}/meals/add")
-def add_meal(list_id: int, meal_id: int = Form(...)):
+def add_meal(list_id: int, pick: str = Form("")):
+    """pick is "meal:12" (meal plan) or "dish:7:Crust" (a Thanksgiving dish or one part of it)."""
     grocery_list = require_list(list_id)
-    if meal_id in {m["id"] for m in _state["pending_meals"]()} and meal_id not in grocery_list["meal_ids"]:
-        store().set_meals(list_id, grocery_list["meal_ids"] + [meal_id])
+    kind, _, value = pick.partition(":")
+    if kind == "meal" and value.isdigit():
+        meal_id = int(value)
+        if meal_id in {m["id"] for m in _state["pending_meals"]()} and meal_id not in grocery_list["meal_ids"]:
+            store().set_meals(list_id, grocery_list["meal_ids"] + [meal_id])
+    elif kind == "dish":
+        dish_pick = parse_dish_pick(value)
+        if dish_pick and value in _valid_dish_values() and dish_pick not in grocery_list["dish_parts"]:
+            store().set_dish_parts(list_id, grocery_list["dish_parts"] + [dish_pick])
+    return to_list(list_id, "meals")
+
+
+@router.post(BASE + "/{list_id}/dishes/remove")
+def remove_dish(list_id: int, key: str = Form(...)):
+    grocery_list = require_list(list_id)
+    pick = parse_dish_pick(key)
+    store().set_dish_parts(list_id, [d for d in grocery_list["dish_parts"] if d != pick])
     return to_list(list_id, "meals")
 
 

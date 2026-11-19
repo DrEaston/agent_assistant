@@ -166,7 +166,7 @@ class ShoppingRouteTests(unittest.TestCase):
 
     def test_add_and_remove_meals(self):
         list_id = self.make_list((1,))
-        self.client.post(f"/apps/recipes/grocery-lists/{list_id}/meals/add", data={"meal_id": "3"})
+        self.client.post(f"/apps/recipes/grocery-lists/{list_id}/meals/add", data={"pick": "meal:3"})
         self.assertEqual(shopping.store().get_list(list_id)["meal_ids"], [1, 3])
         self.client.post(f"/apps/recipes/grocery-lists/{list_id}/meals/1/remove")
         self.assertEqual(shopping.store().get_list(list_id)["meal_ids"], [3])
@@ -224,6 +224,46 @@ class ShoppingRouteTests(unittest.TestCase):
                              data={"text": "Butter shows twice", "page": "/apps/recipes/grocery-lists/1"},
                              follow_redirects=False)
         self.assertEqual(r.headers["location"], "/apps/recipes/grocery-lists/1?reported=1")
+
+    def thanksgiving_dishes(self):
+        from apps.kitchen.thanksgiving import router as tg_router
+        from apps.kitchen.thanksgiving.presets import preset_dish
+        tg_router.configure(self.db)
+        token = set_current_user_id(self.user_id)
+        try:
+            plan_id = tg_router.store().create_plan("2026-11-26T16:00", "Curtis, Parrisa")
+            mac = tg_router.store().add_dish(plan_id, preset_dish("mac"))
+            pie = tg_router.store().add_dish(plan_id, preset_dish("pie"))
+        finally:
+            reset_current_user_id(token)
+        return mac, pie
+
+    def test_tonights_list_from_thanksgiving_dishes(self):
+        mac, pie = self.thanksgiving_dishes()
+        page = self.client.get("/apps/recipes/grocery-lists/new").text
+        self.assertIn("From your Thanksgiving plan", page)
+        self.assertIn(f'value="{pie}:Crust"', page)
+        r = self.client.post("/apps/recipes/grocery-lists/create", follow_redirects=False, data={
+            "picked": "1", "title": "Tonight", "dish": [f"{mac}:", f"{pie}:Crust"]})
+        list_id = int(r.headers["location"].rsplit("/", 1)[1])
+        page = self.client.get(f"/apps/recipes/grocery-lists/{list_id}").text
+        self.assertIn("Pumpkin pie (crust)", page)
+        self.assertIn("Little Smokies", page)
+        self.assertNotIn("Pumpkin puree", page)  # filling is not on tonight's list
+        self.assertNotIn("Evaporated milk", page)
+        self.assertIn("Mac and cheese 7 tbsp · Pumpkin pie (crust) 1 stick", page)
+        self.assertIn("2 sticks", page)  # 7 tbsp + 1 stick, rounded to a half stick
+
+    def test_whole_dish_wins_over_its_part_and_dishes_can_be_added_later(self):
+        mac, pie = self.thanksgiving_dishes()
+        r = self.client.post("/apps/recipes/grocery-lists/create", follow_redirects=False, data={
+            "picked": "1", "dish": [f"{pie}:", f"{pie}:Crust", "999:"]})  # 999 is not your dish
+        list_id = int(r.headers["location"].rsplit("/", 1)[1])
+        self.assertEqual(shopping.store().get_list(list_id)["dish_parts"], [{"dish_id": pie, "part": ""}])
+        self.client.post(f"/apps/recipes/grocery-lists/{list_id}/meals/add", data={"pick": f"dish:{mac}:"})
+        self.assertEqual(len(shopping.store().get_list(list_id)["dish_parts"]), 2)
+        self.client.post(f"/apps/recipes/grocery-lists/{list_id}/dishes/remove", data={"key": f"{pie}:"})
+        self.assertEqual(shopping.store().get_list(list_id)["dish_parts"], [{"dish_id": mac, "part": ""}])
 
 
 class BatchedBackupTests(unittest.TestCase):

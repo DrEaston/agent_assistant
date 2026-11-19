@@ -42,6 +42,9 @@ class ShoppingStore:
             columns = {row[1] for row in conn.execute("PRAGMA table_info(recipe_grocery_lists)").fetchall()}
             if "format" not in columns:
                 conn.execute("ALTER TABLE recipe_grocery_lists ADD COLUMN format INTEGER DEFAULT 1")
+            if "dish_parts_json" not in columns:
+                # Thanksgiving dishes (or one part, e.g. the pie crust): [{"dish_id": 7, "part": "Crust"}]
+                conn.execute("ALTER TABLE recipe_grocery_lists ADD COLUMN dish_parts_json TEXT DEFAULT '[]'")
             if "done_at" not in columns:
                 conn.execute("ALTER TABLE recipe_grocery_lists ADD COLUMN done_at TEXT DEFAULT ''")
             conn.commit()
@@ -62,6 +65,11 @@ class ShoppingStore:
             data["meal_ids"] = [int(i) for i in json.loads(data.get("meal_plan_item_ids_json") or "[]")]
         except (json.JSONDecodeError, TypeError, ValueError):
             data["meal_ids"] = []
+        try:
+            data["dish_parts"] = [{"dish_id": int(d["dish_id"]), "part": str(d.get("part") or "")}
+                                  for d in json.loads(data.get("dish_parts_json") or "[]")]
+        except (json.JSONDecodeError, TypeError, ValueError, KeyError):
+            data["dish_parts"] = []
         return data
 
     # ---------------------------------------------------------------- lists
@@ -80,17 +88,24 @@ class ShoppingStore:
                ORDER BY created_at DESC, id DESC LIMIT ?""", (status, user, user, limit)).fetchall()
         return [self._prepare(r) for r in rows]
 
-    def create_list(self, title, meal_ids):
+    def create_list(self, title, meal_ids, dish_parts=()):
         cur = self._conn().execute(
-            """INSERT INTO recipe_grocery_lists (title, meal_plan_item_ids_json, items_json, user_id, format)
-               VALUES (?, ?, '[]', ?, ?)""",
-            (title[:120], json.dumps([int(i) for i in meal_ids]), self._user(), LIVE_FORMAT))
+            """INSERT INTO recipe_grocery_lists (title, meal_plan_item_ids_json, items_json, user_id, format,
+                                                 dish_parts_json)
+               VALUES (?, ?, '[]', ?, ?, ?)""",
+            (title[:120], json.dumps([int(i) for i in meal_ids]), self._user(), LIVE_FORMAT,
+             json.dumps(list(dish_parts))))
         self._commit()
         return cur.lastrowid
 
     def set_meals(self, list_id, meal_ids):
         self._conn().execute("UPDATE recipe_grocery_lists SET meal_plan_item_ids_json = ? WHERE id = ?",
                              (json.dumps([int(i) for i in meal_ids]), list_id))
+        self._commit()
+
+    def set_dish_parts(self, list_id, dish_parts):
+        self._conn().execute("UPDATE recipe_grocery_lists SET dish_parts_json = ? WHERE id = ?",
+                             (json.dumps(list(dish_parts)), list_id))
         self._commit()
 
     def set_status(self, list_id, status):

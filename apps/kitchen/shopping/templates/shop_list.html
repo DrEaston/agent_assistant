@@ -45,7 +45,8 @@
   <div class="top-inner">
     <a class="back" href="/apps/recipes/grocery-lists">← All lists</a>
     <h1>{{ grocery_list.title or "Shopping list" }}</h1>
-    <div class="sub">Made {{ created }}{% if meals %} · {{ meals|length }} meal{% if meals|length != 1 %}s{% endif %}{% endif %}</div>
+    {%- set n = meals|length + dishes|length %}
+    <div class="sub">Made {{ created }}{% if n %} · {{ n }} meal{% if n != 1 %}s{% endif %}{% endif %}</div>
   </div>
 </header>
 
@@ -130,15 +131,29 @@
           <button type="submit" class="quiet remove" aria-label="Take {{ meal.title }} off this list">✕</button>
         </form>
       </div>
-      {% else %}
-      <p class="muted" style="margin:0">No meals yet.</p>
       {% endfor %}
-      {% if addable_meals %}
+      {% for dish in dishes %}
+      <div class="meal">
+        <a href="{{ dish.url }}">{{ dish.title }}</a>
+        <span class="pill">Thanksgiving</span>
+        <form method="post" action="/apps/recipes/grocery-lists/{{ grocery_list.id }}/dishes/remove">
+          <input type="hidden" name="key" value="{{ dish.key }}">
+          <button type="submit" class="quiet remove" aria-label="Take {{ dish.title }} off this list">✕</button>
+        </form>
+      </div>
+      {% endfor %}
+      {% if not meals and not dishes %}<p class="muted" style="margin:0">No meals yet.</p>{% endif %}
+      {% if addable_meals or addable_dishes %}
       <form method="post" action="/apps/recipes/grocery-lists/{{ grocery_list.id }}/meals/add" class="add-form" style="margin-top:.8rem">
-        <select name="meal_id" aria-label="Meal to add" style="flex:1;min-width:0">
-          {% for meal in addable_meals %}<option value="{{ meal.id }}">{{ meal.title }}</option>{% endfor %}
+        <select name="pick" aria-label="Meal to add" style="flex:1;min-width:0">
+          {% if addable_meals %}<optgroup label="Meal plan">
+            {% for meal in addable_meals %}<option value="meal:{{ meal.id }}">{{ meal.title }}</option>{% endfor %}
+          </optgroup>{% endif %}
+          {% if addable_dishes %}<optgroup label="Thanksgiving">
+            {% for dish in addable_dishes %}<option value="dish:{{ dish.value }}">{{ dish.label }}</option>{% endfor %}
+          </optgroup>{% endif %}
         </select>
-        <button type="submit">Add meal</button>
+        <button type="submit">Add</button>
       </form>
       {% endif %}
     </div>
