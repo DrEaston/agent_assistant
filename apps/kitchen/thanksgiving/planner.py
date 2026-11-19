@@ -10,6 +10,8 @@ import re
 import uuid
 from datetime import datetime, timedelta
 
+from apps.kitchen import ingredients
+
 TEMP_TOLERANCE_F = 25           # dishes within 25°F can share an oven
 DISHES_PER_OVEN = 3
 STEP_KINDS = ("hands", "oven", "stove", "passive", "check", "shop")
@@ -372,26 +374,46 @@ def normalize_key(line):
     return re.sub(r"[^a-z0-9]+", " ", line.lower()).strip()
 
 
+PANTRY_CHECK = "Check the pantry"
+
+
 def build_grocery_list(dishes, extra_items=()):
-    merged = {}
+    """One line per ingredient with the amounts added up across dishes.
+
+    Each item: text (name), amount (total to buy), parts (per-dish amounts), section.
+    Staples like salt and flour go under "Check the pantry" instead of the buy sections.
+    """
+    found = {}
     for dish in dishes:
         for raw in (dish.get("ingredients_text") or "").splitlines():
             line = raw.strip(" -•*\t")
-            key = normalize_key(line)
-            if not key or is_heading(line):
+            if not normalize_key(line) or is_heading(line) or ingredients.is_not_bought(line):
                 continue
-            section = grocery_section(line)
-            if section is None:
-                continue
-            item = merged.setdefault(key, {"key": key, "text": line, "dishes": [], "extra_id": None,
-                                           "section": section})
-            if dish["name"] not in item["dishes"]:
-                item["dishes"].append(dish["name"])
+            for part in ingredients.split_line(line):
+                parsed = ingredients.parse_line(part)
+                entry = found.setdefault(parsed["item"], {"name": parsed["name"], "lines": [], "by_dish": {}})
+                entry["lines"].append(parsed)
+                entry["by_dish"].setdefault(dish["name"], []).append(parsed)
+    merged = {}
+    for item_key, entry in found.items():
+        first = entry["lines"][0]
+        if item_key in ingredients.STAPLES:
+            section = PANTRY_CHECK
+        else:
+            section = grocery_section(f"{entry['name']} {first['text']}") or "Other"
+        key = f"item-{normalize_key(item_key)}"
+        merged[key] = {
+            "key": key, "text": entry["name"], "extra_id": None, "section": section,
+            "amount": ingredients.combine(entry["lines"], buy=True),
+            "dishes": list(entry["by_dish"]),
+            "parts": [{"dish": name, "amount": ingredients.combine(lines)}
+                      for name, lines in entry["by_dish"].items()],
+        }
     for extra in extra_items:
         key = f"extra-{extra['id']}"
         merged[key] = {"key": key, "text": extra["text"], "dishes": [], "extra_id": extra["id"],
-                       "section": grocery_section(extra["text"]) or "Other"}
-    order = [name for name, _ in GROCERY_SECTIONS] + ["Other"]
+                       "section": grocery_section(extra["text"]) or "Other", "amount": "", "parts": []}
+    order = [name for name, _ in GROCERY_SECTIONS] + ["Other", PANTRY_CHECK]
     sections = []
     for name in order:
         items = sorted((i for i in merged.values() if i["section"] == name), key=lambda i: i["text"].lower())
