@@ -332,7 +332,9 @@ class RouteTests(unittest.TestCase):
         page = self.client.get("/thanksgiving").text
         # Dish card, View recipe, and each timeline step's recipe all carry the picker.
         self.assertGreaterEqual(page.count('aria-label="Batch size for Mac and cheese"'), 3)
-        self.assertIn("View recipe · Full · 9x13 pan · about 8 servings", page)
+        self.assertIn(f'View recipe<span data-size-label-for="{mac["id"]}"> · Full · 9x13 pan · about 8 servings</span>', page)
+        # The recipe text sits in blocks the page refreshes in place when the size changes.
+        self.assertGreaterEqual(page.count(f'data-recipe-for="{mac["id"]}"'), 2)
         state = self.client.get("/thanksgiving/api/state").json()
         cook_mac = next(d for d in state["dishes"] if d["name"] == "Mac and cheese")
         self.assertEqual(cook_mac["size_value"], "1")

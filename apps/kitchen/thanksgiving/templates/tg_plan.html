@@ -107,7 +107,7 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
   {%- if dish.size_options -%}
   <form method="post" action="/thanksgiving/dishes/{{ dish.id }}/size" class="row size-form">
     <span class="size-label">Batch size</span>
-    <select name="scale" data-autosubmit aria-label="Batch size for {{ dish.name }}">
+    <select name="scale" data-autosubmit data-size-for="{{ dish.id }}" aria-label="Batch size for {{ dish.name }}">
       {% for option in dish.size_options %}<option value="{{ option.value }}"{% if option.value == dish.size_value %} selected{% endif %}>{{ option.label }}</option>{% endfor %}
     </select>
     <noscript><button type="submit">Save</button></noscript>
@@ -118,12 +118,14 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
   {{ size_picker(dish) }}
   {%- set ing = planner.sections_for_step(dish.ingredient_sections, section) -%}
   {%- set ins = planner.sections_for_step(dish.instruction_sections, section) -%}
+  <div data-recipe-for="{{ dish.id }}">
   {%- if ing or ins -%}
     {{ render_sections(ing, ins) }}
     <details class="full-recipe"><summary>Full {{ dish.name|lower }} recipe</summary>{{ render_sections(dish.ingredient_sections, dish.instruction_sections) }}</details>
   {%- else -%}
     {{ render_sections(dish.ingredient_sections, dish.instruction_sections) }}
   {%- endif -%}
+  </div>
 {%- endmacro %}
 {% macro kind_pill(task) -%}
   {%- if task.kind in ('oven', 'stove', 'passive', 'check', 'shop') -%}
@@ -265,7 +267,7 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
       {% if dish.size_options %}
       <form method="post" action="/thanksgiving/dishes/{{ dish.id }}/size" class="row size-form">
         <label for="size-{{ dish.id }}">Batch size</label>
-        <select id="size-{{ dish.id }}" name="scale" data-autosubmit>
+        <select id="size-{{ dish.id }}" name="scale" data-autosubmit data-size-for="{{ dish.id }}">
           {% for option in dish.size_options %}<option value="{{ option.value }}"{% if option.value == dish.size_value %} selected{% endif %}>{{ option.label }}</option>{% endfor %}
         </select>
         <noscript><button type="submit">Save</button></noscript>
@@ -279,7 +281,7 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
       </ul>
 
       {% if dish.ingredient_sections or dish.instruction_sections %}
-      <details class="view-recipe"><summary>View recipe{% if dish.size_label %} · {{ dish.size_label }}{% endif %}</summary>{{ size_picker(dish) }}{{ render_sections(dish.ingredient_sections, dish.instruction_sections) }}</details>
+      <details class="view-recipe"><summary>View recipe<span data-size-label-for="{{ dish.id }}">{% if dish.size_label %} · {{ dish.size_label }}{% endif %}</span></summary>{{ size_picker(dish) }}<div data-recipe-for="{{ dish.id }}">{{ render_sections(dish.ingredient_sections, dish.instruction_sections) }}</div></details>
       {% endif %}
 
       <details class="editor">
@@ -416,9 +418,38 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
     });
   });
 
-  // Batch size saves as soon as you pick one.
-  document.querySelectorAll("select[data-autosubmit]").forEach((select) => {
-    select.addEventListener("change", () => select.form.submit());
+  // Batch size saves in the background and updates the recipe text in place, so the page
+  // doesn't reload or jump. If anything fails, fall back to a normal form submit.
+  function swapAll(selector, fresh) {
+    const now = [...document.querySelectorAll(selector)];
+    const next = [...fresh.querySelectorAll(selector)];
+    now.forEach((el, i) => {
+      if (!next[i]) return;
+      const open = [...el.querySelectorAll("details")].map((d) => d.open);
+      el.innerHTML = next[i].innerHTML;
+      el.querySelectorAll("details").forEach((d, j) => { if (open[j]) d.open = true; });
+    });
+  }
+  document.addEventListener("change", async (event) => {
+    const select = event.target.closest("select[data-autosubmit]");
+    if (!select) return;
+    const dishId = select.dataset.sizeFor;
+    document.querySelectorAll(`select[data-size-for="${dishId}"]`).forEach((s) => { s.value = select.value; });
+    try {
+      const saved = await fetch(`/thanksgiving/api/dishes/${dishId}/size`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scale: select.value }),
+      });
+      if (!saved.ok) throw new Error(saved.status);
+      const page = await fetch("/thanksgiving", { cache: "no-store" });
+      if (!page.ok) throw new Error(page.status);
+      const fresh = new DOMParser().parseFromString(await page.text(), "text/html");
+      swapAll(`[data-recipe-for="${dishId}"]`, fresh);
+      swapAll(`[data-size-label-for="${dishId}"]`, fresh);
+      swapAll("#shopping", fresh);
+    } catch (error) {
+      select.form.submit();
+    }
   });
 
   // Open the editor for a dish linked by #dish-N.
