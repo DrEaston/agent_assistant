@@ -64,6 +64,9 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
 .dish-steps { margin: .5rem 0 0; padding: 0; list-style: none; font-size: .9rem; }
 .dish-steps li { padding: .15rem 0; display: flex; gap: .5rem; }
 .dish-steps .when { color: var(--muted); min-width: 7.5rem; font-variant-numeric: tabular-nums; }
+.size-form { margin-top: .5rem; gap: .5rem; }
+.size-form label { font-size: .85rem; color: var(--muted); }
+.size-form select { min-height: 40px; }
 .editor { margin-top: .75rem; border-top: 1px solid var(--line); padding-top: .75rem; }
 .editor summary { font-weight: 600; color: var(--accent); }
 .step-edit { display: grid; grid-template-columns: 1.6fr 1fr 2.5fr .8fr 1.2fr .8fr 1.2fr auto; gap: .35rem; align-items: center;
@@ -247,6 +250,15 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
     <article class="card dish" id="dish-{{ dish.id }}">
       <h3>{{ dish.name }} {{ cook_pill(dish.cook) }}{% if not dish.cook %}<span class="pill">Unassigned</span>{% endif %}</h3>
       {% if dish.notes %}<p class="small muted" style="margin:.3rem 0 0">{{ dish.notes }}</p>{% endif %}
+      {% if dish.size_options %}
+      <form method="post" action="/thanksgiving/dishes/{{ dish.id }}/size" class="row size-form">
+        <label for="size-{{ dish.id }}">Batch size</label>
+        <select id="size-{{ dish.id }}" name="scale" data-autosubmit>
+          {% for option in dish.size_options %}<option value="{{ option.value }}"{% if option.value == dish.size_value %} selected{% endif %}>{{ option.label }}</option>{% endfor %}
+        </select>
+        <noscript><button type="submit">Save</button></noscript>
+      </form>
+      {% endif %}
       <ul class="dish-steps">
         {% for t in tasks if t.dish_id == dish.id %}
           {% if loop.index <= 6 %}<li><span class="when">{{ planner.short_date(t.start)[:3] }} {{ planner.format_clock(t.start) }}</span><span>{{ t.title }}</span></li>{% endif %}
@@ -297,8 +309,9 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
             </div>
             <p class="small muted">Thanksgiving-day steps move with dinner time. Earlier days keep their clock time.</p>
           </div>
-          <div class="field"><label>Ingredients (one per line)</label><textarea name="ingredients_text">{{ dish.ingredients_text }}</textarea></div>
-          <div class="field"><label>Recipe steps (one per line)</label><textarea name="instructions_text">{{ dish.instructions_text }}</textarea></div>
+          {% if dish.size_options %}<p class="small muted">Edit the recipe as written (full batch). The batch size above scales it.</p>{% endif %}
+          <div class="field"><label>Ingredients (one per line)</label><textarea name="ingredients_text">{{ dish.base_ingredients_text }}</textarea></div>
+          <div class="field"><label>Recipe steps (one per line)</label><textarea name="instructions_text">{{ dish.base_instructions_text }}</textarea></div>
           <div class="field"><label>Notes</label><input type="text" name="notes" value="{{ dish.notes }}"></div>
           <div class="row"><button class="primary" type="submit">Save dish</button></div>
         </form>
@@ -389,6 +402,11 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
       btn.textContent = "Tap again to delete";
       setTimeout(() => { delete btn.dataset.armed; btn.textContent = "Delete dish"; }, 4000);
     });
+  });
+
+  // Batch size saves as soon as you pick one.
+  document.querySelectorAll("select[data-autosubmit]").forEach((select) => {
+    select.addEventListener("change", () => select.form.submit());
   });
 
   // Open the editor for a dish linked by #dish-N.

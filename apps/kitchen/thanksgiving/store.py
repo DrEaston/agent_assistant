@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS tg_alerts (
 """
 
 CATEGORY_ORDER = ("prep", "turkey", "side", "bread", "dessert", "other")
+SIZE_MARKER = "default-sizes"
 
 
 class ThanksgivingStore:
@@ -73,6 +74,10 @@ class ThanksgivingStore:
         conn = self.db.connect()
         if not self._ready:
             conn.executescript(SCHEMA)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(tg_dishes)").fetchall()}
+            if "scale" not in columns:
+                # Batch size: 0.75 = three-quarters of the recipe as written (see sizes.py).
+                conn.execute("ALTER TABLE tg_dishes ADD COLUMN scale REAL DEFAULT 1")
             conn.commit()
             self._ready = True
             self._upgrade_saved_dishes(conn)
@@ -97,8 +102,27 @@ class ThanksgivingStore:
                 )
                 changed = True
         changed = self._add_later_dishes(conn) or changed
+        changed = self._apply_default_sizes(conn) or changed
         if changed:
             self._commit()
+
+    def _apply_default_sizes(self, conn):
+        """Once per plan: start dishes like mac and cheese on their Thanksgiving size."""
+        from .sizes import DEFAULT_SCALES
+
+        changed = False
+        for plan in conn.execute("SELECT id FROM tg_plans").fetchall():
+            plan_id = plan["id"]
+            if conn.execute("SELECT 1 FROM tg_checks WHERE plan_id = ? AND kind = 'migration' AND item_key = ?",
+                            (plan_id, SIZE_MARKER)).fetchone():
+                continue
+            for name, scale in DEFAULT_SCALES.items():
+                conn.execute("UPDATE tg_dishes SET scale = ? WHERE plan_id = ? AND name = ? AND (scale IS NULL OR scale = 1)",
+                             (scale, plan_id, name))
+            conn.execute("INSERT INTO tg_checks (plan_id, kind, item_key) VALUES (?, 'migration', ?)",
+                         (plan_id, SIZE_MARKER))
+            changed = True
+        return changed
 
     def _add_later_dishes(self, conn):
         """Add dishes that joined the menu after a plan was made, once per plan (deleting one keeps it gone)."""
@@ -142,6 +166,9 @@ class ThanksgivingStore:
             "INSERT INTO tg_plans (user_id, dinner_at, cooks, ovens) VALUES (?, ?, ?, ?)",
             (get_current_user_id(), dinner_at, cooks, ovens),
         )
+        # New dishes get their default size in add_dish, so the one-time size migration doesn't apply.
+        self._conn().execute("INSERT OR IGNORE INTO tg_checks (plan_id, kind, item_key) VALUES (?, 'migration', ?)",
+                             (cur.lastrowid, SIZE_MARKER))
         self._commit()
         return cur.lastrowid
 
@@ -172,16 +199,24 @@ class ThanksgivingStore:
         return next((d for d in self.get_dishes(plan_id) if d["id"] == dish_id), None)
 
     def add_dish(self, plan_id, dish):
+        from .sizes import DEFAULT_SCALES
+
+        name = dish["name"][:120] or "Untitled dish"
         cur = self._conn().execute(
             """INSERT INTO tg_dishes (plan_id, name, category, cook, ingredients_text, instructions_text, notes,
-                                      steps_json, source_meal_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (plan_id, dish["name"][:120] or "Untitled dish", dish.get("category") or "side", dish.get("cook") or "",
+                                      steps_json, source_meal_id, scale)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (plan_id, name, dish.get("category") or "side", dish.get("cook") or "",
              dish.get("ingredients_text") or "", dish.get("instructions_text") or "", dish.get("notes") or "",
-             json.dumps(dish.get("steps") or []), dish.get("source_meal_id")),
+             json.dumps(dish.get("steps") or []), dish.get("source_meal_id"),
+             dish.get("scale") or DEFAULT_SCALES.get(name, 1)),
         )
         self._commit()
         return cur.lastrowid
+
+    def set_scale(self, plan_id, dish_id, scale):
+        self._conn().execute("UPDATE tg_dishes SET scale = ? WHERE id = ? AND plan_id = ?", (scale, dish_id, plan_id))
+        self._commit()
 
     def update_dish(self, plan_id, dish_id, dish):
         self._conn().execute(

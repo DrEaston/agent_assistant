@@ -15,7 +15,7 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from . import planner
+from . import planner, sizes
 from .presets import CATEGORIES, OUR_MENU, PRESET_BUTTONS, preset_dish
 from .store import ThanksgivingStore
 
@@ -94,7 +94,7 @@ def plan_context(plan, now=None):
     s = store()
     dinner = planner.parse_dt(plan["dinner_at"])
     cooks = parse_cooks(plan["cooks"])
-    dishes = s.get_dishes(plan["id"])
+    dishes = [sizes.with_size(d) for d in s.get_dishes(plan["id"])]  # chosen batch size applied
     tasks = planner.build_timeline(plan, dishes)
     done = s.get_checked(plan["id"], "step")
     for task in tasks:
@@ -287,6 +287,19 @@ async def save_dish(dish_id: int, request: Request):
     return back(f"dish-{dish_id}")
 
 
+@router.post("/thanksgiving/dishes/{dish_id}/size")
+def set_dish_size(dish_id: int, scale: str = Form(...)):
+    plan = require_plan()
+    dish = store().get_dish(plan["id"], dish_id)
+    if not dish:
+        raise HTTPException(status_code=404, detail="Dish not found")
+    value = sizes.parse_scale(dish, scale)
+    if value is None:
+        raise HTTPException(status_code=400, detail="Pick one of the listed sizes.")
+    store().set_scale(plan["id"], dish_id, value)
+    return back(f"size-{dish_id}")  # lands on the dropdown without opening the editor
+
+
 @router.post("/thanksgiving/dishes/{dish_id}/turkey")
 def retime_turkey(dish_id: int, weight_lb: float = Form(...), frozen: str = Form("")):
     plan = require_plan()
@@ -384,7 +397,7 @@ def cook_state():
     s = store()
     dinner = planner.parse_dt(plan["dinner_at"])
     cooks = parse_cooks(plan["cooks"])
-    dishes = s.get_dishes(plan["id"])
+    dishes = [sizes.with_size(d) for d in s.get_dishes(plan["id"])]
     tasks = planner.build_timeline(plan, dishes)
     done = s.get_checked(plan["id"], "step")
     by_dish = {}
@@ -404,7 +417,7 @@ def cook_state():
         "colors": cook_colors(cooks),
         "dishes": [{
             "id": d["id"], "name": d["name"], "cook": d["cook"], "category": d["category"],
-            "notes": d["notes"],
+            "notes": d["notes"], "size_label": d.get("size_label", ""),
             "ingredient_sections": planner.recipe_sections(d["ingredients_text"]),
             "instruction_sections": planner.recipe_sections(d["instructions_text"], with_timers=True),
             "steps": by_dish.get(d["id"], []),

@@ -205,7 +205,7 @@ body { overflow-x: hidden; }
     const ingredients = ingredientsHTML(dish, dish.ingredient_sections);
     const instructions = instructionsHTML(dish, dish.instruction_sections);
     $("recipe").innerHTML = `<div class="stack">
-      <div class="row"><h2>${esc(dish.name)}</h2>${pill(dish.cook)}</div>
+      <div class="row"><h2>${esc(dish.name)}</h2>${pill(dish.cook)}${dish.size_label ? `<span class="pill">${esc(dish.size_label)}</span>` : ""}</div>
       ${dish.notes ? `<p class="muted">${esc(dish.notes)}</p>` : ""}
       <h3>Schedule</h3><ol class="steps">${steps || '<li class="muted">No timed steps.</li>'}</ol>
       ${ingredients ? `<h3>Ingredients <span class="small muted">(tap to cross off)</span></h3>${ingredients}` : ""}

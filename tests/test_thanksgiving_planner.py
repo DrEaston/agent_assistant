@@ -195,6 +195,34 @@ class RecipeSectionTests(unittest.TestCase):
         self.assertIsNone(presets.upgrade_saved_dish(edited))
 
 
+class SizeTests(unittest.TestCase):
+    def test_scaling_lines(self):
+        from apps.kitchen.thanksgiving.sizes import scale_ingredient
+        self.assertEqual(scale_ingredient("1 stick (113 g) very cold unsalted butter", 0.5),
+                         "1/2 stick (56 g) very cold unsalted butter")
+        self.assertEqual(scale_ingredient("1 stick (113 g) butter", 2), "2 sticks (226 g) butter")
+        self.assertEqual(scale_ingredient("4 to 6 tbsp ice water", 0.5), "2 to 3 tbsp ice water")
+        self.assertEqual(scale_ingredient("1 lb elbow macaroni", 0.75), "12 oz elbow macaroni")
+        self.assertEqual(scale_ingredient("1/3 cup flour", 0.5), "2 3/4 tbsp flour")
+        self.assertEqual(scale_ingredient("1 package (12 to 14 oz) Little Smokies", 0.75),
+                         "1 package (12 to 14 oz) Little Smokies")  # you buy whole packages
+        self.assertEqual(scale_ingredient("1/2 tsp smoked paprika", 0.75), "1/4 tsp smoked paprika")
+        self.assertEqual(scale_ingredient("kosher salt", 0.5), "kosher salt")
+        self.assertEqual(scale_ingredient("Crust:", 0.5), "Crust:")
+
+    def test_instructions_scale_amounts_not_times_or_pans(self):
+        from apps.kitchen.thanksgiving.sizes import scale_instructions
+        text = "Melt 5 tbsp butter. Bake at 400°F for 20 to 25 minutes in a 9x13 dish."
+        self.assertEqual(scale_instructions(text, 0.5, "8x8"),
+                         "Melt 2 1/2 tbsp butter. Bake at 400°F for 20 to 25 minutes in a 8x8 dish.")
+
+    def test_turkey_and_house_prep_have_no_sizes(self):
+        from apps.kitchen.thanksgiving import sizes
+        self.assertEqual(sizes.with_size(preset_dish("turkey"))["size_options"], [])
+        self.assertEqual(sizes.with_size(preset_dish("house"))["size_options"], [])
+        self.assertEqual(len(sizes.with_size(preset_dish("pie"))["size_options"]), 4)
+
+
 class RouteTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -267,6 +295,56 @@ class RouteTests(unittest.TestCase):
         tg_router.configure(self.db)  # simulates a server restart
         upgraded = tg_router.store().get_dish(plan["id"], pie["id"])
         self.assertIn("Crust:", upgraded["instructions_text"])
+
+    def mac(self):
+        plan = tg_router.store().get_plan()
+        return plan, next(d for d in tg_router.store().get_dishes(plan["id"]) if d["name"] == "Mac and cheese")
+
+    def test_mac_starts_on_thanksgiving_size_and_dropdown_changes_it(self):
+        self.client.get("/thanksgiving")
+        plan, mac = self.mac()
+        self.assertEqual(mac["scale"], 0.75)
+        page = self.client.get("/thanksgiving").text
+        self.assertIn("Batch size", page)
+        self.assertIn('value="0.75" selected', page)
+        self.assertIn("12 oz elbow macaroni", page)
+        self.assertIn("11x7 or 9x9", page)
+        self.assertIn("1 lb elbow macaroni", page)  # the editor keeps the recipe as written
+        groceries = {i["text"]: i["amount"] for s in tg_router.plan_context(plan)["groceries"] for i in s["items"]}
+        self.assertEqual(groceries["Sharp cheddar cheese"], "9 oz")
+        r = self.client.post(f"/thanksgiving/dishes/{mac['id']}/size", data={"scale": "0.5"}, follow_redirects=False)
+        self.assertEqual(r.headers["location"], f"/thanksgiving#size-{mac['id']}")
+        self.assertEqual(self.mac()[1]["scale"], 0.5)
+        self.assertEqual(self.client.post(f"/thanksgiving/dishes/{mac['id']}/size", data={"scale": "3"}).status_code, 400)
+        state = self.client.get("/thanksgiving/api/state").json()
+        cook_mac = next(d for d in state["dishes"] if d["name"] == "Mac and cheese")
+        self.assertEqual(cook_mac["size_label"], "Half: serves 3")
+        self.assertIn("8 oz elbow macaroni or cavatappi", [l for s in cook_mac["ingredient_sections"] for l in s["lines"]])
+
+    def test_size_migration_runs_once_and_keeps_choices(self):
+        self.client.get("/thanksgiving")
+        plan, mac = self.mac()
+        conn = self.db.connect()
+        conn.execute("UPDATE tg_dishes SET scale = 1 WHERE id = ?", (mac["id"],))
+        conn.execute("DELETE FROM tg_checks WHERE kind = 'migration' AND item_key = 'default-sizes'")
+        conn.commit()
+        tg_router.configure(self.db)  # restart: an existing plan gets the Thanksgiving size once
+        self.assertEqual(self.mac()[1]["scale"], 0.75)
+        tg_router.store().set_scale(plan["id"], mac["id"], 1.0)  # you pick Full
+        tg_router.configure(self.db)
+        self.assertEqual(self.mac()[1]["scale"], 1.0)
+
+    def test_saving_an_edited_recipe_keeps_it_unscaled(self):
+        self.client.get("/thanksgiving")
+        plan, mac = self.mac()
+        form = {"name": mac["name"], "category": mac["category"], "cook": "",
+                "ingredients_text": mac["ingredients_text"] + "\n1 cup frozen peas",
+                "instructions_text": mac["instructions_text"], "notes": mac["notes"]}
+        self.client.post(f"/thanksgiving/dishes/{mac['id']}/save", data=form)
+        saved = self.mac()[1]
+        self.assertIn("1 lb elbow macaroni", saved["ingredients_text"])
+        self.assertIn("1 cup frozen peas", saved["ingredients_text"])
+        self.assertIn("3/4 cup frozen peas", self.client.get("/thanksgiving").text)
 
     def test_mac_and_cheese_joins_existing_plan_once(self):
         self.client.get("/thanksgiving")

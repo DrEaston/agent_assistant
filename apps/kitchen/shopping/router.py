@@ -73,20 +73,21 @@ def friendly_date(value):
 
 def _thanksgiving():
     """The user's Thanksgiving plan and dishes, or (None, []) when there is no plan."""
-    from apps.kitchen.thanksgiving import router as tg_router
+    from apps.kitchen.thanksgiving import router as tg_router, sizes
     try:
         plan = tg_router.store().get_plan()
     except RuntimeError:
         return None, []
     if not plan:
         return None, []
-    return plan, tg_router.store().get_dishes(plan["id"])
+    return plan, [sizes.with_size(d) for d in tg_router.store().get_dishes(plan["id"])]  # chosen batch size
 
 
 def _dish_parts(dish):
     """Ingredient section headings, when a dish has separate parts (pie: Crust, Filling, To serve)."""
     from apps.kitchen.thanksgiving import planner
-    headings = [s["heading"] for s in planner.recipe_sections(dish.get("ingredients_text") or "") if s["heading"]]
+    headings = [s["heading"] for s in planner.recipe_sections(dish.get("ingredients_text") or "")
+                if s["heading"] and s["heading"].lower() != (dish.get("name") or "").lower()]
     return headings if len(headings) > 1 else []
 
 

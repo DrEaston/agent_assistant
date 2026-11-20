@@ -251,8 +251,10 @@ class ShoppingRouteTests(unittest.TestCase):
         self.assertIn("Little Smokies", page)
         self.assertNotIn("Pumpkin puree", page)  # filling is not on tonight's list
         self.assertNotIn("Evaporated milk", page)
-        self.assertIn("Mac and cheese 7 tbsp · Pumpkin pie (crust) 1 stick", page)
-        self.assertIn("2 sticks", page)  # 7 tbsp + 1 stick, rounded to a half stick
+        # Mac and cheese starts on its Thanksgiving size (3/4 batch): 5 1/4 tbsp butter + 1 stick for the crust.
+        self.assertIn("Mac and cheese 5 1/4 tbsp · Pumpkin pie (crust) 1 stick", page)
+        self.assertIn("1 1/2 sticks", page)
+        self.assertIn("12 oz", page)  # pasta for the 3/4 batch
 
     def test_whole_dish_wins_over_its_part_and_dishes_can_be_added_later(self):
         mac, pie = self.thanksgiving_dishes()
