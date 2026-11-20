@@ -12,11 +12,11 @@ from apps.kitchen import ingredients
 
 # Dish name -> sizes. A size: (scale, label, pan replacing "9x13" in the recipe, note).
 DISH_SIZES = {
+    # The recipe as written (1 lb pasta, 4 cups milk, 16 oz cheese) makes about 8 side servings.
     "Mac and cheese": (
-        (0.5, "Half: serves 3", "8x8", "Bake fresh 15 to 20 minutes. From the fridge: covered 15 minutes, then uncovered about 10."),
-        (0.75, "Thanksgiving: 3 + leftovers", "11x7 or 9x9",
-         "Bake fresh about 20 minutes. From the fridge: covered 20 minutes, then uncovered 10 to 15."),
-        (1.0, "Full: serves 8 to 10", "9x13", ""),
+        (0.5, "Half · 8x8 pan · about 4 servings", "8x8",
+         "Bake fresh 15 to 20 minutes. From the fridge: covered 15 minutes, then uncovered about 10."),
+        (1.0, "Full · 9x13 pan · about 8 servings", "9x13", ""),
     ),
 }
 GENERIC_SIZES = (
@@ -26,7 +26,7 @@ GENERIC_SIZES = (
     (2.0, "Double", "", ""),
 )
 NO_SIZES = {"turkey", "prep"}  # one turkey is one turkey; house prep has no recipe
-DEFAULT_SCALES = {"Mac and cheese": 0.75}
+DEFAULT_SCALES = {}  # dish name -> starting scale for new dishes; everything starts as written
 
 _UNITS = r"(?:tbsp|tsp|tablespoons?|teaspoons?|cups?|oz|ounces?|lb|lbs|pounds?|g|grams?|sticks?|cloves?|quarts?|pints?)"
 _NUM = r"\d+\s+\d+/\d+|\d+/\d+|\d+(?:\.\d+)?"

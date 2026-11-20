@@ -300,25 +300,30 @@ class RouteTests(unittest.TestCase):
         plan = tg_router.store().get_plan()
         return plan, next(d for d in tg_router.store().get_dishes(plan["id"]) if d["name"] == "Mac and cheese")
 
-    def test_mac_starts_on_thanksgiving_size_and_dropdown_changes_it(self):
+    def test_mac_starts_full_and_dropdown_switches_to_half(self):
         self.client.get("/thanksgiving")
         plan, mac = self.mac()
-        self.assertEqual(mac["scale"], 0.75)
+        self.assertEqual(mac["scale"], 1.0)
         page = self.client.get("/thanksgiving").text
         self.assertIn("Batch size", page)
-        self.assertIn('value="0.75" selected', page)
-        self.assertIn("12 oz elbow macaroni", page)
-        self.assertIn("11x7 or 9x9", page)
-        self.assertIn("1 lb elbow macaroni", page)  # the editor keeps the recipe as written
-        groceries = {i["text"]: i["amount"] for s in tg_router.plan_context(plan)["groceries"] for i in s["items"]}
-        self.assertEqual(groceries["Sharp cheddar cheese"], "9 oz")
+        self.assertIn('value="1" selected>Full · 9x13 pan · about 8 servings', page)
+        self.assertIn("Half · 8x8 pan · about 4 servings", page)
+        self.assertNotIn("Thanksgiving: 3", page)
         r = self.client.post(f"/thanksgiving/dishes/{mac['id']}/size", data={"scale": "0.5"}, follow_redirects=False)
         self.assertEqual(r.headers["location"], f"/thanksgiving#size-{mac['id']}")
         self.assertEqual(self.mac()[1]["scale"], 0.5)
-        self.assertEqual(self.client.post(f"/thanksgiving/dishes/{mac['id']}/size", data={"scale": "3"}).status_code, 400)
+        page = self.client.get("/thanksgiving").text
+        self.assertIn("8 oz elbow macaroni", page)
+        self.assertIn("buttered 8x8 dish", page)
+        self.assertIn("1 lb elbow macaroni", page)  # the editor keeps the recipe as written
+        groceries = {i["text"]: i["amount"] for s in tg_router.plan_context(plan)["groceries"] for i in s["items"]}
+        self.assertEqual(groceries["Sharp cheddar cheese"], "6 oz")
+        for retired in ("0.75", "3"):
+            self.assertEqual(self.client.post(f"/thanksgiving/dishes/{mac['id']}/size",
+                                              data={"scale": retired}).status_code, 400)
         state = self.client.get("/thanksgiving/api/state").json()
         cook_mac = next(d for d in state["dishes"] if d["name"] == "Mac and cheese")
-        self.assertEqual(cook_mac["size_label"], "Half: serves 3")
+        self.assertEqual(cook_mac["size_label"], "Half · 8x8 pan · about 4 servings")
         self.assertIn("8 oz elbow macaroni or cavatappi", [l for s in cook_mac["ingredient_sections"] for l in s["lines"]])
 
     def test_size_picker_shows_wherever_the_recipe_opens(self):
@@ -327,28 +332,27 @@ class RouteTests(unittest.TestCase):
         page = self.client.get("/thanksgiving").text
         # Dish card, View recipe, and each timeline step's recipe all carry the picker.
         self.assertGreaterEqual(page.count('aria-label="Batch size for Mac and cheese"'), 3)
-        self.assertIn("View recipe · Thanksgiving: 3 + leftovers", page)
+        self.assertIn("View recipe · Full · 9x13 pan · about 8 servings", page)
         state = self.client.get("/thanksgiving/api/state").json()
         cook_mac = next(d for d in state["dishes"] if d["name"] == "Mac and cheese")
-        self.assertEqual(cook_mac["size_value"], "0.75")
-        self.assertEqual([o["value"] for o in cook_mac["size_options"]], ["0.5", "0.75", "1"])
-        r = self.client.post(f"/thanksgiving/api/dishes/{mac['id']}/size", json={"scale": "1"})
+        self.assertEqual(cook_mac["size_value"], "1")
+        self.assertEqual([o["value"] for o in cook_mac["size_options"]], ["0.5", "1"])
+        r = self.client.post(f"/thanksgiving/api/dishes/{mac['id']}/size", json={"scale": "0.5"})
         self.assertEqual(r.json(), {"ok": True})
-        self.assertEqual(self.mac()[1]["scale"], 1.0)
+        self.assertEqual(self.mac()[1]["scale"], 0.5)
         self.assertEqual(self.client.post(f"/thanksgiving/api/dishes/{mac['id']}/size", json={"scale": "9"}).status_code, 400)
 
-    def test_size_migration_runs_once_and_keeps_choices(self):
+    def test_retired_size_resets_on_restart_and_choices_stay(self):
         self.client.get("/thanksgiving")
         plan, mac = self.mac()
         conn = self.db.connect()
-        conn.execute("UPDATE tg_dishes SET scale = 1 WHERE id = ?", (mac["id"],))
-        conn.execute("DELETE FROM tg_checks WHERE kind = 'migration' AND item_key = 'default-sizes'")
+        conn.execute("UPDATE tg_dishes SET scale = 0.75 WHERE id = ?", (mac["id"],))  # the removed size
         conn.commit()
-        tg_router.configure(self.db)  # restart: an existing plan gets the Thanksgiving size once
-        self.assertEqual(self.mac()[1]["scale"], 0.75)
-        tg_router.store().set_scale(plan["id"], mac["id"], 1.0)  # you pick Full
-        tg_router.configure(self.db)
+        tg_router.configure(self.db)  # restart
         self.assertEqual(self.mac()[1]["scale"], 1.0)
+        tg_router.store().set_scale(plan["id"], mac["id"], 0.5)  # you pick Half
+        tg_router.configure(self.db)
+        self.assertEqual(self.mac()[1]["scale"], 0.5)
 
     def test_saving_an_edited_recipe_keeps_it_unscaled(self):
         self.client.get("/thanksgiving")
@@ -356,11 +360,12 @@ class RouteTests(unittest.TestCase):
         form = {"name": mac["name"], "category": mac["category"], "cook": "",
                 "ingredients_text": mac["ingredients_text"] + "\n1 cup frozen peas",
                 "instructions_text": mac["instructions_text"], "notes": mac["notes"]}
+        tg_router.store().set_scale(plan["id"], mac["id"], 0.5)
         self.client.post(f"/thanksgiving/dishes/{mac['id']}/save", data=form)
         saved = self.mac()[1]
         self.assertIn("1 lb elbow macaroni", saved["ingredients_text"])
         self.assertIn("1 cup frozen peas", saved["ingredients_text"])
-        self.assertIn("3/4 cup frozen peas", self.client.get("/thanksgiving").text)
+        self.assertIn("1/2 cup frozen peas", self.client.get("/thanksgiving").text)
 
     def test_mac_and_cheese_joins_existing_plan_once(self):
         self.client.get("/thanksgiving")

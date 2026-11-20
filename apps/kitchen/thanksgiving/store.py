@@ -62,7 +62,6 @@ CREATE TABLE IF NOT EXISTS tg_alerts (
 """
 
 CATEGORY_ORDER = ("prep", "turkey", "side", "bread", "dessert", "other")
-SIZE_MARKER = "default-sizes"
 
 
 class ThanksgivingStore:
@@ -102,26 +101,21 @@ class ThanksgivingStore:
                 )
                 changed = True
         changed = self._add_later_dishes(conn) or changed
-        changed = self._apply_default_sizes(conn) or changed
+        changed = self._reset_retired_sizes(conn) or changed
         if changed:
             self._commit()
 
-    def _apply_default_sizes(self, conn):
-        """Once per plan: start dishes like mac and cheese on their Thanksgiving size."""
-        from .sizes import DEFAULT_SCALES
+    def _reset_retired_sizes(self, conn):
+        """A dish saved at a size that no longer exists (e.g. the old 3/4 mac and cheese) goes back to as written."""
+        from .sizes import size_options
 
         changed = False
-        for plan in conn.execute("SELECT id FROM tg_plans").fetchall():
-            plan_id = plan["id"]
-            if conn.execute("SELECT 1 FROM tg_checks WHERE plan_id = ? AND kind = 'migration' AND item_key = ?",
-                            (plan_id, SIZE_MARKER)).fetchone():
-                continue
-            for name, scale in DEFAULT_SCALES.items():
-                conn.execute("UPDATE tg_dishes SET scale = ? WHERE plan_id = ? AND name = ? AND (scale IS NULL OR scale = 1)",
-                             (scale, plan_id, name))
-            conn.execute("INSERT INTO tg_checks (plan_id, kind, item_key) VALUES (?, 'migration', ?)",
-                         (plan_id, SIZE_MARKER))
-            changed = True
+        for row in conn.execute("SELECT id, name, category, ingredients_text, scale FROM tg_dishes").fetchall():
+            scale = row["scale"] if row["scale"] is not None else 1
+            allowed = [o[0] for o in size_options(dict(row))] or [1.0]
+            if not any(abs(scale - value) < 1e-6 for value in allowed):
+                conn.execute("UPDATE tg_dishes SET scale = 1 WHERE id = ?", (row["id"],))
+                changed = True
         return changed
 
     def _add_later_dishes(self, conn):
@@ -166,9 +160,6 @@ class ThanksgivingStore:
             "INSERT INTO tg_plans (user_id, dinner_at, cooks, ovens) VALUES (?, ?, ?, ?)",
             (get_current_user_id(), dinner_at, cooks, ovens),
         )
-        # New dishes get their default size in add_dish, so the one-time size migration doesn't apply.
-        self._conn().execute("INSERT OR IGNORE INTO tg_checks (plan_id, kind, item_key) VALUES (?, 'migration', ?)",
-                             (cur.lastrowid, SIZE_MARKER))
         self._commit()
         return cur.lastrowid
 
