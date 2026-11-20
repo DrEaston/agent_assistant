@@ -141,16 +141,72 @@
     if (watcher) { clearInterval(watcher); watcher = null; }
     if (recorder && recorder.state === "recording") recorder.stop();
   }
-  mic.addEventListener("click", async () => {
+  function report(event, detail) {
+    // Voice problems go to the server log so they can be diagnosed without seeing the device.
+    fetch("/thanksgiving/api/voice-log", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event, detail: String(detail || "").slice(0, 300), agent: navigator.userAgent }) }).catch(() => {});
+  }
+
+  // Chrome (Android, desktop) and newer Safari have speech recognition built in: it shows your words as you
+  // talk and ends by itself when you pause. Use it when available; otherwise record and transcribe on the server.
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition = null;
+  function listenWithRecognition() {
+    if (recognition) { recognition.stop(); return; }
+    recognition = new Recognition();
+    recognition.lang = "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    let finalText = "", gotResult = false;
+    mic.classList.add("recording"); mic.textContent = "■"; mic.setAttribute("aria-label", "Send now");
+    text.value = ""; text.placeholder = "Listening…";
+    recognition.onresult = (event) => {
+      gotResult = true;
+      let interim = "";
+      finalText = "";
+      for (const result of event.results) {
+        if (result.isFinal) finalText += result[0].transcript; else interim += result[0].transcript;
+      }
+      text.value = (finalText + interim).trim();
+    };
+    recognition.onerror = (event) => {
+      report("recognition-error", event.error);
+      const messages = { "not-allowed": "I need microphone permission. Allow it in Chrome's site settings, or type instead.",
+        "no-speech": "I didn't hear anything. Tap 🎤 and try again.", "network": "Speech recognition needs internet. Check the connection or type it." };
+      say("dieter", `<span class="voice-problem">${esc(messages[event.error] || "The microphone stopped (" + event.error + "). Try again or type it.")}</span>`);
+    };
+    recognition.onend = () => {
+      recognition = null;
+      mic.classList.remove("recording"); mic.textContent = "🎤"; mic.setAttribute("aria-label", "Start talking");
+      text.placeholder = "Or type it here";
+      const spoken = (text.value || finalText).trim();
+      if (spoken) send(spoken);
+      else if (!gotResult) report("recognition-empty", "");
+    };
+    try { recognition.start(); }
+    catch (error) { report("recognition-start", error && error.message); recognition = null; listenWithRecording(); }
+  }
+
+  mic.addEventListener("click", () => {
+    const busy = recognition || (recorder && recorder.state === "recording");
+    if (!busy) report("listen-start", Recognition ? "speech recognition" : "recording");
+    if (Recognition && !(recorder && recorder.state === "recording")) { listenWithRecognition(); return; }
+    listenWithRecording();
+  });
+
+  async function listenWithRecording() {
     if (recorder && recorder.state === "recording") { stopListening(); return; }
     if (!navigator.mediaDevices || !window.MediaRecorder) {
       say("dieter", "<span class='voice-problem'>This browser can't record audio here. Type it instead.</span>");
       return;
     }
+    // Create the volume meter while the tap still counts as a user gesture; Chrome won't start it later.
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (error) { audioCtx = null; }
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (error) {
+      report("mic-permission", error && error.name);
       say("dieter", "<span class='voice-problem'>I need microphone permission to listen. You can type instead.</span>");
       return;
     }
@@ -158,7 +214,7 @@
     let heardSpeech = false;
     recorder = new MediaRecorder(stream);
     recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-    recorder.onerror = () => stopListening();
+    recorder.onerror = (event) => { report("recorder-error", event && event.error && event.error.name); stopListening(); };
     recorder.onstop = async () => {
       if (watcher) { clearInterval(watcher); watcher = null; }
       stream.getTracks().forEach((t) => t.stop());
@@ -199,8 +255,8 @@
     const started = Date.now();
     let lastLoud = started, analyser = null, samples = null;
     try {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx.state === "suspended") await audioCtx.resume();
+      if (!audioCtx) throw new Error("no audio context");
+      if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});  // never wait on this: it can hang
       analyser = audioCtx.createAnalyser();
       analyser.fftSize = 2048;
       audioCtx.createMediaStreamSource(stream).connect(analyser);
@@ -220,6 +276,6 @@
       const silentStart = analyser && !heardSpeech && now - started > NO_SPEECH_MS;
       if (paused || silentStart || now - started > MAX_MS) stopListening();
     }, 100);
-  });
+  }
 })();
 </script>

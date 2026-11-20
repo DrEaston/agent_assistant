@@ -329,6 +329,14 @@ async def api_command(request: Request):
             "can_apply": bool(actions)}
 
 
+@router.post("/thanksgiving/api/voice-log")
+async def api_voice_log(request: Request):
+    """The voice panel reports microphone/recognition problems here so they show up in the server log."""
+    data = await _json(request)
+    print("Voice problem: " + json.dumps({k: str(data.get(k) or "")[:300] for k in ("event", "detail", "agent")}))
+    return {"ok": True}
+
+
 @router.post("/thanksgiving/api/command/apply")
 def api_command_apply():
     plan = require_plan()
