@@ -462,6 +462,58 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(mac["scale"], 1.0)
         self.assertNotIn(f"{mac['id']}:practice", tg_router.store().get_checked(plan["id"], "step"))
 
+    def test_voice_add_remove_edit_and_undo(self):
+        self.client.get("/thanksgiving")
+        plan, pie = self.pie()
+        before = [dict(s) for s in pie["steps"]]
+        self.voice_with({"reply": "Pecans, fancy.", "question": "", "actions": [
+            {"type": "add", "dish_id": pie["id"], "title": "Toast pecans for the top", "date": "2026-11-25",
+             "time": "09:00", "minutes": 12, "kind": "oven", "temp": 350},
+            {"type": "remove", "dish_id": pie["id"], "step_ids": ["chill"]},
+            {"type": "edit", "dish_id": pie["id"], "step_id": "cool", "minutes": 150, "detail": "Away from the dog"}]})
+        r = self.client.post("/thanksgiving/api/command", json={"text": "pecans, no chilling, cool longer"}).json()
+        self.assertEqual(r["problems"], [])
+        self.assertIn("add “Toast pecans for the top”", r["changes"][0])
+        self.assertIn("remove “Refrigerate the pie”", r["changes"][1])
+        self.assertIn("2h → 2h 30m", r["changes"][2])
+        self.client.post("/thanksgiving/api/command/apply")
+        steps = {s["id"]: s for s in self.pie()[1]["steps"]}
+        self.assertNotIn("chill", steps)
+        self.assertEqual(steps["cool"]["minutes"], 150)
+        added = next(s for s in steps.values() if s["title"] == "Toast pecans for the top")
+        self.assertEqual((added["anchor"], added["temp"], added["kind"]), ("D-1 09:00", 350, "oven"))
+        self.client.post("/thanksgiving/api/command/undo")
+        self.assertEqual(self.pie()[1]["steps"], before)
+
+    def test_voice_moves_dinner_and_undo_restores_it(self):
+        self.client.get("/thanksgiving")
+        self.voice_with({"reply": "Fashionably late.", "question": "", "actions": [
+            {"type": "dinner", "date": "2026-11-26", "time": "17:00"}]})
+        r = self.client.post("/thanksgiving/api/command", json={"text": "move dinner to 5"}).json()
+        self.assertIn("Dinner: Thu 4:00 PM → Thu 5:00 PM", r["changes"][0])
+        self.client.post("/thanksgiving/api/command/apply")
+        self.assertEqual(tg_router.store().get_plan()["dinner_at"], "2026-11-26T17:00")
+        self.client.post("/thanksgiving/api/command/undo")
+        self.assertEqual(tg_router.store().get_plan()["dinner_at"], "2026-11-26T16:00")
+
+    def test_voice_warns_about_new_oven_clashes(self):
+        self.client.get("/thanksgiving")
+        plan, pie = self.pie()
+        # The pie's 425°F bake moved onto dinner day lands while the turkey roasts at 325°F.
+        self.voice_with({"reply": "Living dangerously.", "question": "", "actions": [
+            {"type": "move", "dish_id": pie["id"], "step_ids": ["bake1"], "date": "2026-11-26", "time": "13:00"}]})
+        r = self.client.post("/thanksgiving/api/command", json={"text": "bake the pie thursday at 1"}).json()
+        self.assertTrue(r["can_apply"])
+        self.assertTrue(any("different temperatures" in w for w in r["warnings"]))
+
+    def test_voice_answers_questions_without_changes(self):
+        self.client.get("/thanksgiving")
+        self.voice_with({"reply": "Yes: wrapped tight, the dough keeps 3 days in the fridge or a month frozen.",
+                         "question": "", "actions": []})
+        r = self.client.post("/thanksgiving/api/command", json={"text": "can I make the crust 4 days ahead?"}).json()
+        self.assertIn("a month frozen", r["reply"])
+        self.assertFalse(r["can_apply"])
+
     def test_no_cook_names_on_the_pages(self):
         self.client.get("/thanksgiving")
         plan_page = self.client.get("/thanksgiving").text

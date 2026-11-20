@@ -18,6 +18,7 @@
 .voice-changes { margin: .35rem 0 0; padding-left: 1.1rem; }
 .voice-changes li { padding: .1rem 0; }
 .voice-problem { color: var(--warn); }
+.voice-warning { color: #92400e; margin-top: .3rem; font-size: .92rem; }
 .voice-input { display: flex; gap: .5rem; }
 .voice-input input { flex: 1; min-width: 0; }
 .voice-mic { min-width: 52px; font-size: 1.2rem; }
@@ -33,7 +34,7 @@
       <h2 id="voice-title">Tell Dieter</h2>
       <button type="button" class="quiet" id="voice-close" aria-label="Close">✕</button>
     </div>
-    <p class="voice-hint" id="voice-hint">Try “move the pie crust to Saturday at 7 PM”, “push the stuffing an hour later”, or “make the mac and cheese a half batch”. You'll see the changes before anything is saved.</p>
+    <p class="voice-hint" id="voice-hint">Try “the pie's getting pushed to the weekend”, “add a step to toast the pecans Wednesday morning”, “move dinner to 5”, or “can I make the crust four days ahead?”. You'll see the changes before anything is saved.</p>
     <div class="voice-log" id="voice-log" aria-live="polite"></div>
     <div class="voice-actions" id="voice-decide" hidden>
       <button type="button" class="primary" id="voice-apply">Apply</button>
@@ -105,6 +106,7 @@
       let html = esc(data.question || data.reply || "");
       if (data.changes.length) html += `<ul class="voice-changes">${data.changes.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>`;
       if (data.problems.length) html += data.problems.map((p) => `<div class="voice-problem">${esc(p)}</div>`).join("");
+      if ((data.warnings || []).length) html += data.warnings.map((w) => `<div class="voice-warning">Heads up: ${esc(w)}</div>`).join("");
       say("dieter", html || "I'm not sure what to change. Try saying it another way.");
       history.push({ role: "assistant", content: [data.question || data.reply, ...data.changes].join("\n") });
       $("voice-decide").hidden = !data.can_apply;

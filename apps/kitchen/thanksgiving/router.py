@@ -324,9 +324,14 @@ async def api_command(request: Request):
         raise HTTPException(status_code=503, detail="Dieter couldn't think that through right now. Try again.") from exc
     actions, changes, problems = voice.check(result["actions"], plan, context["dishes"], context["tasks"],
                                              context["cooks"])
+    warnings = voice.knock_on(plan, context["dishes"], actions, plan["ovens"])
     _state["voice_pending"][plan["id"]] = actions
+    # Logged so "it did something dumb" can be looked up later.
+    print("Tell Dieter: " + json.dumps({"said": text[:500], "reply": result["reply"], "question": result["question"],
+                                        "changes": changes, "problems": problems, "warnings": warnings,
+                                        "model": voice.model_name() if _state["voice_model"] is None else "test"}))
     return {"reply": result["reply"], "question": result["question"], "changes": changes, "problems": problems,
-            "can_apply": bool(actions)}
+            "warnings": warnings, "can_apply": bool(actions)}
 
 
 @router.post("/thanksgiving/api/voice-log")
@@ -344,6 +349,7 @@ def api_command_apply():
     if not actions:
         raise HTTPException(status_code=409, detail="Nothing to apply. Say the change again.")
     _state["voice_undo"][plan["id"]] = voice.apply(store(), plan, actions)
+    print("Tell Dieter: applied " + json.dumps([a["type"] for a in actions]))
     return {"ok": True}
 
 
