@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 
 from . import planner, sizes
 
-ACTION_TYPES = ("move", "shift", "assign", "size", "done")
+ACTION_TYPES = ("move", "shift", "size", "done")
 
 SYSTEM_PROMPT = """You turn a cook's spoken or typed request into changes to their Thanksgiving plan.
 
@@ -28,8 +28,6 @@ Allowed actions (use dish ids and step ids exactly as listed in the plan):
   Moves the earliest of those steps to that date and time; the others keep their spacing after it.
 - {"type": "shift", "dish_id": 7, "step_ids": ["bake"], "days": 1, "minutes": 0}
   Moves steps later (positive) or earlier (negative).
-- {"type": "assign", "dish_id": 7, "step_ids": [], "cook": "Parrisa"}
-  Assigns steps to a cook. Empty step_ids means the whole dish. Use "" to unassign.
 - {"type": "size", "dish_id": 7, "scale": 0.5}   Only a scale listed for that dish.
 - {"type": "done", "dish_id": 7, "step_ids": ["dough"], "done": true}
 
@@ -39,7 +37,7 @@ Rules:
 - If the request is ambiguous (which day, what time, which dish), ask ONE short question and return no actions.
   Example: "the weekend" with no day -> ask "Saturday or Sunday, and what time?"
 - If the request is not about the plan, reply briefly and return no actions.
-- Never invent dishes, steps, cooks or sizes that aren't in the plan."""
+- Never invent dishes, steps or sizes that aren't in the plan. There is no assigning dishes to people."""
 
 
 def plan_summary(plan, dishes, tasks, cooks, now):
@@ -52,7 +50,6 @@ def plan_summary(plan, dishes, tasks, cooks, now):
         f"Now: {now:%A %Y-%m-%d %H:%M}",
         f"Dinner: {dinner:%A %Y-%m-%d %H:%M}",
         "Next days: " + ", ".join(f"{(now + timedelta(days=i)):%a %m-%d}" for i in range(0, 9)),
-        f"Cooks: {', '.join(cooks) or 'none'}",
         "",
     ]
     for dish in dishes:
@@ -60,13 +57,12 @@ def plan_summary(plan, dishes, tasks, cooks, now):
         if dish.get("size_options"):
             options = ", ".join(f"{o['value']} = {o['label']}" for o in dish["size_options"])
             size = f" | size {dish.get('size_value')} (options: {options})"
-        lines.append(f"Dish {dish['id']}: {dish['name']} | cook: {dish.get('cook') or 'unassigned'}{size}")
+        lines.append(f"Dish {dish['id']}: {dish['name']}{size}")
         for task in sorted(by_dish.get(dish["id"], []), key=lambda t: t["start"]):
             section = f" [section {task['section']}]" if task.get("section") else ""
             done = " (done)" if task.get("done") else ""
-            cook = f" cook {task['cook']}" if task.get("cook") else ""
             lines.append(f"  step {task['step_id']}: {task['title']}{section} | "
-                         f"{task['start']:%a %Y-%m-%d %H:%M}, {task['minutes']} min{cook}{done}")
+                         f"{task['start']:%a %Y-%m-%d %H:%M}, {task['minutes']} min{done}")
     return "\n".join(lines)
 
 
@@ -149,14 +145,6 @@ def check(actions, plan, dishes, tasks, cooks):
                     moves.append({"step_id": step["step_id"], "anchor": _anchor(new_start, dinner)})
                     lines.append(f"{dish['name']}: {step['title']}: {_fmt(step['start'])} → {_fmt(new_start)}")
                 normalized.append({"type": "move", "dish_id": dish["id"], "moves": moves})
-            elif kind == "assign":
-                cook = str(action.get("cook") or "").strip()
-                if cook and cook not in cooks:
-                    raise Rejected(f"{cook} isn't one of the cooks ({', '.join(cooks)}).")
-                ids = step_ids or [s["id"] for s in dish["steps"]]
-                normalized.append({"type": "assign", "dish_id": dish["id"], "step_ids": ids, "cook": cook})
-                target = "all steps" if not step_ids else ", ".join(s["title"] for s in steps)
-                lines.append(f"{dish['name']} ({target}): {'assign to ' + cook if cook else 'unassign'}")
             elif kind == "size":
                 scale = sizes.parse_scale(dish, action.get("scale"))
                 if scale is None:
@@ -189,10 +177,6 @@ def apply(store, plan, normalized):
         if action["type"] == "move":
             anchors = {m["step_id"]: m["anchor"] for m in action["moves"]}
             dish["steps"] = [dict(s, anchor=anchors.get(s["id"], s["anchor"])) for s in dish["steps"]]
-            store.update_dish(plan["id"], dish["id"], dish)
-        elif action["type"] == "assign":
-            ids = set(action["step_ids"])
-            dish["steps"] = [dict(s, cook=action["cook"]) if s["id"] in ids else s for s in dish["steps"]]
             store.update_dish(plan["id"], dish["id"], dish)
         elif action["type"] == "size":
             store.set_scale(plan["id"], dish["id"], action["scale"])

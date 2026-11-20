@@ -209,7 +209,7 @@ def _overlap_windows(tasks):
 
 
 def find_conflicts(tasks, ovens=1):
-    """Plain-language warnings: oven temperature clashes and one cook double-booked."""
+    """Plain-language warnings about oven clashes (temperatures, or too many dishes at once)."""
     ovens = max(int(ovens or 1), 1)
     warnings = []
     seen = set()
@@ -228,16 +228,6 @@ def find_conflicts(tasks, ovens=1):
             seen.add(ids)
             warnings.append({"when": start, "text": f"{len(active)} things in the oven at once: {names}."})
 
-    hands = [t for t in tasks if t["kind"] == "hands" and t["minutes"] > 0 and t["cook"]]
-    for cook in sorted({t["cook"] for t in hands}):
-        mine = [t for t in hands if t["cook"] == cook]
-        for start, active in _overlap_windows(mine):
-            ids = (cook,) + tuple(sorted(t["key"] for t in active))
-            if ids in seen:
-                continue
-            seen.add(ids)
-            names = " and ".join(f"{t['dish_name']}: {t['title'].lower()}" for t in active)
-            warnings.append({"when": start, "text": f"{cook} has two hands-on jobs at once: {names}."})
 
     warnings.sort(key=lambda w: w["when"])
     return warnings

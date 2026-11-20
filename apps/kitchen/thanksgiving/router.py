@@ -213,12 +213,14 @@ def setup_plan(dinner_date: str = Form(...), dinner_time: str = Form("16:00"), c
 
 
 @router.post("/thanksgiving/settings")
-def save_settings(dinner_date: str = Form(...), dinner_time: str = Form(...), cooks: str = Form(""),
+def save_settings(dinner_date: str = Form(...), dinner_time: str = Form(...), cooks: str = Form(None),
                   ovens: int = Form(1)):
     plan = require_plan()
     dinner_at = f"{dinner_date}T{dinner_time}"
     planner.parse_dt(dinner_at)
-    store().update_plan(plan["id"], dinner_at, ", ".join(parse_cooks(cooks)), max(1, min(ovens, 2)))
+    # Cook names are no longer shown or edited (you use one device per cook instead); keep what's saved.
+    cooks_text = ", ".join(parse_cooks(cooks)) if cooks is not None else plan["cooks"]
+    store().update_plan(plan["id"], dinner_at, cooks_text, max(1, min(ovens, 2)))
     return back("settings")
 
 
@@ -264,7 +266,8 @@ async def save_dish(dish_id: int, request: Request):
             "minutes": max(_int(minutes, i), 0),
             "kind": kinds[i] if i < len(kinds) and kinds[i] in planner.STEP_KINDS else "hands",
             "temp": max(_int(temps, i), 0),
-            "cook": (step_cooks[i] if i < len(step_cooks) else "").strip(),
+            # No cook field on the form any more: keep whatever was saved.
+            "cook": (step_cooks[i] if i < len(step_cooks) else existing_steps.get(step_id, {}).get("cook", "")).strip(),
             "detail": (details[i] if i < len(details) else "").strip()[:300],
             "section": existing_steps.get(step_id, {}).get("section", ""),
         })
@@ -281,7 +284,7 @@ async def save_dish(dish_id: int, request: Request):
     store().update_dish(plan["id"], dish_id, {
         "name": (form.get("name") or existing["name"]).strip(),
         "category": form.get("category") or existing["category"],
-        "cook": (form.get("cook") or "").strip(),
+        "cook": (form.get("cook", existing.get("cook") or "") or "").strip(),
         "ingredients_text": form.get("ingredients_text", existing["ingredients_text"]),
         "instructions_text": form.get("instructions_text", existing["instructions_text"]),
         "notes": form.get("notes", existing["notes"]),

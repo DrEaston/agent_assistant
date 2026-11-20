@@ -76,7 +76,6 @@ body { overflow-x: hidden; }
   <span class="clock" id="clock">--:--</span>
   <span class="sub" id="dinner-label"></span>
   <span class="spacer"></span>
-  <span class="row" role="group" aria-label="Whose steps" id="filter"></span>
   <a class="button" href="/thanksgiving">Plan</a>
   <a class="button" href="#report">Report problem</a>
 </header>
@@ -120,7 +119,7 @@ body { overflow-x: hidden; }
     if (key) ev.target.open ? openRecipes.add(key) : openRecipes.delete(key);
   }, true);
   selected = Number(safeGet("tg-dish")) || null;
-  filter = safeGet("tg-cook") || "";
+  filter = "";  // no per-cook views: each device shows every step
 
   function safeGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function safeSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
@@ -145,8 +144,8 @@ body { overflow-x: hidden; }
   // ---------- data
   function isDone(step) { return pendingDone.has(step.key) ? pendingDone.get(step.key) : step.done; }
   function allSteps() { return state ? state.dishes.flatMap(d => d.steps.map(s => ({ ...s, dish: d }))) : []; }
-  function color(name) { return (state && state.colors[name]) || "#6b7280"; }
-  function pill(name) { return name ? `<span class="pill cook-pill" style="background:${esc(color(name))}">${esc(name)}</span>` : ""; }
+  function color(name) { return "#d6cbbd"; }  // dishes aren't color-coded by cook any more
+  function pill(name) { return ""; }  // cook names aren't shown
 
   function activeAlerts() {
     if (!state) return [];
@@ -165,10 +164,7 @@ body { overflow-x: hidden; }
   }
 
   // ---------- rendering
-  function renderFilter() {
-    const opts = ["", ...(state ? state.cooks : [])];
-    setHTML("filter", opts.map(c => `<button type="button" data-cook="${esc(c)}" aria-pressed="${c === filter}">${c ? esc(c) : "Everyone"}</button>`).join(""));
-  }
+  function renderFilter() {}
   function nextStep(dish) { return dish.steps.find(s => !isDone(s) && s.end_ms > now()) || dish.steps.find(s => !isDone(s)); }
   function visibleDishes() {
     return state.dishes.filter(d => !filter || !d.cook || d.cook === filter || d.steps.some(s => s.cook === filter));

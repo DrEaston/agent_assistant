@@ -69,7 +69,7 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
 .size-form select { min-height: 40px; }
 .editor { margin-top: .75rem; border-top: 1px solid var(--line); padding-top: .75rem; }
 .editor summary { font-weight: 600; color: var(--accent); }
-.step-edit { display: grid; grid-template-columns: 1.6fr 1fr 2.5fr .8fr 1.2fr .8fr 1.2fr auto; gap: .35rem; align-items: center;
+.step-edit { display: grid; grid-template-columns: 1.6fr 1fr 2.5fr .8fr 1.2fr .8fr auto; gap: .35rem; align-items: center;
   padding: .4rem 0; border-bottom: 1px dashed var(--line); }
 .step-edit input, .step-edit select { min-height: 38px; padding: .3rem .45rem; width: 100%; }
 .step-edit .detail { grid-column: 1 / -1; }
@@ -94,9 +94,6 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
 </style>
 {% endblock %}
 {% block body %}
-{% macro cook_pill(name) -%}
-  {%- if name %}<span class="pill cook-pill" style="background: {{ colors.get(name, '#6b7280') }}">{{ name }}</span>{% endif -%}
-{%- endmacro %}
 {% macro render_sections(ing, ins) -%}
 <div class="recipe-view">
   {% if ing %}<div><h4>Ingredients</h4>{% for s in ing %}{% if s.heading %}<h5>{{ s.heading }}</h5>{% endif %}<ul>{% for line in s.lines %}<li>{{ line }}</li>{% endfor %}</ul>{% endfor %}</div>{% endif %}
@@ -167,7 +164,7 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
       {% else %}<p class="muted small">Nothing in progress.</p>{% endfor %}
     </div>
     <div class="card"><h3>Up next</h3>
-      {% for t in status.next %}<div class="now-item"><strong>{{ t.title }}</strong> {{ cook_pill(t.cook) }}
+      {% for t in status.next %}<div class="now-item"><strong>{{ t.title }}</strong>
         <div class="small muted">{{ t.dish_name }} · {{ planner.short_date(t.start) }} {{ planner.format_clock(t.start) }}</div></div>
       {% else %}<p class="muted small">All done. Enjoy dinner!</p>{% endfor %}
     </div>
@@ -178,18 +175,11 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
     {% for w in conflicts %}<div class="small">{{ planner.short_date(w.when) }} {{ planner.format_clock(w.when) }}: {{ w.text }}</div>{% endfor %}
   </div>
   {% endif %}
-  {% if not cooks or dishes|selectattr('cook')|list|length < dishes|length %}
-  <p class="small muted" style="margin-top:.6rem">Tip: assign each dish to a cook in the Menu so cook mode can show “my steps”.</p>
-  {% endif %}
 </section>
 
 <section id="timeline">
   <div class="section-head">
     <h2>Timeline</h2>
-    <div class="filter" role="group" aria-label="Show steps for">
-      <button type="button" data-filter="" aria-pressed="true">Everyone</button>
-      {% for c in cooks %}<button type="button" data-filter="{{ c }}" aria-pressed="false">{{ c }}</button>{% endfor %}
-    </div>
   </div>
   {% for day in days %}
   <div class="day">
@@ -209,7 +199,7 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
     {% endif %}
     {% for t in day.tasks %}
     {% set is_overdue = not t.done and t.end <= now and t.kind != 'passive' %}
-    <div class="task{% if t.done %} done{% endif %}{% if is_overdue %} overdue{% endif %}" id="task-{{ t.key|replace(':', '-') }}" data-cook="{{ t.cook }}">
+    <div class="task{% if t.done %} done{% endif %}{% if is_overdue %} overdue{% endif %}" id="task-{{ t.key|replace(':', '-') }}">
       <form method="post" action="/thanksgiving/steps/toggle">
         <input type="hidden" name="key" value="{{ t.key }}">
         <input type="hidden" name="anchor" value="task-{{ t.key|replace(':', '-') }}">
@@ -222,7 +212,7 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
         {% set has_recipe = d and (d.ingredient_sections or d.instruction_sections) %}
         {% if has_recipe %}<details class="t-more"><summary>{% endif %}
         <div class="t-title">{{ t.title }}{% if has_recipe %} <span class="t-open">Recipe</span>{% endif %}</div>
-        <div class="t-meta"><span class="small muted">{{ t.dish_name }}</span>{{ cook_pill(t.cook) }}{{ kind_pill(t) }}
+        <div class="t-meta"><span class="small muted">{{ t.dish_name }}</span>{{ kind_pill(t) }}
           {% if t.minutes %}<span class="small muted">{{ planner.format_duration(t.minutes) }}</span>{% endif %}</div>
         {% if t.detail %}<div class="t-detail">{{ t.detail }}</div>{% endif %}
         {% if has_recipe %}</summary>{{ recipe_block(d, t.section) }}</details>{% endif %}
@@ -262,7 +252,7 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
   <div class="dishes">
   {% for dish in dishes %}
     <article class="card dish" id="dish-{{ dish.id }}">
-      <h3>{{ dish.name }} {{ cook_pill(dish.cook) }}{% if not dish.cook %}<span class="pill">Unassigned</span>{% endif %}</h3>
+      <h3>{{ dish.name }}</h3>
       {% if dish.notes %}<p class="small muted" style="margin:.3rem 0 0">{{ dish.notes }}</p>{% endif %}
       {% if dish.size_options %}
       <form method="post" action="/thanksgiving/dishes/{{ dish.id }}/size" class="row size-form">
@@ -289,15 +279,11 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
         <form method="post" action="/thanksgiving/dishes/{{ dish.id }}/save" class="stack" style="margin-top:.75rem">
           <div class="row">
             <div class="field" style="flex:2 1 12rem"><label>Name</label><input type="text" name="name" value="{{ dish.name }}"></div>
-            <div class="field"><label>Cook</label>
-              <select name="cook"><option value="">Unassigned</option>
-                {% for c in cooks %}<option value="{{ c }}" {% if dish.cook == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
-              </select></div>
             <div class="field"><label>Type</label>
               <select name="category">{% for value, label in categories %}<option value="{{ value }}" {% if dish.category == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
           </div>
           <div class="field"><label>Steps</label>
-            <div class="step-edit step-head"><span>Day</span><span>Time</span><span>Step</span><span>Min</span><span>Type</span><span>°F</span><span>Who</span><span>Remove</span></div>
+            <div class="step-edit step-head"><span>Day</span><span>Time</span><span>Step</span><span>Min</span><span>Type</span><span>°F</span><span>Remove</span></div>
             {% for step in dish.steps %}
               {% set when = planner.resolve_anchor(step.anchor, dinner) %}
               <div class="step-edit">
@@ -308,7 +294,6 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
                 <input type="number" name="step_minutes" value="{{ step.minutes }}" min="0" aria-label="Minutes">
                 <select name="step_kind" aria-label="Type">{% for k, label in step_kinds.items() %}<option value="{{ k }}" {% if step.kind == k %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
                 <input type="number" name="step_temp" value="{{ step.temp or '' }}" min="0" placeholder="°F" aria-label="Oven temperature">
-                <select name="step_cook" aria-label="Who"><option value="">Dish cook</option>{% for c in cooks %}<option value="{{ c }}" {% if step.cook == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select>
                 <label class="small" style="font-weight:500"><input type="checkbox" name="step_remove" value="{{ step.id }}"> Remove</label>
                 <input class="detail" type="text" name="step_detail" value="{{ step.detail }}" placeholder="Note (optional)" aria-label="Step note">
               </div>
@@ -384,7 +369,6 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
   <form method="post" action="/thanksgiving/settings" class="card row">
     <div class="field"><label>Dinner date</label><input type="date" name="dinner_date" value="{{ dinner.strftime('%Y-%m-%d') }}" required></div>
     <div class="field"><label>Dinner time</label><input type="time" name="dinner_time" value="{{ dinner.strftime('%H:%M') }}" required></div>
-    <div class="field" style="flex:1 1 14rem"><label>Cooks (comma separated)</label><input type="text" name="cooks" value="{{ plan.cooks }}"></div>
     <div class="field"><label>Ovens</label><select name="ovens"><option value="1" {% if plan.ovens == 1 %}selected{% endif %}>1</option><option value="2" {% if plan.ovens == 2 %}selected{% endif %}>2</option></select></div>
     <button class="primary" type="submit">Save</button>
   </form>
@@ -393,20 +377,6 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
 
 <script>
 (function () {
-  // Cook filter for the timeline (remembered per device).
-  const buttons = document.querySelectorAll("[data-filter]");
-  function apply(name) {
-    buttons.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.filter === name)));
-    document.querySelectorAll(".task").forEach(row => {
-      row.hidden = !!name && row.dataset.cook !== name && row.dataset.cook !== "";
-    });
-    try { localStorage.setItem("tg-filter", name); } catch (e) {}
-  }
-  buttons.forEach(b => b.addEventListener("click", () => apply(b.dataset.filter)));
-  let saved = "";
-  try { saved = localStorage.getItem("tg-filter") || ""; } catch (e) {}
-  if ([...buttons].some(b => b.dataset.filter === saved)) apply(saved);
-
   // In-page confirmation for deletes (no browser dialogs).
   document.querySelectorAll("[data-confirm]").forEach(btn => {
     btn.addEventListener("click", (event) => {

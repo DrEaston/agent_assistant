@@ -89,15 +89,13 @@ class ConflictTests(unittest.TestCase):
         self.assertIn("different temperatures", warnings_[0]["text"])
         self.assertEqual(planner.find_conflicts(planner.build_timeline({"dinner_at": DINNER}, dishes), ovens=2), [])
 
-    def test_same_cook_double_booked(self):
+    def test_no_warnings_name_cooks(self):
+        # Cooks aren't shown any more (each device is one cook), so overlapping hands-on work isn't flagged.
         dishes = [
             self.dish(1, [{"id": "a", "anchor": "T-60", "title": "Peel", "minutes": 20, "kind": "hands"}], "Parrisa"),
             self.dish(2, [{"id": "b", "anchor": "T-50", "title": "Chop", "minutes": 20, "kind": "hands"}], "Parrisa"),
-            self.dish(3, [{"id": "c", "anchor": "T-50", "title": "Stir", "minutes": 20, "kind": "hands"}], "Sam"),
         ]
-        warnings_ = planner.find_conflicts(planner.build_timeline({"dinner_at": DINNER}, dishes))
-        self.assertEqual(len(warnings_), 1)
-        self.assertIn("Parrisa", warnings_[0]["text"])
+        self.assertEqual(planner.find_conflicts(planner.build_timeline({"dinner_at": DINNER}, dishes)), [])
 
 
 class HelperTests(unittest.TestCase):
@@ -443,24 +441,46 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(len(r["problems"]), 5)
         self.assertIn("after dinner", r["problems"][0])
 
-    def test_voice_assign_size_and_done(self):
+    def test_voice_size_and_done_but_no_assigning_people(self):
         self.client.get("/thanksgiving")
         plan, mac = self.mac()
         self.voice_with({"reply": "Got it.", "question": "", "actions": [
             {"type": "assign", "dish_id": mac["id"], "step_ids": [], "cook": "Parrisa"},
             {"type": "size", "dish_id": mac["id"], "scale": 0.5},
             {"type": "done", "dish_id": mac["id"], "step_ids": ["practice"], "done": True}]})
-        r = self.client.post("/thanksgiving/api/command", json={"text": "Parrisa does a half batch mac, practice is done"}).json()
-        self.assertEqual(len(r["changes"]), 3)
+        r = self.client.post("/thanksgiving/api/command", json={"text": "half batch mac, practice is done"}).json()
+        self.assertEqual(len(r["changes"]), 2)
+        self.assertEqual(len(r["problems"]), 1)  # assigning cooks was removed
+        summary_text = json.dumps(r)
+        self.assertNotIn("Parrisa", summary_text)
         self.client.post("/thanksgiving/api/command/apply")
         mac = self.mac()[1]
-        self.assertTrue(all(s["cook"] == "Parrisa" for s in mac["steps"]))
         self.assertEqual(mac["scale"], 0.5)
         self.assertIn(f"{mac['id']}:practice", tg_router.store().get_checked(plan["id"], "step"))
         self.client.post("/thanksgiving/api/command/undo")
         mac = self.mac()[1]
         self.assertEqual(mac["scale"], 1.0)
         self.assertNotIn(f"{mac['id']}:practice", tg_router.store().get_checked(plan["id"], "step"))
+
+    def test_no_cook_names_on_the_pages(self):
+        self.client.get("/thanksgiving")
+        plan_page = self.client.get("/thanksgiving").text
+        self.assertNotIn("Parrisa", plan_page)  # the default plan assigns the turkey step to Parrisa
+        self.assertNotIn("Unassigned", plan_page)
+        self.assertNotIn('name="cooks"', plan_page)
+        self.assertNotIn('name="step_cook"', plan_page)
+        # Saving a dish or the settings keeps the hidden assignments instead of wiping them.
+        plan = tg_router.store().get_plan()
+        turkey = next(d for d in tg_router.store().get_dishes(plan["id"]) if d["category"] == "turkey")
+        form = {"name": turkey["name"], "category": turkey["category"], "step_id": [s["id"] for s in turkey["steps"]],
+                "step_title": [s["title"] for s in turkey["steps"]], "step_day": ["0"] * len(turkey["steps"]),
+                "step_time": ["12:00"] * len(turkey["steps"]), "step_minutes": [str(s["minutes"]) for s in turkey["steps"]],
+                "step_kind": [s["kind"] for s in turkey["steps"]], "step_temp": [str(s.get("temp") or "") for s in turkey["steps"]]}
+        self.client.post(f"/thanksgiving/dishes/{turkey['id']}/save", data=form)
+        saved = tg_router.store().get_dish(plan["id"], turkey["id"])
+        self.assertEqual(next(s for s in saved["steps"] if s["id"] == "out")["cook"], "Parrisa")
+        self.client.post("/thanksgiving/settings", data={"dinner_date": "2026-11-26", "dinner_time": "16:00", "ovens": "1"})
+        self.assertEqual(tg_router.store().get_plan()["cooks"], plan["cooks"])
 
     def test_voice_button_on_both_pages(self):
         self.client.get("/thanksgiving")
