@@ -135,7 +135,7 @@ Bake at 425°F for 15 minutes.
 Lower to 350°F and bake 40 to 50 minutes, until the edges are set and the center barely jiggles. Cover the crust edge with foil if it browns too fast.
 Cool on a rack about 2 hours, then refrigerate loosely covered. Serve with whipped cream."""
 
-MAC_INGREDIENTS = """Mac and cheese:
+OLD_MAC_INGREDIENTS = """Mac and cheese:
 1 lb elbow macaroni or cavatappi
 1 package (12 to 14 oz) Little Smokies
 Sauce:
@@ -153,7 +153,7 @@ Topping:
 1 cup panko breadcrumbs
 2 tbsp unsalted butter, melted"""
 
-MAC_INSTRUCTIONS = """Smokies:
+OLD_MAC_INSTRUCTIONS = """Smokies:
 Cut the smokies into coins. Brown them in a dry skillet over medium-high, 4 to 5 minutes. Set aside.
 Pasta:
 Boil the pasta in well-salted water 2 minutes less than the package says. Drain; don't rinse.
@@ -173,6 +173,17 @@ Mix the panko with the melted butter and the saved cheddar. Scatter over the top
 Made fresh: bake at 400°F for 20 to 25 minutes, until bubbling at the edges and golden on top.
 From the fridge: sit out 45 minutes, bake covered at 400°F for 20 minutes, then uncovered 15 minutes.
 Rest 10 minutes before serving."""
+
+# Current version: 2 oz each of the cheddar and Gruyère swapped for goat cheese (Nov 19 practice run).
+MAC_INGREDIENTS = OLD_MAC_INGREDIENTS.replace(
+    "12 oz sharp cheddar cheese (block, not pre-shredded)\n4 oz Gruyère cheese (or Monterey Jack)",
+    "10 oz sharp cheddar cheese (block, not pre-shredded)\n2 oz Gruyère cheese (or Monterey Jack)\n"
+    "4 oz goat cheese, crumbled")
+MAC_INSTRUCTIONS = OLD_MAC_INSTRUCTIONS.replace(
+    "Stir in the cheese a handful at a time until smooth. Off the heat keeps it silky.",
+    "Stir in the cheddar and Gruyère a handful at a time until smooth. Off the heat keeps it silky.\n"
+    "Crumble in the goat cheese last and stir just until it disappears. It makes the sauce extra creamy "
+    "(save cheddar, not goat cheese, for the top: goat cheese doesn't brown).")
 
 # Text of earlier versions, so saved dishes that were never edited can be upgraded in place.
 OLD_PIE_INSTRUCTIONS = """Shell: roll, fit, and crimp. Wrap tightly and freeze in the plate. Bake from frozen.
@@ -240,6 +251,13 @@ def upgrade_saved_dish(dish):
                 step["cook"] = old.get("shell", {}).get("cook", "")
                 steps.append(step)
         return {"ingredients_text": PIE_INGREDIENTS, "instructions_text": PIE_INSTRUCTIONS, "steps": steps}
+    if dish.get("name") == "Mac and cheese" and (dish.get("ingredients_text") or "").strip() == OLD_MAC_INGREDIENTS:
+        # The goat cheese swap. Instructions update only if they're also untouched; steps and cooks stay.
+        instructions = (dish.get("instructions_text") or "")
+        if instructions.strip() == OLD_MAC_INSTRUCTIONS:
+            instructions = MAC_INSTRUCTIONS
+        return {"ingredients_text": MAC_INGREDIENTS, "instructions_text": instructions,
+                "steps": dish.get("steps") or []}
     return None
 
 

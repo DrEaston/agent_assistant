@@ -317,7 +317,8 @@ class RouteTests(unittest.TestCase):
         self.assertIn("buttered 8x8 dish", page)
         self.assertIn("1 lb elbow macaroni", page)  # the editor keeps the recipe as written
         groceries = {i["text"]: i["amount"] for s in tg_router.plan_context(plan)["groceries"] for i in s["items"]}
-        self.assertEqual(groceries["Sharp cheddar cheese"], "6 oz")
+        self.assertEqual(groceries["Sharp cheddar cheese"], "5 oz")
+        self.assertEqual(groceries["Goat cheese"], "2 oz")
         for retired in ("0.75", "3"):
             self.assertEqual(self.client.post(f"/thanksgiving/dishes/{mac['id']}/size",
                                               data={"scale": retired}).status_code, 400)
@@ -343,6 +344,25 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(r.json(), {"ok": True})
         self.assertEqual(self.mac()[1]["scale"], 0.5)
         self.assertEqual(self.client.post(f"/thanksgiving/api/dishes/{mac['id']}/size", json={"scale": "9"}).status_code, 400)
+
+    def test_saved_mac_gets_goat_cheese_swap_on_restart(self):
+        from apps.kitchen.thanksgiving import presets
+        self.client.get("/thanksgiving")
+        plan, mac = self.mac()
+        conn = self.db.connect()
+        conn.execute("UPDATE tg_dishes SET ingredients_text = ?, instructions_text = ?, scale = 0.5 WHERE id = ?",
+                     (presets.OLD_MAC_INGREDIENTS, presets.OLD_MAC_INSTRUCTIONS, mac["id"]))
+        conn.commit()
+        tg_router.configure(self.db)  # restart
+        upgraded = self.mac()[1]
+        self.assertIn("4 oz goat cheese, crumbled", upgraded["ingredients_text"])
+        self.assertIn("10 oz sharp cheddar", upgraded["ingredients_text"])
+        self.assertIn("goat cheese last", upgraded["instructions_text"])
+        self.assertEqual(upgraded["scale"], 0.5)
+        self.assertEqual(upgraded["steps"], mac["steps"])
+        page = self.client.get("/thanksgiving").text
+        self.assertIn("2 oz goat cheese, crumbled", page)  # half batch
+        self.assertIn("5 oz sharp cheddar", page)
 
     def test_retired_size_resets_on_restart_and_choices_stay(self):
         self.client.get("/thanksgiving")
