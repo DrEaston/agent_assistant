@@ -71,8 +71,17 @@
     if (!r.ok) throw new Error(data.detail || `Something went wrong (${r.status}).`);
     return data;
   }
-  function open() { sheet.hidden = false; $("voice-open").hidden = true; text.focus({ preventScroll: true }); }
+  function open() {
+    // Start listening straight away (this tap counts as permission to use the mic). Don't focus the text box:
+    // that pops up the keyboard, whose own voice-typing button fills the box but never sends.
+    sheet.hidden = false;
+    $("voice-open").hidden = true;
+    if (Recognition || (navigator.mediaDevices && window.MediaRecorder)) mic.click();
+  }
   function close() {
+    if (recognition) { recognition.onend = null; recognition.abort(); recognition = null; }
+    if (recorder && recorder.state === "recording") { recorder.onstop = null; stopListening(); }
+    mic.classList.remove("recording"); mic.textContent = "🎤";
     sheet.hidden = true; $("voice-open").hidden = false;
     if ($("voice-decide").hidden === false) call("/thanksgiving/api/command/cancel").catch(() => {});
     $("voice-decide").hidden = true;
