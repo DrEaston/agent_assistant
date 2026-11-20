@@ -300,6 +300,21 @@ def set_dish_size(dish_id: int, scale: str = Form(...)):
     return back(f"size-{dish_id}")  # lands on the dropdown without opening the editor
 
 
+@router.post("/thanksgiving/api/dishes/{dish_id}/size")
+async def api_set_dish_size(dish_id: int, request: Request):
+    """Cook mode's batch-size dropdown."""
+    data = await _json(request)
+    plan = require_plan()
+    dish = store().get_dish(plan["id"], dish_id)
+    if not dish:
+        raise HTTPException(status_code=404, detail="Dish not found")
+    value = sizes.parse_scale(dish, data.get("scale"))
+    if value is None:
+        raise HTTPException(status_code=400, detail="Pick one of the listed sizes.")
+    store().set_scale(plan["id"], dish_id, value)
+    return {"ok": True}
+
+
 @router.post("/thanksgiving/dishes/{dish_id}/turkey")
 def retime_turkey(dish_id: int, weight_lb: float = Form(...), frozen: str = Form("")):
     plan = require_plan()
@@ -418,6 +433,7 @@ def cook_state():
         "dishes": [{
             "id": d["id"], "name": d["name"], "cook": d["cook"], "category": d["category"],
             "notes": d["notes"], "size_label": d.get("size_label", ""),
+            "size_options": d.get("size_options", []), "size_value": d.get("size_value", ""),
             "ingredient_sections": planner.recipe_sections(d["ingredients_text"]),
             "instruction_sections": planner.recipe_sections(d["instructions_text"], with_timers=True),
             "steps": by_dish.get(d["id"], []),

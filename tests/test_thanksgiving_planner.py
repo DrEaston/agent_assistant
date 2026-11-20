@@ -321,6 +321,22 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(cook_mac["size_label"], "Half: serves 3")
         self.assertIn("8 oz elbow macaroni or cavatappi", [l for s in cook_mac["ingredient_sections"] for l in s["lines"]])
 
+    def test_size_picker_shows_wherever_the_recipe_opens(self):
+        self.client.get("/thanksgiving")
+        plan, mac = self.mac()
+        page = self.client.get("/thanksgiving").text
+        # Dish card, View recipe, and each timeline step's recipe all carry the picker.
+        self.assertGreaterEqual(page.count('aria-label="Batch size for Mac and cheese"'), 3)
+        self.assertIn("View recipe · Thanksgiving: 3 + leftovers", page)
+        state = self.client.get("/thanksgiving/api/state").json()
+        cook_mac = next(d for d in state["dishes"] if d["name"] == "Mac and cheese")
+        self.assertEqual(cook_mac["size_value"], "0.75")
+        self.assertEqual([o["value"] for o in cook_mac["size_options"]], ["0.5", "0.75", "1"])
+        r = self.client.post(f"/thanksgiving/api/dishes/{mac['id']}/size", json={"scale": "1"})
+        self.assertEqual(r.json(), {"ok": True})
+        self.assertEqual(self.mac()[1]["scale"], 1.0)
+        self.assertEqual(self.client.post(f"/thanksgiving/api/dishes/{mac['id']}/size", json={"scale": "9"}).status_code, 400)
+
     def test_size_migration_runs_once_and_keeps_choices(self):
         self.client.get("/thanksgiving")
         plan, mac = self.mac()

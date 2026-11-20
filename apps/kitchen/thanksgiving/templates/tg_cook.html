@@ -205,7 +205,10 @@ body { overflow-x: hidden; }
     const ingredients = ingredientsHTML(dish, dish.ingredient_sections);
     const instructions = instructionsHTML(dish, dish.instruction_sections);
     $("recipe").innerHTML = `<div class="stack">
-      <div class="row"><h2>${esc(dish.name)}</h2>${pill(dish.cook)}${dish.size_label ? `<span class="pill">${esc(dish.size_label)}</span>` : ""}</div>
+      <div class="row"><h2>${esc(dish.name)}</h2>${pill(dish.cook)}</div>
+      ${(dish.size_options || []).length ? `<label class="row small">Batch size
+        <select data-size-dish="${dish.id}" aria-label="Batch size for ${esc(dish.name)}">${dish.size_options.map(o =>
+          `<option value="${esc(o.value)}"${o.value === dish.size_value ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>` : ""}
       ${dish.notes ? `<p class="muted">${esc(dish.notes)}</p>` : ""}
       <h3>Schedule</h3><ol class="steps">${steps || '<li class="muted">No timed steps.</li>'}</ol>
       ${ingredients ? `<h3>Ingredients <span class="small muted">(tap to cross off)</span></h3>${ingredients}` : ""}
@@ -313,6 +316,11 @@ body { overflow-x: hidden; }
   async function act(fn) { try { await fn(); } catch (e) { $("offline").hidden = false; } poll(); }
 
   // ---------- interactions
+  document.addEventListener("change", (ev) => {
+    const select = ev.target.closest("select[data-size-dish]");
+    if (!select) return;
+    act(() => post(`/thanksgiving/api/dishes/${select.dataset.sizeDish}/size`, { scale: select.value }));
+  });
   document.addEventListener("click", (ev) => {
     const el = ev.target.closest("button, li[data-got], .up[data-goto]");
     if (!el || !state) return;

@@ -65,7 +65,7 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
 .dish-steps li { padding: .15rem 0; display: flex; gap: .5rem; }
 .dish-steps .when { color: var(--muted); min-width: 7.5rem; font-variant-numeric: tabular-nums; }
 .size-form { margin-top: .5rem; gap: .5rem; }
-.size-form label { font-size: .85rem; color: var(--muted); }
+.size-form label, .size-form .size-label { font-size: .85rem; color: var(--muted); font-weight: 600; }
 .size-form select { min-height: 40px; }
 .editor { margin-top: .75rem; border-top: 1px solid var(--line); padding-top: .75rem; }
 .editor summary { font-weight: 600; color: var(--accent); }
@@ -103,7 +103,19 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
   {% if ins %}<div><h4>How to</h4>{% for s in ins %}{% if s.heading %}<h5>{{ s.heading }}</h5>{% endif %}<ol>{% for line in s.lines %}<li>{{ line }}</li>{% endfor %}</ol>{% endfor %}</div>{% endif %}
 </div>
 {%- endmacro %}
+{% macro size_picker(dish) -%}
+  {%- if dish.size_options -%}
+  <form method="post" action="/thanksgiving/dishes/{{ dish.id }}/size" class="row size-form">
+    <span class="size-label">Batch size</span>
+    <select name="scale" data-autosubmit aria-label="Batch size for {{ dish.name }}">
+      {% for option in dish.size_options %}<option value="{{ option.value }}"{% if option.value == dish.size_value %} selected{% endif %}>{{ option.label }}</option>{% endfor %}
+    </select>
+    <noscript><button type="submit">Save</button></noscript>
+  </form>
+  {%- endif -%}
+{%- endmacro %}
 {% macro recipe_block(dish, section='') -%}
+  {{ size_picker(dish) }}
   {%- set ing = planner.sections_for_step(dish.ingredient_sections, section) -%}
   {%- set ins = planner.sections_for_step(dish.instruction_sections, section) -%}
   {%- if ing or ins -%}
@@ -267,7 +279,7 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
       </ul>
 
       {% if dish.ingredient_sections or dish.instruction_sections %}
-      <details class="view-recipe"><summary>View recipe</summary>{{ render_sections(dish.ingredient_sections, dish.instruction_sections) }}</details>
+      <details class="view-recipe"><summary>View recipe{% if dish.size_label %} · {{ dish.size_label }}{% endif %}</summary>{{ size_picker(dish) }}{{ render_sections(dish.ingredient_sections, dish.instruction_sections) }}</details>
       {% endif %}
 
       <details class="editor">

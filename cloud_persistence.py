@@ -9,6 +9,7 @@ import shutil
 import sqlite3
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 
@@ -21,6 +22,8 @@ class CloudStoragePersistence:
         self._lock = threading.RLock()
         self._timer_lock = threading.Lock()
         self._timer = None
+        self._pending_since = None
+        self._last_backup = 0.0
         self._client = None
         self._bucket = None
         self.enabled = bool(self.bucket_name)
@@ -110,34 +113,60 @@ class CloudStoragePersistence:
                 tmp_path.unlink(missing_ok=True)
 
     def schedule_backup(self, delay=2.0):
-        """Back up a couple of seconds after the last change instead of on every commit.
+        """Back up after a commit without uploading on every single one.
 
-        A burst of commits (checking off five groceries) becomes one upload, and requests
-        no longer wait on Cloud Storage. Call flush() at shutdown so nothing pending is lost.
+        The first change after a quiet spell uploads right away. Changes within `delay` of the
+        last upload are batched into one trailing upload, which runs from a timer, or from
+        run_if_due() at the start of the next request, whichever comes first. Cloud Run pauses
+        the CPU between requests, so the timer alone can be held up; run_if_due() and flush()
+        (at shutdown) make sure the trailing upload still happens.
         """
         if not self.enabled:
             return
+        now = time.monotonic()
         with self._timer_lock:
-            if self._timer is not None:
-                return  # a backup is already coming and will include this change
-            self._timer = threading.Timer(delay, self._run_scheduled_backup)
-            self._timer.daemon = True
-            self._timer.start()
+            upload_now = self._timer is None and now - self._last_backup >= delay
+            if not upload_now:
+                if self._pending_since is None:
+                    self._pending_since = now
+                if self._timer is None:
+                    self._timer = threading.Timer(delay, self._run_scheduled_backup)
+                    self._timer.daemon = True
+                    self._timer.start()
+        if upload_now:
+            self._backup_now()
 
-    def _run_scheduled_backup(self):
-        with self._timer_lock:
-            self._timer = None  # changes made during the upload schedule a fresh backup
+    def _backup_now(self):
         try:
             self.backup_database()
+            self._last_backup = time.monotonic()
         except Exception as exc:
-            print(f"Warning: scheduled database backup failed: {exc}")
+            print(f"Warning: database backup failed: {exc}")
+
+    def _take_pending(self):
+        with self._timer_lock:
+            timer, self._timer = self._timer, None
+            pending, self._pending_since = self._pending_since, None
+        if timer is not None:
+            timer.cancel()
+        return pending is not None or timer is not None
+
+    def _run_scheduled_backup(self):
+        if self._take_pending():
+            self._backup_now()
+
+    def run_if_due(self, delay=2.0):
+        """Called at the start of each request: run a trailing backup the paused timer missed."""
+        with self._timer_lock:
+            due = self._pending_since is not None and time.monotonic() - self._pending_since >= delay
+        if due and self._take_pending():
+            self._backup_now()
+            return True
+        return False
 
     def flush(self):
         """Run any pending backup now (used at shutdown)."""
-        with self._timer_lock:
-            timer, self._timer = self._timer, None
-        if timer is not None:
-            timer.cancel()
+        if self._take_pending():
             self.backup_database()
             return True
         return False

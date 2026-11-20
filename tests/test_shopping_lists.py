@@ -269,29 +269,45 @@ class ShoppingRouteTests(unittest.TestCase):
 
 
 class BatchedBackupTests(unittest.TestCase):
-    def test_many_commits_become_one_upload(self):
+    def test_first_change_uploads_now_and_a_burst_becomes_one_more(self):
         persistence = CloudStoragePersistence("bucket", "x.db", ".")
         uploads = []
-        done = threading.Event()
+        trailing = threading.Event()
 
         def fake_backup():
             uploads.append(1)
-            done.set()
+            if len(uploads) == 2:
+                trailing.set()
             return True
 
         persistence.backup_database = fake_backup
+        persistence.schedule_backup(delay=0.05)
+        self.assertEqual(len(uploads), 1)  # saved before the request returns
         for _ in range(10):
             persistence.schedule_backup(delay=0.05)
-        self.assertTrue(done.wait(2))
-        self.assertEqual(len(uploads), 1)
+        self.assertTrue(trailing.wait(2))
+        self.assertEqual(len(uploads), 2)
+
+    def test_next_request_runs_a_backup_the_paused_timer_missed(self):
+        persistence = CloudStoragePersistence("bucket", "x.db", ".")
+        uploads = []
+        persistence.backup_database = lambda: uploads.append(1)
+        persistence.schedule_backup(delay=60)  # uploads now
+        persistence.schedule_backup(delay=60)  # trailing change: timer won't fire for a minute
+        self.assertFalse(persistence.run_if_due(delay=60))  # not due yet
+        self.assertTrue(persistence.run_if_due(delay=0))  # e.g. the CPU was paused past the deadline
+        self.assertEqual(len(uploads), 2)
+        self.assertFalse(persistence.run_if_due(delay=0))  # nothing left pending
+        self.assertIsNone(persistence._timer)
 
     def test_flush_runs_a_pending_backup_now(self):
         persistence = CloudStoragePersistence("bucket", "x.db", ".")
         uploads = []
         persistence.backup_database = lambda: uploads.append(1)
         persistence.schedule_backup(delay=60)
+        persistence.schedule_backup(delay=60)
         self.assertTrue(persistence.flush())
-        self.assertEqual(uploads, [1])
+        self.assertEqual(uploads, [1, 1])
         self.assertFalse(persistence.flush())
 
     def test_disabled_without_bucket(self):

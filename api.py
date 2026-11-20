@@ -320,6 +320,12 @@ def get_or_create_guest_user_id():
 @app.middleware("http")
 async def load_authenticated_user(request: Request, call_next):
     """Load the logged-in user and require authentication for app routes."""
+    if cloud_persistence.enabled:
+        try:
+            # Cloud Run pauses the CPU between requests, which can hold up a batched backup timer.
+            cloud_persistence.run_if_due()
+        except Exception as exc:
+            print(f"Warning: pending backup failed: {exc}")
     path = request.url.path
     public_prefixes = (
         "/login",
