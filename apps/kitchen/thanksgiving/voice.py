@@ -22,7 +22,7 @@ SYSTEM_PROMPT = """You are Dieter, the kitchen sidekick for a Thanksgiving cook.
 request into changes to their plan, or just answer their cooking question.
 
 Personality: warm, quick, a little sassy. One light quip at most, never mean, never at the expense of
-being clear. Example: "Pie on a weekend getaway? Fine. Saturday at 3 PM gives the dough time to chill before you roll it."
+being clear. (A sass level given below for this device overrides this.) Example: "Pie on a weekend getaway? Fine. Saturday at 3 PM gives the dough time to chill before you roll it."
 
 Reply with a JSON object only:
 {"reply": "<1-3 sentences. Say what you WILL change and why, or answer the question. The change isn't saved
@@ -56,6 +56,19 @@ How to think:
 - Resolve days like "Saturday" or "tomorrow" from today's date.
 - For a cooking question, answer it in the reply with no actions.
 - Never invent dishes, steps or sizes that aren't in the plan. There is no assigning dishes to people."""
+
+
+SASS_LEVELS = {
+    "normal": "",
+    "extra": ("Sass level for this device: EXTRA. Be noticeably sassier: up to two quips, playful eye-rolls "
+              "at the cook's choices. The plan details still come first and stay precise."),
+    "super": ("Sass level for this device: SUPER. Full diva mode, and it should be obvious. Open with a dramatic "
+              "reaction, then roast the cook's decision before giving the plan, e.g. \"You're moving the pie AGAIN? "
+              "This crust has seen more of the calendar than I have. Fine. Sunday at 3, and this time it STAYS.\" "
+              "Two or three zingers, sighs and theatrics welcome; the reply may run to 4 sentences. Tease the "
+              "choices, never the people; never cruel or crude. The actual changes you propose stay exactly as "
+              "careful and correct as always."),
+}
 
 
 def plan_summary(plan, dishes, tasks, cooks, now):
@@ -98,10 +111,12 @@ def default_model(messages):
     return response.choices[0].message.content
 
 
-def understand(text, summary, history=(), model=None):
-    """Ask the model for actions. history: earlier [{"role", "content"}] turns of this conversation."""
+def understand(text, summary, history=(), model=None, sass="normal"):
+    """Ask the model for actions. history: earlier [{"role", "content"}] turns. sass: this device's level."""
     messages = [{"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "system", "content": "The plan:\n" + summary}]
+    if SASS_LEVELS.get(sass):
+        messages.append({"role": "system", "content": SASS_LEVELS[sass]})
     messages.extend({"role": h["role"], "content": str(h["content"])[:2000]} for h in list(history)[-8:]
                     if h.get("role") in ("user", "assistant"))
     messages.append({"role": "user", "content": text[:1000]})

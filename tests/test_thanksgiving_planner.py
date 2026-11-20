@@ -506,6 +506,20 @@ class RouteTests(unittest.TestCase):
         self.assertTrue(r["can_apply"])
         self.assertTrue(any("different temperatures" in w for w in r["warnings"]))
 
+    def test_voice_sass_level_comes_from_the_device(self):
+        self.client.get("/thanksgiving")
+        seen = self.voice_with({"reply": "Oh, honey.", "question": "", "actions": []})
+        self.client.post("/thanksgiving/api/command", json={"text": "hi", "device": "Kitchen tablet", "sass": "super"})
+        system = " ".join(m["content"] for m in seen["messages"] if m["role"] == "system")
+        self.assertIn("SUPER", system)
+        self.client.post("/thanksgiving/api/command", json={"text": "hi"})
+        system = " ".join(m["content"] for m in seen["messages"] if m["role"] == "system")
+        self.assertNotIn("Sass level for this device", system)
+        self.client.post("/thanksgiving/api/command", json={"text": "hi", "sass": "nuclear"})  # unknown -> normal
+        system = " ".join(m["content"] for m in seen["messages"] if m["role"] == "system")
+        self.assertNotIn("Sass level for this device", system)
+        self.assertIn("This device:", self.client.get("/thanksgiving").text)
+
     def test_voice_answers_questions_without_changes(self):
         self.client.get("/thanksgiving")
         self.voice_with({"reply": "Yes: wrapped tight, the dough keeps 3 days in the fridge or a month frozen.",

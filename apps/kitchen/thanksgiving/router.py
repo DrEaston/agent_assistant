@@ -317,8 +317,12 @@ async def api_command(request: Request):
     context = plan_context(plan)
     summary = voice.plan_summary(plan, context["dishes"], context["tasks"], context["cooks"], context["now"])
     history = data.get("history") if isinstance(data.get("history"), list) else []
+    # Each device can name itself and pick its own sass level (saved on that device).
+    sass = data.get("sass") if data.get("sass") in voice.SASS_LEVELS else "normal"
+    device = str(data.get("device") or "").strip()[:40]
     try:
-        result = voice.understand(text, summary, [h for h in history if isinstance(h, dict)], _state["voice_model"])
+        result = voice.understand(text, summary, [h for h in history if isinstance(h, dict)], _state["voice_model"],
+                                  sass=sass)
     except Exception as exc:
         print(f"Warning: voice command failed: {exc}")
         raise HTTPException(status_code=503, detail="Dieter couldn't think that through right now. Try again.") from exc
@@ -327,7 +331,8 @@ async def api_command(request: Request):
     warnings = voice.knock_on(plan, context["dishes"], actions, plan["ovens"])
     _state["voice_pending"][plan["id"]] = actions
     # Logged so "it did something dumb" can be looked up later.
-    print("Tell Dieter: " + json.dumps({"said": text[:500], "reply": result["reply"], "question": result["question"],
+    print("Tell Dieter: " + json.dumps({"device": device or "unnamed", "sass": sass,
+                                        "said": text[:500], "reply": result["reply"], "question": result["question"],
                                         "changes": changes, "problems": problems, "warnings": warnings,
                                         "model": voice.model_name() if _state["voice_model"] is None else "test"}))
     return {"reply": result["reply"], "question": result["question"], "changes": changes, "problems": problems,

@@ -25,6 +25,9 @@
 .voice-mic.recording { background: var(--warn); border-color: var(--warn); color: #fff; }
 .voice-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .voice-hint { font-size: .85rem; color: var(--muted); }
+.voice-device { font-size: .85rem; color: var(--muted); }
+.voice-device-form { display: flex; flex-wrap: wrap; gap: .5rem; align-items: end; margin-top: .5rem; }
+.voice-device-form label { display: flex; flex-direction: column; gap: .2rem; font-weight: 600; }
 </style>
 
 <button type="button" class="voice-fab" id="voice-open" aria-haspopup="dialog">🎤 Tell Dieter</button>
@@ -48,6 +51,20 @@
       <input type="text" id="voice-text" placeholder="Or type it here" aria-label="What should change?" autocomplete="off">
       <button type="submit">Send</button>
     </form>
+    <details class="voice-device">
+      <summary>This device: <span id="voice-device-label">unnamed</span> · Sass: <span id="voice-sass-label">Normal</span></summary>
+      <div class="voice-device-form">
+        <label>Name <input type="text" id="voice-device-name" maxlength="40" placeholder="Kitchen tablet"></label>
+        <label>Sass
+          <select id="voice-sass">
+            <option value="normal">Normal</option>
+            <option value="extra">Extra</option>
+            <option value="super">Super</option>
+          </select>
+        </label>
+        <button type="button" id="voice-device-save">Save on this device</button>
+      </div>
+    </details>
   </div>
 </section>
 
@@ -56,6 +73,27 @@
   const $ = (id) => document.getElementById(id);
   const sheet = $("voice-sheet"), log = $("voice-log"), text = $("voice-text"), mic = $("voice-mic");
   let history = [];  // this conversation, so follow-up answers ("Saturday at 7") have context
+
+  // "This device": a name and sass level saved only on this device and sent with every command.
+  const SASS_NAMES = { normal: "Normal", extra: "Extra", super: "Super" };
+  function loadDevice() {
+    try { return JSON.parse(localStorage.getItem("tg-voice-device") || "{}"); } catch (e) { return {}; }
+  }
+  function showDevice() {
+    const d = loadDevice();
+    $("voice-device-label").textContent = d.name || "unnamed";
+    $("voice-sass-label").textContent = SASS_NAMES[d.sass] || "Normal";
+    $("voice-device-name").value = d.name || "";
+    $("voice-sass").value = SASS_NAMES[d.sass] ? d.sass : "normal";
+  }
+  $("voice-device-save").addEventListener("click", () => {
+    const d = { name: $("voice-device-name").value.trim().slice(0, 40), sass: $("voice-sass").value };
+    try { localStorage.setItem("tg-voice-device", JSON.stringify(d)); } catch (e) {}
+    showDevice();
+    say("dieter", d.sass === "super" ? "Super sass unlocked. You asked for this." : `Saved. Sass: ${esc(SASS_NAMES[d.sass])}.`);
+    $("voice-device-save").closest("details").open = false;
+  });
+  showDevice();
   let recorder = null, chunks = [];
 
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
@@ -100,7 +138,9 @@
     say("dieter", "<span class='muted'>Thinking…</span>");
     const thinking = log.lastChild;
     try {
-      const data = await call("/thanksgiving/api/command", { text: message, history });
+      const device = loadDevice();
+      const data = await call("/thanksgiving/api/command", { text: message, history, device: device.name || "",
+                                                             sass: device.sass || "normal" });
       thinking.remove();
       history.push({ role: "user", content: message });
       let html = esc(data.question || data.reply || "");
