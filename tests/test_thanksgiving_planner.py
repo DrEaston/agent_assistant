@@ -364,6 +364,23 @@ class RouteTests(unittest.TestCase):
         self.assertIn("2 oz goat cheese, crumbled", page)  # half batch
         self.assertIn("5 oz sharp cheddar", page)
 
+    def test_saved_mac_gets_covering_and_rack_instructions(self):
+        from apps.kitchen.thanksgiving import presets
+        self.client.get("/thanksgiving")
+        plan, mac = self.mac()
+        conn = self.db.connect()
+        conn.execute("UPDATE tg_dishes SET instructions_text = ? WHERE id = ?", (presets.MAC_INSTRUCTIONS_V2, mac["id"]))
+        conn.commit()
+        tg_router.configure(self.db)  # restart
+        text = self.mac()[1]["instructions_text"]
+        self.assertIn("bake UNCOVERED at 400°F", text)
+        self.assertIn("Cover tightly with foil and bake at 400°F for 20 minutes", text)
+        self.assertIn("Rack: middle of the oven", text)
+        conn.execute("UPDATE tg_dishes SET instructions_text = 'My own notes' WHERE id = ?", (mac["id"],))
+        conn.commit()
+        tg_router.configure(self.db)
+        self.assertEqual(self.mac()[1]["instructions_text"], "My own notes")  # your edits are never overwritten
+
     def test_retired_size_resets_on_restart_and_choices_stay(self):
         self.client.get("/thanksgiving")
         plan, mac = self.mac()

@@ -179,11 +179,21 @@ MAC_INGREDIENTS = OLD_MAC_INGREDIENTS.replace(
     "12 oz sharp cheddar cheese (block, not pre-shredded)\n4 oz Gruyère cheese (or Monterey Jack)",
     "10 oz sharp cheddar cheese (block, not pre-shredded)\n2 oz Gruyère cheese (or Monterey Jack)\n"
     "4 oz goat cheese, crumbled")
-MAC_INSTRUCTIONS = OLD_MAC_INSTRUCTIONS.replace(
+MAC_INSTRUCTIONS_V2 = OLD_MAC_INSTRUCTIONS.replace(
     "Stir in the cheese a handful at a time until smooth. Off the heat keeps it silky.",
     "Stir in the cheddar and Gruyère a handful at a time until smooth. Off the heat keeps it silky.\n"
     "Crumble in the goat cheese last and stir just until it disappears. It makes the sauce extra creamy "
     "(save cheddar, not goat cheese, for the top: goat cheese doesn't brown).")
+# Current version: when to cover, and which rack.
+MAC_INSTRUCTIONS = MAC_INSTRUCTIONS_V2.replace(
+    "Made fresh: bake at 400°F for 20 to 25 minutes, until bubbling at the edges and golden on top.\n"
+    "From the fridge: sit out 45 minutes, bake covered at 400°F for 20 minutes, then uncovered 15 minutes.",
+    "Rack: middle of the oven. Lower down, the bottom can scorch before the top browns.\n"
+    "Made fresh: bake UNCOVERED at 400°F for 20 to 25 minutes, until bubbling at the edges and golden on top. "
+    "No foil needed: the sauce is already hot.\n"
+    "From the fridge: sit out 45 minutes. Cover tightly with foil and bake at 400°F for 20 minutes, "
+    "then remove the foil and bake 15 minutes more to brown the top.\n"
+    "Top not golden yet? Broil 1 to 2 minutes, watching closely.")
 
 # Text of earlier versions, so saved dishes that were never edited can be upgraded in place.
 OLD_PIE_INSTRUCTIONS = """Shell: roll, fit, and crimp. Wrap tightly and freeze in the plate. Bake from frozen.
@@ -251,13 +261,17 @@ def upgrade_saved_dish(dish):
                 step["cook"] = old.get("shell", {}).get("cook", "")
                 steps.append(step)
         return {"ingredients_text": PIE_INGREDIENTS, "instructions_text": PIE_INSTRUCTIONS, "steps": steps}
-    if dish.get("name") == "Mac and cheese" and (dish.get("ingredients_text") or "").strip() == OLD_MAC_INGREDIENTS:
-        # The goat cheese swap. Instructions update only if they're also untouched; steps and cooks stay.
-        instructions = (dish.get("instructions_text") or "")
-        if instructions.strip() == OLD_MAC_INSTRUCTIONS:
-            instructions = MAC_INSTRUCTIONS
-        return {"ingredients_text": MAC_INGREDIENTS, "instructions_text": instructions,
-                "steps": dish.get("steps") or []}
+    if dish.get("name") == "Mac and cheese":
+        # Each part updates only if it still matches an earlier version exactly (never your own edits).
+        # Steps, cooks and batch size stay.
+        ingredients = (dish.get("ingredients_text") or "").strip()
+        instructions = (dish.get("instructions_text") or "").strip()
+        new_ingredients = MAC_INGREDIENTS if ingredients == OLD_MAC_INGREDIENTS else dish.get("ingredients_text") or ""
+        new_instructions = (MAC_INSTRUCTIONS if instructions in (OLD_MAC_INSTRUCTIONS, MAC_INSTRUCTIONS_V2)
+                            else dish.get("instructions_text") or "")
+        if new_ingredients != (dish.get("ingredients_text") or "") or new_instructions != (dish.get("instructions_text") or ""):
+            return {"ingredients_text": new_ingredients, "instructions_text": new_instructions,
+                    "steps": dish.get("steps") or []}
     return None
 
 

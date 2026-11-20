@@ -15,7 +15,8 @@ DISH_SIZES = {
     # The recipe as written (1 lb pasta, 4 cups milk, 16 oz cheese) makes about 8 side servings.
     "Mac and cheese": (
         (0.5, "Half · 8x8 pan · about 4 servings", "8x8",
-         "Bake fresh 15 to 20 minutes. From the fridge: covered 15 minutes, then uncovered about 10."),
+         "Made fresh: 15 to 20 minutes uncovered. From the fridge: 15 minutes covered with foil, "
+         "then about 10 uncovered."),
         (1.0, "Full · 9x13 pan · about 8 servings", "9x13", ""),
     ),
 }
