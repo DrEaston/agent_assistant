@@ -455,6 +455,12 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
   // Open the editor for a dish linked by #dish-N.
   const target = location.hash && document.querySelector(location.hash + " details.editor");
   if (target) target.open = true;
+
+  // After a voice change, refresh the page when the Tell Dieter panel closes (so Undo stays reachable).
+  let changedByVoice = false;
+  document.addEventListener("tg:changed", () => { changedByVoice = true; });
+  document.addEventListener("tg:voice-closed", () => { if (changedByVoice) location.reload(); });
 })();
 </script>
+{% include "tg_voice.html" %}
 {% endblock %}

@@ -15,7 +15,7 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from . import planner, sizes
+from . import planner, sizes, voice
 from .presets import CATEGORIES, OUR_MENU, PRESET_BUTTONS, preset_dish
 from .store import ThanksgivingStore
 
@@ -31,9 +31,12 @@ _templates = Environment(
 _state = {"db": None, "store": None}
 
 
-def configure(db):
+def configure(db, voice_model=None):
     _state["db"] = db
     _state["store"] = ThanksgivingStore(db)
+    _state["voice_model"] = voice_model  # None = OpenAI (voice.default_model); tests pass a fake
+    _state["voice_pending"] = {}  # plan id -> checked actions waiting for Apply
+    _state["voice_undo"] = {}  # plan id -> undo record for the last applied command
 
 
 def store():
@@ -298,6 +301,56 @@ def set_dish_size(dish_id: int, scale: str = Form(...)):
         raise HTTPException(status_code=400, detail="Pick one of the listed sizes.")
     store().set_scale(plan["id"], dish_id, value)
     return back(f"size-{dish_id}")  # lands on the dropdown without opening the editor
+
+
+@router.post("/thanksgiving/api/command")
+async def api_command(request: Request):
+    """Turn a spoken or typed request into a preview of changes. Nothing is saved until Apply."""
+    data = await _json(request)
+    text = str(data.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Say or type what to change.")
+    plan = require_plan()
+    context = plan_context(plan)
+    summary = voice.plan_summary(plan, context["dishes"], context["tasks"], context["cooks"], context["now"])
+    history = data.get("history") if isinstance(data.get("history"), list) else []
+    try:
+        result = voice.understand(text, summary, [h for h in history if isinstance(h, dict)], _state["voice_model"])
+    except Exception as exc:
+        print(f"Warning: voice command failed: {exc}")
+        raise HTTPException(status_code=503, detail="Dieter couldn't think that through right now. Try again.") from exc
+    actions, changes, problems = voice.check(result["actions"], plan, context["dishes"], context["tasks"],
+                                             context["cooks"])
+    _state["voice_pending"][plan["id"]] = actions
+    return {"reply": result["reply"], "question": result["question"], "changes": changes, "problems": problems,
+            "can_apply": bool(actions)}
+
+
+@router.post("/thanksgiving/api/command/apply")
+def api_command_apply():
+    plan = require_plan()
+    actions = _state["voice_pending"].pop(plan["id"], None)
+    if not actions:
+        raise HTTPException(status_code=409, detail="Nothing to apply. Say the change again.")
+    _state["voice_undo"][plan["id"]] = voice.apply(store(), plan, actions)
+    return {"ok": True}
+
+
+@router.post("/thanksgiving/api/command/cancel")
+def api_command_cancel():
+    plan = require_plan()
+    _state["voice_pending"].pop(plan["id"], None)
+    return {"ok": True}
+
+
+@router.post("/thanksgiving/api/command/undo")
+def api_command_undo():
+    plan = require_plan()
+    record = _state["voice_undo"].pop(plan["id"], None)
+    if not record:
+        raise HTTPException(status_code=409, detail="Nothing to undo.")
+    voice.undo(store(), plan, record)
+    return {"ok": True}
 
 
 @router.post("/thanksgiving/api/dishes/{dish_id}/size")

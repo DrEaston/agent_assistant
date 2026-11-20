@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 import warnings
@@ -380,6 +381,91 @@ class RouteTests(unittest.TestCase):
         conn.commit()
         tg_router.configure(self.db)
         self.assertEqual(self.mac()[1]["instructions_text"], "My own notes")  # your edits are never overwritten
+
+    def voice_with(self, reply):
+        """Swap in a fake model that returns `reply` (a dict) and records what it was shown."""
+        seen = {}
+
+        def fake_model(messages):
+            seen["messages"] = messages
+            return json.dumps(reply)
+
+        tg_router.configure(self.db, voice_model=fake_model)
+        return seen
+
+    def pie(self):
+        plan = tg_router.store().get_plan()
+        return plan, next(d for d in tg_router.store().get_dishes(plan["id"]) if d["name"] == "Pumpkin pie")
+
+    def test_voice_moves_the_crust_with_preview_apply_and_undo(self):
+        self.client.get("/thanksgiving")
+        plan, pie = self.pie()
+        before = {s["id"]: s["anchor"] for s in pie["steps"]}
+        seen = self.voice_with({"reply": "Moving the crust to Saturday at 7 PM.", "question": "", "actions": [
+            {"type": "move", "dish_id": pie["id"], "step_ids": ["dough", "shell"], "date": "2026-11-21", "time": "19:00"}]})
+        r = self.client.post("/thanksgiving/api/command", json={"text": "move the pie crust to Saturday at 7 PM"}).json()
+        self.assertTrue(r["can_apply"])
+        self.assertEqual(len(r["changes"]), 2)
+        self.assertIn("Sat 7:00 PM", r["changes"][0])
+        self.assertIn("Sat 8:15 PM", r["changes"][1])  # the roll-and-freeze step keeps its spacing
+        summary = seen["messages"][1]["content"]
+        self.assertIn("step dough: Make the butter crust dough and chill it [section Crust]", summary)
+        self.assertEqual(tg_router.store().get_dish(plan["id"], pie["id"])["steps"], pie["steps"])  # preview only
+        self.assertEqual(self.client.post("/thanksgiving/api/command/apply").json(), {"ok": True})
+        moved = {s["id"]: s["anchor"] for s in self.pie()[1]["steps"]}
+        self.assertEqual(moved["dough"], "D-5 19:00")
+        self.assertEqual(moved["shell"], "D-5 20:15")
+        self.assertEqual(moved["bake1"], before["bake1"])  # the rest of the pie stays put
+        self.assertEqual(self.client.post("/thanksgiving/api/command/apply").status_code, 409)
+        self.assertEqual(self.client.post("/thanksgiving/api/command/undo").json(), {"ok": True})
+        self.assertEqual({s["id"]: s["anchor"] for s in self.pie()[1]["steps"]}, before)
+        self.assertEqual(self.client.post("/thanksgiving/api/command/undo").status_code, 409)
+
+    def test_voice_asks_when_unclear_and_cancel_clears(self):
+        self.client.get("/thanksgiving")
+        self.voice_with({"reply": "", "question": "Saturday or Sunday, and what time?", "actions": []})
+        r = self.client.post("/thanksgiving/api/command", json={"text": "push the crust to the weekend"}).json()
+        self.assertEqual(r["question"], "Saturday or Sunday, and what time?")
+        self.assertFalse(r["can_apply"])
+        self.assertEqual(self.client.post("/thanksgiving/api/command/apply").status_code, 409)
+
+    def test_voice_rejects_what_the_editor_would(self):
+        self.client.get("/thanksgiving")
+        plan, pie = self.pie()
+        self.voice_with({"reply": "", "question": "", "actions": [
+            {"type": "move", "dish_id": pie["id"], "step_ids": ["dough"], "date": "2026-11-28", "time": "10:00"},
+            {"type": "assign", "dish_id": pie["id"], "step_ids": [], "cook": "Grandma"},
+            {"type": "move", "dish_id": 999, "step_ids": ["dough"], "date": "2026-11-21", "time": "10:00"},
+            {"type": "delete", "dish_id": pie["id"]},
+            {"type": "size", "dish_id": pie["id"], "scale": 7}]})
+        r = self.client.post("/thanksgiving/api/command", json={"text": "do weird things"}).json()
+        self.assertFalse(r["can_apply"])
+        self.assertEqual(len(r["problems"]), 5)
+        self.assertIn("after dinner", r["problems"][0])
+
+    def test_voice_assign_size_and_done(self):
+        self.client.get("/thanksgiving")
+        plan, mac = self.mac()
+        self.voice_with({"reply": "Got it.", "question": "", "actions": [
+            {"type": "assign", "dish_id": mac["id"], "step_ids": [], "cook": "Parrisa"},
+            {"type": "size", "dish_id": mac["id"], "scale": 0.5},
+            {"type": "done", "dish_id": mac["id"], "step_ids": ["practice"], "done": True}]})
+        r = self.client.post("/thanksgiving/api/command", json={"text": "Parrisa does a half batch mac, practice is done"}).json()
+        self.assertEqual(len(r["changes"]), 3)
+        self.client.post("/thanksgiving/api/command/apply")
+        mac = self.mac()[1]
+        self.assertTrue(all(s["cook"] == "Parrisa" for s in mac["steps"]))
+        self.assertEqual(mac["scale"], 0.5)
+        self.assertIn(f"{mac['id']}:practice", tg_router.store().get_checked(plan["id"], "step"))
+        self.client.post("/thanksgiving/api/command/undo")
+        mac = self.mac()[1]
+        self.assertEqual(mac["scale"], 1.0)
+        self.assertNotIn(f"{mac['id']}:practice", tg_router.store().get_checked(plan["id"], "step"))
+
+    def test_voice_button_on_both_pages(self):
+        self.client.get("/thanksgiving")
+        self.assertIn("Tell Dieter", self.client.get("/thanksgiving").text)
+        self.assertIn("Tell Dieter", self.client.get("/thanksgiving/cook").text)
 
     def test_retired_size_resets_on_restart_and_choices_stay(self):
         self.client.get("/thanksgiving")

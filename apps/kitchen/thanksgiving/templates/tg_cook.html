@@ -96,6 +96,7 @@ body { overflow-x: hidden; }
     <div class="card" id="conflicts-card" hidden><h3>Heads up</h3><div id="conflicts" class="small"></div></div>
   </aside>
 </div>
+{% include "tg_voice.html" %}
 {% endblock %}
 {% block feedback %}
 <details class="feedback card" id="report">
@@ -374,6 +375,7 @@ body { overflow-x: hidden; }
 
   poll();
   setInterval(poll, POLL_MS);
+  document.addEventListener("tg:changed", poll);  // a voice command changed the plan
   setInterval(() => renderAll(), 1000);
 })();
 </script>
