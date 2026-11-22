@@ -15,6 +15,7 @@ Later the "hey Dieter" listener joins this same helper.
 
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -25,6 +26,13 @@ from urllib.parse import parse_qs, urlsplit
 VERSION = "0.1.0"
 PORT = 47613
 ALLOWED_ORIGINS = {"https://askdieter.ai", "https://www.askdieter.ai", "http://localhost:8000", "http://127.0.0.1:8000"}
+# Pull request previews (https://pr-12---dieter-preview-2hu6ba6ata-uc.a.run.app). The "2hu6ba6ata" part is unique
+# to Dieter's Google Cloud project, so no one else's site can have one of these addresses.
+PREVIEW_ORIGIN = re.compile(r"https://[a-z0-9-]+---dieter-preview-2hu6ba6ata-uc\.a\.run\.app")
+
+
+def origin_allowed(origin):
+    return origin in ALLOWED_ORIGINS or bool(origin and PREVIEW_ORIGIN.fullmatch(origin))
 # The page "Open Dieter" shows (override with "dieter_page" in helper.json).
 DIETER_PAGE = "https://askdieter.ai/thanksgiving/cook"
 SETTINGS_FILE =Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / "Dieter" / "helper.json"
@@ -310,7 +318,7 @@ def make_handler(helper):
 
         def _cors(self):
             origin = self.headers.get("Origin", "")
-            if origin in ALLOWED_ORIGINS:
+            if origin_allowed(origin):
                 self.send_header("Access-Control-Allow-Origin", origin)
                 self.send_header("Vary", "Origin")
                 self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -331,7 +339,7 @@ def make_handler(helper):
         def _allowed(self):
             # Only pages from askdieter.ai (or a local Dieter) may control the screen.
             origin = self.headers.get("Origin")
-            return origin is None or origin in ALLOWED_ORIGINS
+            return origin is None or origin_allowed(origin)
 
         def do_OPTIONS(self):
             self.send_response(204 if self._allowed() else 403)

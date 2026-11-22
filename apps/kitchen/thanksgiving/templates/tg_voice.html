@@ -1,7 +1,8 @@
 {# "Tell Dieter": speak or type a change to the plan, see a preview, then Apply / Cancel / Undo.
    Included by tg_page.html (every planner tab) and tg_cook.html. After a change it fires "tg:changed" on document. #}
 <style>
-/* A cartoon speech bubble in the corner, with Dieter's little eyes: the way in to talking with Dieter.
+/* A cartoon speech bubble in the corner: the way in to talking with Dieter. Dieter's eyes only appear in it
+   when the kitchen screen wakes up (window.dieterBubble below).
    The kitchen PC helper (helper/dieter_helper.py, Face) draws the same bubble at the same spot when the screen
    wakes, with big eyes in it, so keep the size (240x92), the corner offsets (1rem) and the path in step. */
 .voice-fab { position: fixed; z-index: 40; right: calc(1rem + env(safe-area-inset-right, 0px));
@@ -16,16 +17,13 @@
 .voice-fab:hover { border: 0; transform: rotate(-3deg) scale(1.04); }
 .voice-fab:hover .voice-fab-bubble .fill { fill: #9a3412; }
 .voice-fab:active { transform: scale(.96); }
-.voice-fab-eyes { width: 36px; height: 24px; flex: none; }
-.voice-fab-eyes .eye { transform-box: fill-box; transform-origin: center; animation: fab-blink 5.5s infinite; }
-@keyframes fab-blink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.12); } }
 /* Dieter comes alive: big eyes fill the bubble for a little performance when the kitchen screen wakes. */
 .voice-fab .voice-fab-face { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; display: none; }
 .voice-fab.alive { z-index: 1001; animation: fab-pop .35s cubic-bezier(.3, 1.6, .5, 1); }
 .voice-fab.alive .voice-fab-face { display: block; }
-.voice-fab.alive .voice-fab-eyes, .voice-fab.alive > span { visibility: hidden; }
+.voice-fab.alive > span { visibility: hidden; }
 @keyframes fab-pop { from { transform: scale(.6); } to { transform: scale(1); } }
-@media (prefers-reduced-motion: reduce) { .voice-fab, .voice-fab-eyes .eye { transition: none; animation: none; } }
+@media (prefers-reduced-motion: reduce) { .voice-fab { transition: none; animation: none; } }
 .voice-sheet { position: fixed; z-index: 45; left: 0; right: 0; bottom: 0; max-height: 80vh; overflow-y: auto;
   background: var(--panel); border-top: 1px solid var(--line); border-radius: 18px 18px 0 0;
   box-shadow: 0 -8px 30px rgba(42,33,24,.18); padding: 1rem max(1rem, env(safe-area-inset-right, 0px))
@@ -73,12 +71,6 @@
   <svg class="voice-fab-bubble" viewBox="0 0 240 92" aria-hidden="true">
     <path class="shade" transform="translate(3 3)" d="M36 4 H180 A32 32 0 0 1 200.6 60.5 Q214 78 232 86 Q205 84 180 68 H36 A32 32 0 0 1 36 4 Z"/>
     <path class="fill" d="M36 4 H180 A32 32 0 0 1 200.6 60.5 Q214 78 232 86 Q205 84 180 68 H36 A32 32 0 0 1 36 4 Z"/>
-  </svg>
-  <svg class="voice-fab-eyes" viewBox="0 0 36 24" aria-hidden="true">
-    <g class="eye"><ellipse cx="10" cy="12" rx="7" ry="9.5" fill="#fff" stroke="#1c140e" stroke-width="2"/>
-      <circle cx="11" cy="13.5" r="4.3" fill="#111"/><circle cx="12.6" cy="11.2" r="1.6" fill="#fff"/></g>
-    <g class="eye"><ellipse cx="26" cy="12" rx="7" ry="9.5" fill="#fff" stroke="#1c140e" stroke-width="2"/>
-      <circle cx="27" cy="13.5" r="4.3" fill="#111"/><circle cx="28.6" cy="11.2" r="1.6" fill="#fff"/></g>
   </svg>
   <svg class="voice-fab-face" id="voice-fab-face" viewBox="0 0 240 92" aria-hidden="true">
     <defs>

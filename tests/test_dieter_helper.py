@@ -132,6 +132,14 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.request("GET", "/status", origin="https://evil.example")[0], 403)
         self.assertFalse(self.helper.asleep)
 
+    def test_dieter_previews_can_control_it_but_other_cloud_run_sites_cannot(self):
+        preview = "https://pr-1---dieter-preview-2hu6ba6ata-uc.a.run.app"
+        self.assertTrue(dh.origin_allowed(preview))
+        for other in ("https://pr-1---dieter-preview-someoneelse-uc.a.run.app", "https://evil.a.run.app",
+                      preview + ".evil.example", "http://pr-1---dieter-preview-2hu6ba6ata-uc.a.run.app", None, ""):
+            self.assertFalse(dh.origin_allowed(other), other)
+        self.assertEqual(self.request("GET", "/status", origin=preview)[0], 200)
+
     def test_preflight_allows_private_network_access(self):
         status, headers, _ = self.request("OPTIONS", "/sleep")
         self.assertEqual(status, 204)
