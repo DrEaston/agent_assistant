@@ -1,13 +1,7 @@
-{% extends "shop_layout.html" %}
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
 {% block title %}New shopping list{% endblock %}
-{% block page_head %}
-<style>
-.pick { display: flex; gap: .75rem; align-items: center; padding: .7rem 0; border-bottom: 1px solid var(--line); cursor: pointer; font-weight: 600; font-size: 1rem; }
-.pick:last-child { border-bottom: 0; }
-.pick input { width: 1.4rem; height: 1.4rem; accent-color: var(--accent); flex: none; }
-.parts { display: flex; flex-wrap: wrap; gap: 0 1.25rem; padding-left: 2.15rem; border-bottom: 1px solid var(--line); }
-.pick.sub { border-bottom: 0; font-weight: 500; color: var(--muted); padding: .35rem 0 .6rem; font-size: .95rem; }
-</style>
+{% block head %}
 <script>
 // Picking a whole dish and one of its parts would count that part twice, so keep them exclusive.
 document.addEventListener("change", (event) => {
@@ -22,47 +16,37 @@ document.addEventListener("change", (event) => {
 });
 </script>
 {% endblock %}
-{% block body %}
-<header class="top">
-  <div class="top-inner">
-    <a class="back" href="/apps/recipes#meal-plan">← Kitchen</a>
-    <h1>New shopping list</h1>
-    <div class="sub">Pick the meals you're shopping for. Amounts are added up for you.</div>
-  </div>
-</header>
+{% block content %}
+{{ ui.page_header("New shopping list", crumbs=[("Dieter", "/"), ("Kitchen", "/apps/recipes#meal-plan"), ("Shopping lists", "/apps/recipes/grocery-lists")],
+                  sub="Pick the meals you're shopping for. Amounts are added up for you.") }}
 <main class="wrap">
   <form method="post" action="/apps/recipes/grocery-lists/create" class="stack">
     <input type="hidden" name="picked" value="1">
-    <div class="field">
-      <label for="title">Name</label>
-      <input type="text" id="title" name="title" value="{{ title }}" maxlength="120">
-    </div>
-    <section>
-      <h2 class="section-title">Meals on your plan</h2>
+    {{ ui.field("Name", "title", value=title, maxlength=120) }}
+    {% call ui.section("Meals on your plan") %}
       <div class="card">
         {% for meal in meals %}
         <label class="pick"><input type="checkbox" name="meal_id" value="{{ meal.id }}" checked> {{ meal.title }}</label>
         {% else %}
-        <p class="empty">Your meal plan is empty. You can still make a list and type items in.</p>
+        {{ ui.empty("Your meal plan is empty. You can still make a list and type items in.") }}
         {% endfor %}
       </div>
-    </section>
+    {% endcall %}
     {% if dishes %}
-    <section>
-      <h2 class="section-title">From your Thanksgiving plan</h2>
+    {% call ui.section("From your Thanksgiving plan") %}
       <div class="card">
         {% for dish in dishes %}
         <label class="pick"><input type="checkbox" name="dish" value="{{ dish.value }}" data-whole="{{ dish.value }}"> {{ dish.label }}</label>
         {% if dish.parts %}
-        <div class="parts">
+        <div class="pick-children">
           {% for part in dish.parts %}
-          <label class="pick sub"><input type="checkbox" name="dish" value="{{ part.value }}" data-part-of="{{ dish.value }}"> {{ part.label }}</label>
+          <label class="pick"><input type="checkbox" name="dish" value="{{ part.value }}" data-part-of="{{ dish.value }}"> {{ part.label }}</label>
           {% endfor %}
         </div>
         {% endif %}
         {% endfor %}
       </div>
-    </section>
+    {% endcall %}
     {% endif %}
     <div class="row">
       <button type="submit" class="primary">Make the list</button>

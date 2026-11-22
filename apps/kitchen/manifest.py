@@ -2,6 +2,7 @@ APP = {
     "id": "kitchen",
     "title": "Dieter Kitchen",
     "nav_label": "Kitchen",
+    "accent": "kitchen",
     "home_url": "/apps/recipes",
     "route_prefixes": ("/apps/recipes",),
     "body_class": "recipe-shell-page",

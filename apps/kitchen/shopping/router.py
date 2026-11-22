@@ -12,9 +12,9 @@ from pathlib import Path
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from jinja2 import Environment, FileSystemLoader, select_autoescape
-
 from apps.kitchen import shopping_list
+from apps.kitchen.manifest import APP as KITCHEN_APP
+from core import ui
 
 from .store import ShoppingStore
 
@@ -22,11 +22,7 @@ router = APIRouter()
 BASE = "/apps/recipes/grocery-lists"
 FEEDBACK_AREA = "Kitchen / Recipes"
 
-_templates = Environment(
-    loader=FileSystemLoader([str(Path(__file__).parent / "templates"),
-                             str(Path(__file__).parent.parent / "thanksgiving" / "templates")]),
-    autoescape=select_autoescape(["html"]),
-)
+_templates = ui.templates(Path(__file__).parent / "templates")
 _state = {"db": None, "store": None, "meal_sources": None, "pending_meals": None, "component_sources": None}
 
 
@@ -42,6 +38,8 @@ def store():
 
 
 def render(name, **context):
+    context.setdefault("app", KITCHEN_APP)
+    context.setdefault("report_url", BASE + "/feedback")
     return HTMLResponse(_templates.get_template(name).render(**context))
 
 

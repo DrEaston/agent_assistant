@@ -52,6 +52,7 @@ from apps.kitchen.stalled_issue_evaluation import (
 )
 from apps.kitchen.import_images import UnsupportedRecipeImage, is_heic, normalize_recipe_image
 from apps.kitchen.thanksgiving.router import configure as configure_thanksgiving, router as thanksgiving_router
+from core import ui as core_ui
 from apps.kitchen.shopping import router as shopping
 from apps.registry import app_shell_for_path, global_nav_apps, launcher_cards
 from apps.pipeline import (
@@ -110,6 +111,8 @@ if uploads_dir != bundled_uploads_dir and bundled_uploads_dir.exists() and not a
 recipe_uploads_dir.mkdir(parents=True, exist_ok=True)
 recipe_thumbnails_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
+# Shared design system (core/ui). Public, so the login page can use it too.
+app.mount(core_ui.STATIC_URL, StaticFiles(directory=str(core_ui.STATIC_DIR)), name="ui-static")
 recipe_ocr_service = RecipeOCRService(uploads_dir)
 
 # Initialize database
@@ -334,6 +337,7 @@ async def load_authenticated_user(request: Request, call_next):
         "/registration-pending",
         "/logout",
         "/favicon.ico",
+        "/static/ui/",
         "/public",
         "/apps/planner",
         "/dashboard",

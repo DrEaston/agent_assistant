@@ -1,0 +1,111 @@
+{#- Shared building blocks. Import with: {% import "components.html" as ui %} -#}
+
+{#- Page header: crumbs, title, optional subtitle, optional actions (via call) and tabs. -#}
+{% macro page_header(title, crumbs=(), sub=None, tabs=(), current=None) -%}
+<header class="app-bar">
+  <div class="app-bar-inner">
+    {% if crumbs %}
+    <nav class="crumbs" aria-label="Where you are">
+      {% for label, url in crumbs %}<a href="{{ url }}">{{ label }}</a>{% if not loop.last %}<span class="sep" aria-hidden="true">›</span>{% endif %}{% endfor %}
+    </nav>
+    {% endif %}
+    <div class="page-title-row">
+      <h1>{{ title }}</h1>
+      {% if caller is defined %}<div class="row">{{ caller() }}</div>{% endif %}
+    </div>
+    {% if sub %}<div class="page-sub">{{ sub }}</div>{% endif %}
+    {% if tabs %}
+    <nav class="tabs" aria-label="Sections">
+      {% for label, url in tabs %}<a href="{{ url }}"{% if url == current %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+    </nav>
+    {% endif %}
+  </div>
+</header>
+{%- endmacro %}
+
+{#- A titled section. Body comes from the call block. -#}
+{% macro section(title=None, id=None, center=False) -%}
+<section class="section{% if center %} center{% endif %}"{% if id %} id="{{ id }}"{% endif %}>
+  {% if title %}<h2 class="section-title">{{ title }}</h2>{% endif %}
+  {{ caller() }}
+</section>
+{%- endmacro %}
+
+{% macro tag(text, tone=None) -%}
+<span class="tag{% if tone %} {{ tone }}{% endif %}">{{ text }}</span>
+{%- endmacro %}
+
+{% macro banner(tone=None) -%}
+<div class="banner{% if tone %} {{ tone }}{% endif %}" role="status">{{ caller() }}</div>
+{%- endmacro %}
+
+{% macro empty(text) -%}
+<p class="empty">{{ text }}</p>
+{%- endmacro %}
+
+{#- Text field with its label. -#}
+{% macro field(label, name, value="", type="text", id=None, maxlength=None, placeholder=None, required=False) -%}
+{% set field_id = id or name %}
+<div class="field">
+  <label for="{{ field_id }}">{{ label }}</label>
+  <input type="{{ type }}" id="{{ field_id }}" name="{{ name }}" value="{{ value }}"
+    {%- if maxlength %} maxlength="{{ maxlength }}"{% endif %}
+    {%- if placeholder %} placeholder="{{ placeholder }}"{% endif %}
+    {%- if required %} required{% endif %}>
+</div>
+{%- endmacro %}
+
+{#- Progress meter. done/total are numbers; id lets page script update it. -#}
+{% macro meter(done, total, id=None) -%}
+{% set pct = ((done / total * 100) if total else 0)|round|int %}
+<div class="meter" aria-hidden="true"><span{% if id %} id="{{ id }}"{% endif %} style="width: {{ pct }}%"></span></div>
+{%- endmacro %}
+
+{#- A button that opens a small inline confirm. Body (the form) comes from the call block. -#}
+{% macro confirm(label, danger=False) -%}
+<details class="confirm">
+  <summary class="button quiet{% if danger %} danger{% endif %}">{{ label }}</summary>
+  {{ caller() }}
+</details>
+{%- endmacro %}
+
+{#- One-tap delete with confirmation. -#}
+{% macro delete_button(action, label="Delete", prompt=None, confirm_label="Delete") -%}
+<details class="confirm">
+  <summary class="button quiet danger">{{ label }}</summary>
+  <form method="post" action="{{ action }}" class="row">
+    {% if prompt %}<span class="muted">{{ prompt }}</span>{% endif %}
+    <button type="submit" class="danger">{{ confirm_label }}</button>
+  </form>
+</details>
+{%- endmacro %}
+
+{#- Small ✕ button that posts to action. -#}
+{% macro remove_button(action, label, fields={}) -%}
+<form method="post" action="{{ action }}">
+  {% for key, value in fields.items() %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+  <button type="submit" class="quiet icon-button" aria-label="{{ label }}">✕</button>
+</form>
+{%- endmacro %}
+
+{#- Tickable row. The form posts key + done; page script may intercept it. Extra controls come from the call block. -#}
+{% macro check_row(key, name, action, done=False, amount=None, note=None, counts=True) -%}
+<div class="check-row{% if done %} done{% endif %}" data-key="{{ key }}" data-counts="{{ 1 if counts else 0 }}">
+  <form class="check-form" method="post" action="{{ action }}">
+    <input type="hidden" name="key" value="{{ key }}">
+    <input type="hidden" name="done" value="{{ '' if done else '1' }}">
+    <button type="submit" class="check-button" role="checkbox" aria-checked="{{ 'true' if done else 'false' }}">
+      <span class="check-box" aria-hidden="true">✓</span>
+      <span class="check-text">
+        <span><span class="check-name">{{ name }}</span>{% if amount %}<span class="check-amount">{{ amount }}</span>{% endif %}</span>
+        {% if note %}<span class="check-note">{{ note }}</span>{% endif %}
+      </span>
+    </button>
+  </form>
+  {% if caller is defined %}{{ caller() }}{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro toast(id="toast") -%}
+<div class="toast" id="{{ id }}" role="status" hidden></div>
+{%- endmacro %}

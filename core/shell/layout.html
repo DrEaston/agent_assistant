@@ -1,0 +1,32 @@
+{#- The one page frame for new-style pages.
+    Context: app (manifest dict: id, title, accent), page_url, report_url, reported.
+    Blocks: title, head (page script), content, after (toasts, scripts at the end). -#}
+<!doctype html>
+<html lang="en" data-accent="{{ app.accent if app else 'today' }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{% block title %}{{ app.nav_label if app else "Dieter" }}{% endblock %} · Dieter</title>
+<link rel="stylesheet" href="{{ css_url }}">
+{% block head %}{% endblock %}
+</head>
+<body>
+{% block content %}{% endblock %}
+{% block report %}
+{% if report_url %}
+<div class="report-wrap">
+  {% if reported %}<p class="banner ok report-thanks">Thanks. Your report went to Dieter Studio.</p>{% endif %}
+  <details class="report card" id="report">
+    <summary>Something wrong or confusing? Report a problem</summary>
+    <form method="post" action="{{ report_url }}" class="stack">
+      <input type="hidden" name="page" value="{{ page_url or '' }}">
+      <textarea class="short" name="text" required aria-label="What went wrong" placeholder="What happened, and what did you expect?"></textarea>
+      <button type="submit">Send to Dieter Studio</button>
+    </form>
+  </details>
+</div>
+{% endif %}
+{% endblock %}
+{% block after %}{% endblock %}
+</body>
+</html>
