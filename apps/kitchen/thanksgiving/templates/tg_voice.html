@@ -9,6 +9,15 @@
   box-shadow: 0 -8px 30px rgba(42,33,24,.18); padding: 1rem max(1rem, env(safe-area-inset-right, 0px))
   calc(1rem + env(safe-area-inset-bottom, 0px)) max(1rem, env(safe-area-inset-left, 0px)); }
 .voice-inner { max-width: 40rem; margin: 0 auto; display: flex; flex-direction: column; gap: .75rem; }
+/* Phones and tablets: at most half the screen, so the recipe stays visible. */
+@media (max-width: 899px) { .voice-sheet { max-height: 50vh; } }
+/* Wide screens: a panel down the right side, and the page moves over instead of being covered. */
+@media (min-width: 900px) {
+  .voice-sheet { left: auto; top: 0; width: 24rem; max-height: none; border-radius: 0; border-top: 0;
+    border-left: 1px solid var(--line); box-shadow: -8px 0 30px rgba(42,33,24,.12); }
+  .voice-inner { max-width: none; }
+  body.voice-open { padding-right: 24rem; }
+}
 .voice-head { display: flex; justify-content: space-between; align-items: center; }
 .voice-head h2 { font-size: 1.1rem; }
 .voice-log { display: flex; flex-direction: column; gap: .5rem; }
@@ -115,6 +124,7 @@
     // that pops up the keyboard, whose own voice-typing button fills the box but never sends.
     document.dispatchEvent(new CustomEvent("tg:voice-opened"));  // hands-free pauses so the mics don't fight
     sheet.hidden = false;
+    document.body.classList.add("voice-open");
     $("voice-open").hidden = true;
     if (Recognition || (navigator.mediaDevices && window.MediaRecorder)) mic.click();
   }
@@ -123,6 +133,7 @@
     if (recorder && recorder.state === "recording") { recorder.onstop = null; stopListening(); }
     mic.classList.remove("recording"); mic.textContent = "🎤";
     sheet.hidden = true; $("voice-open").hidden = false;
+    document.body.classList.remove("voice-open");
     if ($("voice-decide").hidden === false) call("/thanksgiving/api/command/cancel").catch(() => {});
     $("voice-decide").hidden = true;
     document.dispatchEvent(new CustomEvent("tg:voice-closed"));

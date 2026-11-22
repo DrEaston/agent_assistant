@@ -190,6 +190,7 @@
     } catch (e) { $("hf-heard").textContent = "Can't reach Dieter right now."; return; }
     if (!data.addressed) { showHeard(text, "ignored"); return; }
     showHeard(text, "mine");
+    $("hf-help").hidden = true;  // the tips have done their job; keep the bar small
     beep();
     followUntil = 0;
     if (data.command) { run(data.command); return; }
