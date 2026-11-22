@@ -14,7 +14,6 @@ Later the "hey Dieter" listener joins this same helper.
 """
 
 import json
-import math
 import os
 import sys
 import threading
@@ -229,296 +228,18 @@ class MotionWatcher:
             cap.release()
 
 
-# ---------------------------------------------------------------- Dieter's face
-
-# The speech bubble, in the same 240x92 box as the page's "Talk to Dieter" button
-# (apps/kitchen/thanksgiving/templates/tg_voice.html): a round-ended bar with a curly tail into the corner.
-#   SVG: M36 4 H180 A32 32 0 0 1 200.6 60.5 Q214 78 232 86 Q205 84 180 68 H36 A32 32 0 0 1 36 4 Z
-def bubble_points():
-    import math
-
-    def arc(cx, cy, r, a0, a1, n=24):
-        return [(cx + r * math.cos(math.radians(a0 + (a1 - a0) * i / n)),
-                 cy + r * math.sin(math.radians(a0 + (a1 - a0) * i / n))) for i in range(n + 1)]
-
-    def quad(p0, c, p1, n=16):
-        return [((1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * c[0] + t * t * p1[0],
-                 (1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * c[1] + t * t * p1[1]) for t in (i / n for i in range(n + 1))]
-
-    pts = [(36, 4)] + arc(180, 36, 32, -90, 50)
-    pts += quad(pts[-1], (214, 78), (232, 86)) + quad((232, 86), (205, 84), (180, 68))
-    pts += arc(36, 36, 32, 90, 270)
-    return pts
-
-
-# Wake-up performances, one per wake in turn. Each step: (seconds, {"lid": (left, right) 0 open..1 shut,
-# "look": (x, y) -1..1, "pupil": size}). "toward" in a look means "the side the person came from".
-PERFORMANCES = {
-    "peekaboo": [(0.0, {"lid": (0, 0)}), (0.5, {"look": ("toward", 0.1)}), (1.2, {"look": ("away", 0.05)}),
-                 (1.9, {"lid": (1, 1)}), (2.05, {"lid": (0, 0), "look": (0, 0)})],
-    "sleepy": [(0.0, {"lid": (0.55, 0.55), "look": (0, 0.3)}), (0.9, {"lid": (1, 1)}), (1.4, {"lid": (0.5, 0.5)}),
-               (2.0, {"lid": (0, 0), "look": ("toward", 0), "pupil": 1.1}), (2.8, {"look": (0, 0), "pupil": 1.0})],
-    "surprised": [(0.0, {"lid": (0, 0), "pupil": 0.7}), (0.7, {"lid": (1, 1)}), (0.82, {"lid": (0, 0)}),
-                  (0.98, {"lid": (1, 1)}), (1.1, {"lid": (0, 0), "pupil": 1.0}), (1.6, {"look": ("toward", 0)}),
-                  (2.4, {"look": (0, 0)})],
-    # pupils go once all the way round, starting at the top
-    "eyeroll": [(0.0, {"lid": (0, 0)})]
-               + [(0.5 + k * 0.16, {"look": (0.9 * math.cos(-math.pi / 2 + k * math.pi / 4),
-                                             0.8 * math.sin(-math.pi / 2 + k * math.pi / 4))}) for k in range(9)]
-               + [(2.0, {"look": (0, 0)}), (2.4, {"lid": (1, 1)}), (2.55, {"lid": (0, 0)})],
-    "wink": [(0.0, {"lid": (0, 0)}), (0.5, {"look": ("toward", 0.1)}), (1.0, {"look": (0, 0)}),
-             (1.4, {"lid": (0, 1)}), (1.9, {"lid": (0, 0)}), (2.5, {"lid": (1, 1)}), (2.62, {"lid": (0, 0)})],
-}
-PERFORMANCE_LENGTH = 3.2  # seconds on screen before fading out
-
-
-class Face:
-    """Dieter on the kitchen screen. When the screen wakes, the "Talk to Dieter" speech bubble in the lower-right
-    corner comes alive: the same bubble pops up over it with big cartoon eyes (black pupils, shine dots, orange
-    lids), plays one of the PERFORMANCES (a different one each time), and fades away, leaving the button.
-
-    While resting (and no Dieter page is showing its own sleep screen) a full-screen black window covers the
-    screen; touching it wakes Dieter. All drawing happens on one Tk thread; other threads only queue requests.
-    """
-
-    OUTLINE, WHITE, PUPIL, SHINE, LID, BUBBLE = "#1c140e", "#ffffff", "#111111", "#ffffff", "#ea580c", "#c2410c"
-    KEY = "#1d150f"  # see-through colour around the bubble (next to the outline colour, so edges blend cleanly)
-    BOX = (240, 92)  # the bubble's box at 100% display scaling, same as the page's button
-    SS = 3           # drawn this many times larger, then shrunk, for smooth edges
-
-    def __init__(self, on_touch=None, settings=None):
-        import queue
-        self.on_touch = on_touch
-        self.settings = settings if settings is not None else {}
-        self._q = queue.Queue()
-        self._turn = 0
-        self._ready = threading.Event()
-        threading.Thread(target=self._run, name="face", daemon=True).start()
-        self._ready.wait(5)
-
-    # called from any thread
-    def rest(self):
-        self._q.put(("rest", None))
-
-    def eyes(self, side="center"):
-        self._q.put(("wake", side))
-
-    def hide(self):
-        self._q.put(("unrest", None))
-
-    # ------------------------------------------------ the Tk thread
-    def _run(self):
-        try:
-            import tkinter as tk
-            from PIL import Image, ImageChops, ImageDraw, ImageTk
-        except ImportError:
-            self._ready.set()
-            return
-        self.Image, self.ImageChops, self.ImageDraw, self.ImageTk = Image, ImageChops, ImageDraw, ImageTk
-        self.scale = 1.0
-        if sys.platform == "win32":
-            import ctypes
-            try:
-                ctypes.windll.shcore.SetProcessDpiAwareness(2)  # real-size pixels on scaled displays
-                self.scale = ctypes.windll.user32.GetDpiForSystem() / 96
-            except (AttributeError, OSError):
-                pass
-        root = self.root = tk.Tk()
-        root.withdraw()
-        root.title("Dieter")
-
-        # the black screen while resting
-        self.rest_win = tk.Toplevel(root, bg="black", cursor="none")
-        self.rest_win.withdraw()
-        self.rest_win.overrideredirect(True)
-        for event in ("<Motion>", "<KeyPress>", "<ButtonPress>"):
-            self.rest_win.bind(event, self._touched)
-
-        # the bubble with the eyes
-        self.size = (int(self.BOX[0] * self.scale), int(self.BOX[1] * self.scale))
-        win = self.bubble_win = tk.Toplevel(root, bg=self.KEY)
-        win.withdraw()
-        win.overrideredirect(True)
-        win.attributes("-topmost", True)
-        win.attributes("-transparentcolor", self.KEY)
-        try:
-            win.attributes("-toolwindow", True)
-        except tk.TclError:
-            pass
-        self.label = tk.Label(win, bg=self.KEY, bd=0, highlightthickness=0)
-        self.label.pack()
-        self.label.bind("<ButtonPress>", lambda e: self._finish())  # tap it away, to get at the button
-
-        self.resting = False
-        self.showing = False
-        self._rested_at = 0.0
-        self._bubble_img = None
-        self._drawn = None
-        root.after(33, self._tick)
-        self._ready.set()
-        root.mainloop()
-
-    def _place(self):
-        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        w, h = self.size
-        right = int(self.settings.get("bubble_right", 16) * self.scale)  # 1rem, like the page's button
-        bottom = int(self.settings.get("bubble_bottom", 16) * self.scale)
-        self.bubble_win.geometry(f"{w}x{h}+{sw - w - right}+{sh - h - bottom}")
-
-    def _touched(self, _event):
-        if time.time() - self._rested_at > 1.2 and self.resting and self.on_touch:
-            self.on_touch()
-
-    # ------------------------------------------------ behaviour
-    def _do(self, what, arg):
-        if what == "rest":
-            self.resting = True
-            self._rested_at = time.time()
-            self._finish()
-            sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-            self.rest_win.geometry(f"{sw}x{sh}+0+0")
-            self.rest_win.deiconify()
-            self.rest_win.attributes("-topmost", True)
-            self.rest_win.focus_force()
-        elif what == "unrest":
-            self._end_rest()
-        elif what == "wake":
-            self._end_rest()
-            if self.settings.get("eyes", True):
-                self._perform(arg)
-
-    def _end_rest(self):
-        self.resting = False
-        self.rest_win.withdraw()
-
-    def _perform(self, side):
-        names = list(PERFORMANCES)
-        name = self.settings.get("performance") or names[self._turn % len(names)]
-        self._turn += 1
-        toward = {"left": -1.0, "right": 1.0}.get(side, 0.0) or -0.8
-        now = time.time()
-        self._script = []
-        for t, step in PERFORMANCES.get(name, PERFORMANCES["peekaboo"]):
-            step = dict(step)
-            if "look" in step:
-                step["look"] = tuple(toward if v == "toward" else -toward if v == "away" else v for v in step["look"])
-            self._script.append((now + t, step))
-        self.lid, self.lid_to = [1.0, 1.0], [1.0, 1.0]
-        self.look, self.look_to = [0.0, 0.0], [0.0, 0.0]
-        self.pupil, self.pupil_to = 1.0, 1.0
-        self._started = now
-        self._drawn = None
-        self._place()
-        self.bubble_win.attributes("-alpha", 0.0)
-        self.bubble_win.deiconify()
-        self.bubble_win.attributes("-topmost", True)
-        self.bubble_win.lift()
-        self.showing = True
-
-    def _finish(self):
-        self.showing = False
-        self.bubble_win.withdraw()
-
-    def _tick(self):
-        while not self._q.empty():
-            self._do(*self._q.get_nowait())
-        if self.showing:
-            now = time.time()
-            while self._script and self._script[0][0] <= now:
-                step = self._script.pop(0)[1]
-                self.lid_to = list(step.get("lid", self.lid_to))
-                self.look_to = list(step.get("look", self.look_to))
-                self.pupil_to = step.get("pupil", self.pupil_to)
-            for i in (0, 1):
-                self.lid[i] += (self.lid_to[i] - self.lid[i]) * 0.5
-                self.look[i] += (self.look_to[i] - self.look[i]) * 0.3
-            self.pupil += (self.pupil_to - self.pupil) * 0.3
-            t = now - self._started
-            # pop in, then fade out at the end
-            alpha = min(1.0, t / 0.2)
-            if t > PERFORMANCE_LENGTH:
-                alpha = max(0.0, 1 - (t - PERFORMANCE_LENGTH) / 0.5)
-            self.bubble_win.attributes("-alpha", alpha)
-            state = tuple(round(v, 2) for v in (*self.lid, *self.look, self.pupil))
-            if state != self._drawn:
-                self._drawn = state
-                self.label.configure(image=self._render(*state))
-            if alpha <= 0 and t > PERFORMANCE_LENGTH:
-                self._finish()
-        self.root.after(16 if self.showing else 50, self._tick)
-
-    # ------------------------------------------------ drawing
-    def _render(self, lid_l, lid_r, lx, ly, pupil):
-        img = self.draw(lid_l, lid_r, lx, ly, pupil)
-        self._photo = self.ImageTk.PhotoImage(img)
-        return self._photo
-
-    def draw(self, lid_l, lid_r, lx, ly, pupil=1.0):
-        """The bubble with the eyes, as a PIL image (the KEY colour around it is see-through on screen)."""
-        Image, ImageDraw, ImageChops = self.Image, self.ImageDraw, self.ImageChops
-        s = self.SS * self.scale
-        W, H = int(self.BOX[0] * s), int(self.BOX[1] * s)
-        if self._bubble_img is None or self._bubble_img.size != (W, H):
-            base = Image.new("RGB", (W, H), self.KEY)
-            bd = ImageDraw.Draw(base)
-            pts = bubble_points()
-            bd.polygon([((x + 3) * s, (y + 3) * s) for x, y in pts], fill=self.OUTLINE)  # sticker shadow
-            body = [(x * s, y * s) for x, y in pts]
-            bd.polygon(body, fill=self.BUBBLE)
-            bd.line(body + [body[0]], fill=self.OUTLINE, width=int(4 * s), joint="curve")
-            self._bubble_img = base
-        img = self._bubble_img.copy()
-        d = ImageDraw.Draw(img)
-        line = max(2, int(3 * s))
-        for cx, lid in ((86, lid_l), (130, lid_r)):
-            cy, rx, ry = 36, 18, 23
-            box = [(cx - rx) * s, (cy - ry) * s, (cx + rx) * s, (cy + ry) * s]
-            d.ellipse(box, fill=self.WHITE)
-            pr = 10 * pupil
-            px, py = cx + lx * 5, cy + 2 + ly * 7.5
-            d.ellipse([(px - pr) * s, (py - pr) * s, (px + pr) * s, (py + pr) * s], fill=self.PUPIL)
-            sr = 3.4 * min(pupil, 1.0) + 0.6
-            d.ellipse([(px + 3.2 - sr) * s, (py - 3.6 - sr) * s, (px + 3.2 + sr) * s, (py - 3.6 + sr) * s], fill=self.SHINE)
-            tr = 1.4
-            d.ellipse([(px - 3.8 - tr) * s, (py + 3.8 - tr) * s, (px - 3.8 + tr) * s, (py + 3.8 + tr) * s], fill=self.SHINE)
-            if lid > 0.02:  # the orange lid comes down from the top, with a curved edge, kept inside the eye
-                edge = (cy - ry) + lid * (2 * ry + 4)
-                curve = [(cx - rx * 1.7) * s, (edge - 2.6 * ry) * s, (cx + rx * 1.7) * s, edge * s]
-                eye = Image.new("L", (W, H), 0)
-                ImageDraw.Draw(eye).ellipse(box, fill=255)
-                lid_mask = Image.new("L", (W, H), 0)
-                ImageDraw.Draw(lid_mask).ellipse(curve, fill=255)
-                edge_mask = Image.new("L", (W, H), 0)
-                ImageDraw.Draw(edge_mask).arc(curve, 0, 180, fill=255, width=line)
-                img.paste(self.LID, (0, 0, W, H), ImageChops.multiply(lid_mask, eye))
-                img.paste(self.OUTLINE, (0, 0, W, H), ImageChops.multiply(edge_mask, eye))
-                if lid > 0.9:  # shut: a sleepy curved line
-                    d.arc([(cx - rx * 0.7) * s, (cy - ry * 0.45) * s, (cx + rx * 0.7) * s, (cy + ry * 0.4) * s],
-                          25, 155, fill=self.OUTLINE, width=line)
-            d.ellipse(box, outline=self.OUTLINE, width=line)
-        return img.reduce(self.SS)
-
-
 # ---------------------------------------------------------------- the helper
 
 class Helper:
-    def __init__(self, monitor=None, watcher_cls=MotionWatcher, face=None):
+    def __init__(self, monitor=None, watcher_cls=MotionWatcher):
         self.settings = load_settings()
         self.monitor = monitor or Monitor(self.settings)
         self.watcher = watcher_cls(self._motion, self.settings)
-        self.face = face
         self.asleep = False
         self._events = []
         self._next_id = 1
-        self._listeners = 0  # Dieter pages waiting on /events right now
-        self._last_listened = 0.0
         self._cond = threading.Condition()
         self.monitor.keep_pc_awake()
-
-    def page_listening(self):
-        # A page asks again right after each answer, so a gap of a moment between asks still counts as listening.
-        with self._cond:
-            return self._listeners > 0 or time.time() - self._last_listened < 3.0
 
     # events the page waits for
     def _emit(self, **event):
@@ -532,19 +253,14 @@ class Helper:
     def events_after(self, after, timeout=25.0):
         deadline = time.time() + timeout
         with self._cond:
-            self._listeners += 1
-            try:
-                while True:
-                    found = [e for e in self._events if e["id"] > after]
-                    if found:
-                        return found
-                    left = deadline - time.time()
-                    if left <= 0:
-                        return []
-                    self._cond.wait(left)
-            finally:
-                self._listeners -= 1
-                self._last_listened = time.time()
+            while True:
+                found = [e for e in self._events if e["id"] > after]
+                if found:
+                    return found
+                left = deadline - time.time()
+                if left <= 0:
+                    return []
+                self._cond.wait(left)
 
     def latest_id(self):
         with self._cond:
@@ -560,8 +276,6 @@ class Helper:
     def _sleep_now(self):
         if not self.asleep:
             return
-        if self.face and not self.page_listening():
-            self.face.rest()  # no Dieter page is showing its sleep screen, so Dieter's own window goes black
         self.monitor.off()
         self.watcher.start()
 
@@ -570,8 +284,7 @@ class Helper:
         self.asleep = False
         self.watcher.stop()
         self.monitor.on()
-        if self.face:
-            self.face.eyes(side)  # Dieter's eyes in the corner open and look toward whoever's there
+        # The Dieter page (cook mode) hears this and shows Dieter's eyes; reason "test" shows them even if awake.
         return self._emit(type="wake", reason=reason, side=side, was_asleep=was_asleep)
 
     def _motion(self, side):
@@ -729,15 +442,11 @@ def main():
         open_dieter(load_settings())
         return
     helper = Helper()
-    helper.face = Face(on_touch=lambda: helper.wake("touch"), settings=helper.settings)
-    face = helper.face
     try:
         server = serve(helper)
     except OSError:
         print("Another Dieter helper is already running.")
         return
-    if "--quiet" not in sys.argv:
-        face.eyes()  # hello
     tray(helper, server)
 
 

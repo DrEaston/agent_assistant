@@ -29,8 +29,11 @@ the helper (the last plan and timers, read-only). It shouldn't become a second s
   `DieterHelper.exe` on this PC, so it runs `helper\.venv\Scripts\pythonw.exe dieter_helper.py`.
 - Sleep dims the built-in screen to 0 behind a black window. The real "monitor off" made this PC (Modern Standby)
   go into standby and lock, which froze the webcam.
-- Webcam motion wakes it. Dieter's own full-screen window shows orange eyes that look around, unless a Dieter page
-  is listening and shows its own. The eyes also appear when the helper starts.
+- **One home for Dieter: the Thanksgiving app (cook mode).** The helper draws nothing; it's plumbing (screen,
+  webcam, events). Cook mode listens to the helper the whole time it's open. When the screen wakes, the "Talk to
+  Dieter" speech bubble comes alive with big cartoon eyes and plays one of five performances in turn
+  (`window.dieterBubble` in `tg_voice.html`), then the page fades back in. The tray's "Test the eyes" plays one.
+  These page changes only reach the kitchen once the Thanksgiving service is redeployed.
 - A Startup-folder shortcut opens askdieter.ai Thanksgiving cook mode full screen in Chrome at sign-in
   (`dieter_page` in `%LOCALAPPDATA%\Dieter\helper.json` changes it).
 
