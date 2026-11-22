@@ -1,6 +1,7 @@
 """Dieter design system: one stylesheet, shared Jinja macros, and the template setup apps use."""
 
 import hashlib
+import os
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -24,4 +25,5 @@ def templates(*app_template_dirs):
         autoescape=select_autoescape(["html"]),
     )
     env.globals["css_url"] = _css_url()
+    env.globals["preview_label"] = os.getenv("PREVIEW_LABEL", "")
     return env

@@ -8153,6 +8153,7 @@
 {% set show_guest_home_chat = is_guest_session and show_launcher_shell %}
 {% set page_theme = app_shell.theme if app_shell else none %}
 <body class="{% if page_theme %}app-themed-page{% endif %}{% if app_shell and app_shell.body_class %} {{ app_shell.body_class }}{% endif %}"{% if page_theme %} style="--page-theme-header: {{ page_theme.header }}; --page-theme-color: {{ page_theme.color }}; --page-theme-border: {{ page_theme.border }}; --page-theme-panel: {{ page_theme.panel }}; --page-theme-panel-strong: {{ page_theme.panel_strong }}; --page-theme-text: {{ page_theme.text }}; --page-theme-hover: {{ page_theme.hover }}; --page-theme-subtitle: {{ page_theme.subtitle }};"{% endif %}{% if is_guest_session %} data-guest-session="true"{% endif %}{% if show_guest_home_chat %} data-open-guest-chat="true"{% endif %}>
+{% if preview_label %}<p role="status" style="margin:0;padding:.6rem 1rem;background:#fef3c7;color:#78350f;font-weight:600;text-align:center;">Preview of {{ preview_label }}. This is a copy; nothing you do here reaches the live site.</p>{% endif %}
     {% if is_guest_session %}
         <div class="demo-mode-banner">
             Guest Mode

@@ -1,4 +1,4 @@
-"""Studio project and area ownership hints for the Codex issue worker."""
+"""Which files each app area owns, and the quick check for it (used to keep a change inside one app)."""
 
 from __future__ import annotations
 
@@ -104,12 +104,8 @@ DIETER_PIPELINES = {
         label="Studio",
         owned_paths=(
             "apps/issues/",
-            "templates/app_feedback.html",
-            "scripts/run_codex_feedback_worker.py",
-            "scripts/codex_worker_dashboard.py",
-            "scripts/start_codex_worker_dashboard.ps1",
         ),
-        check_command="python -m unittest tests.test_app_issue_menu",
+        check_command="python -m unittest tests.test_studio",
         deploy_after=True,
     ),
     "Issues": AppPipeline(
@@ -117,12 +113,8 @@ DIETER_PIPELINES = {
         label="Studio",
         owned_paths=(
             "apps/issues/",
-            "templates/app_feedback.html",
-            "scripts/run_codex_feedback_worker.py",
-            "scripts/codex_worker_dashboard.py",
-            "scripts/start_codex_worker_dashboard.ps1",
         ),
-        check_command="python -m unittest tests.test_app_issue_menu",
+        check_command="python -m unittest tests.test_studio",
         deploy_after=True,
     ),
     "Auth": AppPipeline(

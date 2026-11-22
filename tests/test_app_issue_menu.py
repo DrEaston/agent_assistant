@@ -51,7 +51,6 @@ class AppIssueMenuTests(unittest.TestCase):
         self.env.globals["current_app_shell"] = self.current_app_shell
         self.env.globals["global_nav_apps"] = global_nav_apps
         self.template = self.env.get_template("base.html")
-        self.feedback_template = self.env.get_template("app_feedback.html")
 
     @pass_context
     def current_app_shell(self, template_context):
@@ -74,31 +73,6 @@ class AppIssueMenuTests(unittest.TestCase):
         )
         context = {"request": request, **extra_context}
         return self.template.render(context)
-
-    def render_issue_create_page(self):
-        request = SimpleNamespace(
-            url=SimpleNamespace(path="/apps/issues/new"),
-            query_params={},
-            state=SimpleNamespace(current_user=SimpleNamespace(name="Curtis", role="admin", status="active")),
-        )
-        return self.feedback_template.render(
-            request=request,
-            feedback_area="",
-            feedback_areas=[
-                "Kitchen / Recipes",
-                "Scheduler",
-                "Assistant / Planner",
-                "Issues",
-                "Trainer",
-                "Music",
-                "Auth",
-                "Dieter",
-            ],
-            show_issue_create=True,
-            show_issue_list=False,
-            show_worker_panel=False,
-            show_issue_pipeline=False,
-        )
 
     def parse_links(self, html):
         parser = AppMenuParser()
@@ -297,53 +271,9 @@ class AppIssueMenuTests(unittest.TestCase):
                 ]
                 self.assertEqual([], issue_list_links)
 
-    def test_issue_create_hamburger_uses_red_theme_parameters(self):
-        html = self.render_path("/apps/issues/new")
 
-        self.assertIn("issues-shell-page", html)
-        self.assertIn("--page-theme-color: #be123c", html)
-        self.assertIn("--page-theme-header: #881337", html)
-        self.assertIn(".recipe-app-menu-icon span", html)
-        icon_rule = html.split(".recipe-app-menu-icon span", 1)[1].split("}", 1)[0]
-        self.assertIn("background: var(--shell-control-text);", icon_rule)
-        self.assertNotIn("background: #4c1d95;", icon_rule)
 
-    def test_issue_create_page_has_single_studio_home_navigation_link(self):
-        html = self.render_issue_create_page()
-        links = self.parse_links(html)
-        studio_home_links = [
-            link
-            for link in links
-            if link["in_app_menu"] and link["href"] == "/apps/issues" and link["text"] == "Studio"
-        ]
-        issue_app_menu_links = [
-            link
-            for link in links
-            if link["in_app_menu"] and link["href"].startswith("/apps/issues")
-        ]
 
-        self.assertEqual(1, len(studio_home_links))
-        self.assertEqual(studio_home_links, issue_app_menu_links)
-        self.assertNotIn("Issue", [link["text"] for link in issue_app_menu_links])
-        self.assertNotIn("Make Issue", [link["text"] for link in links])
-        self.assertEqual(1, html.count('<option value="Issues"'))
-
-    def test_issue_create_header_actions_are_compact_links_without_synthesize(self):
-        html = self.render_issue_create_page()
-
-        self.assertIn('class="feedback-header-actions"', html)
-        self.assertIn('class="feedback-header-action" href="/apps/issues"', html)
-        self.assertIn('class="feedback-header-action" href="/apps/issues/workers"', html)
-        self.assertNotIn("button-link secondary compact", html)
-        self.assertNotIn("/apps/issues/synthesize", html)
-        self.assertNotIn("Synthesize", html)
-
-    def test_issue_create_title_field_appears_after_description(self):
-        html = self.render_issue_create_page()
-
-        self.assertIn('id="issue-description"', html)
-        self.assertIn('id="issue-title"', html)
-        self.assertLess(html.index('id="issue-description"'), html.index('id="issue-title"'))
 
 
 if __name__ == "__main__":

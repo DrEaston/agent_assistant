@@ -720,19 +720,7 @@ class Database:
                 FOREIGN KEY (requested_by_user_id) REFERENCES users(id) ON DELETE SET NULL
             )
         """)
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS app_feedback_codex_worker_heartbeats (
-                worker_name TEXT PRIMARY KEY,
-                project_id TEXT DEFAULT 'dieter',
-                status TEXT DEFAULT '',
-                message TEXT DEFAULT '',
-                run_id INTEGER,
-                last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (run_id) REFERENCES app_feedback_codex_runs(id) ON DELETE SET NULL
-            )
-        """)
+        cursor.execute("DROP TABLE IF EXISTS app_feedback_codex_worker_heartbeats")
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS recipe_grocery_lists (
@@ -860,17 +848,14 @@ class Database:
         self._ensure_column(cursor, "app_feedback_reports", "stalled_reason", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_reports", "plan_approval_status", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_reports", "inferred_objective", "TEXT DEFAULT ''")
+        # Studio with Claude Code: the GitHub issue a report was sent to, and the old Codex runs kept as history.
+        self._ensure_column(cursor, "app_feedback_reports", "github_issue_url", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "app_feedback_reports", "codex_history_json", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_codex_runs", "worker_name", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_codex_runs", "result_note", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_codex_runs", "started_at", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_codex_runs", "finished_at", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "app_feedback_codex_runs", "hidden_at", "TEXT DEFAULT ''")
-        self._ensure_column(cursor, "app_feedback_codex_worker_heartbeats", "status", "TEXT DEFAULT ''")
-        self._ensure_column(cursor, "app_feedback_codex_worker_heartbeats", "project_id", "TEXT DEFAULT 'dieter'")
-        self._ensure_column(cursor, "app_feedback_codex_worker_heartbeats", "message", "TEXT DEFAULT ''")
-        self._ensure_column(cursor, "app_feedback_codex_worker_heartbeats", "run_id", "INTEGER")
-        self._ensure_column(cursor, "app_feedback_codex_worker_heartbeats", "last_seen_at", "TEXT DEFAULT CURRENT_TIMESTAMP")
-        self._ensure_column(cursor, "app_feedback_codex_worker_heartbeats", "updated_at", "TEXT DEFAULT CURRENT_TIMESTAMP")
         self._ensure_column(cursor, "trainer_profiles", "strava_access_token", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_profiles", "strava_refresh_token", "TEXT DEFAULT ''")
         self._ensure_column(cursor, "trainer_profiles", "strava_token_expires_at", "INTEGER DEFAULT 0")
@@ -4963,7 +4948,7 @@ class Database:
         destination_project_id=None,
         destination_action_id=None,
     ):
-        """Store a developer feedback report for Codex triage."""
+        """Store a problem report for Dieter Studio."""
         self.connect()
         cursor = self.conn.cursor()
         cursor.execute(
@@ -4992,37 +4977,14 @@ class Database:
         return report_id
 
     def get_app_feedback_reports(self, status="open", limit=50):
-        """List developer feedback reports for Codex."""
+        """List problem reports, newest first (status "" = all)."""
         self.connect()
         cursor = self.conn.cursor()
         query = """
             SELECT app_feedback_reports.*,
                    projects.name AS project_name,
                    recommended_actions.action AS action_title,
-                   (
-                       SELECT app_feedback_codex_runs.id
-                       FROM app_feedback_codex_runs
-                       WHERE app_feedback_codex_runs.report_id = app_feedback_reports.id
-                         AND COALESCE(app_feedback_codex_runs.hidden_at, '') = ''
-                       ORDER BY app_feedback_codex_runs.id DESC
-                       LIMIT 1
-                   ) AS codex_run_id,
-                   (
-                       SELECT app_feedback_codex_runs.status
-                       FROM app_feedback_codex_runs
-                       WHERE app_feedback_codex_runs.report_id = app_feedback_reports.id
-                         AND COALESCE(app_feedback_codex_runs.hidden_at, '') = ''
-                       ORDER BY app_feedback_codex_runs.id DESC
-                       LIMIT 1
-                   ) AS codex_run_status,
-                   (
-                       SELECT app_feedback_codex_runs.created_at
-                       FROM app_feedback_codex_runs
-                       WHERE app_feedback_codex_runs.report_id = app_feedback_reports.id
-                         AND COALESCE(app_feedback_codex_runs.hidden_at, '') = ''
-                       ORDER BY app_feedback_codex_runs.id DESC
-                       LIMIT 1
-                   ) AS codex_run_requested_at,
+
                    users.updated_at AS user_updated_at,
                    users.updated_at AS user_last_active_at
             FROM app_feedback_reports
@@ -5062,250 +5024,6 @@ class Database:
         row = cursor.fetchone()
         self.close()
         return row
-
-    def add_app_feedback_codex_run(self, report_id, plan, requested_by_user_id=None):
-        """Queue an approved feedback issue plan for local Codex execution."""
-        self.connect()
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO app_feedback_codex_runs
-                (report_id, status, plan, requested_by_user_id, updated_at)
-            VALUES (?, 'queued', ?, ?, CURRENT_TIMESTAMP)
-            """,
-            (report_id, plan, requested_by_user_id or self._active_user_id()),
-        )
-        run_id = cursor.lastrowid
-        self._commit()
-        self.close()
-        return run_id
-
-    def get_next_app_feedback_codex_run(self):
-        """Return the oldest queued feedback Codex run."""
-        rows = self.get_queued_app_feedback_codex_runs(limit=1)
-        return rows[0] if rows else None
-
-    def get_queued_app_feedback_codex_runs(self, limit=100):
-        """Return queued feedback Codex runs in claim order."""
-        self.connect()
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            SELECT app_feedback_codex_runs.*,
-                   app_feedback_reports.title AS report_title,
-                   app_feedback_reports.area AS report_area,
-                   app_feedback_reports.raw_feedback AS raw_feedback
-            FROM app_feedback_codex_runs
-            JOIN app_feedback_reports ON app_feedback_reports.id = app_feedback_codex_runs.report_id
-            WHERE app_feedback_codex_runs.status = 'queued'
-            ORDER BY app_feedback_codex_runs.created_at ASC, app_feedback_codex_runs.id ASC
-            LIMIT ?
-            """,
-            (limit,),
-        )
-        rows = cursor.fetchall()
-        self.close()
-        return rows
-
-    def claim_app_feedback_codex_run(self, run_id, worker_name=""):
-        """Mark a queued feedback Codex run as running."""
-        self.connect()
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            UPDATE app_feedback_codex_runs
-            SET status = 'running',
-                worker_name = ?,
-                started_at = CURRENT_TIMESTAMP,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND status = 'queued'
-            """,
-            (worker_name, run_id),
-        )
-        changed = cursor.rowcount
-        self._commit()
-        cursor.execute(
-            """
-            SELECT app_feedback_codex_runs.*,
-                   app_feedback_reports.title AS report_title,
-                   app_feedback_reports.area AS report_area,
-                   app_feedback_reports.raw_feedback AS raw_feedback
-            FROM app_feedback_codex_runs
-            JOIN app_feedback_reports ON app_feedback_reports.id = app_feedback_codex_runs.report_id
-            WHERE app_feedback_codex_runs.id = ?
-            """,
-            (run_id,),
-        )
-        row = cursor.fetchone() if changed else None
-        self.close()
-        return row
-
-    def get_app_feedback_codex_run(self, run_id):
-        """Fetch one feedback Codex run."""
-        self.connect()
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            SELECT app_feedback_codex_runs.*,
-                   app_feedback_reports.title AS report_title,
-                   app_feedback_reports.area AS report_area,
-                   app_feedback_reports.raw_feedback AS raw_feedback
-            FROM app_feedback_codex_runs
-            JOIN app_feedback_reports ON app_feedback_reports.id = app_feedback_codex_runs.report_id
-            WHERE app_feedback_codex_runs.id = ?
-            """,
-            (run_id,),
-        )
-        row = cursor.fetchone()
-        self.close()
-        return row
-
-    def get_recent_app_feedback_codex_runs(self, limit=10):
-        """List recent feedback Codex worker runs for the visible issue dashboard."""
-        self.connect()
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            SELECT app_feedback_codex_runs.*,
-                   app_feedback_reports.title AS report_title,
-                   app_feedback_reports.area AS report_area,
-                   app_feedback_reports.status AS report_status
-            FROM app_feedback_codex_runs
-            JOIN app_feedback_reports ON app_feedback_reports.id = app_feedback_codex_runs.report_id
-            WHERE COALESCE(app_feedback_codex_runs.hidden_at, '') = ''
-            ORDER BY
-                CASE app_feedback_codex_runs.status
-                    WHEN 'running' THEN 0
-                    WHEN 'queued' THEN 1
-                    ELSE 2
-                END,
-                app_feedback_codex_runs.updated_at DESC,
-                app_feedback_codex_runs.id DESC
-            LIMIT ?
-            """,
-            (limit,),
-        )
-        rows = cursor.fetchall()
-        self.close()
-        return rows
-
-    def record_app_feedback_codex_worker_heartbeat(self, worker_name, status="", message="", run_id=None, project_id="dieter"):
-        """Record that a trusted Codex worker recently checked in."""
-        safe_worker = (worker_name or "local-codex").strip()[:120] or "local-codex"
-        safe_project = (project_id or "dieter").strip()[:80] or "dieter"
-        self.connect()
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO app_feedback_codex_worker_heartbeats
-                (worker_name, project_id, status, message, run_id, last_seen_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT(worker_name) DO UPDATE SET
-                project_id = excluded.project_id,
-                status = excluded.status,
-                message = excluded.message,
-                run_id = excluded.run_id,
-                last_seen_at = CURRENT_TIMESTAMP,
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (safe_worker, safe_project, status or "", message or "", run_id),
-        )
-        self._commit()
-        self.close()
-
-    def get_app_feedback_codex_worker_heartbeats(self, limit=10):
-        """List recent Codex worker check-ins."""
-        self.connect()
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            SELECT app_feedback_codex_worker_heartbeats.*,
-                   app_feedback_codex_runs.report_id AS report_id,
-                   app_feedback_codex_runs.status AS run_status,
-                   app_feedback_reports.title AS report_title,
-                   app_feedback_reports.area AS report_area
-            FROM app_feedback_codex_worker_heartbeats
-            LEFT JOIN app_feedback_codex_runs
-                ON app_feedback_codex_runs.id = app_feedback_codex_worker_heartbeats.run_id
-            LEFT JOIN app_feedback_reports
-                ON app_feedback_reports.id = app_feedback_codex_runs.report_id
-            ORDER BY app_feedback_codex_worker_heartbeats.last_seen_at DESC
-            LIMIT ?
-            """,
-            (limit,),
-        )
-        rows = cursor.fetchall()
-        self.close()
-        return rows
-
-    def hide_app_feedback_codex_run(self, run_id):
-        """Hide one worker run from normal issue dashboards."""
-        self.connect()
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            UPDATE app_feedback_codex_runs
-            SET hidden_at = CURRENT_TIMESTAMP,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-              AND status NOT IN ('queued', 'running')
-            """,
-            (run_id,),
-        )
-        changed = cursor.rowcount
-        self._commit()
-        self.close()
-        return bool(changed)
-
-    def hide_finished_app_feedback_codex_runs(self, status="failed"):
-        """Hide finished worker runs by status from normal issue dashboards."""
-        self.connect()
-        cursor = self.conn.cursor()
-        if status:
-            cursor.execute(
-                """
-                UPDATE app_feedback_codex_runs
-                SET hidden_at = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE status = ?
-                  AND status NOT IN ('queued', 'running')
-                  AND COALESCE(hidden_at, '') = ''
-                """,
-                (status,),
-            )
-        else:
-            cursor.execute(
-                """
-                UPDATE app_feedback_codex_runs
-                SET hidden_at = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE status NOT IN ('queued', 'running')
-                  AND COALESCE(hidden_at, '') = ''
-                """
-            )
-        changed = cursor.rowcount
-        self._commit()
-        self.close()
-        return changed
-
-    def finish_app_feedback_codex_run(self, run_id, status, result_note):
-        """Record the result of a local Codex run."""
-        safe_status = status if status in {"ready_for_testing", "failed", "canceled"} else "failed"
-        self.connect()
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            UPDATE app_feedback_codex_runs
-            SET status = ?,
-                result_note = ?,
-                finished_at = CURRENT_TIMESTAMP,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            """,
-            (safe_status, result_note, run_id),
-        )
-        self._commit()
-        self.close()
 
     def update_app_feedback_report_status(self, report_id, status):
         """Update a developer feedback report status."""
@@ -5364,198 +5082,6 @@ class Database:
             WHERE id = ?
             """,
             (json.dumps(history, ensure_ascii=False), report_id),
-        )
-        self._commit()
-        self.close()
-        return True
-
-    def update_app_feedback_report_audit_plan(self, report_id, audit_plan):
-        """Persist the latest Codex audit plan for a feedback report."""
-        self.connect()
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            SELECT audit_plan, audit_plan_updated_at, audit_plan_approved_at, audit_plan_history_json
-            FROM app_feedback_reports
-            WHERE id = ?
-            """,
-            (report_id,),
-        )
-        existing = cursor.fetchone()
-        history_json = existing["audit_plan_history_json"] if existing else "[]"
-        try:
-            history = json.loads(history_json or "[]")
-        except json.JSONDecodeError:
-            history = []
-        previous_plan = (existing["audit_plan"] if existing else "") or ""
-        if previous_plan.strip() and previous_plan.strip() != (audit_plan or "").strip():
-            history.append(
-                {
-                    "plan": previous_plan,
-                    "updated_at": (existing["audit_plan_updated_at"] if existing else "") or "",
-                    "approved_at": (existing["audit_plan_approved_at"] if existing else "") or "",
-                }
-            )
-            history = history[-8:]
-        cursor.execute(
-            """
-            UPDATE app_feedback_reports
-            SET audit_plan = ?,
-                audit_plan_updated_at = CURRENT_TIMESTAMP,
-                audit_plan_history_json = ?,
-                audit_plan_approved_at = '',
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            """,
-            (audit_plan, json.dumps(history, ensure_ascii=False), report_id),
-        )
-        self._commit()
-        self.close()
-
-    def mark_app_feedback_report_audit_plan_approved(self, report_id):
-        """Record that the current feedback audit plan was approved by the user."""
-        self.connect()
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            UPDATE app_feedback_reports
-            SET audit_plan_approved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            """,
-            (report_id,),
-        )
-        self._commit()
-        self.close()
-
-    def update_app_feedback_report_audit_answers(self, report_id, answers):
-        """Persist user answers to open questions for a feedback audit."""
-        self.connect()
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            UPDATE app_feedback_reports
-            SET audit_answers_json = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            """,
-            (answers, report_id),
-        )
-        self._commit()
-        self.close()
-
-    def clear_app_feedback_report_audit_answers(self, report_id):
-        """Clear stale audit answers when a feedback issue starts a fresh plan cycle."""
-        self.update_app_feedback_report_audit_answers(report_id, "{}")
-
-    def update_app_feedback_report_review_note(self, report_id, status, note):
-        """Mark a feedback issue ready for user testing with an implementation note."""
-        self.connect()
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            UPDATE app_feedback_reports
-            SET status = ?,
-                implementation_note = ?,
-                implementation_note_updated_at = CURRENT_TIMESTAMP,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            """,
-            (status, note, report_id),
-        )
-        self._commit()
-        self.close()
-
-    def update_app_feedback_auto_evaluation_plan(self, report_id, plan, inferred_objective, stalled_reason):
-        """Persist a reviewable stalled-issue evaluation plan."""
-        self.connect()
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            UPDATE app_feedback_reports
-            SET auto_evaluation_plan = ?,
-                auto_evaluation_status = 'plan_ready',
-                auto_evaluation_summary = '',
-                auto_evaluation_plan_approved_at = '',
-                last_auto_plan_at = CURRENT_TIMESTAMP,
-                stalled_detected_at = CURRENT_TIMESTAMP,
-                stalled_reason = ?,
-                plan_approval_status = 'pending',
-                inferred_objective = ?,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            """,
-            (plan, stalled_reason, inferred_objective, report_id),
-        )
-        changed = cursor.rowcount
-        self._commit()
-        self.close()
-        return bool(changed)
-
-    def approve_app_feedback_auto_evaluation_plan(self, report_id):
-        """Mark the current stalled-issue evaluation plan approved for safe checks."""
-        self.connect()
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            UPDATE app_feedback_reports
-            SET auto_evaluation_plan_approved_at = CURRENT_TIMESTAMP,
-                auto_evaluation_status = 'approved',
-                plan_approval_status = 'approved',
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-              AND COALESCE(auto_evaluation_plan, '') != ''
-            """,
-            (report_id,),
-        )
-        changed = cursor.rowcount
-        self._commit()
-        self.close()
-        return bool(changed)
-
-    def update_app_feedback_auto_evaluation_result(self, report_id, status, summary):
-        """Persist an observation-only automated evaluation outcome."""
-        safe_status = status if status in {"completed", "failed"} else "completed"
-        self.connect()
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            UPDATE app_feedback_reports
-            SET auto_evaluation_status = ?,
-                auto_evaluation_summary = ?,
-                last_auto_evaluated_at = CURRENT_TIMESTAMP,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            """,
-            (safe_status, summary, report_id),
-        )
-        changed = cursor.rowcount
-        self._commit()
-        self.close()
-        return bool(changed)
-
-    def delete_app_feedback_report_audit_plan(self, report_id):
-        """Clear the current audit plan while keeping the feedback issue."""
-        self.connect()
-        cursor = self.conn.cursor()
-        cursor.execute(
-            "SELECT id FROM app_feedback_reports WHERE id = ?",
-            (report_id,),
-        )
-        row = cursor.fetchone()
-        if not row:
-            self.close()
-            return False
-        cursor.execute(
-            """
-            UPDATE app_feedback_reports
-            SET audit_plan = '',
-                audit_plan_updated_at = '',
-                audit_plan_history_json = '[]',
-                audit_answers_json = '{}',
-                audit_plan_approved_at = '',
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            """,
-            (report_id,),
         )
         self._commit()
         self.close()

@@ -1,0 +1,77 @@
+# A preview copy of the site for each pull request, at its own address, posted as a comment.
+# Previews run as the separate service dieter-preview: a read-only copy of the live data, their own keys,
+# and no Strava or Spotify connection. Nothing done in a preview reaches the live site.
+name: preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+env:
+  PROJECT_ID: recipes-442702
+  REGION: us-central1
+  SERVICE: dieter-preview
+  WIF_PROVIDER: projects/406739570356/locations/global/workloadIdentityPools/github/providers/dieter-repo
+  DEPLOYER: github-deployer@recipes-442702.iam.gserviceaccount.com
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    # Only pull requests from this repository (never forks) get a preview.
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Deploy the preview
+        id: deploy
+        run: |
+          tag="pr-${{ github.event.pull_request.number }}"
+          gcloud run deploy "$SERVICE" --source . --region "$REGION" --project "$PROJECT_ID" \
+            --no-traffic --tag "$tag" --update-env-vars "PREVIEW_LABEL=pull request #${{ github.event.pull_request.number }}" --quiet
+          url=$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT_ID" \
+            --format "value(status.traffic[].url)" | tr ';' '\n' | grep "://$tag---" | head -1)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - name: Post the link
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const url = "${{ steps.deploy.outputs.url }}";
+            const body = `**Preview:** ${url}\n\nA copy of Dieter with this change and a copy of your data. ` +
+              `Sign in as usual; nothing you do there reaches the live site. Merge to put it live.\n\n` +
+              `<sub>Updated for ${context.payload.pull_request.head.sha.slice(0, 7)}</sub>`;
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo, issue_number: context.issue.number });
+            const mine = comments.find(c => c.user.type === "Bot" && c.body.startsWith("**Preview:**"));
+            if (mine) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: mine.id, body });
+            } else {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body });
+            }
+
+  cleanup:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: |
+          gcloud run services update-traffic "$SERVICE" --region "$REGION" --project "$PROJECT_ID" \
+            --remove-tags "pr-${{ github.event.pull_request.number }}" --quiet || true

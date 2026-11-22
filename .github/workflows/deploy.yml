@@ -1,0 +1,56 @@
+# Merging to main puts it live: run the tests, then deploy the main Dieter service.
+# Settings and secrets stay as they are on the service; only the code changes.
+# The Thanksgiving service is not touched (it deploys separately, from a tag).
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: recipes-442702
+  REGION: us-central1
+  SERVICE: dieter
+  WIF_PROVIDER: projects/406739570356/locations/global/workloadIdentityPools/github/providers/dieter-repo
+  DEPLOYER: github-deployer@recipes-442702.iam.gserviceaccount.com
+
+concurrency:
+  group: deploy-live
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Remember the live version (for undo)
+        run: |
+          gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT_ID" \
+            --format "value(status.traffic[0].revisionName)" | tee previous_revision.txt
+      - name: Deploy
+        run: |
+          gcloud run deploy "$SERVICE" --source . --region "$REGION" --project "$PROJECT_ID" --quiet \
+            --update-labels "commit=${GITHUB_SHA::12}"
+      - name: Check it started
+        run: |
+          url=$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT_ID" --format "value(status.url)")
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$url/login") && [ "$code" = "200" ] && exit 0
+            sleep 10
+          done
+          echo "The new version didn't answer on /login (last status $code). Undo: run the undo workflow." && exit 1

@@ -15,7 +15,11 @@ param(
     [string]$ExtraEnv = "",
     # Shared key that signs calls between Dieter services (core/internal.py). Created with a random value if missing.
     [string]$InternalKeySecretName = "dieter-internal-key",
-    [string]$AppSecretKeyName = "dieter-secret-key"
+    [string]$AppSecretKeyName = "dieter-secret-key",
+    # Identity the service runs as. Default: the project's compute account. Previews use their own, narrower one.
+    [string]$RuntimeServiceAccount = "",
+    # Previews: read a copy of the live data at startup and never write it back (bucket read access only).
+    [switch]$DataReadOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -70,10 +74,14 @@ if ($bucketDescribeExitCode -ne 0) {
 }
 
 $projectNumber = (& $gcloud projects describe $ProjectId --format "value(projectNumber)").Trim()
-$runtimeServiceAccount = "$projectNumber-compute@developer.gserviceaccount.com"
+$runtimeServiceAccount = if ($RuntimeServiceAccount) { $RuntimeServiceAccount } else { "$projectNumber-compute@developer.gserviceaccount.com" }
+$bucketRole = if ($DataReadOnly) { "roles/storage.objectViewer" } else { "roles/storage.objectAdmin" }
+$previous = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 & $gcloud storage buckets add-iam-policy-binding $bucketUri `
     --member "serviceAccount:$runtimeServiceAccount" `
-    --role "roles/storage.objectAdmin" *> $null
+    --role $bucketRole *> $null
+$ErrorActionPreference = $previous
 
 $openAiApiKey = $env:OPENAI_API_KEY
 if (-not $openAiApiKey) {
@@ -237,6 +245,9 @@ if ($openAiTranscriptionModel) {
 if ($RegistrationCode) {
     $envVars = "$envVars,DIETER_REGISTRATION_CODE=$RegistrationCode"
 }
+if ($DataReadOnly) {
+    $envVars = "$envVars,GCS_READ_ONLY=1"
+}
 if ($ExtraEnv) {
     $envVars = "$envVars,$ExtraEnv"
 }
@@ -245,6 +256,7 @@ if ($ExtraEnv) {
     --source . `
     --region $Region `
     --allow-unauthenticated `
+    --service-account $runtimeServiceAccount `
     --min-instances $MinInstances `
     --max-instances 1 `
     --concurrency $Concurrency `

@@ -2,6 +2,7 @@ APP = {
     "id": "issues",
     "title": "Dieter Studio",
     "nav_label": "Studio",
+    "accent": "studio",
     "home_url": "/apps/issues",
     "route_prefixes": ("/apps/issues",),
     "body_class": "issues-shell-page",
@@ -17,7 +18,7 @@ APP = {
     "show_issue_item": False,
     "show_chat_button": False,
     "band_label": "Studio utility navigation",
-    "subtitle": "Turn app feedback into scoped plans, Codex runs, and tested improvements.",
+    "subtitle": "Problems and change requests, sent to Claude Code and checked in a preview.",
     "home_label": "Studio Home",
     "nav_items": (
         {"label": "Studio", "url": "/apps/issues"},
@@ -37,6 +38,6 @@ APP = {
         "kicker": "Studio",
         "title": "Dieter Studio",
         "url": "/apps/issues",
-        "description": "Review feedback, synthesize plans, approve Codex runs, and track implementation.",
+        "description": "Report problems, ask for changes, and check previews before they go live.",
     },
 }

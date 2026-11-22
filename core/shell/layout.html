@@ -11,6 +11,7 @@
 {% block head %}{% endblock %}
 </head>
 <body>
+{% if preview_label %}<p class="banner warn" role="status">Preview of {{ preview_label }}. This is a copy; nothing you do here reaches the live site.</p>{% endif %}
 {% block content %}{% endblock %}
 {% block report %}
 {% if report_url %}

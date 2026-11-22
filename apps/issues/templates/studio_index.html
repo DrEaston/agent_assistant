@@ -1,0 +1,31 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Studio{% endblock %}
+{% block content %}
+{% call ui.page_header("Studio", crumbs=[("Dieter", "/")],
+    sub="Problems and change requests. Send one to Claude and it comes back as a preview you can check.",
+    tabs=[("Open (" ~ counts.active ~ ")", "/apps/issues"), ("Done (" ~ counts.done ~ ")", "/apps/issues?show=done")],
+    current="/apps/issues" if show == "active" else "/apps/issues?show=done") %}
+  <a class="button primary" href="/apps/issues/new">New request</a>
+{% endcall %}
+<main class="wrap">
+  {% if not github_enabled %}
+  {% call ui.banner("warn") %}GitHub isn't connected yet, so requests stay here until it is.{% endcall %}
+  {% endif %}
+  {% call ui.section() %}
+    <div class="card">
+      {% for r in reports %}
+      <div class="list-row">
+        <div class="grow">
+          <a class="title" href="/apps/issues/{{ r.id }}">{{ r.title }}</a>
+          <div class="muted small">{{ r.area or "Dieter" }} · {{ r.created }}{% if r.reporter_name %} · {{ r.reporter_name }}{% endif %}</div>
+        </div>
+        {{ ui.tag(r.status_label, "ok" if r.status == "done" else ("accent" if r.github_issue_url else None)) }}
+      </div>
+      {% else %}
+      {{ ui.empty("Nothing here." if show == "done" else "No open requests. Use Report a problem on any page, or New request.") }}
+      {% endfor %}
+    </div>
+  {% endcall %}
+</main>
+{% endblock %}

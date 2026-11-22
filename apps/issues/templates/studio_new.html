@@ -1,0 +1,33 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}New request · Studio{% endblock %}
+{% block report %}{% endblock %}
+{% block content %}
+{{ ui.page_header("New request", crumbs=[("Dieter", "/"), ("Studio", "/apps/issues")]) }}
+<main class="wrap">
+  {% call ui.section() %}
+  <form method="post" action="/apps/issues/create" class="card stack">
+    <div class="field">
+      <label for="text">What's wrong, or what should change?</label>
+      <textarea id="text" name="text" required placeholder="Say it the way you'd tell a friend. Which page, what you tried, what you expected."></textarea>
+    </div>
+    <div class="field">
+      <label for="area">App</label>
+      <select id="area" name="area">
+        <option value="">Let Dieter guess</option>
+        {% for a in areas %}<option value="{{ a }}"{% if a == area %} selected{% endif %}>{{ a }}</option>{% endfor %}
+      </select>
+    </div>
+    {{ ui.field("Page (optional)", "page", value=page, placeholder="/apps/recipes") }}
+    <div class="row">
+      {% if github_enabled %}
+      <button type="submit" name="send" value="1" class="primary">Send to Claude</button>
+      <button type="submit" class="quiet">Just save it</button>
+      {% else %}
+      <button type="submit" class="primary">Save</button>
+      {% endif %}
+    </div>
+  </form>
+  {% endcall %}
+</main>
+{% endblock %}

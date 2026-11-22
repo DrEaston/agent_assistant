@@ -41,12 +41,14 @@ The current FastAPI route handlers still live in `api.py`. That is an unavoidabl
 
 Use shared modules only for behavior that is genuinely reused across apps. App-specific helpers, constants, styles, and tests should stay with that app when practical. If a change requires editing both an app manifest and a shared file, keep the shared edit small and document why it is shared in the commit or issue note.
 
-## Codex Issue Worker
+## Changes with Claude Code
 
-The app stays in one repository and deploys through one Cloud Run service for now, so approved Codex jobs still run serially. This avoids two workers editing or deploying the same monolithic app at the same time.
+The Codex issue worker is retired. Changes now go through GitHub (see `CLAUDE.md`):
 
-`apps/pipeline.py` provides lightweight area ownership hints for the local Codex worker. When an issue is queued for Trainer, Kitchen / Recipes, Music, Studio, Assistant / Planner, Scheduler, Auth, or Dieter, the worker prompt tells Codex which app-owned folders to prefer and which files are shared/platform files.
+- Studio (`apps/issues/`) collects reports and sends one to Claude Code as a GitHub issue labelled `claude`.
+- `.github/workflows/claude.yml` runs Claude Code on that issue; it asks questions there or opens a pull request.
+- `ci.yml` runs the tests, `preview.yml` deploys each pull request to the `dieter-preview` service (read-only copy
+  of the live data) and posts the link, `deploy.yml` puts `main` live after a merge, and `undo.yml` switches the
+  live site back to the previous version.
 
-The same file also defines external Studio project areas for EEG Headband and Calcium Imaging. Those areas are labels such as `EEG / Firmware` or `Calcium Imaging / Analysis`. The local worker can route those issues to another repo when `EEG_REPO_PATH` or `CALCIUM_IMAGING_REPO_PATH` is set.
-
-Shared/platform files include `api.py`, `database.py`, `templates/base.html`, deployment files, `scripts/`, `docs/`, and `tests/`. Editing them is allowed when necessary, but the worker records an app-boundary note so broad changes are visible during review/testing.
+`apps/pipeline.py` still lists which files each app area owns, so a change can stay inside one app.

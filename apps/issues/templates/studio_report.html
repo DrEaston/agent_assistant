@@ -1,0 +1,96 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}{{ report.title }} · Studio{% endblock %}
+{% block report %}{% endblock %}
+{% macro event(h) -%}
+<div class="list-row">
+  <div class="grow">
+    <div>{{ h.summary or h.action|replace("_", " ") }}</div>
+    <div class="muted small">{{ h.created_at }}{% if h.details and h.details.issue %} · <a href="{{ h.details.issue }}">issue</a>{% endif %}</div>
+  </div>
+</div>
+{%- endmacro %}
+{% block content %}
+{% call ui.page_header(report.title, crumbs=[("Dieter", "/"), ("Studio", "/apps/issues")],
+    sub=(report.area or "Dieter") ~ " · " ~ report.created ~ (" · " ~ report.reporter_name if report.reporter_name else "")) %}
+  {{ ui.tag(report.status_label, "ok" if report.status == "done" else None) }}
+{% endcall %}
+<main class="wrap">
+  {% if sent %}{% call ui.banner("ok") %}Sent to Claude. It will reply on GitHub with questions or a pull request and a preview link.{% endcall %}{% endif %}
+  {% if error %}{% call ui.banner("warn") %}{{ error }}{% endcall %}{% endif %}
+
+  {% call ui.section("What was said") %}
+  <div class="card stack">
+    {% for line in report.raw_feedback.splitlines() if line.strip() %}<p>{{ line }}</p>{% endfor %}
+    {% if report.page_url %}<p class="muted small">Page: <a href="{{ report.page_url }}">{{ report.page_title or report.page_url }}</a></p>{% endif %}
+  </div>
+  {% endcall %}
+
+  {% call ui.section("Claude") %}
+  <div class="card stack">
+    {% if report.github_issue_url %}
+      <p>The conversation, the pull request and the preview link are on GitHub.
+        {% if issue %}{{ ui.tag("open" if issue.state == "open" else "closed", "info" if issue.state == "open" else "ok") }}
+        {% if issue.comments %}<span class="muted small">{{ issue.comments }} repl{{ "y" if issue.comments == 1 else "ies" }}</span>{% endif %}{% endif %}</p>
+      <div class="row"><a class="button primary" href="{{ report.github_issue_url }}">Open on GitHub</a></div>
+    {% elif github_enabled %}
+      <p class="muted">Claude reads this, asks if anything's unclear, then opens a pull request with a preview you can try before anything goes live.</p>
+      <form method="post" action="/apps/issues/{{ report.id }}/send" class="row">
+        <button type="submit" class="primary">Send to Claude</button>
+      </form>
+    {% else %}
+      <p class="muted">GitHub isn't connected yet. Once it is, a Send to Claude button appears here.</p>
+    {% endif %}
+  </div>
+  {% endcall %}
+
+  {% call ui.section("Status") %}
+  <div class="card row">
+    {% for value, label in [("open", "New"), ("in_progress", "In progress"), ("ready_for_review", "Ready to check"), ("done", "Done")] %}
+    <form method="post" action="/apps/issues/{{ report.id }}/status">
+      <input type="hidden" name="status" value="{{ value }}">
+      <button type="submit" class="{{ 'primary' if report.status == value else 'quiet' }}"{% if report.status == value %} aria-pressed="true"{% endif %}>{{ label }}</button>
+    </form>
+    {% endfor %}
+  </div>
+  {% endcall %}
+
+  {% if report.history or report.codex_history or report.old_plan %}
+  {% call ui.section("History") %}
+  <div class="card stack">
+    {% set events = report.history|reverse|list %}
+    {% for h in events[:5] %}{{ event(h) }}{% endfor %}
+    {% if events|length > 5 %}
+    <details>
+      <summary>Older ({{ events|length - 5 }})</summary>
+      {% for h in events[5:] %}{{ event(h) }}{% endfor %}
+    </details>
+    {% endif %}
+    {% if report.codex_history %}
+    <details>
+      <summary>Earlier Codex attempts ({{ report.codex_history|length }})</summary>
+      {% for run in report.codex_history %}
+      <div class="list-row">
+        <div class="grow">
+          <div>Run {{ run.id }} · {{ run.status|replace("_", " ") }}{% if run.finished_at %} · {{ run.finished_at[:10] }}{% endif %}</div>
+          {% for line in (run.result_note or "").splitlines() if line.strip() %}<div class="muted small">{{ line }}</div>{% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </details>
+    {% endif %}
+    {% if report.old_plan %}
+    <details>
+      <summary>The old Codex plan</summary>
+      {% for line in report.old_plan.splitlines() if line.strip() %}<p class="small">{{ line }}</p>{% endfor %}
+    </details>
+    {% endif %}
+  </div>
+  {% endcall %}
+  {% endif %}
+
+  {% call ui.section() %}
+  {{ ui.delete_button("/apps/issues/" ~ report.id ~ "/delete", label="Delete report", confirm_label="Delete") }}
+  {% endcall %}
+</main>
+{% endblock %}

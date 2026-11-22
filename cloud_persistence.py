@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 class CloudStoragePersistence:
-    def __init__(self, bucket_name, db_path, uploads_dir, prefix="dieter"):
+    def __init__(self, bucket_name, db_path, uploads_dir, prefix="dieter", read_only=False):
         self.bucket_name = (bucket_name or "").strip()
         self.db_path = Path(db_path)
         self.uploads_dir = Path(uploads_dir)
@@ -27,12 +27,15 @@ class CloudStoragePersistence:
         self._client = None
         self._bucket = None
         self.enabled = bool(self.bucket_name)
+        # Read-only (previews): restore a copy of the live data at startup, never write anything back.
+        self.read_only = bool(read_only)
 
     @classmethod
     def from_env(cls, db_path, uploads_dir):
         bucket_name = os.getenv("GCS_BUCKET") or os.getenv("DIETER_GCS_BUCKET")
         prefix = os.getenv("GCS_PREFIX") or os.getenv("DIETER_GCS_PREFIX") or "dieter"
-        return cls(bucket_name, db_path, uploads_dir, prefix)
+        read_only = os.getenv("GCS_READ_ONLY", "").lower() in {"1", "true", "yes", "on"}
+        return cls(bucket_name, db_path, uploads_dir, prefix, read_only=read_only)
 
     @property
     def db_blob_name(self):
@@ -93,6 +96,8 @@ class CloudStoragePersistence:
 
     def backup_database(self):
         """Upload a consistent SQLite backup snapshot to Cloud Storage."""
+        if self.read_only:
+            return False
         if not self.enabled or not self.db_path.exists():
             return False
         with self._lock:
@@ -121,6 +126,8 @@ class CloudStoragePersistence:
         the CPU between requests, so the timer alone can be held up; run_if_due() and flush()
         (at shutdown) make sure the trailing upload still happens.
         """
+        if self.read_only:
+            return False
         if not self.enabled:
             return
         now = time.monotonic()
@@ -173,6 +180,8 @@ class CloudStoragePersistence:
 
     def sync_upload_file(self, path):
         """Upload one file under uploads_dir to Cloud Storage."""
+        if self.read_only:
+            return False
         if not self.enabled:
             return False
         path = Path(path)
@@ -190,6 +199,8 @@ class CloudStoragePersistence:
 
     def sync_uploads(self):
         """Upload all local files under uploads_dir to Cloud Storage."""
+        if self.read_only:
+            return 0
         if not self.enabled or not self.uploads_dir.exists():
             return 0
         count = 0
@@ -207,6 +218,8 @@ class CloudStoragePersistence:
 
     def seed_if_empty(self):
         """Create the first durable snapshot if no database object exists yet."""
+        if self.read_only:
+            return False
         if not self.enabled or not self.db_path.exists():
             return False
         with self._lock:

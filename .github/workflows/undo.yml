@@ -1,0 +1,50 @@
+# Undo: send the live site back to the version before the current one (or a named one).
+# Takes seconds; no rebuild. Run it from the Actions tab (works in the GitHub app on a phone).
+name: undo
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: "Version to go back to (leave empty for the one before the current)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: recipes-442702
+  REGION: us-central1
+  SERVICE: dieter
+  WIF_PROVIDER: projects/406739570356/locations/global/workloadIdentityPools/github/providers/dieter-repo
+  DEPLOYER: github-deployer@recipes-442702.iam.gserviceaccount.com
+
+concurrency:
+  group: deploy-live
+  cancel-in-progress: false
+
+jobs:
+  undo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Switch the live site back
+        env:
+          WANT: ${{ inputs.revision }}
+        run: |
+          current=$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT_ID" \
+            --format "value(status.traffic[0].revisionName)")
+          if [ -z "$WANT" ]; then
+            WANT=$(gcloud run revisions list --service "$SERVICE" --region "$REGION" --project "$PROJECT_ID" \
+              --sort-by "~metadata.creationTimestamp" --format "value(metadata.name)" \
+              | grep -v -x "$current" | head -1)
+          fi
+          echo "Live now: $current. Going back to: $WANT"
+          gcloud run services update-traffic "$SERVICE" --region "$REGION" --project "$PROJECT_ID" \
+            --to-revisions "$WANT=100" --quiet
