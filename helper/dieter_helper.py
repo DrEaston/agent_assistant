@@ -49,29 +49,105 @@ def save_settings(settings):
 
 # ---------------------------------------------------------------- the monitor (Windows)
 
-class Monitor:
-    """Turn the display off and on. On other systems these do nothing (so the helper can be tested anywhere)."""
+def _powershell(command, timeout=10):
+    """Run a short PowerShell command without a window; returns its output ('' on failure)."""
+    import subprocess
+    try:
+        done = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+                              capture_output=True, text=True, timeout=timeout,
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return done.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
 
-    def __init__(self):
+
+class Monitor:
+    """Darken the screen and bring it back. On other systems these do nothing (so the helper can be tested anywhere).
+
+    Built-in screens (all-in-ones, laptops): the backlight goes to its lowest level while the page shows black, and
+    Windows is told the display is still needed. Telling Windows "monitor off" instead would, on PCs with Modern
+    Standby (most new ones), put the whole PC into standby a second later: the webcam freezes, nothing can wake it
+    but a key, and Windows asks to sign in again.
+    Separate monitors (no backlight control): the old way, monitor off, then a mouse nudge to wake it.
+    """
+
+    def __init__(self, settings=None):
         self.win = sys.platform == "win32"
+        self.settings = settings if settings is not None else {}
+        self._display_request = None
         if self.win:
             import ctypes
+            self.ctypes = ctypes
             self.user32 = ctypes.windll.user32
             self.kernel32 = ctypes.windll.kernel32
+            self.can_dim = self._get_brightness() is not None
+            # If the helper stopped while the screen was dimmed, put the brightness back.
+            if self.can_dim and self.settings.get("dimmed_from") is not None:
+                self._set_brightness(self.settings.pop("dimmed_from"))
+                save_settings(self.settings)
 
     def keep_pc_awake(self):
         # ES_CONTINUOUS | ES_SYSTEM_REQUIRED: the PC itself never sleeps while the helper runs (the screen may).
         if self.win:
             self.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)
 
+    # built-in screen brightness (WMI), 0-100
+    def _get_brightness(self):
+        out = _powershell("(Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightness "
+                          "-ErrorAction Stop | Select-Object -First 1).CurrentBrightness")
+        return int(out) if out.isdigit() else None
+
+    def _set_brightness(self, level):
+        _powershell("Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightnessMethods | "
+                    f"Invoke-CimMethod -MethodName WmiSetBrightness -Arguments @{{Timeout=0; Brightness={int(level)}}}"
+                    " | Out-Null")
+
+    # a process-wide "the display is in use" request, so Windows doesn't switch the screen off or go to standby
+    def _hold_display(self, hold):
+        k = self.kernel32
+        if hold and self._display_request is None:
+            ct = self.ctypes
+
+            class REASON_CONTEXT(ct.Structure):
+                _fields_ = [("Version", ct.c_ulong), ("Flags", ct.c_ulong), ("SimpleReasonString", ct.c_wchar_p)]
+
+            k.PowerCreateRequest.restype = ct.c_void_p
+            k.PowerCreateRequest.argtypes = [ct.POINTER(REASON_CONTEXT)]
+            k.PowerSetRequest.argtypes = k.PowerClearRequest.argtypes = [ct.c_void_p, ct.c_int]
+            k.CloseHandle.argtypes = [ct.c_void_p]
+            self._reason = REASON_CONTEXT(0, 1, "Dieter kitchen screen is resting, watching for someone")
+            handle = k.PowerCreateRequest(ct.byref(self._reason))
+            if handle and handle != ct.c_void_p(-1).value:
+                k.PowerSetRequest(handle, 0)  # PowerRequestDisplayRequired
+                self._display_request = handle
+        elif not hold and self._display_request is not None:
+            k.PowerClearRequest(self._display_request, 0)
+            k.CloseHandle(self._display_request)
+            self._display_request = None
+
     def off(self):
-        if self.win:
+        if not self.win:
+            return
+        if self.can_dim:
+            self._hold_display(True)
+            if self.settings.get("dimmed_from") is None:
+                current = self._get_brightness()
+                self.settings["dimmed_from"] = current if current else 100
+                save_settings(self.settings)
+            self._set_brightness(0)
+        else:
             # WM_SYSCOMMAND, SC_MONITORPOWER, 2 = off. PostMessage so a busy window can't block us.
             self.user32.PostMessageW(0xFFFF, 0x0112, 0xF170, 2)
 
     def on(self):
         if not self.win:
             return
+        if self.can_dim:
+            level = self.settings.pop("dimmed_from", None)
+            if level is not None:
+                self._set_brightness(level)
+                save_settings(self.settings)
+            self._hold_display(False)
         # ES_DISPLAY_REQUIRED without ES_CONTINUOUS: counts as activity once, doesn't pin the screen on.
         self.kernel32.SetThreadExecutionState(0x00000002)
         # A one-pixel mouse nudge (and back) is what reliably turns a sleeping monitor on in Windows 10/11.
@@ -155,7 +231,7 @@ class MotionWatcher:
 class Helper:
     def __init__(self, monitor=None, watcher_cls=MotionWatcher):
         self.settings = load_settings()
-        self.monitor = monitor or Monitor()
+        self.monitor = monitor or Monitor(self.settings)
         self.watcher = watcher_cls(self._motion, self.settings)
         self.asleep = False
         self._events = []
