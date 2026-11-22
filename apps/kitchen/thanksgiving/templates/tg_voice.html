@@ -97,6 +97,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const sheet = $("voice-sheet"), log = $("voice-log"), text = $("voice-text"), mic = $("voice-mic");
+  let about = null;  // a step this conversation is about (from an alert's 🎤), e.g. {title, dish, when}
   let history = [];  // this conversation, so follow-up answers ("Saturday at 7") have context
 
   // "This device": a name and sass level saved only on this device and sent with every command.
@@ -135,6 +136,15 @@
     if (!r.ok) throw new Error(data.detail || `Something went wrong (${r.status}).`);
     return data;
   }
+  const hintText = $("voice-hint").textContent;
+  document.addEventListener("tg:voice-about", (event) => {
+    if (!sheet.hidden) close();
+    about = event.detail; history = [];
+    $("voice-title").textContent = `About: ${about.title}`;
+    $("voice-hint").textContent = "Say what you want, like “I'll do that later today, around 4”, “move it to tomorrow morning”, or “skip it”.";
+    $("voice-hint").hidden = false;
+    open();
+  });
   function open() {
     // Start listening straight away (this tap counts as permission to use the mic). Don't focus the text box:
     // that pops up the keyboard, whose own voice-typing button fills the box but never sends.
@@ -147,6 +157,7 @@
   }
   function close() {
     endConversation();
+    if (about) { about = null; $("voice-title").textContent = "Tell Dieter"; $("voice-hint").textContent = hintText; }
     if (recorder && recorder.state === "recording") { recorder.onstop = null; stopListening(); }
     mic.classList.remove("recording"); mic.textContent = "🎤";
     sheet.hidden = true; $("voice-open").hidden = false;
@@ -182,7 +193,10 @@
     const thinking = log.lastChild;
     try {
       const device = loadDevice();
-      let data = await call("/thanksgiving/api/command", { text: message, history, device: device.name || "",
+      // From an alert's 🎤: say which step "that" is, so "I'll do that later today" moves the right one.
+      const said = about && !history.length
+        ? `About the step "${about.title}" (${about.dish}, due ${about.when}): ${message}` : message;
+      let data = await call("/thanksgiving/api/command", { text: said, history, device: device.name || "",
                                                            sass: device.sass || "normal", two_step: true });
       if (data.escalate) {
         // The quick pass handed this to the careful model: say so right away, then wait for its answer.
@@ -190,7 +204,7 @@
         data = await call("/thanksgiving/api/think", { ticket: data.ticket });
       }
       thinking.remove();
-      history.push({ role: "user", content: message });
+      history.push({ role: "user", content: said });
       showResult(data);
       history.push({ role: "assistant", content: [data.question || data.reply, ...data.changes].join("\n") });
     } catch (error) {

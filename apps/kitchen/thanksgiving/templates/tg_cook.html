@@ -243,7 +243,8 @@ body { overflow-x: hidden; }
       return `<div class="alert" role="alert"><div class="what"><strong>${esc(s.title)}</strong> ${pill(s.cook)}
           <div class="small">${esc(a.dish.name)} · ${esc(s.clock)} · ${esc(rel(s.start_ms))}${s.temp ? ` · ${s.temp}°F` : ""}</div></div>
         ${goto}<button class="primary" data-done="${esc(s.key)}">Done</button>
-        <button data-ack="${esc(s.key)}">On it</button><button class="quiet" data-snooze="${esc(s.key)}">5 min</button></div>`;
+        <button data-ack="${esc(s.key)}">On it</button><button class="quiet" data-snooze="${esc(s.key)}">5 min</button>
+        <button data-voice-about="${esc(s.key)}" aria-label="Tell Dieter about this step" title="Tell Dieter (e.g. “later today”)">🎤</button></div>`;
     }).join(""));
   }
   function renderSide() {
@@ -343,6 +344,13 @@ body { overflow-x: hidden; }
       const value = step ? !isDone(step) : true;
       pendingDone.set(key, value); handled.set(key, Date.now()); renderAll(true);
       act(() => post("/thanksgiving/api/steps/done", { key, done: value }));
+    } else if (el.dataset.voiceAbout) {
+      // Talk about this step ("I'll do that later today"): stop the alert, open Tell Dieter pointed at it.
+      const key = el.dataset.voiceAbout, step = allSteps().find(s => s.key === key);
+      handled.set(key, Date.now()); renderAll();
+      act(() => post("/thanksgiving/api/alerts", { key, state: "ack" }));
+      if (step) document.dispatchEvent(new CustomEvent("tg:voice-about", { detail: {
+        key, title: step.title, dish: step.dish.name, when: `${step.day} ${step.clock}` } }));
     } else if (el.dataset.ack) {
       handled.set(el.dataset.ack, Date.now()); renderAll();
       act(() => post("/thanksgiving/api/alerts", { key: el.dataset.ack, state: "ack" }));
