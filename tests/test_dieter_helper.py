@@ -27,6 +27,10 @@ class FakeMonitor:
     def on(self):
         self.calls.append("on")
 
+    def press_f11(self):
+        self.calls.append("f11")
+        return True
+
 
 class FakeWatcher:
     """Stands in for the webcam: tests call .see(side) to simulate someone walking by."""
@@ -84,6 +88,22 @@ class HelperTests(unittest.TestCase):
         time.sleep(0.8)
         self.assertNotIn("off", self.monitor.calls)
 
+    def test_a_wake_during_a_slow_dim_still_brings_the_screen_back(self):
+        # Dimming the real screen takes ~2 s; a wake that arrived halfway used to leave it dark for good.
+        calls = self.monitor.calls
+        dimming = threading.Event()
+
+        def slow_off():
+            dimming.set()
+            time.sleep(0.4)
+            calls.append("off")
+
+        self.monitor.off = slow_off
+        self.helper.sleep()
+        self.assertTrue(dimming.wait(2))
+        self.helper.wake("asked")  # mid-dim
+        self.assertEqual(calls[-2:], ["off", "on"])
+
     def test_events_wait_for_the_next_one(self):
         start = self.helper.latest_id()
         threading.Timer(0.1, lambda: self.helper.wake("asked")).start()
@@ -131,6 +151,20 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.request("POST", "/sleep", origin=None)[0], 403)
         self.assertEqual(self.request("GET", "/status", origin="https://evil.example")[0], 403)
         self.assertFalse(self.helper.asleep)
+
+    def test_the_page_can_switch_full_screen_but_other_sites_cannot(self):
+        self.assertEqual(self.request("POST", "/fullscreen", origin="https://evil.example")[0], 403)
+        self.assertNotIn("f11", self.monitor.calls)
+        self.assertEqual(self.request("POST", "/fullscreen", origin="https://askdieter.ai")[0], 200)
+        self.assertEqual(self.monitor.calls[-1], "f11")
+
+    def test_dieter_previews_can_control_it_but_other_cloud_run_sites_cannot(self):
+        preview = "https://pr-1---dieter-preview-2hu6ba6ata-uc.a.run.app"
+        self.assertTrue(dh.origin_allowed(preview))
+        for other in ("https://pr-1---dieter-preview-someoneelse-uc.a.run.app", "https://evil.a.run.app",
+                      preview + ".evil.example", "http://pr-1---dieter-preview-2hu6ba6ata-uc.a.run.app", None, ""):
+            self.assertFalse(dh.origin_allowed(other), other)
+        self.assertEqual(self.request("GET", "/status", origin=preview)[0], 200)
 
     def test_preflight_allows_private_network_access(self):
         status, headers, _ = self.request("OPTIONS", "/sleep")

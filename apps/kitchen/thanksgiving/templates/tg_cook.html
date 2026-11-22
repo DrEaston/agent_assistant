@@ -16,6 +16,12 @@ body { overflow-x: hidden; }
   box-shadow: 0 6px 24px rgba(194,65,12,.25); display: flex; flex-wrap: wrap; gap: .5rem .9rem; align-items: center; animation: pulse 1.6s ease-in-out infinite; }
 .alert.timer { border-color: #4338ca; background: #eef2ff; }
 .alert .what { flex: 1 1 16rem; }
+/* Full screen on/off: small and faint in the lower-left corner, out of the way (Talk to Dieter is lower right). */
+.fullscreen-btn { position: fixed; z-index: 30; left: calc(.75rem + env(safe-area-inset-left, 0px));
+  bottom: calc(.75rem + env(safe-area-inset-bottom, 0px)); width: 40px; height: 40px; min-height: 40px; padding: 0;
+  border-radius: 50%; font-size: 1.15rem; line-height: 1; opacity: .4; transition: opacity .2s ease; }
+.fullscreen-btn:hover, .fullscreen-btn:focus-visible { opacity: 1; }
+.alert .snooze { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .3rem; }
 .alert .what strong { font-size: 1.1rem; }
 @keyframes pulse { 50% { box-shadow: 0 6px 30px rgba(194,65,12,.5); } }
 .layout { display: grid; grid-template-columns: 16rem 1fr 20rem; gap: 1rem; padding: 1rem; max-width: 96rem; margin: 0 auto; }
@@ -83,6 +89,7 @@ body { overflow-x: hidden; }
 </header>
 <div class="offline" id="offline" hidden>Can't reach Dieter. Retrying… (timers keep counting on this screen)</div>
 <div id="alerts" aria-live="assertive"></div>
+<button type="button" class="fullscreen-btn" id="fullscreen-btn" title="Full screen on/off" aria-label="Full screen on or off">⛶</button>
 
 <div class="layout">
   <nav class="tabs" id="tabs" role="tablist" aria-label="Recipes"></nav>
@@ -237,6 +244,7 @@ body { overflow-x: hidden; }
     return `<details class="s-recipe" data-open-key="${esc(step.key)}"${openRecipes.has(step.key) ? " open" : ""}>
       <summary>Recipe for this step</summary>${ingredientsHTML(dish, ing)}${instructionsHTML(dish, ins)}</details>`;
   }
+  const SNOOZES = [[10, "10 min"], [60, "1 h"], [120, "2 h"], [240, "4 h"]];  // "Later:" on a step alert
   function renderAlerts(alerts) {
     setHTML("alerts", alerts.map(a => {
       const goto = a.dish && a.dish.id !== selected ? `<button data-goto="${a.dish.id}">Go to ${esc(a.dish.name)}</button>` : "";
@@ -246,7 +254,9 @@ body { overflow-x: hidden; }
       return `<div class="alert" role="alert"><div class="what"><strong>${esc(s.title)}</strong> ${pill(s.cook)}
           <div class="small">${esc(a.dish.name)} · ${esc(s.clock)} · ${esc(rel(s.start_ms))}${s.temp ? ` · ${s.temp}°F` : ""}</div></div>
         ${goto}<button class="primary" data-done="${esc(s.key)}">Done</button>
-        <button data-ack="${esc(s.key)}">On it</button><button class="quiet" data-snooze="${esc(s.key)}">5 min</button>
+        <button data-ack="${esc(s.key)}">On it</button>
+        <span class="snooze" role="group" aria-label="Remind me later"><span class="small">Later:</span>${SNOOZES.map(([m, label]) =>
+          `<button class="quiet" data-snooze="${esc(s.key)}" data-minutes="${m}" aria-label="Remind me in ${label}">${label}</button>`).join("")}</span>
         <button data-voice-about="${esc(s.key)}" aria-label="Tell Dieter about this step" title="Tell Dieter (e.g. “later today”)">🎤</button></div>`;
     }).join(""));
   }
@@ -359,7 +369,7 @@ body { overflow-x: hidden; }
       act(() => post("/thanksgiving/api/alerts", { key: el.dataset.ack, state: "ack" }));
     } else if (el.dataset.snooze) {
       handled.set(el.dataset.snooze, Date.now()); renderAll();
-      act(() => post("/thanksgiving/api/alerts", { key: el.dataset.snooze, state: "snooze", minutes: 5 }));
+      act(() => post("/thanksgiving/api/alerts", { key: el.dataset.snooze, state: "snooze", minutes: Number(el.dataset.minutes) || 10 }));
     } else if (el.dataset.dismissTimer) {
       const id = Number(el.dataset.dismissTimer);
       handled.set("timer:" + id, Date.now()); state.timers = state.timers.filter(t => t.id !== id); renderAll();

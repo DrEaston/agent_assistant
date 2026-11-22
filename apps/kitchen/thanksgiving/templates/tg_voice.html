@@ -1,16 +1,29 @@
 {# "Tell Dieter": speak or type a change to the plan, see a preview, then Apply / Cancel / Undo.
    Included by tg_page.html (every planner tab) and tg_cook.html. After a change it fires "tg:changed" on document. #}
 <style>
-/* A big speech bubble in the corner: the way in to talking with Dieter. */
-.voice-fab { position: fixed; z-index: 40; right: calc(1.25rem + env(safe-area-inset-right, 0px));
-  bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px)); min-height: 64px; padding: .9rem 1.5rem;
-  border-radius: 28px 28px 8px 28px; background: var(--accent); border: 3px solid #fff; color: #fff;
-  font-size: 1.2rem; font-weight: 800; gap: .55rem; box-shadow: 0 10px 28px rgba(194,65,12,.38), 0 2px 6px rgba(42,33,24,.2); }
-.voice-fab::after { content: ""; position: absolute; right: 14px; bottom: -14px; border: 9px solid transparent;
-  border-top-color: var(--accent); border-right-color: var(--accent); }
-.voice-fab:hover { background: #9a3412; border-color: #fff; }
-.voice-fab:hover::after { border-top-color: #9a3412; border-right-color: #9a3412; }
-.voice-fab .voice-fab-icon { font-size: 1.5rem; line-height: 1; }
+/* A cartoon speech bubble in the corner: the way in to talking with Dieter. Dieter's eyes only appear in it
+   when the kitchen screen wakes up (window.dieterBubble below).
+   The kitchen PC helper (helper/dieter_helper.py, Face) draws the same bubble at the same spot when the screen
+   wakes, with big eyes in it, so keep the size (240x92), the corner offsets (1rem) and the path in step. */
+.voice-fab { position: fixed; z-index: 40; right: calc(1rem + env(safe-area-inset-right, 0px));
+  bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); width: 240px; height: 92px; min-height: 0;
+  padding: 0 24px 20px 0; /* centres the words in the round part, above the tail */
+  background: none; border: 0; border-radius: 0; color: #fff; font-size: 1.15rem; font-weight: 800; gap: .45rem;
+  transform-origin: 90% 90%; transition: transform .15s ease; }
+.voice-fab > * { position: relative; }
+.voice-fab .voice-fab-bubble { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.voice-fab-bubble .shade { fill: #1c140e; }
+.voice-fab-bubble .fill { fill: var(--accent); stroke: #1c140e; stroke-width: 4; stroke-linejoin: round; }
+.voice-fab:hover { border: 0; transform: rotate(-3deg) scale(1.04); }
+.voice-fab:hover .voice-fab-bubble .fill { fill: #9a3412; }
+.voice-fab:active { transform: scale(.96); }
+/* Dieter comes alive: big eyes fill the bubble for a little performance when the kitchen screen wakes. */
+.voice-fab .voice-fab-face { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; display: none; }
+.voice-fab.alive { z-index: 1001; animation: fab-pop .35s cubic-bezier(.3, 1.6, .5, 1); }
+.voice-fab.alive .voice-fab-face { display: block; }
+.voice-fab.alive > span { visibility: hidden; }
+@keyframes fab-pop { from { transform: scale(.6); } to { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .voice-fab { transition: none; animation: none; } }
 .voice-sheet { position: fixed; z-index: 45; left: 0; right: 0; bottom: 0; max-height: 80vh; overflow-y: auto;
   background: var(--panel); border-top: 1px solid var(--line); border-radius: 18px 18px 0 0;
   box-shadow: 0 -8px 30px rgba(42,33,24,.18); padding: 1rem max(1rem, env(safe-area-inset-right, 0px))
@@ -54,7 +67,110 @@
 .voice-device-form label { display: flex; flex-direction: column; gap: .2rem; font-weight: 600; }
 </style>
 
-<button type="button" class="voice-fab" id="voice-open" aria-haspopup="dialog"><span class="voice-fab-icon" aria-hidden="true">🎤</span> Talk to Dieter</button>
+<button type="button" class="voice-fab" id="voice-open" aria-haspopup="dialog">
+  <svg class="voice-fab-bubble" viewBox="0 0 240 92" aria-hidden="true">
+    <path class="shade" transform="translate(3 3)" d="M36 4 H180 A32 32 0 0 1 200.6 60.5 Q214 78 232 86 Q205 84 180 68 H36 A32 32 0 0 1 36 4 Z"/>
+    <path class="fill" d="M36 4 H180 A32 32 0 0 1 200.6 60.5 Q214 78 232 86 Q205 84 180 68 H36 A32 32 0 0 1 36 4 Z"/>
+  </svg>
+  <svg class="voice-fab-face" id="voice-fab-face" viewBox="0 0 240 92" aria-hidden="true">
+    <defs>
+      <clipPath id="fab-eye-0"><ellipse cx="86" cy="36" rx="18" ry="23"/></clipPath>
+      <clipPath id="fab-eye-1"><ellipse cx="130" cy="36" rx="18" ry="23"/></clipPath>
+    </defs>
+    {% for cx in (86, 130) %}
+    <g class="fab-eye">
+      <ellipse cx="{{ cx }}" cy="36" rx="18" ry="23" fill="#fff"/>
+      <g class="fab-pupil"><circle cx="{{ cx }}" cy="38" r="10" fill="#111"/>
+        <circle cx="{{ cx + 3.2 }}" cy="34.4" r="4" fill="#fff"/><circle cx="{{ cx - 3.8 }}" cy="41.8" r="1.4" fill="#fff"/></g>
+      <g clip-path="url(#fab-eye-{{ loop.index0 }})">
+        <ellipse class="fab-lid" cx="{{ cx }}" cy="-16.9" rx="30.6" ry="29.9" fill="#ea580c" stroke="#1c140e" stroke-width="3"/>
+      </g>
+      <path class="fab-shut" d="M{{ cx - 11 }} 39 Q{{ cx }} 47 {{ cx + 11 }} 39" fill="none" stroke="#1c140e" stroke-width="3"
+        stroke-linecap="round" opacity="0"/>
+      <ellipse cx="{{ cx }}" cy="36" rx="18" ry="23" fill="none" stroke="#1c140e" stroke-width="3"/>
+    </g>
+    {% endfor %}
+  </svg>
+  <span>Talk to Dieter</span>
+</button>
+<script>
+/* Dieter's little performances in the bubble, one per wake in turn. Each step: [seconds, {lid: [left, right]
+   0 open..1 shut, look: [x, y] -1..1 ("toward"/"away" = the side someone came from or the other), pupil: size}]. */
+(function () {
+  const fab = document.getElementById("voice-open"), face = document.getElementById("voice-fab-face");
+  if (!fab || !face) return;
+  const ring = Array.from({ length: 9 }, (_, k) => [0.5 + k * 0.16,
+    { look: [0.9 * Math.cos(-Math.PI / 2 + k * Math.PI / 4), 0.8 * Math.sin(-Math.PI / 2 + k * Math.PI / 4)] }]);
+  const PERFORMANCES = {
+    peekaboo: [[0, { lid: [0, 0] }], [0.5, { look: ["toward", 0.1] }], [1.2, { look: ["away", 0.05] }],
+               [1.9, { lid: [1, 1] }], [2.05, { lid: [0, 0], look: [0, 0] }]],
+    sleepy: [[0, { lid: [0.55, 0.55], look: [0, 0.3] }], [0.9, { lid: [1, 1] }], [1.4, { lid: [0.5, 0.5] }],
+             [2.0, { lid: [0, 0], look: ["toward", 0], pupil: 1.1 }], [2.8, { look: [0, 0], pupil: 1 }]],
+    surprised: [[0, { lid: [0, 0], pupil: 0.7 }], [0.7, { lid: [1, 1] }], [0.82, { lid: [0, 0] }], [0.98, { lid: [1, 1] }],
+                [1.1, { lid: [0, 0], pupil: 1 }], [1.6, { look: ["toward", 0] }], [2.4, { look: [0, 0] }]],
+    eyeroll: [[0, { lid: [0, 0] }], ...ring, [2.0, { look: [0, 0] }], [2.4, { lid: [1, 1] }], [2.55, { lid: [0, 0] }]],
+    wink: [[0, { lid: [0, 0] }], [0.5, { look: ["toward", 0.1] }], [1.0, { look: [0, 0] }], [1.4, { lid: [0, 1] }],
+           [1.9, { lid: [0, 0] }], [2.5, { lid: [1, 1] }], [2.62, { lid: [0, 0] }]],
+  };
+  const LENGTH = 3200;  // ms on screen
+  const eyes = Array.from(face.querySelectorAll(".fab-eye")).map((g, i) => ({
+    cx: i ? 130 : 86, pupil: g.querySelector(".fab-pupil"), lid: g.querySelector(".fab-lid"), shut: g.querySelector(".fab-shut") }));
+  let frame = null, done = null;
+
+  function draw(s) {
+    eyes.forEach((e, i) => {
+      const lid = s.lid[i];
+      e.lid.setAttribute("cy", (13 + lid * 50 - 29.9).toFixed(2));  // the lid's lower edge moves from the top of the eye down
+      e.shut.setAttribute("opacity", lid > 0.9 ? 1 : 0);
+      const x = s.look[0] * 5, y = s.look[1] * 7.5, p = s.pupil;
+      e.pupil.setAttribute("transform",
+        `translate(${(x + e.cx * (1 - p)).toFixed(2)} ${(y + 38 * (1 - p)).toFixed(2)}) scale(${p.toFixed(3)})`);
+    });
+  }
+
+  function nextName() {
+    const names = Object.keys(PERFORMANCES);
+    let turn = 0;
+    try { turn = (parseInt(localStorage.getItem("dieter-performance") || "0", 10) || 0) % names.length;
+          localStorage.setItem("dieter-performance", String(turn + 1)); } catch (e) { turn = Math.floor(Math.random() * names.length); }
+    return names[turn];
+  }
+
+  // Returns how long (ms) the bubble stays alive. Nothing happens while the Talk to Dieter panel is open.
+  function perform(side = "center") {
+    if (fab.hidden) return 0;
+    const toward = side === "left" ? -1 : side === "right" ? 1 : -0.8;
+    const steps = PERFORMANCES[nextName()].map(([t, step]) => [t * 1000, {
+      ...step, look: step.look && step.look.map((v) => v === "toward" ? toward : v === "away" ? -toward : v) }]);
+    const s = { lid: [1, 1], look: [0, 0], pupil: 1 }, to = { lid: [1, 1], look: [0, 0], pupil: 1 };
+    const start = Date.now();
+    let last = start;
+    clearTimeout(frame); clearTimeout(done);
+    fab.classList.remove("alive"); void fab.offsetWidth; fab.classList.add("alive");
+    draw(s);
+    const tick = (now) => {
+      while (steps.length && steps[0][0] <= now - start) {
+        const step = steps.shift()[1];
+        if (step.lid) to.lid = step.lid.slice();
+        if (step.look) to.look = step.look.slice();
+        if (step.pupil) to.pupil = step.pupil;
+      }
+      const frames = (now - last) / 16.7;
+      last = now;
+      const k = (f) => 1 - Math.pow(1 - f, frames);  // the same easing at any frame rate
+      for (const i of [0, 1]) { s.lid[i] += (to.lid[i] - s.lid[i]) * k(0.5); s.look[i] += (to.look[i] - s.look[i]) * k(0.3); }
+      s.pupil += (to.pupil - s.pupil) * k(0.3);
+      draw(s);
+      if (now - start < LENGTH) frame = setTimeout(() => tick(Date.now()), 16);
+    };
+    frame = setTimeout(() => tick(Date.now()), 16);
+    done = setTimeout(() => { clearTimeout(frame); fab.classList.remove("alive"); }, LENGTH);
+    return LENGTH;
+  }
+
+  window.dieterBubble = { perform, names: Object.keys(PERFORMANCES) };
+})();
+</script>
 <section class="voice-sheet" id="voice-sheet" role="dialog" aria-labelledby="voice-title" hidden>
   <div class="voice-inner">
     <div class="voice-head">

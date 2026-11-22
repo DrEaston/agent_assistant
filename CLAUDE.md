@@ -58,5 +58,5 @@ none of them need network access or API keys.
 `helper/` is a small Windows tray app for the kitchen PC: cook mode's Sleep turns the monitor fully off and
 the webcam wakes it (the page then shows the eyes; `apps/kitchen/thanksgiving/templates/tg_sleep.html`).
 It is built and installed on that PC, not deployed. To set it up there, use the `install-kitchen-helper`
-skill (`.claude/skills/install-kitchen-helper/`). Next planned piece: an on-device "hey Dieter" wake word in
-the same helper, using the webcam's mic.
+skill (`.claude/skills/install-kitchen-helper/`). The plan for turning the kitchen PC into Dieter (web app stays
+the brain on Cloud Run; the helper is the PC's eyes, ears and voice) is `docs/kitchen_pc_plan.md`.
