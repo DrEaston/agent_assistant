@@ -89,10 +89,11 @@ body { overflow-x: hidden; }
   <aside class="side stack">
     <div class="card" id="timers-card"><h3>Timers</h3><div id="timers"></div>
       <form id="timer-form" class="row" style="margin-top:.5rem">
-        <input type="text" id="timer-label" maxlength="60" placeholder="Label (e.g. potatoes)" style="flex:2 1 9rem" aria-label="Timer label">
-        <input type="number" id="timer-min" min="1" max="600" placeholder="Min" style="width:5.5rem" aria-label="Timer minutes" required>
-        <button type="submit">Start timer</button>
-      </form></div>
+        <input type="text" id="timer-text" maxlength="80" placeholder="potatoes 20 min" style="flex:1 1 10rem"
+          aria-label="Timer: what and how long" aria-describedby="timer-preview" autocomplete="off" enterkeyhint="go">
+        <button type="submit">Start</button>
+      </form>
+      <div class="small muted" id="timer-preview" aria-live="polite">Type what and how long: “rolls 1h 15m”, “pie 1 1/2 hours”, “gravy 10”.</div></div>
     <div class="card"><h3>Coming up</h3><div id="upcoming"></div></div>
     <div class="card" id="conflicts-card" hidden><h3>Heads up</h3><div id="conflicts" class="small"></div></div>
   </aside>
@@ -366,12 +367,51 @@ body { overflow-x: hidden; }
       el.classList.toggle("got");
     }
   });
+  // "potatoes 20 min" / "rolls 1h 15m" / "pie 1 1/2 hours" / "half an hour" / "gravy 10" -> {minutes, label}
+  const WORD_NUM = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+    fifteen: 15, twenty: 20, thirty: 30, forty: 40, "forty-five": 45, fifty: 50, sixty: 60, ninety: 90 };
+  function parseTimer(raw) {
+    let text = " " + String(raw || "").toLowerCase().replace(/[–—]/g, "-") + " ";
+    let minutes = 0, found = false;
+    const take = (re, fn) => { text = text.replace(re, (...m) => { found = true; minutes += fn(m); return " "; }); };
+    const num = (v) => {
+      v = String(v).trim();
+      if (WORD_NUM[v] !== undefined) return WORD_NUM[v];
+      const mixed = v.match(/^(\d+)\s+(\d+)\/(\d+)$/); if (mixed) return +mixed[1] + mixed[2] / mixed[3];
+      const frac = v.match(/^(\d+)\/(\d+)$/); if (frac) return frac[1] / frac[2];
+      return parseFloat(v);
+    };
+    const N = String.raw`(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:\.\d+)?|an?|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty-five|forty|fifty|sixty|ninety)`;
+    take(/\b(?:half an hour|half hour)\b/g, () => 30);
+    take(/\b(\d+):(\d{2})\b/g, (m) => +m[1] * 60 + +m[2]);  // 1:30 = 1 hour 30 minutes
+    take(new RegExp(String.raw`\b` + N + String.raw`\s*(?:and a half\s*)?(?:h|hr|hrs|hour|hours)\b(\s*and a half)?`, "g"),
+         (m) => num(m[1]) * 60 + (/half/.test(m[0]) ? 30 : 0));
+    take(new RegExp(String.raw`\b` + N + String.raw`\s*(?:m|min|mins|minute|minutes)\b`, "g"), (m) => num(m[1]));
+    if (!found) take(/(?:^|\s)(\d+(?:\.\d+)?)(?=\s|$)/, (m) => parseFloat(m[1]));  // a bare number is minutes
+    minutes = Math.round(minutes);
+    if (!found || !(minutes >= 1) || minutes > 24 * 60) return null;
+    let label = text.replace(/\b(?:timer|for|the|and|set|start|a|an)\b/g, " ").replace(/[^a-z0-9' -]/g, " ")
+      .replace(/\s+/g, " ").trim();
+    label = label ? label[0].toUpperCase() + label.slice(1) : "Timer";
+    return { minutes, label };
+  }
+  function durationText(m) {
+    const h = Math.floor(m / 60), r = m % 60;
+    return h ? `${h} hr${r ? ` ${r} min` : ""}` : `${m} min`;
+  }
+  function showTimerPreview() {
+    const box = $("timer-text"), parsed = parseTimer(box.value);
+    $("timer-preview").textContent = !box.value.trim() ? "Type what and how long: “rolls 1h 15m”, “pie 1 1/2 hours”, “gravy 10”."
+      : parsed ? `${parsed.label} · ${durationText(parsed.minutes)}` : "Add how long, like “20 min” or “1h 15m”.";
+  }
+  $("timer-text").addEventListener("input", showTimerPreview);
+  window.tgParseTimer = parseTimer;  // for tests in the browser
   $("timer-form").addEventListener("submit", (ev) => {
     ev.preventDefault();
-    const minutes = Number($("timer-min").value);
-    if (!minutes) return;
-    const label = $("timer-label").value.trim() || "Timer";
-    $("timer-min").value = ""; $("timer-label").value = "";
+    const parsed = parseTimer($("timer-text").value);
+    if (!parsed) { $("timer-preview").textContent = "Add how long, like “20 min” or “1h 15m”."; return; }
+    const { minutes, label } = parsed;
+    $("timer-text").value = ""; showTimerPreview();
     if (state) { state.timers.push({ id: -Date.now(), dish_id: null, label, ends_ms: now() + minutes * 60000 }); renderAll(); }
     act(() => post("/thanksgiving/api/timers", { dish_id: null, label, minutes }));
   });

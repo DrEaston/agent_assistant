@@ -828,7 +828,7 @@ class RouteTests(unittest.TestCase):
     def test_timers_stand_alone_with_a_label(self):
         self.client.get("/thanksgiving")
         page = self.client.get("/thanksgiving/cook").text
-        self.assertIn('id="timer-label"', page)
+        self.assertIn('id="timer-text"', page)
         self.assertNotIn("data-timer=", page)  # no timer buttons on steps or recipe lines
         self.assertTrue(self.client.post("/thanksgiving/api/timers", json={"label": "Potatoes", "minutes": 12}).json()["ok"])
         timers = self.client.get("/thanksgiving/api/state").json()["timers"]
