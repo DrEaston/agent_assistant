@@ -38,7 +38,7 @@ class DemoGuestLoginTests(unittest.TestCase):
         with (
             patch.object(api, "DEMO_MODE", True),
             patch.object(api, "render_demo_landing", return_value="landing") as landing,
-            patch.object(api, "render_apps_page", return_value="apps") as apps,
+            patch.object(api, "render_today_page", return_value="apps") as apps,
         ):
             self.assertEqual("landing", api.home_default(request))
             landing.assert_called_once()
@@ -48,7 +48,7 @@ class DemoGuestLoginTests(unittest.TestCase):
         with (
             patch.object(api, "DEMO_MODE", True),
             patch.object(api, "render_demo_landing", return_value="landing") as landing,
-            patch.object(api, "render_apps_page", return_value="apps") as apps,
+            patch.object(api, "render_today_page", return_value="apps") as apps,
         ):
             self.assertEqual("apps", api.home_default(request))
             apps.assert_called_once()

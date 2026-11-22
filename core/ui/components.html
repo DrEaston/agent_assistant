@@ -1,9 +1,9 @@
 {#- Shared building blocks. Import with: {% import "components.html" as ui %} -#}
 
 {#- Page header: crumbs, title, optional subtitle, optional actions (via call) and tabs. -#}
-{% macro page_header(title, crumbs=(), sub=None, tabs=(), current=None) -%}
+{% macro page_header(title, crumbs=(), sub=None, tabs=(), current=None, wide=False) -%}
 <header class="app-bar">
-  <div class="app-bar-inner">
+  <div class="app-bar-inner{% if wide %} wide{% endif %}">
     {% if crumbs %}
     <nav class="crumbs" aria-label="Where you are">
       {% for label, url in crumbs %}<a href="{{ url }}">{{ label }}</a>{% if not loop.last %}<span class="sep" aria-hidden="true">›</span>{% endif %}{% endfor %}

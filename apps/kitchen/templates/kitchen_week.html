@@ -1,0 +1,103 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Kitchen{% endblock %}
+{% block content %}
+{{ ui.page_header("Kitchen", tabs=tabs, current=current, wide=True) }}
+<main class="wrap wide">
+  {% if added %}{% call ui.banner("ok") %}Added to this week's plan.{% endcall %}<div class="gap-above"></div>{% endif %}
+  <div class="cols main-side">
+    <div class="stack">
+      <section id="meal-plan" aria-label="On the plan">
+        <div class="section-head">
+          <h2 class="section-title">On the plan</h2>
+          <a href="/apps/recipes/library">Add from recipes</a>
+        </div>
+        <div class="card flush">
+          {% if thanksgiving %}
+          <a class="link-row accent-today" href="/thanksgiving">
+            <span class="label-stack">
+              <span class="small muted">{{ thanksgiving.when }}</span>
+              <span class="title">Thanksgiving dinner</span>
+            </span>
+            <span class="tag accent">Planner</span>
+          </a>
+          {% endif %}
+          {% for item in planned %}
+          <div class="link-row">
+            <span class="label-stack">
+              {% if item.url %}<a class="title" href="{{ item.url }}">{{ item.title }}</a>{% else %}<span class="title">{{ item.title }}</span>{% endif %}
+            </span>
+            {% if not is_guest %}
+            <div class="row">
+              <form method="post" action="/apps/recipes/meal-plan/{{ item.id }}/cooked">
+                <button type="submit" class="pill-button">Cooked</button>
+              </form>
+              {{ ui.remove_button("/apps/recipes/meal-plan/" ~ item.id ~ "/remove", "Take " ~ item.title ~ " off the plan") }}
+            </div>
+            {% endif %}
+          </div>
+          {% else %}
+          {% if not thanksgiving %}<p class="empty">Nothing planned yet. <a href="/apps/recipes/library">Pick some dinners</a>.</p>{% endif %}
+          {% endfor %}
+        </div>
+      </section>
+
+      <section aria-label="Recent recipes">
+        <div class="section-head">
+          <h2 class="section-title">Your recipes</h2>
+          <a href="/apps/recipes/library">See all</a>
+        </div>
+        <div class="card flush">
+          {% for meal in recent %}
+          <div class="link-row">
+            <a class="title grow" href="{{ meal.url }}">{{ meal.title }}</a>
+            {% if meal.id in planned_ids %}
+            <span class="tag accent">On the plan</span>
+            {% elif not is_guest %}
+            <form method="post" action="/apps/recipes/meal-plan/meals/{{ meal.id }}/add">
+              <button type="submit" class="pill-button" aria-label="Add {{ meal.title }} to the plan">+ Plan</button>
+            </form>
+            {% endif %}
+          </div>
+          {% else %}
+          <p class="empty">No recipes yet. <a href="/apps/recipes/import">Add some</a>.</p>
+          {% endfor %}
+        </div>
+      </section>
+    </div>
+
+    <div class="stack">
+      <section class="feature" aria-label="Shopping">
+        <div class="row spread">
+          <strong>Shopping list</strong>
+          {% if shopping %}<span class="small muted">{{ shopping.created }}</span>{% endif %}
+        </div>
+        {% if shopping %}
+        <div>
+          <span class="small">{% if shopping.left %}{{ shopping.left }} of {{ shopping.total }} left{% else %}Everything's checked off{% endif %}</span>
+          {{ ui.meter(shopping.total - shopping.left, shopping.total) }}
+        </div>
+        <div class="actions">
+          <a class="button primary" href="/apps/recipes/grocery-lists/{{ shopping.id }}">Open the list</a>
+        </div>
+        {% else %}
+        <p class="small">Make one list from the dinners on your plan, sorted by aisle.</p>
+        <div class="actions">
+          <a class="button primary" href="/apps/recipes/grocery-lists/new">Make a shopping list</a>
+        </div>
+        {% endif %}
+      </section>
+
+      <section aria-label="More">
+        <h2 class="section-title">More</h2>
+        <div class="card flush">
+          <a class="link-row" href="/apps/recipes/import"><span class="title">Add recipes from photos</span><span class="chev" aria-hidden="true">›</span></a>
+          <a class="link-row" href="/apps/recipes/create-meal"><span class="title">Build a meal from parts</span><span class="chev" aria-hidden="true">›</span></a>
+          <a class="link-row" href="/apps/recipes/grocery-lists"><span class="title">Past shopping lists</span><span class="chev" aria-hidden="true">›</span></a>
+          <a class="link-row" href="/apps/recipes/manage"><span class="title">Manage recipes</span><span class="chev" aria-hidden="true">›</span></a>
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+{% endblock %}

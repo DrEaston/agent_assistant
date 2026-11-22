@@ -47,6 +47,8 @@ from apps.kitchen.import_images import UnsupportedRecipeImage, is_heic, normaliz
 from apps.kitchen.thanksgiving.router import configure as configure_thanksgiving, router as thanksgiving_router
 from core import internal as core_internal, proxy as core_proxy, ui as core_ui
 from apps.kitchen.shopping import router as shopping
+from apps.kitchen import pages as kitchen_pages
+from apps.launcher import today as today_page
 from apps.music import routes as music_routes
 from apps.issues import routes as studio_routes
 from apps.registry import app_shell_for_path, global_nav_apps, launcher_cards
@@ -5156,10 +5158,77 @@ def admin_update_member_trainer_mode(request: Request, user_id: int, trainer_mod
 
 @app.get("/")
 def home_default(request: Request):
-    """Dieter app launcher."""
+    """Today: the home page."""
     if DEMO_MODE and not request.state.current_user:
         return render_demo_landing(request)
-    return render_apps_page(request)
+    return render_today_page(request)
+
+
+def _quietly(what, load, default=None):
+    """One home-page card failing shouldn't take the page down."""
+    try:
+        return load()
+    except Exception as exc:
+        print(f"Warning: Today could not load {what}: {exc}")
+        return default
+
+
+def thanksgiving_summary():
+    """Thanksgiving card data ({countdown, when, ...}) while it's coming up, else None."""
+    if THANKSGIVING_SERVICE_URL:
+        plan, dishes = remote_thanksgiving()
+    else:
+        plan, dishes = shopping._thanksgiving()
+    return today_page.thanksgiving_card(dict(plan) if plan else None, dishes, app_today())
+
+
+def planned_meal_rows():
+    items = prepare_meal_plan_items(db.get_recipe_meal_plan_items("pending"))
+    return [{"id": item["id"], "title": item.get("title") or "Meal", "url": item.get("source_url") or "",
+             "source_id": item.get("source_id") if item.get("source_kind") == "complete_meal" else None}
+            for item in items]
+
+
+def todo_rows():
+    rows = []
+    for item in prepare_scheduler_items_for_display(dicts_from_rows(db.get_scheduler_items(status="open", limit=50))):
+        when = ""
+        if item.get("is_due"):
+            when = "Overdue"
+        elif item.get("is_today"):
+            when = "Today"
+        elif item.get("scheduled_date"):
+            when = today_page.short_date(item["scheduled_date"])
+        rows.append({"id": item["id"], "title": item.get("title") or "To do", "when": when})
+    return rows
+
+
+def focus_project():
+    context = agent_service.build_dashboard_context()
+    project = context.get("recommended_project")
+    if not project:
+        return None
+    action = context.get("next_action") or {}
+    return {"name": project.get("name") or "Project", "url": f"/projects/{project['id']}",
+            "next": action.get("action") or ""}
+
+
+def render_today_page(request: Request):
+    user = request.state.current_user or {}
+    last = _quietly("workouts", lambda: dicts_from_rows(db.get_trainer_imported_workouts(limit=1)), [])
+    shopping_lists = _quietly("shopping lists", lambda: shopping.active_summaries(1), [])
+    return today_page.render(
+        user_name=user.get("display_name") or user.get("name") or "",
+        now=app_now(),
+        thanksgiving=_quietly("Thanksgiving", thanksgiving_summary),
+        planned_meals=_quietly("the meal plan", planned_meal_rows, []),
+        shopping=shopping_lists[0] if shopping_lists else None,
+        todos=_quietly("to-dos", todo_rows, []),
+        focus=_quietly("the focus project", focus_project),
+        last_workout=last[0] if last else None,
+        playlist_drafts=_quietly("playlists", lambda: len(db.get_playlist_drafts()), 0),
+        is_guest=current_user_is_guest_session(),
+    )
 
 
 @app.get("/demo")
@@ -7181,9 +7250,39 @@ def recipe_app_page_context(request: Request, recipe_app, extra_context=None):
     return context
 
 
+def kitchen_library_meals(recipe_app):
+    meals = filter_public_complete_meals(recipe_app["complete_meals"])
+    return sorted(meals, key=lambda m: (m.get("updated_at") or m.get("created_at") or ""), reverse=True)
+
+
 @app.get("/apps/recipes")
+def kitchen_week_page(request: Request):
+    """Kitchen: this week's plan, the shopping list, recent recipes."""
+    recipe_app = get_recipe_app_context()
+    meals = kitchen_library_meals(recipe_app)
+    shopping_lists = _quietly("shopping lists", lambda: shopping.active_summaries(1), [])
+    return kitchen_pages.week_page(
+        planned=planned_meal_rows(),
+        shopping=shopping_lists[0] if shopping_lists else None,
+        recent=kitchen_pages.library_rows(meals[:6]),
+        thanksgiving=_quietly("Thanksgiving", thanksgiving_summary),
+        is_guest=current_user_is_guest_session(),
+        added=request.query_params.get("added") == "1",
+    )
+
+
+@app.get("/apps/recipes/library")
+def kitchen_library_page(request: Request):
+    """Kitchen: every recipe, searchable."""
+    recipe_app = get_recipe_app_context()
+    planned_ids = [row["source_id"] for row in planned_meal_rows() if row["source_id"]]
+    return kitchen_pages.library_page(meals=kitchen_library_meals(recipe_app), planned_ids=planned_ids,
+                                      is_guest=current_user_is_guest_session())
+
+
+@app.get("/apps/recipes/classic")
 def recipe_home_page(request: Request):
-    """Recipe app home page."""
+    """The older Kitchen home page (kept while its last features move to the new pages)."""
     recipe_app = get_recipe_app_context()
     if not recipe_app["project"]:
         raise HTTPException(status_code=404, detail="Recipe app project not found")
@@ -7248,8 +7347,25 @@ def recipe_manage_page(request: Request):
 
 
 @app.get("/apps/recipes/meals/{meal_id}")
+def kitchen_recipe_page(request: Request, meal_id: int):
+    """A recipe: ingredients (2 or 4 servings), steps, and cook mode."""
+    meal = dict_from_row(db.get_recipe_complete_meal(meal_id))
+    if not meal:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    meal = prepare_recipe_complete_meals([meal])[0]
+    if meal.get("show_bake_mode"):
+        sections = [(s["label"], s["items"]) for s in parse_baking_ingredient_sections(meal["display_ingredients_text"])]
+    else:
+        sections = [(None, meal["display_ingredients_text"].splitlines())]
+    plan_item = next((row for row in planned_meal_rows() if row["source_id"] == meal_id), None)
+    return kitchen_pages.recipe_page(meal=meal, sections=sections, plan_item=plan_item,
+                                     cooked=request.query_params.get("cooked") == "1",
+                                     is_guest=current_user_is_guest_session())
+
+
+@app.get("/apps/recipes/meals/{meal_id}/details")
 def recipe_meal_detail_page(request: Request, meal_id: int):
-    """Complete meal detail page."""
+    """Complete meal detail page: editing, sharing and the change log (the older page)."""
     recipe_app = get_recipe_app_context(include_library=False, run_maintenance=False)
     meal = dict_from_row(db.get_recipe_complete_meal(meal_id))
     if not recipe_app["project"] or not meal:
@@ -7499,15 +7615,15 @@ def save_selected_recipe_meal_form(
 
 
 @app.post("/apps/recipes/meal-plan/meals/{meal_id}/add")
-def add_complete_meal_to_plan_form(meal_id: int):
-    """Add a complete meal to the pending meal plan."""
+def add_complete_meal_to_plan_form(meal_id: int, next: str = Form("")):
+    """Add a complete meal to the pending meal plan, then go back where you were (or to This week)."""
     meal = dict_from_row(db.get_recipe_complete_meal(meal_id))
     if not meal:
         raise HTTPException(status_code=404, detail="Complete meal not found")
     meal = prepare_recipe_complete_meals([meal])[0]
     title = meal.get("display_title") or meal.get("title") or "Complete meal"
     db.add_recipe_meal_plan_item("complete_meal", title, source_id=meal_id)
-    return RedirectResponse(url="/apps/recipes#meal-plan", status_code=303)
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/recipes?added=1#meal-plan"), status_code=303)
 
 
 @app.post("/apps/recipes/meals/{meal_id}/favorite")

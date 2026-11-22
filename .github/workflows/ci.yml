@@ -21,4 +21,10 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements.txt
-      - run: python -m unittest discover -s tests
+      - name: Run tests
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests 2>&1 | tee test-output.txt
+      - name: Show failures as annotations
+        if: failure()
+        run: python .github/scripts/annotate_failures.py test-output.txt
