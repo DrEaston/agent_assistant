@@ -250,7 +250,9 @@
   // answers in the panel (not out loud), and the mic stays open until 10 seconds pass with nothing said to Dieter. It turns itself
   // off when two phrases in a row clearly aren't for it, or when you wrap up ("thanks, that's all").
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const CONVO_MS = 10000, MAX_IGNORED = 2, SETTLE_MS = 700;
+  const CONVO_MS = 10000, MAX_IGNORED = 2, SETTLE_MS = 1300, TRAILING_MS = 2600;
+  // A sentence that ends on one of these words isn't finished ("no actually I only…"): wait longer.
+  const TRAILING = /(?:^|\s)(i|i'm|only|and|but|or|so|the|a|an|to|of|for|with|actually|um|uh|like|just|then|because|if|my|it's|is|was|did|didn't|not|also|maybe|well)$/i;
   const SPEAK_REPLIES = false;  // replies are text only; flip to true to have Dieter read them aloud
   let recognition = null, convo = null, speaking = false, utter = 0, lastPhrase = { text: "", at: 0 };
 
@@ -350,7 +352,7 @@
           stopRecognition();
           heardPhrase(phrase);
           setTimeout(listenNext, 150);
-        }, SETTLE_MS);
+        }, TRAILING.test(phrase) ? TRAILING_MS : SETTLE_MS);
       }
     };
     recognition.onerror = (event) => {

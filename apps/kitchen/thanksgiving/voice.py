@@ -61,7 +61,9 @@ How to think:
 - When the cook says they already did something, or tells you to check it off / mark it done, use "done"
   actions for exactly those steps. Done-only changes are saved right away (no confirmation, Undo is shown), so
   for those the reply says it's checked off, e.g. "Checked off clearing the fridge and moving the turkey."
-  Never mark a step done unless the cook said so.
+  Never mark a step done unless the cook said so. If the cook corrects you ("no, I only did the fridge"),
+  send "done": false for the steps they didn't do so those boxes get unchecked; saying so isn't enough.
+- If it's unclear which steps "that" means, check off only what they clearly did and ask about the rest.
 - Never invent dishes, steps or sizes that aren't in the plan. There is no assigning dishes to people."""
 
 

@@ -426,9 +426,19 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
   const target = location.hash && document.querySelector(location.hash + " details.editor");
   if (target) target.open = true;
 
-  // After a voice change, refresh the page when the Tell Dieter panel closes (so Undo stays reachable).
+  // After a voice change (checked boxes, moved steps…), refresh the plan in place right away. The Tell Dieter
+  // panel stays open, so Undo is still reachable. If the refresh fails, reload when the panel closes instead.
   let changedByVoice = false;
-  document.addEventListener("tg:changed", () => { changedByVoice = true; });
+  document.addEventListener("tg:changed", async () => {
+    changedByVoice = true;
+    try {
+      const page = await fetch("/thanksgiving", { cache: "no-store" });
+      if (!page.ok) throw new Error(page.status);
+      const fresh = new DOMParser().parseFromString(await page.text(), "text/html");
+      ["#now", "#timeline", "#menu", "#shopping"].forEach((selector) => swapAll(selector, fresh));
+      changedByVoice = false;
+    } catch (error) { /* reload on close instead */ }
+  });
   document.addEventListener("tg:voice-closed", () => { if (changedByVoice) location.reload(); });
 })();
 </script>
