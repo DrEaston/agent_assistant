@@ -102,24 +102,45 @@ def model_name():
     return os.getenv("OPENAI_PLANNER_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
 
 
+_clients = {}
+
+
+def _client(timeout):
+    # One client per timeout, reused: a fresh connection to OpenAI costs ~1.5 s on the first call.
+    if timeout not in _clients:
+        from openai import OpenAI
+
+        _clients[timeout] = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=timeout,
+                                   max_retries=0 if timeout < 30 else 2)
+    return _clients[timeout]
+
+
+def openai_model(name, timeout=60, **options):
+    """A model function: messages -> JSON text, from OpenAI's chat API."""
+    def call(messages):
+        response = _client(timeout).chat.completions.create(model=name, messages=messages,
+                                                  response_format={"type": "json_object"}, **options)
+        return response.choices[0].message.content
+    return call
+
+
 def default_model(messages):
-    from openai import OpenAI
-
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    response = client.chat.completions.create(model=model_name(), messages=messages,
-                                              response_format={"type": "json_object"})
-    return response.choices[0].message.content
+    return openai_model(model_name())(messages)
 
 
-def understand(text, summary, history=(), model=None, sass="normal", spoken_prompt=""):
+def understand(text, summary, history=(), model=None, sass="normal", spoken_prompt="", handoff=""):
     """Ask the model for actions. history: earlier [{"role", "content"}] turns. sass: this device's level.
-    spoken_prompt: extra instructions when the phrase came from the hands-free mic (it may answer {"ignore": true})."""
+    spoken_prompt: extra instructions when the phrase came from the hands-free mic (it may answer {"ignore": true}).
+    handoff: why the quick first pass passed this to the deep model."""
     messages = [{"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "system", "content": "The plan:\n" + summary}]
     if SASS_LEVELS.get(sass):
         messages.append({"role": "system", "content": SASS_LEVELS[sass]})
     if spoken_prompt:
         messages.append({"role": "system", "content": spoken_prompt})
+    if handoff:
+        messages.append({"role": "system", "content": "A quick first pass already told the cook you're on it, and "
+                                                      "handed this to you because: " + handoff[:300]})
     messages.extend({"role": h["role"], "content": str(h["content"])[:2000]} for h in list(history)[-8:]
                     if h.get("role") in ("user", "assistant"))
     messages.append({"role": "user", "content": text[:1000]})
@@ -134,6 +155,74 @@ def understand(text, summary, history=(), model=None, sass="normal", spoken_prom
     return {"reply": str(data.get("reply") or "")[:800], "question": str(data.get("question") or "")[:300],
             "actions": [a for a in actions if isinstance(a, dict)][:15], "ignore": False,
             "end": bool(spoken_prompt) and data.get("end") is True}
+
+
+# ---------------------------------------------------------------- quick first pass
+
+FAST_PROMPT = """You are Dieter, the kitchen sidekick for a Thanksgiving cook, giving the QUICK first answer.
+Speed matters more than depth. You never change the plan yourself; a slower, careful model does that.
+
+Reply with a JSON object only:
+{"route": "answer" | "deep" | "ignore",
+ "reply": "<route answer: 1-2 short sentences>",
+ "say_now": "<route deep: 3-8 words to say right away, a statement, never a question, and don't describe the
+             change yet. E.g. \\"Let me work out the timing.\\" or \\"On it, checking the oven.\\">",
+ "why": "<route deep: one short line for the careful model>",
+ "end": false}
+
+Use "answer" for: questions you can answer straight from the plan below (what's next, what time, how long,
+which dish), general cooking questions, greetings and small talk about the cooking.
+Use "deep" for: ANY request to change the plan (move, push, add, remove, resize, mark done, change dinner time),
+"what if" or "could we" timing questions, anything about knock-on effects on other dishes or the oven, and
+anything you can't answer confidently from the plan.
+Use "ignore" only when the instructions below say the phrase may not be meant for you and it clearly isn't
+(they mention {"ignore": true}; use route "ignore" instead).
+If they also say to end a wrapped-up conversation, set "end": true with a short sign-off as the reply.
+
+Personality: warm, quick, a little sassy (a sass level below overrides this). Never invent times or steps
+that aren't in the plan."""
+
+ROUTES = ("answer", "deep", "ignore")
+
+
+def fast_model_name():
+    # gpt-4.1 won the Nov 2026 speed test: 11/12 routed right, ~0.9 s median.
+    return os.getenv("OPENAI_FAST_MODEL") or "gpt-4.1"
+
+
+def fast_default_model(messages):
+    return openai_model(fast_model_name(), timeout=6)(messages)
+
+
+def triage(text, summary, history=(), model=None, sass="normal", spoken_prompt=""):
+    """Quick first pass: {"route": "answer"|"deep"|"ignore", "reply", "say_now", "why", "end"}.
+    Anything odd (bad JSON, unknown route, an ignore where ignoring isn't allowed) routes to "deep"."""
+    messages = [{"role": "system", "content": FAST_PROMPT},
+                {"role": "system", "content": "The plan:\n" + summary}]
+    if SASS_LEVELS.get(sass):
+        messages.append({"role": "system", "content": SASS_LEVELS[sass]})
+    if spoken_prompt:
+        messages.append({"role": "system", "content": spoken_prompt})
+    messages.extend({"role": h["role"], "content": str(h["content"])[:2000]} for h in list(history)[-8:]
+                    if h.get("role") in ("user", "assistant"))
+    messages.append({"role": "user", "content": text[:1000]})
+    try:
+        data = json.loads((model or fast_default_model)(messages) or "{}")
+    except json.JSONDecodeError:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    route = data.get("route") if data.get("route") in ROUTES else "deep"
+    if data.get("ignore") is True:
+        route = "ignore"
+    if route == "ignore" and not spoken_prompt:
+        route = "deep"  # typed requests are always meant for Dieter
+    reply = str(data.get("reply") or "").strip()[:600]
+    if route == "answer" and not reply:
+        route = "deep"
+    return {"route": route, "reply": reply, "say_now": str(data.get("say_now") or "").strip()[:120],
+            "why": str(data.get("why") or "").strip()[:300],
+            "end": bool(spoken_prompt) and route == "answer" and data.get("end") is True}
 
 
 # ---------------------------------------------------------------- checking

@@ -388,7 +388,27 @@ class RouteTests(unittest.TestCase):
             seen["messages"] = messages
             return json.dumps(reply)
 
-        tg_router.configure(self.db, voice_model=fake_model)
+        def fast_hands_off(messages):
+            seen["fast_messages"] = messages
+            return json.dumps({"route": "deep", "say_now": "One sec.", "why": "test"})
+
+        tg_router.configure(self.db, voice_model=fake_model, fast_model=fast_hands_off)
+        return seen
+
+    def fast_with(self, reply, deep=None):
+        """Fake fast model returning `reply`; the deep model returns `deep` (or fails the test if called)."""
+        seen = {"deep_calls": 0}
+
+        def fast(messages):
+            seen["fast_messages"] = messages
+            return json.dumps(reply)
+
+        def deep_model(messages):
+            seen["deep_calls"] += 1
+            seen["messages"] = messages
+            return json.dumps(deep or {"reply": "deep", "question": "", "actions": []})
+
+        tg_router.configure(self.db, voice_model=deep_model, fast_model=fast)
         return seen
 
     def pie(self):
@@ -563,6 +583,61 @@ class RouteTests(unittest.TestCase):
         r = self.client.post("/thanksgiving/api/command", json={"text": "thanks"}).json()
         self.assertNotIn("end", r)
         self.assertIn('id="voice-live"', self.client.get("/thanksgiving").text)
+
+    def test_fast_pass_answers_simple_questions_alone(self):
+        self.client.get("/thanksgiving")
+        seen = self.fast_with({"route": "answer", "reply": "Noon on Thursday."})
+        r = self.client.post("/thanksgiving/api/command", json={"text": "when does the turkey go in"}).json()
+        self.assertEqual("Noon on Thursday.", r["reply"])
+        self.assertEqual("fast", r["tier"])
+        self.assertEqual(0, seen["deep_calls"])
+        self.assertIn("QUICK first answer", seen["fast_messages"][0]["content"])
+
+    def test_fast_pass_hands_changes_to_the_deep_model(self):
+        self.client.get("/thanksgiving")
+        plan, pie = self.pie()
+        self.fast_with({"route": "deep", "say_now": "Let me work out the timing.", "why": "moves the crust"},
+                       deep={"reply": "Sunday at 3.", "question": "",
+                             "actions": [{"type": "shift", "dish_id": pie["id"], "step_ids": ["dough"], "days": 0,
+                                          "minutes": 30}]})
+        first = self.client.post("/thanksgiving/api/handsfree/ask",
+                                 json={"text": "can we do the crust later", "via": "conversation", "two_step": True}).json()
+        self.assertTrue(first["escalate"])
+        self.assertEqual("Let me work out the timing.", first["say_now"])
+        final = self.client.post("/thanksgiving/api/think", json={"ticket": first["ticket"]}).json()
+        self.assertEqual("deep", final["tier"])
+        self.assertTrue(final["can_apply"])
+        # A change is now waiting, so the next phrase skips the fast pass entirely.
+        seen = self.fast_with({"route": "answer", "reply": "should not be used"}, deep={"reply": "Okay, 4 instead.",
+                                                                                       "question": "", "actions": []})
+        tg_router._state["voice_pending"][plan["id"]] = [{"type": "noop"}]
+        r = self.client.post("/thanksgiving/api/command", json={"text": "actually make it 4"}).json()
+        self.assertEqual("Okay, 4 instead.", r["reply"])
+        self.assertNotIn("fast_messages", seen)
+        self.assertIn("waiting for the cook's yes or no", " ".join(m["content"] for m in seen["messages"]))
+        # Without two_step the request just waits for the deep answer (older pages keep working).
+        self.assertEqual(404, self.client.post("/thanksgiving/api/think", json={"ticket": "nope"}).status_code)
+
+    def test_pushback_and_broken_fast_answers_go_deep(self):
+        self.client.get("/thanksgiving")
+        seen = self.fast_with({"route": "answer", "reply": "fast"})
+        r = self.client.post("/thanksgiving/api/command", json={"text": "are you sure about that"}).json()
+        self.assertEqual("deep", r["tier"])
+        self.assertNotIn("fast_messages", seen)
+        for broken in ({"route": "banana"}, {"route": "answer", "reply": ""}, {"route": "ignore"}):
+            self.fast_with(broken)  # a typed request is never ignored
+            r = self.client.post("/thanksgiving/api/command", json={"text": "hello there"}).json()
+            self.assertEqual("deep", r["tier"], broken)
+
+    def test_open_mic_fast_pass_can_ignore_and_end(self):
+        self.client.get("/thanksgiving")
+        seen = self.fast_with({"route": "ignore"})
+        r = self.client.post("/thanksgiving/api/handsfree/ask", json={"text": "did you see the game", "via": "conversation"}).json()
+        self.assertTrue(r["ignored"])
+        self.assertEqual(0, seen["deep_calls"])
+        self.fast_with({"route": "answer", "reply": "Happy cooking!", "end": True})
+        r = self.client.post("/thanksgiving/api/handsfree/ask", json={"text": "thanks that's all", "via": "conversation"}).json()
+        self.assertTrue(r["end"])
 
     def test_cook_mode_has_hands_free(self):
         self.client.get("/thanksgiving")

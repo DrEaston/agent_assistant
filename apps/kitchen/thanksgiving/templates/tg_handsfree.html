@@ -202,7 +202,16 @@
     const d = device();
     let data;
     try {
-      data = await post("/thanksgiving/api/handsfree/ask", { text, via, history, device: d.name || "", sass: d.sass || "normal" });
+      data = await post("/thanksgiving/api/handsfree/ask", { text, via, history, device: d.name || "", sass: d.sass || "normal",
+                                                            two_step: true });
+      if (data.escalate) {
+        // The quick pass handed off to the careful model: say the "one moment" line while it works.
+        showSaid(data.say_now, []);
+        speak(data.say_now, { quiet: true });
+        data = await post("/thanksgiving/api/think", { ticket: data.ticket });
+        const since = Date.now();
+        while (speaking && Date.now() - since < 15000) await new Promise((r) => setTimeout(r, 100));
+      }
     } catch (e) { thinking = false; speak(e.message); return; }
     thinking = false;
     if (data.ignored) { showHeard(text, "ignored"); render(); return; }

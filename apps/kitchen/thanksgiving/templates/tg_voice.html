@@ -176,8 +176,13 @@
     const thinking = log.lastChild;
     try {
       const device = loadDevice();
-      const data = await call("/thanksgiving/api/command", { text: message, history, device: device.name || "",
-                                                             sass: device.sass || "normal" });
+      let data = await call("/thanksgiving/api/command", { text: message, history, device: device.name || "",
+                                                           sass: device.sass || "normal", two_step: true });
+      if (data.escalate) {
+        // The quick pass handed this to the careful model: say so right away, then wait for its answer.
+        thinking.innerHTML = `${esc(data.say_now)} <span class="muted">Thinking it through…</span>`;
+        data = await call("/thanksgiving/api/think", { ticket: data.ticket });
+      }
       thinking.remove();
       history.push({ role: "user", content: message });
       showResult(data);
@@ -259,6 +264,13 @@
     u.onend = done; u.onerror = done;
     setTimeout(done, 2500 + message.length * 90);  // some Chrome builds never fire onend for long speech
     speechSynthesis.speak(u);
+  }
+  function speechFinished() {
+    return new Promise((resolve) => {
+      const started = Date.now();
+      const wait = () => (!speaking || Date.now() - started > 15000 ? resolve() : setTimeout(wait, 100));
+      wait();
+    });
   }
   function hushOut() {
     utter++;
@@ -393,7 +405,15 @@
     let data;
     try {
       data = await call("/thanksgiving/api/handsfree/ask", { text: message, via: "conversation", history,
-                                                            device: device.name || "", sass: device.sass || "normal" });
+                                                            device: device.name || "", sass: device.sass || "normal",
+                                                            two_step: true });
+      if (data.escalate) {
+        // Say the quick "one moment" line out loud while the careful model works, then wait for both.
+        thinking.innerHTML = `${esc(data.say_now)} <span class="muted">Thinking it through…</span>`;
+        if (convo) speakOut(data.say_now);
+        data = await call("/thanksgiving/api/think", { ticket: data.ticket });
+        await speechFinished();
+      }
     } catch (error) {
       thinking.remove();
       if (convo) convo.thinking = false;

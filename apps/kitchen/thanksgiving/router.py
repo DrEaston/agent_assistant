@@ -6,13 +6,17 @@ templates (autoescaped) and does not use templates/base.html.
 
 import json
 import os
+import re
+import secrets
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from . import handsfree, planner, sizes, voice
@@ -31,10 +35,12 @@ _templates = Environment(
 _state = {"db": None, "store": None}
 
 
-def configure(db, voice_model=None):
+def configure(db, voice_model=None, fast_model=None):
     _state["db"] = db
     _state["store"] = ThanksgivingStore(db)
-    _state["voice_model"] = voice_model  # None = OpenAI (voice.default_model); tests pass a fake
+    _state["voice_model"] = voice_model  # deep model; None = OpenAI (voice.default_model); tests pass a fake
+    _state["fast_model"] = fast_model  # quick first pass; None = OpenAI (voice.fast_default_model)
+    _state["deep_jobs"] = {}  # ticket -> deep model call in progress for an escalated request
     _state["voice_pending"] = {}  # plan id -> checked actions waiting for Apply
     _state["voice_undo"] = {}  # plan id -> undo record for the last applied command
 
@@ -306,33 +312,131 @@ def set_dish_size(dish_id: int, scale: str = Form(...)):
     return back(f"size-{dish_id}")  # lands on the dropdown without opening the editor
 
 
-def _run_command(text, history, device, sass, spoken=""):
-    """Ask the AI about one request and keep its checked changes pending until Apply. Shared by Tell Dieter and
-    hands-free mode (spoken="name"|"follow-up": short spoken replies, and the AI may decide it wasn't meant for it)."""
+# ---------------------------------------------------------------- Tell Dieter: fast first pass, deep when needed
+#
+# Every request first goes to a fast model (voice.triage, ~1 s). It answers questions and small talk itself and
+# can ignore chatter on an open mic. Anything that changes the plan, "what if" timing, or anything it isn't sure
+# of is handed to the deep model (voice.understand), which proposes checked changes. Some requests skip the fast
+# pass: a change already waiting for yes/no, or pushback ("are you sure?"). Requests that obviously ask for a
+# change start the deep model at the same time as the fast one, to save a second.
+# Clients that send two_step get {"escalate": true, "say_now", "ticket"} right away and fetch the deep answer
+# from /thanksgiving/api/think; older clients just wait for the final answer.
+
+CHANGE_WORDS = re.compile(r"\b(move|moving|push|pushed|pull|shift|change|reschedule|instead|earlier|later|add|"
+                          r"remove|delete|drop|skip|double|halve|half batch|resize|mark|dinner at|what if)\b")
+PUSHBACK = re.compile(r"\b(are you sure|think (about it|harder|again)|double ?check|that's wrong|that is wrong|"
+                      r"doesn't work|won't work|that's not right)\b")
+_thinkers = ThreadPoolExecutor(max_workers=4, thread_name_prefix="dieter-deep")
+JOB_MAX_AGE = 300
+
+
+def _empty_answer(**extra):
+    answer = {"ignored": False, "reply": "", "question": "", "changes": [], "problems": [], "warnings": [],
+              "can_apply": False, "end": False}
+    answer.update(extra)
+    return answer
+
+
+def _start_deep(plan, text, history, summary, sass, prompt, handoff, device, spoken):
+    now = time.time()
+    for old, job in list(_state["deep_jobs"].items()):
+        if now - job["started"] > JOB_MAX_AGE:
+            _state["deep_jobs"].pop(old, None)
+    ticket = secrets.token_urlsafe(9)
+    future = _thinkers.submit(voice.understand, text, summary, history, _state["voice_model"], sass, prompt, handoff)
+    _state["deep_jobs"][ticket] = {"future": future, "plan_id": plan["id"], "text": text, "sass": sass,
+                                   "device": device, "spoken": spoken, "started": now}
+    return ticket
+
+
+def _log_tier(device, text, route, note, ms):
+    print("Tell Dieter quick: " + json.dumps({"device": device or "unnamed", "said": text[:200], "route": route,
+                                              "note": str(note or "")[:200], "ms": ms}))
+
+
+def _answer(text, history, device, sass, spoken=""):
+    """First answer to one request: the fast model's reply, an ignore, or an escalation ticket for the deep model.
+    spoken: "" (typed), or how an open mic heard it ("name" / "follow-up" / "conversation")."""
     plan = require_plan()
     context = plan_context(plan)
     summary = voice.plan_summary(plan, context["dishes"], context["tasks"], context["cooks"], context["now"])
+    history = [h for h in history if isinstance(h, dict)]
+    prompt = handsfree.spoken_prompt(spoken) if spoken else ""
+    lowered = text.lower()
+    if _state["voice_pending"].get(plan["id"]):
+        forced = "a change is waiting for the cook's yes or no"
+    elif PUSHBACK.search(lowered):
+        forced = "the cook pushed back on the last answer"
+    else:
+        forced = ""
+    started = time.perf_counter()
+    ticket = None
+    if forced or CHANGE_WORDS.search(lowered):
+        ticket = _start_deep(plan, text, history, summary, sass, prompt, forced, device, spoken)
+    if forced:
+        _log_tier(device, text, "deep", forced, 0)
+        return _empty_answer(escalate=True, ticket=ticket, say_now="Let me think that through.")
     try:
-        result = voice.understand(text, summary, [h for h in history if isinstance(h, dict)], _state["voice_model"],
-                                  sass=sass, spoken_prompt=handsfree.spoken_prompt(spoken) if spoken else "")
+        quick = voice.triage(text, summary, history, _state["fast_model"], sass=sass, spoken_prompt=prompt)
+    except Exception as exc:
+        print(f"Warning: quick pass failed: {exc}")
+        quick = {"route": "deep", "reply": "", "say_now": "", "why": "the quick pass failed", "end": False}
+    fast_ms = round((time.perf_counter() - started) * 1000)
+    _log_tier(device, text, quick["route"], quick.get("why") or quick.get("reply"), fast_ms)
+    if quick["route"] in ("answer", "ignore"):
+        if ticket:
+            job = _state["deep_jobs"].pop(ticket, None)
+            if job:
+                job["future"].cancel()  # an unneeded head start; its answer is dropped if it already ran
+        if quick["route"] == "ignore":
+            return _empty_answer(ignored=True, tier="fast")
+        return _empty_answer(reply=quick["reply"], end=quick["end"], tier="fast")
+    if ticket is None:
+        ticket = _start_deep(plan, text, history, summary, sass, prompt, quick["why"], device, spoken)
+    return _empty_answer(escalate=True, ticket=ticket, say_now=quick["say_now"] or "Let me work that out.")
+
+
+def _finish(ticket):
+    """Wait for the deep model's answer to an escalated request, check its changes, and keep them pending."""
+    plan = require_plan()
+    job = _state["deep_jobs"].pop(str(ticket or ""), None)
+    if not job or job["plan_id"] != plan["id"]:
+        raise HTTPException(status_code=404, detail="That answer expired. Say it again?")
+    try:
+        result = job["future"].result(timeout=90)
     except Exception as exc:
         print(f"Warning: voice command failed: {exc}")
         raise HTTPException(status_code=503, detail="Dieter couldn't think that through right now. Try again.") from exc
+    deep_ms = round((time.time() - job["started"]) * 1000)
     if result.get("ignore"):
-        print("Hands-free: " + json.dumps({"device": device or "unnamed", "said": text[:200], "ignored": "by AI"}))
-        return {"ignored": True, "reply": "", "question": "", "changes": [], "problems": [], "warnings": [],
-                "can_apply": False, "end": False}
+        print("Hands-free: " + json.dumps({"device": job["device"] or "unnamed", "said": job["text"][:200],
+                                           "ignored": "by AI"}))
+        return _empty_answer(ignored=True, tier="deep")
+    context = plan_context(plan)
     actions, changes, problems = voice.check(result["actions"], plan, context["dishes"], context["tasks"],
                                              context["cooks"])
     warnings = voice.knock_on(plan, context["dishes"], actions, plan["ovens"])
     _state["voice_pending"][plan["id"]] = actions
     # Logged so "it did something dumb" can be looked up later.
-    print("Tell Dieter: " + json.dumps({"device": device or "unnamed", "sass": sass, "hands_free": spoken or "",
-                                        "said": text[:500], "reply": result["reply"], "question": result["question"],
-                                        "changes": changes, "problems": problems, "warnings": warnings,
+    print("Tell Dieter: " + json.dumps({"device": job["device"] or "unnamed", "sass": job["sass"],
+                                        "hands_free": job["spoken"] or "", "said": job["text"][:500],
+                                        "reply": result["reply"], "question": result["question"],
+                                        "changes": changes, "problems": problems, "warnings": warnings, "ms": deep_ms,
                                         "model": voice.model_name() if _state["voice_model"] is None else "test"}))
-    return {"ignored": False, "reply": result["reply"], "question": result["question"], "changes": changes,
-            "problems": problems, "warnings": warnings, "can_apply": bool(actions), "end": bool(result.get("end"))}
+    return _empty_answer(reply=result["reply"], question=result["question"], changes=changes, problems=problems,
+                         warnings=warnings, can_apply=bool(actions), end=bool(result.get("end")), tier="deep")
+
+
+async def _answer_request(data, spoken=""):
+    text = str(data.get("text") or "").strip()[:1000]
+    if not text:
+        raise HTTPException(status_code=400, detail="Say or type what to change.")
+    history = data.get("history") if isinstance(data.get("history"), list) else []
+    device, sass = _device_and_sass(data)
+    result = await run_in_threadpool(_answer, text, history, device, sass, spoken)
+    if result.get("escalate") and not data.get("two_step"):
+        result = await run_in_threadpool(_finish, result["ticket"])
+    return result
 
 
 def _device_and_sass(data):
@@ -343,17 +447,18 @@ def _device_and_sass(data):
 
 @router.post("/thanksgiving/api/command")
 async def api_command(request: Request):
-    """Turn a spoken or typed request into a preview of changes. Nothing is saved until Apply."""
-    data = await _json(request)
-    text = str(data.get("text") or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="Say or type what to change.")
-    history = data.get("history") if isinstance(data.get("history"), list) else []
-    device, sass = _device_and_sass(data)
-    result = _run_command(text, history, device, sass)
+    """Turn a spoken or typed request into an answer or a preview of changes. Nothing is saved until Apply."""
+    result = await _answer_request(await _json(request))
     result.pop("ignored", None)
     result.pop("end", None)
     return result
+
+
+@router.post("/thanksgiving/api/think")
+async def api_think(request: Request):
+    """The deep model's answer for an escalated request (ticket from /api/command or /api/handsfree/ask)."""
+    data = await _json(request)
+    return await run_in_threadpool(_finish, data.get("ticket"))
 
 
 @router.post("/thanksgiving/api/handsfree/heard")
@@ -386,10 +491,8 @@ async def api_handsfree_ask(request: Request):
     text = str(data.get("text") or "").strip()[:500]
     if not text:
         raise HTTPException(status_code=400, detail="Nothing to ask.")
-    history = data.get("history") if isinstance(data.get("history"), list) else []
-    device, sass = _device_and_sass(data)
     via = data.get("via") if data.get("via") in ("follow-up", "conversation") else "name"
-    return _run_command(text, history, device, sass, spoken=via)
+    return await _answer_request(data, spoken=via)
 
 
 @router.post("/thanksgiving/api/voice-log")
