@@ -96,6 +96,15 @@ class Monitor:
                 self._set_brightness(self.settings.pop("dimmed_from"))
                 save_settings(self.settings)
 
+    def press_f11(self):
+        """Full screen on/off for the window in front (Chrome's own F11)."""
+        if not self.win:
+            return False
+        VK_F11, KEYEVENTF_KEYUP = 0x7A, 0x0002
+        self.user32.keybd_event(VK_F11, 0, 0, 0)
+        self.user32.keybd_event(VK_F11, 0, KEYEVENTF_KEYUP, 0)
+        return True
+
     def keep_pc_awake(self):
         # ES_CONTINUOUS | ES_SYSTEM_REQUIRED: the PC itself never sleeps while the helper runs (the screen may).
         if self.win:
@@ -374,6 +383,10 @@ def make_handler(helper):
                 return self._json({"ok": True})
             if path == "/wake":
                 return self._json({"ok": True, "event": helper.wake("asked")})
+            if path == "/fullscreen":
+                # The page's full-screen button: press F11 for it. The page was just tapped, so it's the window
+                # in front, and F11 also undoes Chrome's own full screen (which a page can't do by itself).
+                return self._json({"ok": helper.monitor.press_f11()})
             return self._json({"detail": "Not found."}, 404)
 
     return Handler
@@ -441,11 +454,11 @@ def find_browser():
 
 
 def open_dieter(settings):
-    """Open the Dieter page as the kitchen screen: Chrome kiosk mode, so no address bar, tabs or taskbar
-    (Alt+F4 closes it). It uses its own Chrome profile in %LOCALAPPDATA%\\Dieter\\kiosk-browser: kiosk mode only
-    takes hold when Chrome starts fresh, which a separate profile guarantees even with normal Chrome open.
-    Sign in to askdieter.ai once there and it stays signed in. "kiosk": false in helper.json opens a normal
-    app window instead."""
+    """Open the Dieter page as the kitchen screen: its own window, full screen (no address bar, tabs or taskbar).
+    F11, or the page's ⛶ button, switches full screen off and on. It uses its own Chrome profile in
+    %LOCALAPPDATA%\\Dieter\\kiosk-browser: Chrome ignores the full-screen setting when it opens a window in an
+    already-running Chrome, and a separate profile always starts fresh. Sign in to askdieter.ai once there and it
+    stays signed in. "kiosk": true in helper.json locks it in kiosk mode instead (only Alt+F4 gets out)."""
     import subprocess
     import webbrowser
     page = settings.get("dieter_page", DIETER_PAGE)
@@ -453,13 +466,11 @@ def open_dieter(settings):
     if not browser:
         webbrowser.open(page)
         return
-    if settings.get("kiosk", True):
-        profile = SETTINGS_FILE.parent / "kiosk-browser"
-        subprocess.Popen([browser, "--kiosk", page, f"--user-data-dir={profile}", "--no-first-run",
-                          "--no-default-browser-check", "--disable-session-crashed-bubble",
-                          "--autoplay-policy=no-user-gesture-required"])  # the step chime may play without a tap
-    else:
-        subprocess.Popen([browser, f"--app={page}", "--start-fullscreen"])
+    profile = SETTINGS_FILE.parent / "kiosk-browser"
+    window = ["--kiosk", page] if settings.get("kiosk") else [f"--app={page}", "--start-fullscreen"]
+    subprocess.Popen([browser, *window, f"--user-data-dir={profile}", "--no-first-run",
+                      "--no-default-browser-check", "--disable-session-crashed-bubble",
+                      "--autoplay-policy=no-user-gesture-required"])  # the step chime may play without a tap
 
 
 def main():

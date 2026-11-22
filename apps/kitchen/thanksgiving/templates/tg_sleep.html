@@ -79,6 +79,14 @@
   }
 
   button.addEventListener("click", () => sleep());
+  // Full screen on/off. On the kitchen PC the helper presses F11, which also undoes the full screen the kitchen
+  // window starts in (a page can't leave Chrome's own full screen by itself). Elsewhere: the browser's full screen.
+  const fullscreen = $("fullscreen-btn");
+  if (fullscreen) fullscreen.addEventListener("click", async () => {
+    if (!document.fullscreenElement && helper && await helperCall("/fullscreen", "POST")) return;
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+  });
   // Someone at the keyboard, mouse, or screen. (Ignore the first second: that's the tap that put it to sleep.)
   for (const type of ["pointerdown", "pointermove", "keydown", "touchstart"]) {
     document.addEventListener(type, () => { if (asleep && Date.now() - sleptAt > 1200) wake("center"); }, true);
