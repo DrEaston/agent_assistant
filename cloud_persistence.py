@@ -23,7 +23,9 @@ class CloudStoragePersistence:
         self._timer_lock = threading.Lock()
         self._timer = None
         self._pending_since = None
-        self._last_backup = 0.0
+        # Never backed up yet. (Not 0.0: time.monotonic() counts from boot, so on a freshly started machine
+        # 0.0 looks like "a moment ago" and the first change would wait instead of uploading right away.)
+        self._last_backup = float("-inf")
         self._client = None
         self._bucket = None
         self.enabled = bool(self.bucket_name)
