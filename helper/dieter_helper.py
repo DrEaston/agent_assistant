@@ -14,6 +14,7 @@ Later the "hey Dieter" listener joins this same helper.
 """
 
 import json
+import math
 import os
 import sys
 import threading
@@ -230,18 +231,59 @@ class MotionWatcher:
 
 # ---------------------------------------------------------------- Dieter's face
 
-class Face:
-    """Dieter living on the screen: a small pair of cartoon eyes in the lower-right corner (just above where the
-    page's "Talk to Dieter" button sits), always on top. They blink and glance around now and then, close their
-    orange lids while the screen rests, and open and look around when someone walks in.
+# The speech bubble, in the same 240x92 box as the page's "Talk to Dieter" button
+# (apps/kitchen/thanksgiving/templates/tg_voice.html): a round-ended bar with a curly tail into the corner.
+#   SVG: M36 4 H180 A32 32 0 0 1 200.6 60.5 Q214 78 232 86 Q205 84 180 68 H36 A32 32 0 0 1 36 4 Z
+def bubble_points():
+    import math
 
-    While resting (and no Dieter page is showing its own sleep screen) a full-screen black window covers the rest
-    of the screen; touching it wakes Dieter. All drawing happens on one Tk thread; other threads queue requests.
+    def arc(cx, cy, r, a0, a1, n=24):
+        return [(cx + r * math.cos(math.radians(a0 + (a1 - a0) * i / n)),
+                 cy + r * math.sin(math.radians(a0 + (a1 - a0) * i / n))) for i in range(n + 1)]
+
+    def quad(p0, c, p1, n=16):
+        return [((1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * c[0] + t * t * p1[0],
+                 (1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * c[1] + t * t * p1[1]) for t in (i / n for i in range(n + 1))]
+
+    pts = [(36, 4)] + arc(180, 36, 32, -90, 50)
+    pts += quad(pts[-1], (214, 78), (232, 86)) + quad((232, 86), (205, 84), (180, 68))
+    pts += arc(36, 36, 32, 90, 270)
+    return pts
+
+
+# Wake-up performances, one per wake in turn. Each step: (seconds, {"lid": (left, right) 0 open..1 shut,
+# "look": (x, y) -1..1, "pupil": size}). "toward" in a look means "the side the person came from".
+PERFORMANCES = {
+    "peekaboo": [(0.0, {"lid": (0, 0)}), (0.5, {"look": ("toward", 0.1)}), (1.2, {"look": ("away", 0.05)}),
+                 (1.9, {"lid": (1, 1)}), (2.05, {"lid": (0, 0), "look": (0, 0)})],
+    "sleepy": [(0.0, {"lid": (0.55, 0.55), "look": (0, 0.3)}), (0.9, {"lid": (1, 1)}), (1.4, {"lid": (0.5, 0.5)}),
+               (2.0, {"lid": (0, 0), "look": ("toward", 0), "pupil": 1.1}), (2.8, {"look": (0, 0), "pupil": 1.0})],
+    "surprised": [(0.0, {"lid": (0, 0), "pupil": 0.7}), (0.7, {"lid": (1, 1)}), (0.82, {"lid": (0, 0)}),
+                  (0.98, {"lid": (1, 1)}), (1.1, {"lid": (0, 0), "pupil": 1.0}), (1.6, {"look": ("toward", 0)}),
+                  (2.4, {"look": (0, 0)})],
+    # pupils go once all the way round, starting at the top
+    "eyeroll": [(0.0, {"lid": (0, 0)})]
+               + [(0.5 + k * 0.16, {"look": (0.9 * math.cos(-math.pi / 2 + k * math.pi / 4),
+                                             0.8 * math.sin(-math.pi / 2 + k * math.pi / 4))}) for k in range(9)]
+               + [(2.0, {"look": (0, 0)}), (2.4, {"lid": (1, 1)}), (2.55, {"lid": (0, 0)})],
+    "wink": [(0.0, {"lid": (0, 0)}), (0.5, {"look": ("toward", 0.1)}), (1.0, {"look": (0, 0)}),
+             (1.4, {"lid": (0, 1)}), (1.9, {"lid": (0, 0)}), (2.5, {"lid": (1, 1)}), (2.62, {"lid": (0, 0)})],
+}
+PERFORMANCE_LENGTH = 3.2  # seconds on screen before fading out
+
+
+class Face:
+    """Dieter on the kitchen screen. When the screen wakes, the "Talk to Dieter" speech bubble in the lower-right
+    corner comes alive: the same bubble pops up over it with big cartoon eyes (black pupils, shine dots, orange
+    lids), plays one of the PERFORMANCES (a different one each time), and fades away, leaving the button.
+
+    While resting (and no Dieter page is showing its own sleep screen) a full-screen black window covers the
+    screen; touching it wakes Dieter. All drawing happens on one Tk thread; other threads only queue requests.
     """
 
-    OUTLINE, WHITE, PUPIL, SHINE, LID = "#1c140e", "#ffffff", "#111111", "#ffffff", "#ea580c"
-    KEY = "#1d150f"  # see-through colour around the eyes (next to the outline colour, so edges blend cleanly)
-    BOX = (124, 70)  # the eyes' size at 100% display scaling, in pixels
+    OUTLINE, WHITE, PUPIL, SHINE, LID, BUBBLE = "#1c140e", "#ffffff", "#111111", "#ffffff", "#ea580c", "#c2410c"
+    KEY = "#1d150f"  # see-through colour around the bubble (next to the outline colour, so edges blend cleanly)
+    BOX = (240, 92)  # the bubble's box at 100% display scaling, same as the page's button
     SS = 3           # drawn this many times larger, then shrunk, for smooth edges
 
     def __init__(self, on_touch=None, settings=None):
@@ -249,6 +291,7 @@ class Face:
         self.on_touch = on_touch
         self.settings = settings if settings is not None else {}
         self._q = queue.Queue()
+        self._turn = 0
         self._ready = threading.Event()
         threading.Thread(target=self._run, name="face", daemon=True).start()
         self._ready.wait(5)
@@ -267,20 +310,19 @@ class Face:
     def _run(self):
         try:
             import tkinter as tk
-            from PIL import Image, ImageDraw, ImageTk
+            from PIL import Image, ImageChops, ImageDraw, ImageTk
         except ImportError:
             self._ready.set()
             return
-        self.Image, self.ImageDraw, self.ImageTk = Image, ImageDraw, ImageTk
+        self.Image, self.ImageChops, self.ImageDraw, self.ImageTk = Image, ImageChops, ImageDraw, ImageTk
+        self.scale = 1.0
         if sys.platform == "win32":
             import ctypes
             try:
-                ctypes.windll.shcore.SetProcessDpiAwareness(2)  # sharp, real-size pixels on scaled displays
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)  # real-size pixels on scaled displays
+                self.scale = ctypes.windll.user32.GetDpiForSystem() / 96
             except (AttributeError, OSError):
                 pass
-            self.scale = ctypes.windll.user32.GetDpiForSystem() / 96 if hasattr(ctypes.windll.user32, "GetDpiForSystem") else 1.0
-        else:
-            self.scale = 1.0
         root = self.root = tk.Tk()
         root.withdraw()
         root.title("Dieter")
@@ -292,10 +334,10 @@ class Face:
         for event in ("<Motion>", "<KeyPress>", "<ButtonPress>"):
             self.rest_win.bind(event, self._touched)
 
-        # the eyes
-        w, h = int(self.BOX[0] * self.scale), int(self.BOX[1] * self.scale)
-        self.size = (w, h)
-        win = self.eyes_win = tk.Toplevel(root, bg=self.KEY)
+        # the bubble with the eyes
+        self.size = (int(self.BOX[0] * self.scale), int(self.BOX[1] * self.scale))
+        win = self.bubble_win = tk.Toplevel(root, bg=self.KEY)
+        win.withdraw()
         win.overrideredirect(True)
         win.attributes("-topmost", True)
         win.attributes("-transparentcolor", self.KEY)
@@ -305,40 +347,23 @@ class Face:
             pass
         self.label = tk.Label(win, bg=self.KEY, bd=0, highlightthickness=0)
         self.label.pack()
-        self.label.bind("<ButtonPress>", lambda e: self._double_blink())
-        self._place()
+        self.label.bind("<ButtonPress>", lambda e: self._finish())  # tap it away, to get at the button
 
-        # what the eyes are doing: lid 0 = open, 1 = shut; look x, y from -1 to 1
-        self.lid, self.lid_to = 1.0, 1.0
-        self.look, self.look_to = [0.0, 0.0], [0.0, 0.0]
         self.resting = False
+        self.showing = False
         self._rested_at = 0.0
+        self._bubble_img = None
         self._drawn = None
-        self._script = []  # pending [(time, action)] for the current little performance
-        self._next_blink = time.time() + 3
-        self._next_glance = time.time() + 8
-        if self.settings.get("eyes", True):
-            win.deiconify()
-        else:
-            win.withdraw()
-        root.after(16, self._tick)
-        root.after(2000, self._keep_on_top)
+        root.after(33, self._tick)
         self._ready.set()
         root.mainloop()
 
     def _place(self):
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
         w, h = self.size
-        right = int(self.settings.get("eyes_right", 28) * self.scale)
-        bottom = int(self.settings.get("eyes_bottom", 112) * self.scale)  # sits above the "Talk to Dieter" button
-        self.eyes_win.geometry(f"{w}x{h}+{sw - w - right}+{sh - h - bottom}")
-
-    def _keep_on_top(self):
-        # A full-screen browser can end up above us; quietly come back on top.
-        if self.eyes_win.winfo_viewable():
-            self.eyes_win.attributes("-topmost", True)
-            self.eyes_win.lift()
-        self.root.after(2000, self._keep_on_top)
+        right = int(self.settings.get("bubble_right", 16) * self.scale)  # 1rem, like the page's button
+        bottom = int(self.settings.get("bubble_bottom", 16) * self.scale)
+        self.bubble_win.geometry(f"{w}x{h}+{sw - w - right}+{sh - h - bottom}")
 
     def _touched(self, _event):
         if time.time() - self._rested_at > 1.2 and self.resting and self.on_touch:
@@ -346,92 +371,118 @@ class Face:
 
     # ------------------------------------------------ behaviour
     def _do(self, what, arg):
-        now = time.time()
         if what == "rest":
             self.resting = True
-            self._rested_at = now
-            self._script = []
-            self.lid_to, self.look_to = 1.0, [0.0, 0.25]  # eyes drift down and close
+            self._rested_at = time.time()
+            self._finish()
             sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
             self.rest_win.geometry(f"{sw}x{sh}+0+0")
             self.rest_win.deiconify()
             self.rest_win.attributes("-topmost", True)
             self.rest_win.focus_force()
-            self.eyes_win.lift()
         elif what == "unrest":
             self._end_rest()
         elif what == "wake":
             self._end_rest()
-            first = {"left": -1.0, "right": 1.0}.get(arg, 0.0)
-            other = -(first or -0.8)
-            # (seconds from now, lid, look) - open, glance toward whoever's there, look around, blink, settle
-            self._script = [(now + t, lid, look) for t, lid, look in (
-                (0.0, 0.0, (0.0, 0.0)), (0.45, None, (first or -0.8, 0.1)), (1.1, None, (other, 0.05)),
-                (1.75, 1.0, None), (1.88, 0.0, (0.5, -0.5)), (2.5, None, (0.0, 0.0)))]
-            self._next_blink = now + 4
-            self._next_glance = now + 9
+            if self.settings.get("eyes", True):
+                self._perform(arg)
 
     def _end_rest(self):
         self.resting = False
         self.rest_win.withdraw()
-        self.lid_to = 0.0
 
-    def _double_blink(self):
+    def _perform(self, side):
+        names = list(PERFORMANCES)
+        name = self.settings.get("performance") or names[self._turn % len(names)]
+        self._turn += 1
+        toward = {"left": -1.0, "right": 1.0}.get(side, 0.0) or -0.8
         now = time.time()
-        self._script = [(now, 1.0, (0.0, 0.0)), (now + 0.12, 0.0, None), (now + 0.3, 1.0, None), (now + 0.42, 0.0, None)]
+        self._script = []
+        for t, step in PERFORMANCES.get(name, PERFORMANCES["peekaboo"]):
+            step = dict(step)
+            if "look" in step:
+                step["look"] = tuple(toward if v == "toward" else -toward if v == "away" else v for v in step["look"])
+            self._script.append((now + t, step))
+        self.lid, self.lid_to = [1.0, 1.0], [1.0, 1.0]
+        self.look, self.look_to = [0.0, 0.0], [0.0, 0.0]
+        self.pupil, self.pupil_to = 1.0, 1.0
+        self._started = now
+        self._drawn = None
+        self._place()
+        self.bubble_win.attributes("-alpha", 0.0)
+        self.bubble_win.deiconify()
+        self.bubble_win.attributes("-topmost", True)
+        self.bubble_win.lift()
+        self.showing = True
+
+    def _finish(self):
+        self.showing = False
+        self.bubble_win.withdraw()
 
     def _tick(self):
-        import random
         while not self._q.empty():
             self._do(*self._q.get_nowait())
-        now = time.time()
-        while self._script and self._script[0][0] <= now:
-            _, lid, look = self._script.pop(0)
-            if lid is not None:
-                self.lid_to = lid
-            if look is not None:
-                self.look_to = list(look)
-        if not self.resting and not self._script:
-            if now >= self._next_blink:
-                self._script = [(now, 1.0, None), (now + 0.12, 0.0, None)]
-                self._next_blink = now + random.uniform(3, 7)
-            elif now >= self._next_glance:
-                spot = (random.choice((-0.8, -0.5, 0.5, 0.8)), random.uniform(-0.4, 0.3))
-                self._script = [(now, None, spot), (now + random.uniform(0.9, 1.6), None, (0.0, 0.0))]
-                self._next_glance = now + random.uniform(8, 16)
-        # ease toward the targets (lids shut fast for blinks, close slowly for sleep)
-        lid_speed = 0.08 if self.resting else 0.45
-        self.lid += (self.lid_to - self.lid) * lid_speed
-        for i in (0, 1):
-            self.look[i] += (self.look_to[i] - self.look[i]) * 0.22
-        state = (round(self.lid, 2), round(self.look[0], 2), round(self.look[1], 2))
-        if state != self._drawn:
-            self._drawn = state
-            self._draw(*state)
-        self.root.after(33, self._tick)
+        if self.showing:
+            now = time.time()
+            while self._script and self._script[0][0] <= now:
+                step = self._script.pop(0)[1]
+                self.lid_to = list(step.get("lid", self.lid_to))
+                self.look_to = list(step.get("look", self.look_to))
+                self.pupil_to = step.get("pupil", self.pupil_to)
+            for i in (0, 1):
+                self.lid[i] += (self.lid_to[i] - self.lid[i]) * 0.5
+                self.look[i] += (self.look_to[i] - self.look[i]) * 0.3
+            self.pupil += (self.pupil_to - self.pupil) * 0.3
+            t = now - self._started
+            # pop in, then fade out at the end
+            alpha = min(1.0, t / 0.2)
+            if t > PERFORMANCE_LENGTH:
+                alpha = max(0.0, 1 - (t - PERFORMANCE_LENGTH) / 0.5)
+            self.bubble_win.attributes("-alpha", alpha)
+            state = tuple(round(v, 2) for v in (*self.lid, *self.look, self.pupil))
+            if state != self._drawn:
+                self._drawn = state
+                self.label.configure(image=self._render(*state))
+            if alpha <= 0 and t > PERFORMANCE_LENGTH:
+                self._finish()
+        self.root.after(16 if self.showing else 50, self._tick)
 
     # ------------------------------------------------ drawing
-    def _draw(self, lid, lx, ly):
-        Image, ImageDraw = self.Image, self.ImageDraw
+    def _render(self, lid_l, lid_r, lx, ly, pupil):
+        img = self.draw(lid_l, lid_r, lx, ly, pupil)
+        self._photo = self.ImageTk.PhotoImage(img)
+        return self._photo
+
+    def draw(self, lid_l, lid_r, lx, ly, pupil=1.0):
+        """The bubble with the eyes, as a PIL image (the KEY colour around it is see-through on screen)."""
+        Image, ImageDraw, ImageChops = self.Image, self.ImageDraw, self.ImageChops
         s = self.SS * self.scale
         W, H = int(self.BOX[0] * s), int(self.BOX[1] * s)
-        img = Image.new("RGB", (W, H), self.KEY)
+        if self._bubble_img is None or self._bubble_img.size != (W, H):
+            base = Image.new("RGB", (W, H), self.KEY)
+            bd = ImageDraw.Draw(base)
+            pts = bubble_points()
+            bd.polygon([((x + 3) * s, (y + 3) * s) for x, y in pts], fill=self.OUTLINE)  # sticker shadow
+            body = [(x * s, y * s) for x, y in pts]
+            bd.polygon(body, fill=self.BUBBLE)
+            bd.line(body + [body[0]], fill=self.OUTLINE, width=int(4 * s), joint="curve")
+            self._bubble_img = base
+        img = self._bubble_img.copy()
         d = ImageDraw.Draw(img)
         line = max(2, int(3 * s))
-        for cx in (34, 90):
-            cy, rx, ry = 35, 26, 31
+        for cx, lid in ((86, lid_l), (130, lid_r)):
+            cy, rx, ry = 36, 18, 23
             box = [(cx - rx) * s, (cy - ry) * s, (cx + rx) * s, (cy + ry) * s]
-            # white of the eye
             d.ellipse(box, fill=self.WHITE)
-            # pupil and its shine dots, moved by where Dieter is looking
-            px, py = cx + lx * 9, cy + 3 + ly * 11
-            d.ellipse([(px - 14) * s, (py - 14) * s, (px + 14) * s, (py + 14) * s], fill=self.PUPIL)
-            d.ellipse([(px + 1) * s, (py - 10) * s, (px + 10) * s, (py - 1) * s], fill=self.SHINE)
-            d.ellipse([(px - 8) * s, (py + 4) * s, (px - 4) * s, (py + 8) * s], fill=self.SHINE)
-            # the orange lid, coming down from the top with a curved edge, kept inside the eye
-            if lid > 0.02:
-                from PIL import ImageChops
-                edge = (cy - ry) + lid * (2 * ry + 6)
+            pr = 10 * pupil
+            px, py = cx + lx * 5, cy + 2 + ly * 7.5
+            d.ellipse([(px - pr) * s, (py - pr) * s, (px + pr) * s, (py + pr) * s], fill=self.PUPIL)
+            sr = 3.4 * min(pupil, 1.0) + 0.6
+            d.ellipse([(px + 3.2 - sr) * s, (py - 3.6 - sr) * s, (px + 3.2 + sr) * s, (py - 3.6 + sr) * s], fill=self.SHINE)
+            tr = 1.4
+            d.ellipse([(px - 3.8 - tr) * s, (py + 3.8 - tr) * s, (px - 3.8 + tr) * s, (py + 3.8 + tr) * s], fill=self.SHINE)
+            if lid > 0.02:  # the orange lid comes down from the top, with a curved edge, kept inside the eye
+                edge = (cy - ry) + lid * (2 * ry + 4)
                 curve = [(cx - rx * 1.7) * s, (edge - 2.6 * ry) * s, (cx + rx * 1.7) * s, edge * s]
                 eye = Image.new("L", (W, H), 0)
                 ImageDraw.Draw(eye).ellipse(box, fill=255)
@@ -441,13 +492,11 @@ class Face:
                 ImageDraw.Draw(edge_mask).arc(curve, 0, 180, fill=255, width=line)
                 img.paste(self.LID, (0, 0, W, H), ImageChops.multiply(lid_mask, eye))
                 img.paste(self.OUTLINE, (0, 0, W, H), ImageChops.multiply(edge_mask, eye))
-                if lid > 0.9:  # shut: a sleepy curved line across the lid
+                if lid > 0.9:  # shut: a sleepy curved line
                     d.arc([(cx - rx * 0.7) * s, (cy - ry * 0.45) * s, (cx + rx * 0.7) * s, (cy + ry * 0.4) * s],
                           25, 155, fill=self.OUTLINE, width=line)
             d.ellipse(box, outline=self.OUTLINE, width=line)
-        img = img.reduce(self.SS)
-        self._photo = self.ImageTk.PhotoImage(img)
-        self.label.configure(image=self._photo)
+        return img.reduce(self.SS)
 
 
 # ---------------------------------------------------------------- the helper
