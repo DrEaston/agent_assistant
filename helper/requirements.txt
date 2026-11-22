@@ -1,0 +1,5 @@
+# The Dieter helper (kitchen PC). Not part of the website; built into DieterHelper.exe by build.ps1.
+opencv-python-headless==4.10.0.84
+pystray==0.19.5
+Pillow>=10.0
+pyinstaller==6.10.0

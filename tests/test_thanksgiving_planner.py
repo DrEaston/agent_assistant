@@ -840,6 +840,8 @@ class RouteTests(unittest.TestCase):
         self.client.get("/thanksgiving")
         page = self.client.get("/thanksgiving/cook").text
         self.assertIn('id="timer-text"', page)
+        self.assertIn('id="sleep-btn"', page)  # kitchen screen sleep (helper/ turns the monitor off)
+        self.assertIn("http://127.0.0.1:47613", page)
         self.assertNotIn("data-timer=", page)  # no timer buttons on steps or recipe lines
         self.assertTrue(self.client.post("/thanksgiving/api/timers", json={"label": "Potatoes", "minutes": 12}).json()["ok"])
         timers = self.client.get("/thanksgiving/api/state").json()["timers"]

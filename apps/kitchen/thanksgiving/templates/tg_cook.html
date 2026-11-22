@@ -76,6 +76,7 @@ body { overflow-x: hidden; }
   <span class="clock" id="clock">--:--</span>
   <span class="sub" id="dinner-label"></span>
   <span class="spacer"></span>
+  <button type="button" id="sleep-btn">🌙 Sleep</button>
   <button type="button" id="hf-toggle" aria-pressed="false">🎙 Hands-free</button>
   <a class="button" href="/thanksgiving">Plan</a>
   <a class="button" href="#report">Report problem</a>
@@ -99,6 +100,7 @@ body { overflow-x: hidden; }
   </aside>
 </div>
 {% include "tg_voice.html" %}
+{% include "tg_sleep.html" %}
 {% include "tg_handsfree.html" %}
 {% endblock %}
 {% block feedback %}

@@ -15,3 +15,6 @@ data
 codex_feedback_issue_*.md
 codex_worker_status.json
 codex_worker_status.*.json
+
+# The kitchen-PC helper is not part of the website.
+helper/
