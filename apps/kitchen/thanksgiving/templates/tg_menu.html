@@ -33,8 +33,8 @@
 .feast-foot { display: block; color: var(--gold); font-size: 1.35rem; margin-top: 2.2rem; }
 @media (max-width: 480px) { .dish-name { font-size: 1.3rem; } .course-turkey .dish:first-child .dish-name { font-size: 1.55rem; }
   .dish-desc { font-size: 1rem; } }
-.kitchen-head { margin-top: .5rem; }
-.made-by { font-style: normal; }
+.menu-extras { text-align: center; margin: 0 0 1rem; }
+#add-dish:not([open]) { display: none; }
 </style>
 {% endblock %}
 {% block page %}
@@ -63,28 +63,9 @@
     <span class="feast-foot" aria-hidden="true">❦</span>
   </article>
 
-  <div class="section-head kitchen-head"><h2>In the kitchen</h2><span class="small muted">Progress on each dish</span></div>
-  <div class="card menu-list">
-  {% for dish in dishes %}
-    {% set steps = tasks|selectattr("dish_id", "equalto", dish.id)|list %}
-    {% set left = steps|rejectattr("done")|sort(attribute="start")|list %}
-    <a class="menu-row" href="/thanksgiving/menu/{{ dish.id }}">
-      <div class="menu-main">
-        <strong>{{ dish.name }}</strong>
-        <div class="small muted">
-          {%- if dish.cook %}<span class="made-by">{{ dish.cook }}'s</span> · {% endif -%}
-          {%- if dish.size_label %}{{ dish.size_label }} · {% endif -%}
-          {%- if steps %}{{ steps|length - left|length }} of {{ steps|length }} step{{ '' if steps|length == 1 else 's' }} done{% else %}No steps{% endif -%}
-          {%- if left %} · next: {{ planner.short_date(left[0].start)[:3] }} {{ planner.format_clock(left[0].start) }}, {{ left[0].title }}{% endif -%}
-        </div>
-      </div>
-      <span class="menu-progress{% if steps and not left %} all{% endif %}">{% if steps and not left %}✓{% else %}›{% endif %}</span>
-    </a>
-  {% endfor %}
-  </div>
-  {% for d in prep_dishes %}<p class="small" style="margin:.6rem 0 0"><a href="/thanksgiving/menu/{{ d.id }}">{{ d.name }} tasks →</a></p>{% endfor %}
+  <p class="small muted menu-extras">{% for d in prep_dishes %}<a href="/thanksgiving/menu/{{ d.id }}">{{ d.name }} tasks</a> · {% endfor %}<a href="#add-dish" data-open-add>Add a dish</a></p>
 
-  <details class="card stack" style="margin-top:1rem">
+  <details class="card stack" id="add-dish">
     <summary><strong>Add a dish</strong></summary>
     <form method="post" action="/thanksgiving/dishes/add" class="add-grid">
       {% for key, label in presets %}<button type="submit" name="preset" value="{{ key }}">+ {{ label }}</button>{% endfor %}
@@ -106,4 +87,12 @@
     </div>
   </details>
 </section>
+<script>
+(function () {
+  var panel = document.getElementById("add-dish");
+  function open() { if (panel) { panel.open = true; panel.scrollIntoView({ block: "start" }); } }
+  document.querySelectorAll("[data-open-add]").forEach(function (a) { a.addEventListener("click", function (e) { e.preventDefault(); open(); }); });
+  if (location.hash === "#add-dish") open();
+})();
+</script>
 {% endblock %}

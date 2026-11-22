@@ -316,8 +316,9 @@ class RouteTests(unittest.TestCase):
         self.assertNotIn("House prep", card)
         for who in ("Parrisa", "Janice"):
             self.assertNotIn(who, card)  # who makes what stays off the shareable card
-        self.assertIn("Parrisa's", page)  # ...but shows in the kitchen list below it
+        self.assertNotIn("In the kitchen", page)
         self.assertIn("House prep tasks", page)
+        self.assertIn('id="add-dish"', page)
         self.assertEqual(self.client.get("/thanksgiving/photos/turkey.jpg").status_code, 404)
 
     def test_janice_brings_green_beans_and_cranberry_is_made_tuesday(self):
@@ -369,7 +370,6 @@ class RouteTests(unittest.TestCase):
         plan, mac = self.mac()
         menu = self.client.get("/thanksgiving/menu").text
         self.assertIn(f'href="/thanksgiving/menu/{mac["id"]}"', menu)
-        self.assertIn("steps done", menu)
         self.assertNotIn('name="ingredients_text"', menu)  # the editor lives on the dish page
         page = self.dish_page(mac)
         self.assertIn("<h2>Mac and cheese</h2>", page)
