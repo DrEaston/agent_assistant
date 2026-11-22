@@ -209,6 +209,18 @@ class ThanksgivingStore:
                 changed = True
                 conn.execute("UPDATE tg_dishes SET scale = 1.0 WHERE plan_id = ? AND name = 'Mac and cheese' AND scale < 1",
                              (plan_id,))
+            if once(plan_id, "pie-double"):
+                # Two pies, so 5 or 6 adults and a kid get seconds and leftovers.
+                changed = True
+                for row in conn.execute("SELECT id, ingredients_text FROM tg_dishes WHERE plan_id = ? AND name = 'Pumpkin pie'",
+                                        (plan_id,)).fetchall():
+                    # Counted in cans, so the list says "2 cans" rather than "2 lb".
+                    text = (row["ingredients_text"] or "").replace(
+                        "15 oz can pumpkin puree", "1 can (15 oz) pumpkin puree").replace(
+                        "12 oz can evaporated milk", "1 can (12 oz) evaporated milk")
+                    conn.execute("UPDATE tg_dishes SET ingredients_text = ? WHERE id = ?", (text, row["id"]))
+                conn.execute("UPDATE tg_dishes SET scale = 2.0 WHERE plan_id = ? AND name = 'Pumpkin pie' AND scale = 1",
+                             (plan_id,))
         return changed
 
     def _commit(self):

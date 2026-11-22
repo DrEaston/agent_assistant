@@ -109,12 +109,12 @@ PIE_INGREDIENTS = """Crust:
 1 stick (113 g) very cold unsalted butter
 4 to 6 tbsp ice water
 Filling:
-15 oz can pumpkin puree (not pie filling)
+1 can (15 oz) pumpkin puree (not pie filling)
 3/4 cup sugar
 2 tsp pumpkin pie spice
 1/2 tsp salt
 2 large eggs
-12 oz can evaporated milk
+1 can (12 oz) evaporated milk
 Whipped cream:
 1 cup cold heavy cream
 2 tbsp powdered sugar
