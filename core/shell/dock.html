@@ -1,0 +1,153 @@
+{#- The app switcher and Ask Dieter. Phones: a bar along the bottom. Wide screens: a bar along the top.
+    Ask Dieter sends to /api/dieter/action with this page's address, so it knows what you're looking at. -#}
+{% set here = app.id if app else "today" %}
+<div class="dock">
+  <a class="dock-brand" href="/">Dieter</a>
+  <nav class="dock-apps" aria-label="Apps">
+    {% for id, label, url in nav_apps %}
+    <a href="{{ url }}" data-app="{{ id }}"{% if id == here %} aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+  <button type="button" class="ask-open" id="ask-open" aria-haspopup="dialog">
+    <span class="ask-open-text">Ask Dieter…</span>
+    <span class="ask-open-mic" aria-hidden="true">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+    </span>
+  </button>
+</div>
+
+<dialog class="ask-sheet" id="ask-sheet" aria-labelledby="ask-title">
+  <div class="ask-head">
+    <h2 id="ask-title">Ask Dieter</h2>
+    <button type="button" class="quiet icon-button" id="ask-close" aria-label="Close">✕</button>
+  </div>
+  <div class="ask-log" id="ask-log" aria-live="polite">
+    <p class="muted small" id="ask-hint">Ask a question or tell Dieter what to change. Dieter can see this page.</p>
+  </div>
+  <div class="ask-confirm" id="ask-confirm" hidden>
+    <button type="button" class="primary" id="ask-yes">Yes, do it</button>
+    <button type="button" id="ask-no">No</button>
+  </div>
+  <form class="ask-form" id="ask-form">
+    <label class="visually-hidden" for="ask-input">Message to Dieter</label>
+    <textarea id="ask-input" rows="2" placeholder="Ask or tell Dieter…"></textarea>
+    <div class="row spread">
+      <button type="button" id="ask-mic" class="ask-mic" aria-pressed="false">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+        <span id="ask-mic-label">Talk</span>
+      </button>
+      <button type="submit" class="primary" id="ask-send">Send</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const sheet = $("ask-sheet"), log = $("ask-log"), input = $("ask-input"), form = $("ask-form");
+  const confirmBox = $("ask-confirm"), mic = $("ask-mic"), micLabel = $("ask-mic-label");
+  const history = [];
+  let pending = null;      // {content, token, plan} while Dieter waits for a yes
+  let recorder = null, chunks = [], stream = null;
+
+  function open(startListening) {
+    if (!sheet.open) sheet.showModal();
+    if (startListening) toggleMic(); else input.focus();
+  }
+  function say(role, text, link) {
+    $("ask-hint").hidden = true;
+    const p = document.createElement("div");
+    p.className = "ask-msg " + role;
+    p.textContent = text;
+    if (link) {
+      const a = document.createElement("a");
+      a.href = link.url; a.textContent = link.label; a.className = "ask-link";
+      p.appendChild(document.createElement("br")); p.appendChild(a);
+    }
+    log.appendChild(p);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  async function send(content, confirming) {
+    if (!content) return;
+    if (!confirming) { say("me", content); history.push({ role: "user", content }); }
+    input.value = ""; input.disabled = true; $("ask-send").disabled = true; confirmBox.hidden = true;
+    const thinking = document.createElement("div");
+    thinking.className = "ask-msg dieter muted"; thinking.textContent = "…"; log.appendChild(thinking);
+    try {
+      const r = await fetch("/api/dieter/action", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: confirming ? pending.content : content,
+          page_title: document.title,
+          page_url: location.pathname + location.search + location.hash,
+          confirmation_token: confirming ? pending.token : "",
+          previous_action_plan: confirming ? (pending.previous || "") : (pending ? pending.plan : ""),
+          conversation_history: history.slice(-8),
+        }),
+      });
+      const data = await r.json();
+      thinking.remove();
+      const answer = data.assistant_message || data.response || data.detail || "Sorry, I couldn't answer that.";
+      const link = data.redirect_url && data.redirect_label ? { url: data.redirect_url, label: data.redirect_label } : null;
+      say("dieter", answer, link);
+      history.push({ role: "assistant", content: answer });
+      if (data.needs_confirmation && data.confirmation_token) {
+        pending = { content: confirming ? pending.content : content, token: data.confirmation_token,
+                    plan: data.action_plan || answer, previous: pending ? pending.plan : "" };
+        confirmBox.hidden = false;
+      } else {
+        pending = null;
+      }
+      if (data.reload_page || (data.changed_fields && data.changed_fields.length && !link)) {
+        setTimeout(() => location.reload(), 1200);
+      }
+    } catch (e) {
+      thinking.remove();
+      say("dieter", "That didn't go through. Check the connection and try again.");
+    } finally {
+      input.disabled = false; $("ask-send").disabled = false; input.focus();
+    }
+  }
+
+  async function toggleMic() {
+    if (recorder) { recorder.stop(); return; }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) { say("dieter", "I can't use the microphone here. Type instead?"); return; }
+    chunks = [];
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    recorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+      recorder = null; mic.setAttribute("aria-pressed", "false"); micLabel.textContent = "Talk";
+      if (!blob.size) return;
+      micLabel.textContent = "Listening done…";
+      const body = new FormData();
+      body.append("audio", blob, "dieter-voice." + (blob.type.includes("mp4") ? "mp4" : "webm"));
+      try {
+        const r = await fetch("/api/dieter/transcribe", { method: "POST", body });
+        const data = await r.json();
+        const text = (data.text || "").trim();
+        micLabel.textContent = "Talk";
+        if (text) send(text, false); else say("dieter", "I didn't catch that.");
+      } catch (e) { micLabel.textContent = "Talk"; say("dieter", "I couldn't hear that. Try again?"); }
+    };
+    recorder.start();
+    mic.setAttribute("aria-pressed", "true"); micLabel.textContent = "Stop and send";
+  }
+
+  $("ask-open").addEventListener("click", () => open(false));
+  $("ask-close").addEventListener("click", () => sheet.close());
+  sheet.addEventListener("click", (e) => { if (e.target === sheet) sheet.close(); });
+  form.addEventListener("submit", (e) => { e.preventDefault(); send(input.value.trim(), false); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
+  });
+  $("ask-yes").addEventListener("click", () => send("yes", true));
+  $("ask-no").addEventListener("click", () => { pending = null; confirmBox.hidden = true; say("dieter", "Okay, I won't."); });
+  mic.addEventListener("click", toggleMic);
+  window.dieterAsk = { open, send: (text) => { open(false); send(text, false); } };
+})();
+</script>

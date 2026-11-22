@@ -26,4 +26,15 @@ def templates(*app_template_dirs):
     )
     env.globals["css_url"] = _css_url()
     env.globals["preview_label"] = os.getenv("PREVIEW_LABEL", "")
+    env.globals["nav_apps"] = NAV_APPS
     return env
+
+
+# The app switcher (core/shell/dock.html): (app id, label, address).
+NAV_APPS = (
+    ("today", "Today", "/"),
+    ("kitchen", "Kitchen", "/apps/recipes"),
+    ("assistant", "Assistant", "/apps/assistant/planner"),
+    ("trainer", "Trainer", "/apps/trainer"),
+    ("music", "Music", "/apps/music/playlists"),
+)

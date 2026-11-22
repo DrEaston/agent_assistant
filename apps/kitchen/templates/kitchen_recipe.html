@@ -1,0 +1,119 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+{{ ui.page_header(title, crumbs=(("Kitchen", "/apps/recipes"), ("Recipes", "/apps/recipes/library")), sub=(steps|length ~ " steps") if steps else None, wide=True) }}
+<main class="wrap wide">
+  {% if cooked %}
+  {% call ui.banner("ok") %}Marked cooked. Anything to change next time? Tell Dieter: <button type="button" class="quiet" onclick="window.dieterAsk && dieterAsk.open()">Ask Dieter</button>{% endcall %}
+  <div class="gap-above"></div>
+  {% endif %}
+
+  <div class="row gap-above">
+    {% if steps %}<button type="button" class="primary" id="cook-start">Start cooking</button>{% endif %}
+    {% if not is_guest %}
+      {% if plan_item %}
+      <form method="post" action="/apps/recipes/meal-plan/{{ plan_item.id }}/cooked"><button type="submit">Mark cooked</button></form>
+      {% else %}
+      <form method="post" action="/apps/recipes/meal-plan/meals/{{ meal.id }}/add"><input type="hidden" name="next" value="/apps/recipes/meals/{{ meal.id }}"><button type="submit">+ Plan</button></form>
+      {% endif %}
+      <a class="button quiet" href="/apps/recipes/meals/{{ meal.id }}/details">Edit and details</a>
+    {% endif %}
+  </div>
+
+  <div class="cols side-main recipe-cols gap-above">
+    <section class="card ingredients-card" aria-label="Ingredients">
+      <div class="section-head">
+        <h2>Ingredients</h2>
+        {% if has_servings %}
+        <div class="seg" role="group" aria-label="Servings">
+          <button type="button" data-serves="2" aria-pressed="true">2 servings</button>
+          <button type="button" data-serves="4" aria-pressed="false">4 servings</button>
+        </div>
+        {% endif %}
+      </div>
+      {% for group in groups %}
+      <div class="group ingredients">
+        {% if group.heading %}<h3 class="group-title">{{ group.heading }}</h3>{% endif %}
+        {% for row in group.rows %}
+        <label class="ing">
+          <input type="checkbox">
+          <span class="name">{{ row.name }}</span>
+          {% if row.two %}<span class="amount" data-two="{{ row.two }}" data-four="{{ row.four }}">{{ row.two }}</span>{% endif %}
+        </label>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="muted">No ingredients yet.</p>
+      {% endfor %}
+      {% if pantry %}<p class="small muted gap-above">From the pantry: {{ pantry|join(", ")|lower }}</p>{% endif %}
+    </section>
+
+    <section aria-label="Steps">
+      <h2 class="section-title">Steps</h2>
+      {% if steps %}
+      <ol class="steps">
+        {% for step in steps %}
+        <li><span class="step-num" aria-hidden="true">{{ loop.index }}</span><span>{{ step.html }}</span></li>
+        {% endfor %}
+      </ol>
+      {% else %}
+      <p class="muted">No steps yet.</p>
+      {% endif %}
+    </section>
+  </div>
+</main>
+
+{% if steps %}
+<div class="cook" id="cook" hidden role="dialog" aria-label="Cooking {{ title }}">
+  <div class="cook-top">
+    <strong id="cook-count"></strong>
+    <button type="button" id="cook-close">Done</button>
+  </div>
+  <div class="cook-step"><p id="cook-text" aria-live="polite"></p></div>
+  <div class="cook-nav">
+    <button type="button" id="cook-prev">Back</button>
+    <button type="button" class="primary" id="cook-next">Next</button>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+{% block after %}
+<script>
+(function () {
+  for (const button of document.querySelectorAll("[data-serves]")) {
+    button.addEventListener("click", () => {
+      const four = button.dataset.serves === "4";
+      document.querySelectorAll("[data-serves]").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
+      document.querySelectorAll(".amount[data-two]").forEach((a) => { a.textContent = four ? a.dataset.four : a.dataset.two; });
+    });
+  }
+
+  const cook = document.getElementById("cook");
+  if (!cook) return;
+  const steps = {{ steps|map(attribute="html")|map("string")|list|tojson }};
+  let at = 0, lock = null;
+  function show() {
+    document.getElementById("cook-text").innerHTML = steps[at];
+    document.getElementById("cook-count").textContent = "Step " + (at + 1) + " of " + steps.length;
+    document.getElementById("cook-prev").disabled = at === 0;
+    document.getElementById("cook-next").textContent = at === steps.length - 1 ? "Finish" : "Next";
+  }
+  async function start() {
+    at = 0; show(); cook.hidden = false;
+    try { lock = await navigator.wakeLock.request("screen"); } catch (e) { lock = null; }  // keep the screen on
+  }
+  function stop() { cook.hidden = true; if (lock) { lock.release(); lock = null; } }
+  document.getElementById("cook-start").addEventListener("click", start);
+  document.getElementById("cook-close").addEventListener("click", stop);
+  document.getElementById("cook-prev").addEventListener("click", () => { if (at > 0) { at--; show(); } });
+  document.getElementById("cook-next").addEventListener("click", () => { if (at < steps.length - 1) { at++; show(); } else stop(); });
+  document.addEventListener("keydown", (e) => {
+    if (cook.hidden) return;
+    if (e.key === "ArrowRight" || e.key === " ") { e.preventDefault(); document.getElementById("cook-next").click(); }
+    if (e.key === "ArrowLeft") document.getElementById("cook-prev").click();
+    if (e.key === "Escape") stop();
+  });
+})();
+</script>
+{% endblock %}

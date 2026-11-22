@@ -1,6 +1,6 @@
 {#- The one page frame for new-style pages.
     Context: app (manifest dict: id, title, accent), page_url, report_url, reported.
-    Blocks: title, head (page script), content, after (toasts, scripts at the end). -#}
+    Blocks: title, head (page script), content, after (toasts, scripts at the end), dock (app switcher, Ask Dieter). -#}
 <!doctype html>
 <html lang="en" data-accent="{{ app.accent if app else 'today' }}">
 <head>
@@ -10,7 +10,8 @@
 <link rel="stylesheet" href="{{ css_url }}">
 {% block head %}{% endblock %}
 </head>
-<body>
+<body class="has-dock">
+{% block dock %}{% include "dock.html" %}{% endblock %}
 {% if preview_label %}<p class="banner warn" role="status">Preview of {{ preview_label }}. This is a copy; nothing you do here reaches the live site.</p>{% endif %}
 {% block content %}{% endblock %}
 {% block report %}

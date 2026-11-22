@@ -1,0 +1,74 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Recipes{% endblock %}
+{% block content %}
+{{ ui.page_header("Kitchen", tabs=tabs, current=current, wide=True) }}
+<main class="wrap wide">
+  <div class="stack">
+    <label class="search">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <span class="visually-hidden">Search recipes</span>
+      <input type="search" id="recipe-search" placeholder="Search recipes or ingredients" autocomplete="off">
+    </label>
+    {% if chips %}
+    <div class="chips" role="group" aria-label="Filter">
+      <button type="button" class="chip" data-words="" aria-pressed="true">All</button>
+      {% for chip in chips %}
+      <button type="button" class="chip" data-words="{{ chip.words }}" aria-pressed="false">{{ chip.label }}</button>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <p class="small muted" id="recipe-count">{{ meals|length }} recipes</p>
+    <div class="card flush" id="recipe-list">
+      {% for meal in meals %}
+      <div class="link-row" id="recipe-{{ meal.id }}" data-search="{{ meal.search }}">
+        <a class="title grow" href="{{ meal.url }}">{{ meal.title }}</a>
+        {% if not is_guest %}
+          {% if meal.id in planned_ids %}
+          <span class="tag accent">On the plan</span>
+          {% else %}
+          <form method="post" action="/apps/recipes/meal-plan/meals/{{ meal.id }}/add">
+            <input type="hidden" name="next" value="/apps/recipes/library#recipe-{{ meal.id }}">
+            <button type="submit" class="pill-button" aria-label="Add {{ meal.title }} to the plan">+ Plan</button>
+          </form>
+          {% endif %}
+        {% endif %}
+      </div>
+      {% else %}
+      <p class="empty">No recipes yet. <a href="/apps/recipes/import">Add some from photos</a>.</p>
+      {% endfor %}
+      <p class="empty" id="recipe-none" hidden>No recipes match.</p>
+    </div>
+  </div>
+</main>
+{% endblock %}
+{% block after %}
+<script>
+(function () {
+  const search = document.getElementById("recipe-search");
+  const rows = [...document.querySelectorAll("#recipe-list [data-search]")];
+  const chips = [...document.querySelectorAll(".chip")];
+  let words = [];
+  function apply() {
+    const q = search.value.trim().toLowerCase();
+    let shown = 0;
+    for (const row of rows) {
+      const text = row.dataset.search;
+      const ok = (!q || q.split(/\s+/).every((w) => text.includes(w))) && (!words.length || words.some((w) => text.includes(w)));
+      row.hidden = !ok;
+      if (ok) shown++;
+    }
+    document.getElementById("recipe-count").textContent = shown + (shown === 1 ? " recipe" : " recipes");
+    document.getElementById("recipe-none").hidden = shown > 0 || !rows.length;
+  }
+  search.addEventListener("input", apply);
+  for (const chip of chips) {
+    chip.addEventListener("click", () => {
+      chips.forEach((c) => c.setAttribute("aria-pressed", String(c === chip)));
+      words = chip.dataset.words ? chip.dataset.words.split(" ") : [];
+      apply();
+    });
+  }
+})();
+</script>
+{% endblock %}

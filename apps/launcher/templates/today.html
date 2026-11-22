@@ -1,0 +1,130 @@
+{% extends "layout.html" %}
+{% block title %}Today{% endblock %}
+{% block content %}
+<main class="wrap wide">
+  <div class="greeting">
+    <p class="muted small">{{ today_label }}</p>
+    <h1>{{ greeting }}{% if first_name %}, {{ first_name }}{% endif %}</h1>
+  </div>
+
+  <div class="cols">
+    <div class="stack">
+      {% if thanksgiving %}
+      <section class="feature accent-today" aria-label="Thanksgiving">
+        <div class="row spread">
+          <span class="kicker">Thanksgiving</span>
+          <span class="small">{{ thanksgiving.when }}</span>
+        </div>
+        <div class="feature-big">{{ thanksgiving.countdown }}</div>
+        <div class="actions">
+          {% if thanksgiving.is_today %}
+          <a class="button primary" href="/thanksgiving/cook">Open cook mode</a>
+          {% else %}
+          <a class="button primary" href="/thanksgiving">Open the plan</a>
+          {% endif %}
+          <a class="button" href="/thanksgiving/shopping">Shopping list</a>
+        </div>
+      </section>
+      {% endif %}
+
+      <section class="accent-kitchen" aria-label="Kitchen">
+        <div class="section-head">
+          <h2 class="section-title">Kitchen</h2>
+          <a href="/apps/recipes">Open</a>
+        </div>
+        <div class="card flush">
+          {% for meal in planned_meals[:3] %}
+          <a class="link-row" href="{{ meal.url or '/apps/recipes' }}">
+            <span class="label-stack">
+              {% if loop.first %}<span class="small muted">On the plan</span>{% endif %}
+              <span class="title">{{ meal.title }}</span>
+            </span>
+            <span class="chev" aria-hidden="true">›</span>
+          </a>
+          {% else %}
+          <a class="link-row" href="/apps/recipes/library">
+            <span class="label-stack">
+              <span class="small muted">Nothing on the plan</span>
+              <span class="title">Pick some dinners</span>
+            </span>
+            <span class="chev" aria-hidden="true">›</span>
+          </a>
+          {% endfor %}
+          {% if shopping %}
+          <a class="link-row" href="/apps/recipes/grocery-lists/{{ shopping.id }}">
+            <span class="label-stack">
+              <span class="small muted">Shopping list</span>
+              <span class="title">{% if shopping.left %}{{ shopping.left }} of {{ shopping.total }} left{% else %}All done{% endif %}</span>
+            </span>
+            <span class="chev" aria-hidden="true">›</span>
+          </a>
+          {% endif %}
+        </div>
+      </section>
+    </div>
+
+    <div class="stack">
+      <section class="accent-assistant" aria-label="To do">
+        <div class="section-head">
+          <h2 class="section-title">To do</h2>
+          <a href="/apps/assistant/scheduler">Assistant</a>
+        </div>
+        <div class="card flush">
+          {% for item in todos[:5] %}
+          <div class="link-row">
+            <span class="label-stack">
+              <span class="title">{{ item.title }}</span>
+              {% if item.when %}<span class="small muted">{{ item.when }}</span>{% endif %}
+            </span>
+            {% if not is_guest %}
+            <form method="post" action="/scheduler/{{ item.id }}/complete">
+              <input type="hidden" name="next" value="/">
+              <button type="submit" class="pill-button" aria-label="Mark {{ item.title }} done">Done</button>
+            </form>
+            {% endif %}
+          </div>
+          {% endfor %}
+          {% if focus %}
+          <a class="link-row" href="{{ focus.url }}">
+            <span class="label-stack">
+              <span class="small muted">Focus project</span>
+              <span class="title">{{ focus.name }}</span>
+              {% if focus.next %}<span class="small muted">Next: {{ focus.next }}</span>{% endif %}
+            </span>
+            <span class="chev" aria-hidden="true">›</span>
+          </a>
+          {% endif %}
+          {% if not todos and not focus %}
+          <p class="empty">Nothing waiting. Nice.</p>
+          {% endif %}
+        </div>
+      </section>
+
+      <div class="tiles">
+        <a class="tile accent-trainer" href="/apps/trainer">
+          <span class="kicker">Trainer</span>
+          {% if workout %}
+          <span class="tile-title">Last: {{ workout.title }}</span>
+          <span class="small muted">{{ workout.detail }}</span>
+          {% else %}
+          <span class="tile-title">No workouts yet</span>
+          <span class="small muted">Connect Strava</span>
+          {% endif %}
+        </a>
+        <a class="tile accent-music" href="/apps/music/playlists">
+          <span class="kicker">Music</span>
+          {% if playlist_drafts %}
+          <span class="tile-title">{{ playlist_drafts }} playlist draft{{ "s" if playlist_drafts != 1 }}</span>
+          <span class="small muted">Pick up where you left off</span>
+          {% else %}
+          <span class="tile-title">Playlists</span>
+          <span class="small muted">Make one for a run or a dinner</span>
+          {% endif %}
+        </a>
+      </div>
+
+      <p class="small muted center"><a href="/apps/issues">Dieter Studio</a> · ask for a change or report a problem</p>
+    </div>
+  </div>
+</main>
+{% endblock %}
