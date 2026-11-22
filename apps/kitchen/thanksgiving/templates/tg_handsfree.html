@@ -349,7 +349,7 @@
         break;
       }
       case "timer": {
-        const label = cmd.label ? cmd.label.replace(/^./, (x) => x.toUpperCase()) : (dish ? dish.name : "Timer");
+        const label = cmd.label ? cmd.label.replace(/^./, (x) => x.toUpperCase()) : "Timer";
         c.startTimer(cmd.minutes, label);
         out(`${minutesText(cmd.minutes)} timer started${cmd.label ? " for " + cmd.label : ""}.`);
         break;

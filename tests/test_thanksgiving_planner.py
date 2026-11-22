@@ -825,6 +825,15 @@ class RouteTests(unittest.TestCase):
         self.assertIn("/thanksgiving/api/handsfree/heard", page)
         self.assertNotIn('id="hf-toggle"', self.client.get("/thanksgiving").text)
 
+    def test_timers_stand_alone_with_a_label(self):
+        self.client.get("/thanksgiving")
+        page = self.client.get("/thanksgiving/cook").text
+        self.assertIn('id="timer-label"', page)
+        self.assertNotIn("data-timer=", page)  # no timer buttons on steps or recipe lines
+        self.assertTrue(self.client.post("/thanksgiving/api/timers", json={"label": "Potatoes", "minutes": 12}).json()["ok"])
+        timers = self.client.get("/thanksgiving/api/state").json()["timers"]
+        self.assertEqual([(t["label"], t["dish_id"]) for t in timers], [("Potatoes", None)])
+
     def test_voice_answers_questions_without_changes(self):
         self.client.get("/thanksgiving")
         self.voice_with({"reply": "Yes: wrapped tight, the dough keeps 3 days in the fridge or a month frozen.",

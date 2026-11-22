@@ -89,7 +89,8 @@ body { overflow-x: hidden; }
   <aside class="side stack">
     <div class="card" id="timers-card"><h3>Timers</h3><div id="timers"></div>
       <form id="timer-form" class="row" style="margin-top:.5rem">
-        <input type="number" id="timer-min" min="1" max="600" placeholder="Min" style="width:5.5rem" aria-label="Timer minutes">
+        <input type="text" id="timer-label" maxlength="60" placeholder="Label (e.g. potatoes)" style="flex:2 1 9rem" aria-label="Timer label">
+        <input type="number" id="timer-min" min="1" max="600" placeholder="Min" style="width:5.5rem" aria-label="Timer minutes" required>
         <button type="submit">Start timer</button>
       </form></div>
     <div class="card"><h3>Coming up</h3><div id="upcoming"></div></div>
@@ -197,7 +198,6 @@ body { overflow-x: hidden; }
         <div><div class="s-when">${esc(s.day)} · ${esc(s.clock)}${s.minutes ? ` · ${s.minutes} min` : ""}${s.temp ? ` · ${s.temp}°F` : ""} ${isDone(s) ? "" : `· <span class="${s.start_ms < t && !due ? "late" : ""}">${esc(rel(s.start_ms))}</span>`}</div>
           <div class="s-title">${esc(s.title)} ${s.cook && s.cook !== dish.cook ? pill(s.cook) : ""}</div>
           ${s.detail ? `<div class="small muted">${esc(s.detail)}</div>` : ""}
-          ${s.minutes && !isDone(s) ? `<div class="s-actions"><button data-timer="${s.minutes}" data-label="${esc(dish.name + ": " + s.title)}">⏱ ${s.minutes} min timer</button></div>` : ""}
           ${stepRecipe(dish, s)}
         </div></li>`;
     }).join("");
@@ -225,7 +225,7 @@ body { overflow-x: hidden; }
   }
   function instructionsHTML(dish, sections) {
     return sections.map(sec => `${sec.heading ? `<h4>${esc(sec.heading)}</h4>` : ""}<ol class="instructions">${sec.lines.map(line =>
-      `<li>${esc(line.text)}${line.timers.map(m => `<button class="chip" data-timer="${m}" data-label="${esc(dish.name)}">⏱ ${m} min</button>`).join("")}</li>`
+      `<li>${esc(line.text)}</li>`
     ).join("")}</ol>`).join("");
   }
   function stepRecipe(dish, step) {
@@ -357,11 +357,6 @@ body { overflow-x: hidden; }
     } else if (el.dataset.snooze) {
       handled.set(el.dataset.snooze, Date.now()); renderAll();
       act(() => post("/thanksgiving/api/alerts", { key: el.dataset.snooze, state: "snooze", minutes: 5 }));
-    } else if (el.dataset.timer) {
-      const minutes = Number(el.dataset.timer), dish = state.dishes.find(d => d.id === selected);
-      state.timers.push({ id: -Date.now(), dish_id: dish && dish.id, label: el.dataset.label || "Timer", ends_ms: now() + minutes * 60000 });
-      renderAll();
-      act(() => post("/thanksgiving/api/timers", { dish_id: dish && dish.id, label: el.dataset.label, minutes }));
     } else if (el.dataset.dismissTimer) {
       const id = Number(el.dataset.dismissTimer);
       handled.set("timer:" + id, Date.now()); state.timers = state.timers.filter(t => t.id !== id); renderAll();
@@ -375,9 +370,10 @@ body { overflow-x: hidden; }
     ev.preventDefault();
     const minutes = Number($("timer-min").value);
     if (!minutes) return;
-    const dish = state && state.dishes.find(d => d.id === selected);
-    $("timer-min").value = "";
-    act(() => post("/thanksgiving/api/timers", { dish_id: dish && dish.id, label: dish ? dish.name : "Timer", minutes }));
+    const label = $("timer-label").value.trim() || "Timer";
+    $("timer-min").value = ""; $("timer-label").value = "";
+    if (state) { state.timers.push({ id: -Date.now(), dish_id: null, label, ends_ms: now() + minutes * 60000 }); renderAll(); }
+    act(() => post("/thanksgiving/api/timers", { dish_id: null, label, minutes }));
   });
   $("report-form").addEventListener("submit", (ev) => {
     ev.preventDefault();
@@ -404,11 +400,10 @@ body { overflow-x: hidden; }
     },
     timers: () => (state ? state.timers : []),
     startTimer(minutes, label) {
-      const dish = state && state.dishes.find(d => d.id === selected);
-      const name = label || (dish ? dish.name : "Timer");
-      state.timers.push({ id: -Date.now(), dish_id: dish && dish.id, label: name, ends_ms: now() + minutes * 60000 });
+      const name = label || "Timer";
+      state.timers.push({ id: -Date.now(), dish_id: null, label: name, ends_ms: now() + minutes * 60000 });
       renderAll();
-      act(() => post("/thanksgiving/api/timers", { dish_id: dish && dish.id, label: name, minutes }));
+      act(() => post("/thanksgiving/api/timers", { dish_id: null, label: name, minutes }));
     },
     stopTimer(id) {
       handled.set("timer:" + id, Date.now()); state.timers = state.timers.filter(t => t.id !== id); renderAll();
