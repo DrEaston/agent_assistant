@@ -369,7 +369,7 @@ async def load_authenticated_user(request: Request, call_next):
             return await call_next(request)
         finally:
             reset_current_user_id(user_token)
-    public_exact_paths = {"/cct-roadmap"}
+    public_exact_paths = {"/cct-roadmap", "/thanksgiving/menu"}  # the shareable Thanksgiving menu
     if DEMO_MODE:
         public_exact_paths.update({"/", "/demo"})
     token = request.cookies.get(SESSION_COOKIE_NAME, "")

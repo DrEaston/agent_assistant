@@ -142,7 +142,7 @@ class ProjectReviewTemplateTests(unittest.TestCase):
         api_source = (Path(__file__).resolve().parents[1] / "api.py").read_text(encoding="utf-8")
         base_template = (Path(__file__).resolve().parents[1] / "templates" / "base.html").read_text(encoding="utf-8")
 
-        self.assertIn('public_exact_paths = {"/cct-roadmap"}', api_source)
+        self.assertRegex(api_source, r'public_exact_paths = \{"/cct-roadmap"')
         self.assertIn('"/api/cct-roadmap"', api_source)
         self.assertIn('@app.get("/cct-roadmap")', api_source)
         self.assertIn('@app.get("/public/cct-interview-questions")', api_source)

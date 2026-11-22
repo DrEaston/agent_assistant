@@ -321,6 +321,17 @@ class RouteTests(unittest.TestCase):
         self.assertIn('id="add-dish"', page)
         self.assertEqual(self.client.get("/thanksgiving/photos/turkey.jpg").status_code, 404)
 
+    def test_main_app_lets_signed_out_visitors_see_only_the_menu(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            import api
+        client = TestClient(api.app)
+        r = client.get("/thanksgiving/menu", follow_redirects=False)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("The Menu", r.text)
+        self.assertEqual(client.get("/thanksgiving", follow_redirects=False).status_code, 303)
+        self.assertEqual(client.get("/thanksgiving/menu/1", follow_redirects=False).status_code, 303)
+
     def test_janice_brings_green_beans_and_cranberry_is_made_tuesday(self):
         self.client.get("/thanksgiving")
         plan = tg_router.store().get_plan()

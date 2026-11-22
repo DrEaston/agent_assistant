@@ -28,7 +28,8 @@ def _http():
 
 def signer_user(user):
     """The fields an app needs from the main app's user row."""
-    user = user or {}
+    if not user:
+        return {"id": None, "signed_out": True}  # only a service's public pages accept this
     return {"id": user.get("id"), "email": user.get("email") or "",
             "name": user.get("name") or user.get("display_name") or ""}
 

@@ -189,6 +189,11 @@ class ThanksgivingStore:
 
     # ---------------------------------------------------------------- plans
 
+    def household_plan(self):
+        """The plan shown at the public /thanksgiving/menu: the first one made (this site has one household)."""
+        row = self._conn().execute("SELECT * FROM tg_plans ORDER BY id LIMIT 1").fetchone()
+        return dict(row) if row else None
+
     def get_plan(self):
         row = self._conn().execute(
             "SELECT * FROM tg_plans WHERE user_id IS ? ORDER BY id DESC LIMIT 1", (get_current_user_id(),)

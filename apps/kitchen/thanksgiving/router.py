@@ -21,6 +21,7 @@ from starlette.concurrency import run_in_threadpool
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from core import internal
+from database import get_current_user_id
 
 from . import handsfree, menu, planner, sizes, voice
 from .presets import CATEGORIES, OUR_MENU, PRESET_BUTTONS, preset_dish
@@ -276,8 +277,25 @@ def timeline_page(request: Request):
     return render_page(request, "tg_timeline.html", "timeline")
 
 
+PUBLIC_PATHS = {"/thanksgiving/menu"}  # open without signing in (the main app and service.py both allow it)
+
+
+def public_menu(request):
+    """Signed out: just the menu card, for sharing the plain link. No tabs, no editing, no names."""
+    plan = store().household_plan()
+    if not plan:
+        return render("tg_menu_public.html", menu_courses=[], dinner=planner.parse_dt(DEFAULT_DINNER),
+                      menu_time="", page_url=str(request.url.path))
+    dinner = planner.parse_dt(plan["dinner_at"])
+    courses = menu.courses(store().get_dishes(plan["id"]))
+    return render("tg_menu_public.html", menu_courses=courses, dinner=dinner, menu_time=menu.time_in_words(dinner),
+                  page_url=str(request.url.path))
+
+
 @router.get("/thanksgiving/menu", response_class=HTMLResponse)
 def menu_page(request: Request):
+    if not get_current_user_id():
+        return public_menu(request)
     def courses(context):
         found = menu.courses(context["dishes"])
         return {"menu_courses": found, "menu_time": menu.time_in_words(context["dinner"]),

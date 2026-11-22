@@ -1,67 +1,14 @@
 {% extends "tg_page.html" %}
 {% from "tg_macros.html" import render_sections, size_picker, recipe_block, kind_pill, task_row, day_chart with context %}
+{% from "tg_menu_card.html" import menu_style, menu_card %}
 {% block title %}Menu{% endblock %}
 {% block head %}
 {{ super() }}
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&display=swap">
-<style>
-/* The menu card: a printed multi-course menu, made to look good in a screenshot or on a shared screen. */
-.feast { --serif: "Cormorant Garamond", Georgia, "Times New Roman", serif; --paper: #fffdf8; --gold: #9a6b1f;
-  max-width: 36rem; margin: 0 auto 2.25rem; background: var(--paper); color: #2b2118; text-align: center;
-  border: 1px solid #e7dcc8; outline: 1px solid #e7dcc8; outline-offset: -10px; border-radius: 4px;
-  box-shadow: 0 1px 2px rgba(60, 40, 10, .06), 0 12px 32px rgba(60, 40, 10, .08);
-  padding: clamp(2.25rem, 7vw, 3.75rem) clamp(1.5rem, 6vw, 3.5rem); font-family: var(--serif); }
-.feast-eyebrow { display: block; font-size: .8rem; letter-spacing: .38em; text-transform: uppercase; color: var(--gold);
-  font-weight: 600; padding-left: .38em; }
-.feast-title { font-style: italic; font-weight: 500; font-size: clamp(2.8rem, 9vw, 3.8rem); line-height: 1.05;
-  margin: .5rem 0 .4rem; color: #2b2118; font-family: var(--serif); }
-.feast-when { display: block; font-size: 1.05rem; letter-spacing: .04em; color: #6b5a48; }
-.fleuron { display: block; color: var(--gold); font-size: 1.35rem; line-height: 1; margin: 1.4rem 0 .4rem; }
-.course { margin-top: 2.1rem; }
-.course + .course::before { content: ""; display: block; width: 2.5rem; height: 1px; background: #d9c9ad; margin: 0 auto 2.1rem; }
-.course-num { display: block; color: var(--gold); font-size: 1rem; font-weight: 600; letter-spacing: .1em; }
-.course-name { font-family: var(--serif); font-size: .82rem; font-weight: 600; letter-spacing: .32em; text-transform: uppercase;
-  color: #6b5a48; margin: .2rem 0 1.15rem; padding-left: .32em; }
-.dish { display: block; color: inherit; text-decoration: none; margin: 0 auto 1.05rem; max-width: 26rem; }
-.dish:last-child { margin-bottom: 0; }
-.dish-name { display: block; font-size: 1.5rem; font-weight: 600; line-height: 1.2; }
-.course-turkey .dish:first-child .dish-name { font-size: 1.8rem; }
-.dish-desc { display: block; font-style: italic; font-size: 1.07rem; line-height: 1.4; color: #6b5a48; margin-top: .1rem; }
-.dish:hover .dish-name, .dish:focus-visible .dish-name { text-decoration: underline; text-decoration-color: #d9c9ad;
-  text-underline-offset: .2em; }
-.feast-foot { display: block; color: var(--gold); font-size: 1.35rem; margin-top: 2.2rem; }
-@media (max-width: 480px) { .dish-name { font-size: 1.3rem; } .course-turkey .dish:first-child .dish-name { font-size: 1.55rem; }
-  .dish-desc { font-size: 1rem; } }
-.menu-extras { text-align: center; margin: 0 0 1rem; }
-#add-dish:not([open]) { display: none; }
-</style>
+{{ menu_style() }}
 {% endblock %}
 {% block page %}
 <section id="menu">
-  <article class="feast" aria-label="Thanksgiving menu">
-    <header>
-      <span class="feast-eyebrow">Thanksgiving</span>
-      <h2 class="feast-title">The Menu</h2>
-      <span class="feast-when">{{ dinner.strftime('%A, %B') }} {{ dinner.day }} · {{ menu_time }}</span>
-      <span class="fleuron" aria-hidden="true">❦</span>
-    </header>
-    {% for course in menu_courses %}
-    <section class="course course-{{ course.key }}" aria-label="{{ course.label }}">
-      <span class="course-num" aria-hidden="true">{{ course.numeral }}</span>
-      <h3 class="course-name">{{ course.label }}</h3>
-      {% for item in course.dishes %}
-      <a class="dish" href="/thanksgiving/menu/{{ item.dish.id }}" id="dish-{{ item.dish.id }}">
-        <span class="dish-name">{{ item.dish.name }}</span>
-        {% if item.blurb %}<span class="dish-desc">{{ item.blurb }}</span>{% endif %}
-      </a>
-      {% endfor %}
-    </section>
-    {% else %}
-    <p class="feast-when">No dishes yet. Add some below.</p>
-    {% endfor %}
-    <span class="feast-foot" aria-hidden="true">❦</span>
-  </article>
+  {{ menu_card(menu_courses, dinner, menu_time) }}
 
   <p class="small muted menu-extras">{% for d in prep_dishes %}<a href="/thanksgiving/menu/{{ d.id }}">{{ d.name }} tasks</a> · {% endfor %}<a href="#add-dish" data-open-add>Add a dish</a></p>
 

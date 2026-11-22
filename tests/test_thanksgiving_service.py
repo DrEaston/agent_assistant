@@ -82,6 +82,26 @@ class ServiceTests(unittest.TestCase):
         other = client.get("/thanksgiving/api/internal/dishes", headers=self.signed(42)).json()
         self.assertIsNone(other["plan"])
 
+    def test_menu_opens_signed_out_but_nothing_else_does(self):
+        client = TestClient(self.service.app)
+        client.get("/thanksgiving", headers=self.signed(1))  # the household's plan
+        anon = {internal.HEADER: internal.sign(proxy.signer_user(None))}
+        self.assertIsNone(internal.verify(anon[internal.HEADER]))  # other services still require a user
+        menu = client.get("/thanksgiving/menu", headers=anon)
+        self.assertEqual(menu.status_code, 200)
+        self.assertIn("The Menu</h2>", menu.text)
+        self.assertIn("Pumpkin pie", menu.text)
+        for private in ("Parrisa", "Janice", 'href="/thanksgiving/menu/', "Add a dish", "Report a problem", 'id="voice-'):
+            self.assertNotIn(private, menu.text)
+        self.assertIn('property="og:title"', menu.text)
+        self.assertEqual(client.get("/thanksgiving/menu").status_code, 401)  # still only through askdieter.ai
+        self.assertEqual(client.get("/thanksgiving", headers=anon).status_code, 401)
+        self.assertEqual(client.get("/thanksgiving/shopping", headers=anon).status_code, 401)
+        self.assertEqual(client.post("/thanksgiving/menu", headers=anon).status_code, 401)
+        self.assertEqual(client.get("/thanksgiving/api/state", headers=anon).status_code, 401)
+        # Signed in, the same address is the full Menu tab.
+        self.assertIn("Add a dish", client.get("/thanksgiving/menu", headers=self.signed(1)).text)
+
     def test_forwarding_from_the_main_app(self):
         # A main-app stand-in that forwards /thanksgiving to the service, in-process.
         main = FastAPI()

@@ -32,13 +32,18 @@ def sign(user, secret=None, now=None):
         raise RuntimeError("DIETER_INTERNAL_KEY is not set")
     body = {"id": int(user.get("id") or 0), "email": str(user.get("email") or ""),
             "name": str(user.get("name") or ""), "ts": int(now if now is not None else time.time())}
+    if user.get("signed_out") is True and not body["id"]:
+        body["signed_out"] = True
     payload = base64.urlsafe_b64encode(json.dumps(body, separators=(",", ":")).encode()).decode().rstrip("=")
     mac = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}.{mac}"
 
 
-def verify(value, secret=None, now=None):
-    """The user dict from a signed header, or None if it's missing, forged, or stale."""
+def verify(value, secret=None, now=None, allow_signed_out=False):
+    """The user dict from a signed header, or None if it's missing, forged, or stale.
+
+    allow_signed_out: also accept the main app's marker for a visitor who isn't signed in ({"signed_out": true});
+    that comes back as {"id": None, ...}. Only a service's public pages should accept it."""
     secret = secret if secret is not None else key()
     if not secret or not value or "." not in value:
         return None
@@ -51,8 +56,10 @@ def verify(value, secret=None, now=None):
     except ValueError:
         return None
     current = now if now is not None else time.time()
-    if not isinstance(body, dict) or abs(current - int(body.get("ts") or 0)) > MAX_AGE or not body.get("id"):
+    if not isinstance(body, dict) or abs(current - int(body.get("ts") or 0)) > MAX_AGE:
         return None
+    if not body.get("id"):
+        return {"id": None, "email": "", "name": ""} if allow_signed_out and body.get("signed_out") is True else None
     return {"id": int(body["id"]), "email": body.get("email") or "", "name": body.get("name") or ""}
 
 
