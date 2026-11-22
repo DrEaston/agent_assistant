@@ -19,7 +19,9 @@ param(
     # Identity the service runs as. Default: the project's compute account. Previews use their own, narrower one.
     [string]$RuntimeServiceAccount = "",
     # Previews: read a copy of the live data at startup and never write it back (bucket read access only).
-    [switch]$DataReadOnly
+    [switch]$DataReadOnly,
+    # Fine-grained GitHub token Studio uses to open issues for Claude Code (main service only, if it exists).
+    [string]$GitHubTokenSecretName = "dieter-github-token"
 )
 
 $ErrorActionPreference = "Stop"
@@ -252,6 +254,25 @@ if ($ExtraEnv) {
     $envVars = "$envVars,$ExtraEnv"
 }
 
+# --set-secrets replaces the whole list, so every secret the service uses is named here.
+$secrets = "OPENAI_API_KEY=$OpenAiSecretName`:latest,DIETER_INTERNAL_KEY=$InternalKeySecretName`:latest,SECRET_KEY=$AppSecretKeyName`:latest"
+# Studio's "Send to Claude" token, on the main app only (never on previews), once it exists in Secret Manager.
+if ($ServiceName -eq "dieter" -and $GitHubTokenSecretName) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & $gcloud secrets describe $GitHubTokenSecretName *> $null
+    $hasGitHubToken = ($LASTEXITCODE -eq 0)
+    if ($hasGitHubToken) {
+        & $gcloud secrets add-iam-policy-binding $GitHubTokenSecretName `
+            --member "serviceAccount:$runtimeServiceAccount" `
+            --role "roles/secretmanager.secretAccessor" *> $null
+    }
+    $ErrorActionPreference = $previous
+    if ($hasGitHubToken) {
+        $secrets = "$secrets,DIETER_GITHUB_TOKEN=$GitHubTokenSecretName`:latest"
+    }
+}
+
 & $gcloud run deploy $ServiceName `
     --source . `
     --region $Region `
@@ -263,4 +284,4 @@ if ($ExtraEnv) {
     --memory 1Gi `
     --cpu 1 `
     --update-env-vars $envVars `
-    --set-secrets "OPENAI_API_KEY=$OpenAiSecretName`:latest,DIETER_INTERNAL_KEY=$InternalKeySecretName`:latest,SECRET_KEY=$AppSecretKeyName`:latest"
+    --set-secrets $secrets
