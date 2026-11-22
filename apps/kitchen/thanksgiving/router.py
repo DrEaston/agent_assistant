@@ -16,11 +16,11 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from . import handsfree, planner, sizes, voice
+from . import handsfree, menu, planner, sizes, voice
 from .presets import CATEGORIES, OUR_MENU, PRESET_BUTTONS, preset_dish
 from .store import ThanksgivingStore
 
@@ -198,7 +198,7 @@ def create_default_plan(request):
     return store().get_plan()
 
 
-def render_page(request, template, tab, **extra):
+def render_page(request, template, tab, extend=None, **extra):
     """One tab of the planner (they share tg_page.html: header, tabs, Tell Dieter)."""
     plan = store().get_plan() or create_default_plan(request)
     context = plan_context(plan)
@@ -207,8 +207,8 @@ def render_page(request, template, tab, **extra):
         day = context["dinner"] - planner.timedelta(days=offset)
         day_choices.append({"offset": offset, "label": "Thanksgiving" if offset == 0 else planner.short_date(day)})
     context.update(extra)
-    if callable(context.get("dish")):
-        context.update(context.pop("dish")(context))
+    if extend:
+        context.update(extend(context))  # page-specific values worked out from the plan
     return render(template, **context, planner=planner, categories=CATEGORIES, presets=PRESET_BUTTONS,
                   step_kinds=planner.KIND_LABELS, day_choices=day_choices, tab=tab,
                   page_url=str(request.url.path))
@@ -226,7 +226,20 @@ def timeline_page(request: Request):
 
 @router.get("/thanksgiving/menu", response_class=HTMLResponse)
 def menu_page(request: Request):
-    return render_page(request, "tg_menu.html", "menu", library=library_recipes())
+    def courses(context):
+        found = menu.courses(context["dishes"])
+        return {"menu_courses": found, "menu_credits": menu.credits(found),
+                "dishes": [d for d in context["dishes"] if d.get("category") != "prep"],
+                "prep_dishes": [d for d in context["dishes"] if d.get("category") == "prep"]}
+    return render_page(request, "tg_menu.html", "menu", extend=courses, library=library_recipes())
+
+
+@router.get("/thanksgiving/photos/{name}")
+def menu_photo(name: str):
+    path = menu.photo_file(name)
+    if not path:
+        raise HTTPException(status_code=404, detail="No such photo.")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=604800"})
 
 
 @router.get("/thanksgiving/menu/{dish_id}", response_class=HTMLResponse)
@@ -236,7 +249,7 @@ def dish_page(request: Request, dish_id: int):
         if not dish:
             raise HTTPException(status_code=404, detail="That dish isn't on the menu.")
         return {"dish": dish, "dish_tasks": [t for t in context["tasks"] if t["dish_id"] == dish_id]}
-    return render_page(request, "tg_dish.html", "menu", dish=pick)
+    return render_page(request, "tg_dish.html", "menu", extend=pick)
 
 
 @router.get("/thanksgiving/recipes", response_class=HTMLResponse)

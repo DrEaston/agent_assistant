@@ -288,15 +288,29 @@ class RouteTests(unittest.TestCase):
     def test_each_tab_is_its_own_page(self):
         self.client.get("/thanksgiving")
         for url, heading in [("/thanksgiving", "Up next"), ("/thanksgiving/timeline", "<h2>Timeline</h2>"),
-                             ("/thanksgiving/menu", "<h2>Menu</h2>"), ("/thanksgiving/recipes", "<h2>Recipes</h2>"),
+                             ("/thanksgiving/menu", "The Menu</h2>"), ("/thanksgiving/recipes", "<h2>Recipes</h2>"),
                              ("/thanksgiving/shopping", "Shopping list"), ("/thanksgiving/settings", "Dinner date")]:
             page = self.client.get(url).text
             self.assertIn(heading, page, url)
             self.assertIn(f'<a href="{url}" aria-current="page">', page, url)
             self.assertIn('id="voice-live"', page, url)  # Tell Dieter on every page
         timeline = self.client.get("/thanksgiving/timeline").text
-        self.assertNotIn("<h2>Menu</h2>", timeline)
+        self.assertNotIn("The Menu</h2>", timeline)
         self.assertNotIn("Dinner date", timeline)
+
+    def test_menu_card_has_photos_and_leaves_out_house_prep(self):
+        self.client.get("/thanksgiving")
+        page = self.client.get("/thanksgiving/menu").text
+        card = page.split('<article class="feast"')[1].split("</article>")[0]
+        self.assertIn('src="/thanksgiving/photos/turkey.jpg"', card)
+        self.assertIn("Sharp cheddar, Gruyère and goat cheese", card)
+        self.assertNotIn("House prep", card)
+        self.assertIn("House prep tasks", page)  # still reachable from the kitchen list
+        self.assertIn("Wikimedia Commons", card)  # photo credits
+        r = self.client.get("/thanksgiving/photos/turkey.jpg")
+        self.assertEqual((r.status_code, r.headers["content-type"]), (200, "image/jpeg"))
+        self.assertEqual(self.client.get("/thanksgiving/photos/menu.json").status_code, 404)
+        self.assertEqual(self.client.get("/thanksgiving/photos/..%2Frouter.py").status_code, 404)
 
     def test_menu_lists_dishes_and_each_opens_its_own_page(self):
         self.client.get("/thanksgiving")
