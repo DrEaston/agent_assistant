@@ -35,7 +35,7 @@ Allowed actions (dish ids and step ids exactly as listed in the plan):
   Moves the earliest of those steps to that date/time; the others keep their spacing after it.
 - {"type": "shift", "dish_id": 7, "step_ids": ["bake"], "days": 0, "minutes": 60}   Later (+) or earlier (-).
 - {"type": "size", "dish_id": 7, "scale": 0.5}   Only a scale listed for that dish.
-- {"type": "done", "dish_id": 7, "step_ids": ["dough"], "done": true}
+- {"type": "done", "dish_id": 7, "step_ids": ["dough"], "done": true}   Checks the box (saved right away).
 - {"type": "add", "dish_id": 7, "title": "Toast the pecans", "date": "YYYY-MM-DD", "time": "HH:MM",
    "minutes": 10, "kind": "hands|oven|stove|passive|check|shop", "temp": 0, "detail": ""}
 - {"type": "remove", "dish_id": 7, "step_ids": ["chill"]}
@@ -55,6 +55,13 @@ How to think:
 - "The crust"/"the dough" means steps in section Crust (or about the crust/dough).
 - Resolve days like "Saturday" or "tomorrow" from today's date.
 - For a cooking question, answer it in the reply with no actions.
+- "What's left / what should I do / what's not done": use the Status block. Name the unchecked steps from
+  earlier first (by dish and step, with their day), then what's next. Never say "nothing to do" if Status lists
+  anything unchecked.
+- When the cook says they already did something, or tells you to check it off / mark it done, use "done"
+  actions for exactly those steps. Done-only changes are saved right away (no confirmation, Undo is shown), so
+  for those the reply says it's checked off, e.g. "Checked off clearing the fridge and moving the turkey."
+  Never mark a step done unless the cook said so.
 - Never invent dishes, steps or sizes that aren't in the plan. There is no assigning dishes to people."""
 
 
@@ -83,6 +90,19 @@ def plan_summary(plan, dishes, tasks, cooks, now):
         "Next days: " + ", ".join(f"{(now + timedelta(days=i)):%a %m-%d}" for i in range(0, 9)),
         "",
     ]
+    # Worked out here, not left to the model: which boxes are unchecked from earlier, and what's coming up.
+    names = {dish["id"]: dish["name"] for dish in dishes}
+    undone = sorted((t for t in tasks if not t.get("done") and t["dish_id"] in names), key=lambda t: t["start"])
+    late = [t for t in undone if t["start"] < now]
+    upcoming = [t for t in undone if t["start"] >= now][:6]
+
+    def status_line(task):
+        return f"  {names[task['dish_id']]}: {task['title']} (step {task['step_id']}, dish {task['dish_id']}) | "                f"{task['start']:%a %m-%d %H:%M}"
+    lines.append("Status, unchecked steps from earlier (not done yet): " + ("" if late else "none"))
+    lines.extend(status_line(t) for t in late)
+    lines.append("Status, next unchecked steps: " + ("" if upcoming else "none"))
+    lines.extend(status_line(t) for t in upcoming)
+    lines.append("")
     for dish in dishes:
         size = ""
         if dish.get("size_options"):
@@ -206,6 +226,8 @@ Reply with a JSON object only:
 
 Use "answer" for: questions you can answer straight from the plan below (what's next, what time, how long,
 which dish), general cooking questions, greetings and small talk about the cooking.
+For "what should I do / what's left / what's not done", read the Status block: name the unchecked earlier
+steps first, then what's next, briefly. Never say there's nothing to do if Status lists anything.
 Use "deep" for: ANY request to change the plan (move, push, add, remove, resize, mark done, change dinner time),
 "what if" or "could we" timing questions, anything about knock-on effects on other dishes or the oven, and
 anything you can't answer confidently from the plan.

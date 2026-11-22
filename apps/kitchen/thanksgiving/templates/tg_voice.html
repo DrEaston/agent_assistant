@@ -139,6 +139,7 @@
     // Start listening straight away (this tap counts as permission to use the mic). Don't focus the text box:
     // that pops up the keyboard, whose own voice-typing button fills the box but never sends.
     document.dispatchEvent(new CustomEvent("tg:voice-opened"));  // hands-free pauses so the mics don't fight
+    fetch("/thanksgiving/api/warm", { method: "POST" }).catch(() => {});  // open the AI connection while you talk
     sheet.hidden = false;
     document.body.classList.add("voice-open");
     $("voice-open").hidden = true;
@@ -162,6 +163,11 @@
     if ((data.warnings || []).length) html += data.warnings.map((w) => `<div class="voice-warning">Heads up: ${esc(w)}</div>`).join("");
     say("dieter", html || "I'm not sure what to change. Try saying it another way.");
     $("voice-decide").hidden = !data.can_apply;
+    if (data.applied) {
+      // Check-offs are saved right away; Undo is there if Dieter checked the wrong box.
+      $("voice-undo-row").hidden = false;
+      document.dispatchEvent(new CustomEvent("tg:changed"));
+    }
   }
 
   async function send(message) {
@@ -244,7 +250,7 @@
   // answers in the panel (not out loud), and the mic stays open until 10 seconds pass with nothing said to Dieter. It turns itself
   // off when two phrases in a row clearly aren't for it, or when you wrap up ("thanks, that's all").
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const CONVO_MS = 10000, MAX_IGNORED = 2;
+  const CONVO_MS = 10000, MAX_IGNORED = 2, SETTLE_MS = 700;
   const SPEAK_REPLIES = false;  // replies are text only; flip to true to have Dieter read them aloud
   let recognition = null, convo = null, speaking = false, utter = 0, lastPhrase = { text: "", at: 0 };
 
@@ -321,17 +327,31 @@
     recognition.lang = "en-US";
     recognition.continuous = true;
     recognition.interimResults = true;
-    let handledIndex = -1;
+    let handledIndex = -1, settle = null;
+    const rec = recognition;
     recognition.onresult = (event) => {
-      let interim = "";
+      let interim = "", interimIndex = -1;
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         if (result.isFinal) {
           if (i > handledIndex) { handledIndex = i; const phrase = result[0].transcript.trim(); if (phrase) heardPhrase(phrase); }
-        } else interim += result[0].transcript;
+        } else if (i > handledIndex) { interim += result[0].transcript; interimIndex = i; }
       }
       text.value = interim.trim();
       if (interim.trim() && convo) convo.until = Math.max(convo.until, Date.now() + CONVO_MS);
+      clearTimeout(settle);
+      if (interim.trim()) {
+        const phrase = interim.trim();
+        settle = setTimeout(() => {
+          // No new words for a moment: that's the end of the sentence. Send it now, then restart the mic so
+          // the next sentence starts fresh.
+          if (recognition !== rec || !convo) return;
+          handledIndex = Math.max(handledIndex, interimIndex);
+          stopRecognition();
+          heardPhrase(phrase);
+          setTimeout(listenNext, 150);
+        }, SETTLE_MS);
+      }
     };
     recognition.onerror = (event) => {
       if (event.error === "not-allowed" || event.error === "service-not-allowed") {

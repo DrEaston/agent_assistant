@@ -324,7 +324,8 @@ def set_dish_size(dish_id: int, scale: str = Form(...)):
 # from /thanksgiving/api/think; older clients just wait for the final answer.
 
 CHANGE_WORDS = re.compile(r"\b(move|moving|push|pushed|pull|shift|change|reschedule|instead|earlier|later|add|"
-                          r"remove|delete|drop|skip|double|halve|half batch|resize|mark|dinner at|what if)\b")
+                          r"remove|delete|drop|skip|double|halve|half batch|resize|mark|dinner at|what if|"
+                          r"did|finished|check(ed)? (it |them |that |those )?off|tick)\b")
 PUSHBACK = re.compile(r"\b(are you sure|think (about it|harder|again)|double ?check|that's wrong|that is wrong|"
                       r"doesn't work|won't work|that's not right)\b")
 _thinkers = ThreadPoolExecutor(max_workers=4, thread_name_prefix="dieter-deep")
@@ -333,7 +334,7 @@ JOB_MAX_AGE = 300
 
 def _empty_answer(**extra):
     answer = {"ignored": False, "reply": "", "question": "", "changes": [], "problems": [], "warnings": [],
-              "can_apply": False, "end": False}
+              "can_apply": False, "applied": False, "end": False}
     answer.update(extra)
     return answer
 
@@ -417,15 +418,40 @@ def _finish(ticket):
     actions, changes, problems = voice.check(result["actions"], plan, context["dishes"], context["tasks"],
                                              context["cooks"])
     warnings = voice.knock_on(plan, context["dishes"], actions, plan["ovens"])
-    _state["voice_pending"][plan["id"]] = actions
+    applied = bool(actions) and all(a["type"] == "done" for a in actions)
+    if applied:
+        # Checking off boxes the cook asked to check is saved right away; Undo is shown instead of Apply/Cancel.
+        _state["voice_pending"].pop(plan["id"], None)
+        _state["voice_undo"][plan["id"]] = voice.apply(store(), plan, actions)
+    else:
+        _state["voice_pending"][plan["id"]] = actions
     # Logged so "it did something dumb" can be looked up later.
     print("Tell Dieter: " + json.dumps({"device": job["device"] or "unnamed", "sass": job["sass"],
                                         "hands_free": job["spoken"] or "", "said": job["text"][:500],
                                         "reply": result["reply"], "question": result["question"],
-                                        "changes": changes, "problems": problems, "warnings": warnings, "ms": deep_ms,
+                                        "changes": changes, "problems": problems, "warnings": warnings,
+                                        "applied": applied, "ms": deep_ms,
                                         "model": voice.model_name() if _state["voice_model"] is None else "test"}))
     return _empty_answer(reply=result["reply"], question=result["question"], changes=changes, problems=problems,
-                         warnings=warnings, can_apply=bool(actions), end=bool(result.get("end")), tier="deep")
+                         warnings=warnings, can_apply=bool(actions) and not applied, applied=applied,
+                         end=bool(result.get("end")), tier="deep")
+
+
+def warm_up():
+    """Open the OpenAI connections before the cook's first phrase (a cold one adds ~3 s to that phrase)."""
+    if _state.get("fast_model") is not None or _state.get("warmed", 0) > time.time() - 240:
+        return
+    _state["warmed"] = time.time()
+    for name, timeout in ((voice.fast_model_name(), 6), (voice.model_name(), 60)):
+        _thinkers.submit(_ping, name, timeout)
+
+
+def _ping(name, timeout):
+    try:
+        voice._client(timeout).chat.completions.create(model=name, messages=[{"role": "user", "content": "hi"}],
+                                                       max_completion_tokens=16)
+    except Exception as exc:
+        print(f"Warning: warm-up failed for {name}: {exc}")
 
 
 async def _answer_request(data, spoken=""):
@@ -520,6 +546,13 @@ def api_speak(text: str = ""):
             print("Hands-free voice cut off: " + json.dumps({"error": str(error)[:200]}))
 
     return StreamingResponse(body(), media_type="audio/mpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.post("/thanksgiving/api/warm")
+def api_warm():
+    """The voice panel calls this when it opens, so the first phrase doesn't wait on a cold connection."""
+    warm_up()
+    return {"ok": True}
 
 
 @router.post("/thanksgiving/api/voice-log")

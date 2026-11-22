@@ -252,6 +252,10 @@
     history = history.slice(-8);
     awaiting = !!data.can_apply;
     if (awaiting) say += " Should I do it?";
+    if (data.applied) {  // check-offs are saved right away; "Dieter, undo" takes them back
+      localUndo = null; serverUndo = true;
+      document.dispatchEvent(new CustomEvent("tg:changed"));
+    }
     showSaid(data.question || data.reply, data.changes.concat((data.warnings || []).map((w) => "Heads up: " + w)));
     speak(say || "Hmm, I'm not sure. Try saying it another way.");
   }
@@ -425,6 +429,7 @@
     bar.hidden = false; toggle.setAttribute("aria-pressed", "true");
     showSaid("", []); $("hf-heard").textContent = "";
     report("on", device().name || "unnamed");
+    fetch("/thanksgiving/api/warm", { method: "POST" }).catch(() => {});
     speak("Hands-free is on. Say Dieter, then what you need.");  // this tap also unlocks speech on Android
   }
   function turnOff(message) {

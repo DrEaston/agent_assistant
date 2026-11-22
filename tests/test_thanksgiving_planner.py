@@ -483,6 +483,28 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(len(r["problems"]), 5)
         self.assertIn("after dinner", r["problems"][0])
 
+    def test_checking_off_by_voice_is_saved_right_away_and_undoable(self):
+        self.client.get("/thanksgiving")
+        plan, mac = self.mac()
+        self.voice_with({"reply": "Checked off the practice run.", "question": "", "actions": [
+            {"type": "done", "dish_id": mac["id"], "step_ids": ["practice"], "done": True}]})
+        r = self.client.post("/thanksgiving/api/command", json={"text": "I did the practice run"}).json()
+        self.assertTrue(r["applied"])
+        self.assertFalse(r["can_apply"])
+        self.assertIn(f"{mac['id']}:practice", tg_router.store().get_checked(plan["id"], "step"))
+        self.assertEqual(self.client.post("/thanksgiving/api/command/apply").status_code, 409)  # nothing pending
+        self.client.post("/thanksgiving/api/command/undo")
+        self.assertNotIn(f"{mac['id']}:practice", tg_router.store().get_checked(plan["id"], "step"))
+
+    def test_the_model_is_told_which_steps_are_unchecked(self):
+        self.client.get("/thanksgiving")
+        seen = self.voice_with({"reply": "Here's what's left.", "question": "", "actions": []})
+        self.client.post("/thanksgiving/api/command", json={"text": "what's not done"})
+        plan_text = next(m["content"] for m in seen["messages"] if m["content"].startswith("The plan:"))
+        self.assertIn("Status, unchecked steps from earlier", plan_text)
+        self.assertIn("Status, next unchecked steps:", plan_text)
+        self.assertIn("(step ", plan_text.split("Status, next unchecked steps:")[1])
+
     def test_voice_size_and_done_but_no_assigning_people(self):
         self.client.get("/thanksgiving")
         plan, mac = self.mac()
