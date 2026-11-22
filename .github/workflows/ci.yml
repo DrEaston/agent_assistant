@@ -21,4 +21,22 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements.txt
-      - run: python -m unittest discover -s tests
+      - name: Run tests
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests 2>&1 | tee test-output.txt
+      - name: Show failures as annotations
+        if: failure()
+        run: |
+          # Annotations are readable without signing in, so failures can be diagnosed from anywhere.
+          python - <<'PY'
+          import re
+          text = open("test-output.txt", encoding="utf-8", errors="replace").read()
+          blocks = re.split(r"
+={50,}
+", text)
+          for block in blocks[1:9]:
+              msg = block.strip().replace("%", "%25").replace("", "").replace("
+", "%0A")
+              print("::error title=Test failure::" + msg[:3500])
+          PY
