@@ -47,7 +47,7 @@ Start checking at 2 1/2 hours: 165°F in the thickest part of the breast and thi
 Rest, loosely tented, 30 to 40 minutes. The vegetables are soft and rich: use them for gravy or serve them."""
 
 GRAVY_INGREDIENTS = """turkey pan drippings
-4 tbsp butter (or skimmed turkey fat)
+4 tbsp unsalted butter (or skimmed turkey fat)
 1/4 cup flour
 low-sodium broth to make 3 to 4 cups liquid with the drippings"""
 
@@ -56,8 +56,9 @@ Melt 4 tbsp butter or fat, whisk in 1/4 cup flour, and cook 1 minute.
 Whisk in 3 to 4 cups drippings topped up with broth. Simmer 5 to 10 minutes.
 Taste before adding any salt (the turkey is pre-brined)."""
 
-POTATO_INGREDIENTS = """4 lb Yukon Gold potatoes
-1 1/2 sticks butter
+POTATO_INGREDIENTS = """2 lb russet potatoes
+2 lb Yukon Gold potatoes
+1 1/2 sticks unsalted butter
 1 to 1 1/4 cups half-and-half or heavy cream
 2 oz cream cheese (optional)
 kosher salt
@@ -67,12 +68,12 @@ POTATO_INSTRUCTIONS = """Peel and cut potatoes into 2-inch chunks. Cover with co
 Bring to a boil and cook 15 to 20 minutes, until a fork slides in easily.
 Drain, then return to the hot pot 1 to 2 minutes to steam dry.
 Melt the butter into the warm cream.
-Mash or rice. Add the butter-cream and cream cheese. Beat with a hand mixer on low-medium 30 to 60 seconds only.
+Mash or rice. Add the butter-cream and cream cheese. Beat with a hand mixer on low-medium 30 to 60 seconds only (russets turn gluey if over-beaten).
 Season with salt and pepper.
 Hold in a buttered slow cooker on Warm (up to 4 hours). Stir now and then; add a splash of cream and a pat of butter before serving."""
 
 STUFFING_INGREDIENTS = """1 bag (12 to 14 oz) herb-seasoned stuffing cubes
-1 stick butter
+1 stick unsalted butter
 1 onion
 3 celery ribs
 2 to 2 1/2 cups low-sodium broth

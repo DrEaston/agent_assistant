@@ -6,8 +6,12 @@ scoped to a plan the caller already loaded for that user.
 """
 
 import json
+import re
 
 from database import get_current_user_id
+
+# "1 1/2 sticks butter" -> "1 1/2 sticks unsalted butter" (lines that already say salted or unsalted are left alone).
+UNSALTED_BUTTER = re.compile(r"^(\s*\d[\d/ ]*\s*(?:tbsp|tablespoons?|sticks?|cups?)\s+)butter\b", re.IGNORECASE)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tg_plans (
@@ -182,6 +186,29 @@ class ThanksgivingStore:
                         steps.append(whipped_cream_step())
                     conn.execute("UPDATE tg_dishes SET ingredients_text = ?, instructions_text = ?, steps_json = ? WHERE id = ?",
                                  (ingredients, instructions, json.dumps(steps), row["id"]))
+            if once(plan_id, "potatoes-half-russet"):
+                changed = True
+                for row in conn.execute("SELECT * FROM tg_dishes WHERE plan_id = ? AND name = 'Whipped mashed potatoes'",
+                                        (plan_id,)).fetchall():
+                    ingredients = (row["ingredients_text"] or "").replace(
+                        "4 lb Yukon Gold potatoes", "2 lb russet potatoes\n2 lb Yukon Gold potatoes", 1)
+                    instructions = (row["instructions_text"] or "").replace(
+                        "30 to 60 seconds only.", "30 to 60 seconds only (russets turn gluey if over-beaten).", 1)
+                    conn.execute("UPDATE tg_dishes SET ingredients_text = ?, instructions_text = ? WHERE id = ?",
+                                 (ingredients, instructions, row["id"]))
+            if once(plan_id, "unsalted-butter"):
+                # The turkey is pre-brined, so every dish uses unsalted butter.
+                changed = True
+                for row in conn.execute("SELECT id, ingredients_text FROM tg_dishes WHERE plan_id = ?", (plan_id,)).fetchall():
+                    text = row["ingredients_text"] or ""
+                    fixed = "\n".join(UNSALTED_BUTTER.sub(r"\1unsalted butter", line) for line in text.split("\n"))
+                    if fixed != text:
+                        conn.execute("UPDATE tg_dishes SET ingredients_text = ? WHERE id = ?", (fixed, row["id"]))
+            if once(plan_id, "mac-full-batch"):
+                # Dinner is 5 or 6 adults and a kid: the practice-run half batch (about 4 servings) is too small.
+                changed = True
+                conn.execute("UPDATE tg_dishes SET scale = 1.0 WHERE plan_id = ? AND name = 'Mac and cheese' AND scale < 1",
+                             (plan_id,))
         return changed
 
     def _commit(self):

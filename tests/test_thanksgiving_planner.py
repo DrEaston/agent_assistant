@@ -164,8 +164,9 @@ class RecipeSectionTests(unittest.TestCase):
     def test_whole_menu_totals(self):
         sections = planner.build_grocery_list(menu_dishes())
         items = {i["text"]: i for s in sections for i in s["items"]}
-        self.assertEqual(items["Butter"]["amount"], "5 1/2 sticks (about 1 1/3 lb)")
-        self.assertEqual(items["Yukon Gold potatoes"]["amount"], "4 lb")
+        self.assertEqual(items["Unsalted butter"]["amount"], "5 1/2 sticks (about 1 1/3 lb)")
+        self.assertEqual(items["Yukon Gold potatoes"]["amount"], "2 lb")
+        self.assertEqual(items["Russet potatoes"]["amount"], "2 lb")
         self.assertEqual(items["Onions"]["amount"], "4")  # 2 + 1/2 + 1, rounded up
         self.assertEqual(items["Celery"]["amount"], "7 ribs")
         self.assertEqual(items["Eggs"]["amount"], "3")
@@ -497,6 +498,8 @@ class RouteTests(unittest.TestCase):
         conn = self.db.connect()
         conn.execute("UPDATE tg_dishes SET ingredients_text = ?, instructions_text = ?, scale = 0.5 WHERE id = ?",
                      (presets.OLD_MAC_INGREDIENTS, presets.OLD_MAC_INSTRUCTIONS, mac["id"]))
+        # The one-time switch to a full batch for Thanksgiving dinner already ran; a size chosen after it stays.
+        conn.execute("INSERT INTO tg_checks (plan_id, kind, item_key) VALUES (?, 'migration', 'mac-full-batch')", (plan["id"],))
         conn.commit()
         tg_router.configure(self.db)  # restart
         upgraded = self.mac()[1]

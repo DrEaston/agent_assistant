@@ -88,3 +88,23 @@ class TodayHelperTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ThanksgivingIngredientFixTests(unittest.TestCase):
+    def test_plain_butter_becomes_unsalted(self):
+        from apps.kitchen.thanksgiving.store import UNSALTED_BUTTER
+        fix = lambda line: UNSALTED_BUTTER.sub(r"\1unsalted butter", line)
+        self.assertEqual(fix("1 1/2 sticks butter"), "1 1/2 sticks unsalted butter")
+        self.assertEqual(fix("4 tbsp butter (or skimmed turkey fat)"), "4 tbsp unsalted butter (or skimmed turkey fat)")
+        self.assertEqual(fix("5 tbsp unsalted butter"), "5 tbsp unsalted butter")
+        self.assertEqual(fix("2 tbsp salted butter"), "2 tbsp salted butter")
+
+    def test_russet_and_yukon_stay_separate_on_the_list(self):
+        from apps.kitchen.thanksgiving import planner
+        dish = {"id": 1, "name": "Mash", "category": "side", "scale": 1.0,
+                "ingredients_text": "2 lb russet potatoes\n2 lb Yukon Gold potatoes\n1 stick unsalted butter\n2 tbsp unsalted butter, melted",
+                "instructions_text": ""}
+        items = {i["text"]: i.get("amount") for s in planner.build_grocery_list([dish], []) for i in s["items"]}
+        self.assertEqual(items.get("Russet potatoes"), "2 lb")
+        self.assertEqual(items.get("Yukon Gold potatoes"), "2 lb")
+        self.assertIn("Unsalted butter", items)

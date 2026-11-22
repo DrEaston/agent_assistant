@@ -135,6 +135,8 @@ def display_name(key, entry):
     if key in ingredients.BUY_AS or key in ingredients.COUNT_NAMES:
         return entry["name"]
     described = {_describe(p) for p in entry["lines"]}
+    if key == "butter" and described and all("unsalted" in d.lower() for d in described):
+        return "Unsalted butter"
     if len({d.lower().rstrip("s") for d in described}) == 1:
         text = sorted(described)[0]
         if 2 < len(text) <= 40:

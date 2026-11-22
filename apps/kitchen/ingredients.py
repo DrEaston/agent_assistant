@@ -77,6 +77,8 @@ ITEMS = (
     ("orange-juice", "Orange juice", ("orange juice",)),
     ("orange", "Oranges", ("orange",)),
     ("sweet-potato", "Sweet potatoes", ("sweet potato",)),
+    ("russet-potato", "Russet potatoes", ("russet",)),
+    ("yukon-potato", "Yukon Gold potatoes", ("yukon",)),
     ("potato", "Potatoes", ("potato",)),
     ("broth", "Broth", ("broth", "stock")),
     ("stuffing", "Stuffing cubes", ("stuffing cubes", "stuffing mix")),
