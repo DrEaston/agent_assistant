@@ -63,6 +63,7 @@ ITEMS = (
     ("rice-flour", "Rice flour", ("rice flour",)),
     ("flour", "Flour", ("flour",)),
     ("brown-sugar", "Brown sugar", ("brown sugar",)),
+    ("powdered-sugar", "Powdered sugar", ("powdered sugar", "confectioners", "icing sugar")),
     ("sugar", "Sugar", ("sugar",)),
     ("garlic-powder", "Garlic powder", ("garlic powder",)),
     ("garlic", "Garlic", ("garlic",)),
@@ -72,6 +73,9 @@ ITEMS = (
     ("celery", "Celery", ("celery",)),
     ("carrot", "Carrots", ("carrot",)),
     ("lemon", "Lemons", ("lemon",)),
+    ("cranberries", "Fresh cranberries", ("cranberries",)),
+    ("orange-juice", "Orange juice", ("orange juice",)),
+    ("orange", "Oranges", ("orange",)),
     ("sweet-potato", "Sweet potatoes", ("sweet potato",)),
     ("potato", "Potatoes", ("potato",)),
     ("broth", "Broth", ("broth", "stock")),
@@ -97,7 +101,7 @@ BUY_AS = {"herbs": "1 small pack each", "salt": "", "pepper": ""}
 TRAILING_UNITS = {"rib", "clove", "head", "bunch", "slice"}
 
 # Counted things that are named by size, not unit ("2 large onions").
-COUNT_NAMES = {"onion": ("onion", "onions"), "lemon": ("lemon", "lemons"), "carrot": ("carrot", "carrots"),
+COUNT_NAMES = {"onion": ("onion", "onions"), "lemon": ("lemon", "lemons"), "orange": ("orange", "oranges"), "carrot": ("carrot", "carrots"),
                "eggs": ("egg", "eggs"), "turkey": ("turkey", "turkeys")}
 
 # Things most kitchens have; listed under "Check the pantry" instead of "buy".

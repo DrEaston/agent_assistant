@@ -1,7 +1,8 @@
-"""The shareable Thanksgiving menu: dishes grouped into courses, each with a photo and a one-line description.
+"""The shareable Thanksgiving menu card: dishes grouped into numbered courses, each with a one-line description.
 
-Photos, descriptions and credits live in static/photos/menu.json (content, not code): a dish uses the first
-entry whose "match" words appear in its name. House prep isn't food, so it never appears on the menu.
+Course names, order and descriptions live in menu.json next to this file (content, not code). A dish uses the
+first entry whose "match" words appear in its name. House prep isn't food, so it never appears. Who makes a
+dish (the dish's `cook`) is kept on the dish pages, never on the card.
 """
 
 import json
@@ -11,37 +12,36 @@ from pathlib import Path
 
 from apps.kitchen.ingredients import is_not_bought, parse_line
 
-PHOTO_DIR = Path(__file__).parent / "static" / "photos"
-COURSES = (("turkey", "The main event"), ("side", "On the side"), ("bread", "From the oven"),
-           ("dessert", "Dessert"), ("other", "And also"))
+CONTENT = Path(__file__).parent / "menu.json"
+DEFAULT_COURSES = (("bread", "To begin"), ("turkey", "The main course"), ("side", "Alongside"),
+                   ("dessert", "To finish"), ("other", "And also"))
+NUMERALS = ("I", "II", "III", "IV", "V", "VI", "VII", "VIII")
+HOURS = ("twelve", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven")
 # Things every recipe has; they don't make a dish sound like anything.
 STAPLES = {"salt", "kosher salt", "pepper", "black pepper", "water", "oil", "olive oil", "vegetable oil", "flour",
            "all-purpose flour", "sugar", "butter", "unsalted butter", "egg", "eggs", "ice water", "cooking spray"}
 
 
 @lru_cache(maxsize=1)
-def photos():
+def content():
     try:
-        return json.loads((PHOTO_DIR / "menu.json").read_text(encoding="utf-8"))["dishes"]
-    except (OSError, ValueError, KeyError):
-        return []
+        return json.loads(CONTENT.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
 
-def photo_for(dish):
+def course_list():
+    found = [(c["key"], c["name"]) for c in content().get("courses", []) if c.get("key") and c.get("name")]
+    return tuple(found) or DEFAULT_COURSES
+
+
+def entry_for(dish):
     name = (dish.get("name") or "").lower()
-    return next((p for p in photos() if any(word in name for word in p.get("match", []))), None)
-
-
-def photo_file(name):
-    """The photo file for /thanksgiving/photos/<name>, only if it's one listed in menu.json."""
-    if name in {p["file"] for p in photos()}:
-        path = PHOTO_DIR / name
-        return path if path.is_file() else None
-    return None
+    return next((e for e in content().get("dishes", []) if any(word in name for word in e.get("match", []))), {})
 
 
 def blurb(dish, limit=4):
-    """'sharp cheddar, Gruyère, goat cheese and Little Smokies' from the ingredient list."""
+    """'Sharp cheddar, Gruyère, goat cheese and Little Smokies' from the ingredient list."""
     seen, parts = set(), []
     for line in (dish.get("ingredients_text") or "").splitlines():
         line = line.strip().lstrip("-•* ").strip()
@@ -58,32 +58,35 @@ def blurb(dish, limit=4):
         if len(parts) == limit:
             break
     if not parts:
-        return dish.get("notes") or ""
+        return ""
     text = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
     return text[0].upper() + text[1:]
 
 
 def courses(dishes):
-    """[{"key", "label", "dishes": [{"dish", "photo", "blurb"}]}] in serving order, without house prep."""
+    """[{"key", "label", "numeral", "dishes": [{"dish", "blurb"}]}] in serving order, without house prep."""
+    known = dict(course_list())
+    grouped = {key: [] for key in known}
+    for d in dishes:
+        if d.get("category") == "prep":
+            continue
+        entry = entry_for(d)
+        key = entry.get("course") or d.get("category")
+        key = key if key in known else ("other" if "other" in known else next(iter(known)))
+        grouped[key].append({"dish": d, "blurb": entry.get("description") or blurb(d)})
     out = []
-    food = [d for d in dishes if d.get("category") != "prep"]
-    for key, label in COURSES:
-        items = []
-        for d in food:
-            if (d.get("category") if d.get("category") in dict(COURSES) else "other") != key:
-                continue
-            photo = photo_for(d)
-            items.append({"dish": d, "photo": photo,
-                          "blurb": (photo or {}).get("description") or d.get("notes") or blurb(d)})
-        if items:
-            out.append({"key": key, "label": label, "dishes": items})
+    for key, label in course_list():
+        if grouped.get(key):
+            out.append({"key": key, "label": label, "numeral": NUMERALS[min(len(out), len(NUMERALS) - 1)],
+                        "dishes": grouped[key]})
     return out
 
 
-def credits(course_list):
-    used = {}
-    for course in course_list:
-        for item in course["dishes"]:
-            if item["photo"]:
-                used[item["photo"]["file"]] = item["photo"]
-    return list(used.values())
+def time_in_words(when):
+    """4:00 PM -> "Four o'clock"; 4:30 PM -> "Half past four"; other times stay as 4:15 PM."""
+    hour = HOURS[when.hour % 12]
+    if when.minute == 0:
+        return f"{hour.capitalize()} o'clock"
+    if when.minute == 30:
+        return f"Half past {hour}"
+    return when.strftime("%I:%M %p").lstrip("0")

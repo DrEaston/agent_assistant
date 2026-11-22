@@ -1,0 +1,21 @@
+{
+ "_about": "The shareable menu card. Courses are served in this order; a dish joins the course for its type unless its entry below names another. A dish uses the first entry whose 'match' words appear in its name. Edit this file to reword anything; no code change needed. Who makes a dish never appears here.",
+ "courses": [
+  {"key": "bread", "name": "To begin"},
+  {"key": "turkey", "name": "The main course"},
+  {"key": "side", "name": "Alongside"},
+  {"key": "dessert", "name": "To finish"},
+  {"key": "other", "name": "And also"}
+ ],
+ "dishes": [
+  {"match": ["turkey"], "description": "Pre-brined and roasted over onions, carrots and celery"},
+  {"match": ["gravy"], "course": "turkey", "description": "From the pan drippings"},
+  {"match": ["cranberry"], "course": "turkey", "description": "Fresh cranberries simmered with orange"},
+  {"match": ["potato"], "description": "Yukon Golds whipped with butter, cream and a little cream cheese"},
+  {"match": ["stuffing", "dressing"], "description": "Herbed bread with onion, celery and butter"},
+  {"match": ["mac and cheese", "macaroni"], "description": "Sharp cheddar, Gruyère and goat cheese, Little Smokies, buttered panko"},
+  {"match": ["green bean"], "description": "The classic, under crispy fried onions"},
+  {"match": ["sourdough", "bread", "rolls", "loaf"], "description": "A naturally leavened loaf from our own starter"},
+  {"match": ["pumpkin pie"], "description": "Spiced pumpkin custard in an all-butter crust, with softly whipped cream"}
+ ]
+}

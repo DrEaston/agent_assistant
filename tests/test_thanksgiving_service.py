@@ -110,8 +110,6 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(r.headers["location"], "/thanksgiving/timeline")
             state = client.get("/thanksgiving/api/state").json()
             self.assertIn(key, [s["key"] for d in state["dishes"] for s in d["steps"] if s["done"]])
-            photo = client.get("/thanksgiving/photos/pie.jpg")
-            self.assertEqual((photo.status_code, photo.headers["content-type"]), (200, "image/jpeg"))
         finally:
             proxy._client = saved
 

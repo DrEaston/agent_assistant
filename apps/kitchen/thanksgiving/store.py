@@ -101,6 +101,7 @@ class ThanksgivingStore:
                 )
                 changed = True
         changed = self._add_later_dishes(conn) or changed
+        changed = self._update_saved_dishes(conn) or changed
         changed = self._reset_retired_sizes(conn) or changed
         if changed:
             self._commit()
@@ -137,11 +138,50 @@ class ThanksgivingStore:
                     conn.execute(
                         """INSERT INTO tg_dishes (plan_id, name, category, cook, ingredients_text, instructions_text,
                                                   notes, steps_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (plan_id, dish["name"], dish["category"], "", dish["ingredients_text"],
+                        (plan_id, dish["name"], dish["category"], dish.get("cook") or "", dish["ingredients_text"],
                          dish["instructions_text"], dish["notes"], json.dumps(dish["steps"])))
                 conn.execute("INSERT INTO tg_checks (plan_id, kind, item_key) VALUES (?, 'migration', ?)",
                              (plan_id, marker))
                 changed = True
+        return changed
+
+    def _update_saved_dishes(self, conn):
+        """One-time changes to dishes already in a plan (each runs once per plan; your later edits stay)."""
+        from .presets import WHIPPED_CREAM_INGREDIENTS, WHIPPED_CREAM_INSTRUCTIONS, whipped_cream_step
+
+        def once(plan_id, marker):
+            done = conn.execute("SELECT 1 FROM tg_checks WHERE plan_id = ? AND kind = 'migration' AND item_key = ?",
+                                (plan_id, marker)).fetchone()
+            if not done:
+                conn.execute("INSERT INTO tg_checks (plan_id, kind, item_key) VALUES (?, 'migration', ?)", (plan_id, marker))
+            return not done
+
+        changed = False
+        for plan in conn.execute("SELECT id FROM tg_plans").fetchall():
+            plan_id = plan["id"]
+            if once(plan_id, "mac-by-parrisa"):
+                conn.execute("UPDATE tg_dishes SET cook = 'Parrisa' WHERE plan_id = ? AND name = 'Mac and cheese' "
+                             "AND COALESCE(cook, '') = ''", (plan_id,))
+                changed = True
+            if once(plan_id, "pie-whipped-cream"):
+                changed = True
+                for row in conn.execute("SELECT * FROM tg_dishes WHERE plan_id = ? AND name = 'Pumpkin pie'", (plan_id,)).fetchall():
+                    ingredients, instructions = row["ingredients_text"] or "", row["instructions_text"] or ""
+                    if "whipped cream:" not in ingredients.lower():
+                        if "To serve:\nwhipped cream" in ingredients:
+                            ingredients = ingredients.replace("To serve:\nwhipped cream", WHIPPED_CREAM_INGREDIENTS)
+                        else:
+                            ingredients = ingredients.rstrip() + "\n" + WHIPPED_CREAM_INGREDIENTS
+                    if "whipped cream:" not in instructions.lower():
+                        instructions = instructions.rstrip().replace(" Serve with whipped cream.", "") + "\n" + WHIPPED_CREAM_INSTRUCTIONS
+                    try:
+                        steps = json.loads(row["steps_json"] or "[]")
+                    except json.JSONDecodeError:
+                        steps = []
+                    if not any(step.get("id") == "cream" for step in steps):
+                        steps.append(whipped_cream_step())
+                    conn.execute("UPDATE tg_dishes SET ingredients_text = ?, instructions_text = ?, steps_json = ? WHERE id = ?",
+                                 (ingredients, instructions, json.dumps(steps), row["id"]))
         return changed
 
     def _commit(self):

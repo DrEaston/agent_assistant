@@ -6,73 +6,61 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&display=swap">
 <style>
-/* The menu card: printed-menu feel, made to look good in a screenshot or on a shared screen. */
-.feast { --serif: "Cormorant Garamond", Georgia, "Times New Roman", serif; --paper: #fffdf8; --gold: #a16207;
-  max-width: 54rem; margin: 0 auto 2rem; background: var(--paper); border: 1px solid var(--line);
-  border-radius: 18px; box-shadow: var(--shadow); padding: clamp(1.25rem, 4vw, 2.75rem); }
-.feast-head { text-align: center; display: grid; gap: .35rem; margin-bottom: 1.75rem; }
-.feast-eyebrow { font-size: .78rem; letter-spacing: .22em; text-transform: uppercase; color: var(--gold); font-weight: 700; }
-.feast-title { font-family: var(--serif); font-style: italic; font-weight: 500; font-size: clamp(2.6rem, 7vw, 3.6rem); line-height: 1; color: var(--ink); }
-.feast-when { color: var(--muted); font-size: 1rem; }
-.fleuron { color: var(--gold); font-size: 1.3rem; line-height: 1; }
-.course { margin-top: 2rem; }
-.course-name { display: flex; align-items: center; gap: 1rem; font-family: var(--serif); font-weight: 600; font-size: 1.45rem;
-  color: var(--ink); text-align: center; margin-bottom: 1.1rem; }
-.course-name::before, .course-name::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-.plates { display: flex; flex-wrap: wrap; justify-content: center; gap: 1.4rem 1.25rem; }
-.plate { flex: 0 1 15rem; display: grid; gap: .55rem; align-content: start; color: inherit; text-decoration: none; }
-.plate-photo { aspect-ratio: 4 / 3; border-radius: 12px; overflow: hidden; background: #f3ece3; }
-.plate-photo img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .4s ease; }
-.plate:hover .plate-photo img { transform: scale(1.03); }
-.plate-blank { width: 100%; height: 100%; display: grid; place-items: center; font-family: var(--serif); font-size: 3rem; color: var(--gold); }
-.plate-name { font-family: var(--serif); font-weight: 600; font-size: 1.45rem; line-height: 1.15; }
-.plate-desc { color: var(--muted); font-style: italic; font-size: .98rem; line-height: 1.45; }
-.course-turkey .plate { flex: 1 1 100%; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 1.25rem; align-items: center; }
-.course-turkey .plate-photo { aspect-ratio: 3 / 2; }
-.course-turkey .plate-name { font-size: 1.9rem; }
-.feast-credits { margin-top: 2rem; padding-top: .9rem; border-top: 1px solid var(--line); font-size: .72rem; color: var(--muted); text-align: center; }
-.feast-credits a { color: inherit; }
-@media (max-width: 640px) { .course-turkey .plate { grid-template-columns: 1fr; }
-  .plates { gap: 1.1rem .8rem; } .plate { flex-basis: calc(50% - .4rem); } .plate-name { font-size: 1.2rem; } .plate-desc { font-size: .88rem; } }
-@media (prefers-reduced-motion: reduce) { .plate-photo img { transition: none; } }
+/* The menu card: a printed multi-course menu, made to look good in a screenshot or on a shared screen. */
+.feast { --serif: "Cormorant Garamond", Georgia, "Times New Roman", serif; --paper: #fffdf8; --gold: #9a6b1f;
+  max-width: 36rem; margin: 0 auto 2.25rem; background: var(--paper); color: #2b2118; text-align: center;
+  border: 1px solid #e7dcc8; outline: 1px solid #e7dcc8; outline-offset: -10px; border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(60, 40, 10, .06), 0 12px 32px rgba(60, 40, 10, .08);
+  padding: clamp(2.25rem, 7vw, 3.75rem) clamp(1.5rem, 6vw, 3.5rem); font-family: var(--serif); }
+.feast-eyebrow { display: block; font-size: .8rem; letter-spacing: .38em; text-transform: uppercase; color: var(--gold);
+  font-weight: 600; padding-left: .38em; }
+.feast-title { font-style: italic; font-weight: 500; font-size: clamp(2.8rem, 9vw, 3.8rem); line-height: 1.05;
+  margin: .5rem 0 .4rem; color: #2b2118; font-family: var(--serif); }
+.feast-when { display: block; font-size: 1.05rem; letter-spacing: .04em; color: #6b5a48; }
+.fleuron { display: block; color: var(--gold); font-size: 1.35rem; line-height: 1; margin: 1.4rem 0 .4rem; }
+.course { margin-top: 2.1rem; }
+.course + .course::before { content: ""; display: block; width: 2.5rem; height: 1px; background: #d9c9ad; margin: 0 auto 2.1rem; }
+.course-num { display: block; color: var(--gold); font-size: 1rem; font-weight: 600; letter-spacing: .1em; }
+.course-name { font-family: var(--serif); font-size: .82rem; font-weight: 600; letter-spacing: .32em; text-transform: uppercase;
+  color: #6b5a48; margin: .2rem 0 1.15rem; padding-left: .32em; }
+.dish { display: block; color: inherit; text-decoration: none; margin: 0 auto 1.05rem; max-width: 26rem; }
+.dish:last-child { margin-bottom: 0; }
+.dish-name { display: block; font-size: 1.5rem; font-weight: 600; line-height: 1.2; }
+.course-turkey .dish:first-child .dish-name { font-size: 1.8rem; }
+.dish-desc { display: block; font-style: italic; font-size: 1.07rem; line-height: 1.4; color: #6b5a48; margin-top: .1rem; }
+.dish:hover .dish-name, .dish:focus-visible .dish-name { text-decoration: underline; text-decoration-color: #d9c9ad;
+  text-underline-offset: .2em; }
+.feast-foot { display: block; color: var(--gold); font-size: 1.35rem; margin-top: 2.2rem; }
+@media (max-width: 480px) { .dish-name { font-size: 1.3rem; } .course-turkey .dish:first-child .dish-name { font-size: 1.55rem; }
+  .dish-desc { font-size: 1rem; } }
 .kitchen-head { margin-top: .5rem; }
+.made-by { font-style: normal; }
 </style>
 {% endblock %}
 {% block page %}
 <section id="menu">
   <article class="feast" aria-label="Thanksgiving menu">
-    <header class="feast-head">
-      <span class="feast-eyebrow">Thanksgiving dinner</span>
+    <header>
+      <span class="feast-eyebrow">Thanksgiving</span>
       <h2 class="feast-title">The Menu</h2>
-      <span class="feast-when">{{ dinner.strftime('%A, %B') }} {{ dinner.day }} · {{ planner.format_clock(dinner) }}</span>
+      <span class="feast-when">{{ dinner.strftime('%A, %B') }} {{ dinner.day }} · {{ menu_time }}</span>
       <span class="fleuron" aria-hidden="true">❦</span>
     </header>
     {% for course in menu_courses %}
-    <div class="course course-{{ course.key }}">
+    <section class="course course-{{ course.key }}" aria-label="{{ course.label }}">
+      <span class="course-num" aria-hidden="true">{{ course.numeral }}</span>
       <h3 class="course-name">{{ course.label }}</h3>
-      <div class="plates">
-        {% for item in course.dishes %}
-        <a class="plate" href="/thanksgiving/menu/{{ item.dish.id }}" id="dish-{{ item.dish.id }}">
-          <div class="plate-photo">
-            {% if item.photo %}<img src="/thanksgiving/photos/{{ item.photo.file }}" alt="{{ item.dish.name }}" loading="lazy">
-            {% else %}<div class="plate-blank" aria-hidden="true">{{ item.dish.name[:1] }}</div>{% endif %}
-          </div>
-          <div>
-            <div class="plate-name">{{ item.dish.name }}</div>
-            {% if item.blurb %}<div class="plate-desc">{{ item.blurb }}</div>{% endif %}
-          </div>
-        </a>
-        {% endfor %}
-      </div>
-    </div>
+      {% for item in course.dishes %}
+      <a class="dish" href="/thanksgiving/menu/{{ item.dish.id }}" id="dish-{{ item.dish.id }}">
+        <span class="dish-name">{{ item.dish.name }}</span>
+        {% if item.blurb %}<span class="dish-desc">{{ item.blurb }}</span>{% endif %}
+      </a>
+      {% endfor %}
+    </section>
     {% else %}
-    <p class="muted" style="text-align:center">No dishes yet. Add some below.</p>
+    <p class="feast-when">No dishes yet. Add some below.</p>
     {% endfor %}
-    {% if menu_credits %}
-    <footer class="feast-credits">Photos via Wikimedia Commons:
-      {% for p in menu_credits %}<a href="{{ p.source }}" rel="noopener" target="_blank">{{ p.credit or "unknown" }}</a> ({% if p.license_url %}<a href="{{ p.license_url }}" rel="noopener" target="_blank">{{ p.license }}</a>{% else %}{{ p.license }}{% endif %}){% if not loop.last %} · {% endif %}{% endfor %}
-    </footer>
-    {% endif %}
+    <span class="feast-foot" aria-hidden="true">❦</span>
   </article>
 
   <div class="section-head kitchen-head"><h2>In the kitchen</h2><span class="small muted">Progress on each dish</span></div>
@@ -84,6 +72,7 @@
       <div class="menu-main">
         <strong>{{ dish.name }}</strong>
         <div class="small muted">
+          {%- if dish.cook %}<span class="made-by">{{ dish.cook }}'s</span> · {% endif -%}
           {%- if dish.size_label %}{{ dish.size_label }} · {% endif -%}
           {%- if steps %}{{ steps|length - left|length }} of {{ steps|length }} step{{ '' if steps|length == 1 else 's' }} done{% else %}No steps{% endif -%}
           {%- if left %} · next: {{ planner.short_date(left[0].start)[:3] }} {{ planner.format_clock(left[0].start) }}, {{ left[0].title }}{% endif -%}

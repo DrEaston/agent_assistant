@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -280,18 +280,12 @@ def timeline_page(request: Request):
 def menu_page(request: Request):
     def courses(context):
         found = menu.courses(context["dishes"])
-        return {"menu_courses": found, "menu_credits": menu.credits(found),
+        return {"menu_courses": found, "menu_time": menu.time_in_words(context["dinner"]),
                 "dishes": [d for d in context["dishes"] if d.get("category") != "prep"],
                 "prep_dishes": [d for d in context["dishes"] if d.get("category") == "prep"]}
     return render_page(request, "tg_menu.html", "menu", extend=courses, library=library_recipes())
 
 
-@router.get("/thanksgiving/photos/{name}")
-def menu_photo(name: str):
-    path = menu.photo_file(name)
-    if not path:
-        raise HTTPException(status_code=404, detail="No such photo.")
-    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=604800"})
 
 
 @router.get("/thanksgiving/menu/{dish_id}", response_class=HTMLResponse)

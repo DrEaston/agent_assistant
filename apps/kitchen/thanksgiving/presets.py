@@ -114,8 +114,10 @@ Filling:
 1/2 tsp salt
 2 large eggs
 12 oz can evaporated milk
-To serve:
-whipped cream"""
+Whipped cream:
+1 cup cold heavy cream
+2 tbsp powdered sugar
+1/2 tsp vanilla"""
 
 PIE_INSTRUCTIONS = """Crust:
 Whisk the flour, sugar, and salt in a bowl. Cut the cold butter into 1/2-inch cubes.
@@ -133,7 +135,10 @@ Filling and bake:
 Whisk the pumpkin, sugar, spice, salt, eggs, and evaporated milk until smooth. Pour into the warm shell.
 Bake at 425°F for 15 minutes.
 Lower to 350°F and bake 40 to 50 minutes, until the edges are set and the center barely jiggles. Cover the crust edge with foil if it browns too fast.
-Cool on a rack about 2 hours, then refrigerate loosely covered. Serve with whipped cream."""
+Cool on a rack about 2 hours, then refrigerate loosely covered.
+Whipped cream:
+Chill the bowl and whisk for 10 minutes. Whip the cream, powdered sugar, and vanilla to soft peaks, about 2 minutes on medium-high. Stop before it turns grainy.
+Cover and refrigerate. It holds for a few hours; whisk a few strokes by hand right before serving."""
 
 OLD_MAC_INGREDIENTS = """Mac and cheese:
 1 lb elbow macaroni or cavatappi
@@ -243,6 +248,7 @@ def _pie_steps():
         _s("bake2", "D-1 11:45", "Lower to 350°F and bake until barely jiggly", 45, "oven", 350, section="Filling"),
         _s("cool", "D-1 12:30", "Cool the pie on a rack", 120, "passive"),
         _s("chill", "D-1 14:30", "Refrigerate the pie", 2),
+        whipped_cream_step(),
     ]
 
 
@@ -340,8 +346,14 @@ def preset_dish(key, dinner=None):
         return _dish("Sourdough", "bread", SOURDOUGH_INGREDIENTS, SOURDOUGH_INSTRUCTIONS, _sourdough_steps(),
                      notes="Starter lives in the fridge, so it gets two feedings.")
     if key == "mac":
-        return _dish("Mac and cheese", "side", MAC_INGREDIENTS, MAC_INSTRUCTIONS, _mac_steps(),
+        dish = _dish("Mac and cheese", "side", MAC_INGREDIENTS, MAC_INSTRUCTIONS, _mac_steps(),
                      notes="With Little Smokies.")
+        dish["cook"] = "Parrisa"
+        return dish
+    if key == "cranberry":
+        return cranberry_dish()
+    if key == "green_beans_janice":
+        return janice_green_bean_dish()
     if key == "pie":
         return _dish("Pumpkin pie", "dessert", PIE_INGREDIENTS, PIE_INSTRUCTIONS, _pie_steps())
     if key == "house":
@@ -357,17 +369,17 @@ def preset_dish(key, dinner=None):
 SIMPLE_SIDES = {
     "green_beans": ("Green bean casserole", "2 lb green beans\n1 can cream of mushroom soup\n3/4 cup milk\n"
                     "1 tsp soy sauce\n1 1/3 cups crispy fried onions", 15, "oven", 30, 375),
-    "cranberry": ("Cranberry sauce", "12 oz fresh cranberries\n1 cup sugar\n1 cup orange juice", 5, "stove", 15, 0),
     "rolls": ("Dinner rolls", "2 dozen dinner rolls\nbutter", 5, "oven", 15, 375),
     "brussels": ("Roasted Brussels sprouts", "2 lb Brussels sprouts\nolive oil\nkosher salt\nblack pepper",
                  15, "oven", 25, 400),
     "salad": ("Green salad", "2 heads lettuce\n1 cucumber\ncherry tomatoes\nvinaigrette", 15, "none", 0, 0),
 }
 
-OUR_MENU = ("house", "turkey", "potatoes", "gravy", "stuffing", "mac", "sourdough", "pie")
+OUR_MENU = ("house", "turkey", "potatoes", "gravy", "stuffing", "mac", "green_beans_janice", "cranberry", "sourdough",
+            "pie")
 
 # Dishes added to the menu after plans already existed: (migration key, preset key).
-LATER_ADDITIONS = (("add-mac", "mac"),)
+LATER_ADDITIONS = (("add-mac", "mac"), ("add-green-beans-janice", "green_beans_janice"), ("add-cranberry", "cranberry"))
 
 PRESET_BUTTONS = (
     ("turkey", "Turkey"), ("potatoes", "Mashed potatoes"), ("gravy", "Gravy"), ("stuffing", "Stuffing"),
@@ -376,3 +388,61 @@ PRESET_BUTTONS = (
     ("cranberry", "Cranberry sauce"), ("rolls", "Rolls"), ("brussels", "Brussels sprouts"),
     ("salad", "Salad"), ("house", "House prep"),
 )
+
+
+# ---------------------------------------------------------------- added 11/22: cranberry sauce, Janice's casserole
+
+WHIPPED_CREAM_INGREDIENTS = """Whipped cream:
+1 cup cold heavy cream
+2 tbsp powdered sugar
+1/2 tsp vanilla"""
+WHIPPED_CREAM_INSTRUCTIONS = """Whipped cream:
+Chill the bowl and whisk for 10 minutes. Whip the cream, powdered sugar, and vanilla to soft peaks, about 2 minutes on medium-high. Stop before it turns grainy.
+Cover and refrigerate. It holds for a few hours; whisk a few strokes by hand right before serving."""
+
+
+def whipped_cream_step():
+    return _s("cream", "T-180", "Whip the cream for the pie and refrigerate", 10,
+              detail="Soft peaks. Whisk a few strokes by hand before serving.", section="Whipped cream")
+
+
+CRANBERRY_INGREDIENTS = """12 oz fresh cranberries
+1 cup sugar
+1/2 cup orange juice
+1/2 cup water
+1 orange, for zest
+pinch of salt"""
+
+CRANBERRY_INSTRUCTIONS = """Rinse the cranberries and pick out any soft ones.
+Bring the sugar, orange juice, water, and salt to a boil in a saucepan, stirring until the sugar dissolves.
+Add the cranberries and simmer, stirring now and then, until most have popped and the sauce thickens, about 10 to 12 minutes.
+Zest the orange straight into the pot and stir. It thickens a lot as it cools.
+Cool, then refrigerate covered. It keeps a week. Serve cold or at room temperature."""
+
+
+def _cranberry_steps():
+    return [
+        _s("make", "D-2 18:00", "Make the cranberry sauce", 20, "stove",
+           detail="Simmer until the berries pop, then cool on the counter."),
+        _s("fridge", "D-2 19:00", "Refrigerate the cranberry sauce", 2),
+        _s("plate", "T-20", "Cranberry sauce into a serving bowl", 3),
+    ]
+
+
+def _janice_green_bean_steps():
+    return [
+        _s("confirm", "D-2 12:00", "Check with Janice: green bean casserole, and does it need warming?", 5, "check",
+           detail="If it arrives hot, skip the warm-up step."),
+        _s("warm", "T-25", "Warm Janice's green bean casserole, uncovered, at 400°F", 15, "oven", 400,
+           detail="Shares the oven with the mac and cheese."),
+    ]
+
+
+def cranberry_dish():
+    return _dish("Cranberry sauce", "side", CRANBERRY_INGREDIENTS, CRANBERRY_INSTRUCTIONS, _cranberry_steps())
+
+
+def janice_green_bean_dish():
+    dish = _dish("Green bean casserole", "side", steps=_janice_green_bean_steps(), notes="Janice is bringing it.")
+    dish["cook"] = "Janice"
+    return dish

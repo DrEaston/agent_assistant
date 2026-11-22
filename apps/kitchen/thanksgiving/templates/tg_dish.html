@@ -8,7 +8,7 @@
     <h2>{{ dish.name }}</h2>
     <a class="small" href="#edit" data-open-editor>Edit dish</a>
   </div>
-  {% if dish.notes %}<p class="muted">{{ dish.notes }}</p>{% endif %}
+  {% if dish.cook or dish.notes %}<p class="muted">{% if dish.cook %}<strong>{{ dish.cook }}'s</strong>{% if dish.notes %} · {% endif %}{% endif %}{{ dish.notes }}</p>{% endif %}
   <div class="card">
     <h3 class="card-title">Recipe{% if dish.size_label %} <span data-size-label-for="{{ dish.id }}">· {{ dish.size_label }}</span>{% endif %}</h3>
     {{ size_picker(dish) }}
@@ -62,7 +62,10 @@
           {% if dish.size_options %}<p class="small muted">Edit the recipe as written (full batch). The batch size above scales it.</p>{% endif %}
           <div class="field"><label>Ingredients (one per line)</label><textarea name="ingredients_text">{{ dish.base_ingredients_text }}</textarea></div>
           <div class="field"><label>Recipe steps (one per line)</label><textarea name="instructions_text">{{ dish.base_instructions_text }}</textarea></div>
-          <div class="field"><label>Notes</label><input type="text" name="notes" value="{{ dish.notes }}"></div>
+          <div class="row">
+            <div class="field" style="flex:1 1 10rem"><label>Made by</label><input type="text" name="cook" value="{{ dish.cook or '' }}" placeholder="Only shown here, not on the menu"></div>
+            <div class="field" style="flex:2 1 14rem"><label>Notes</label><input type="text" name="notes" value="{{ dish.notes }}"></div>
+          </div>
           <div class="row"><button class="primary" type="submit">Save dish</button></div>
         </form>
         {% if dish.category == 'turkey' %}

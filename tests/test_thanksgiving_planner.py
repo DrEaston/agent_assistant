@@ -1,4 +1,5 @@
 import json
+import re
 import tempfile
 import unittest
 import warnings
@@ -11,7 +12,7 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     from fastapi.testclient import TestClient
 
-from apps.kitchen.thanksgiving import planner, router as tg_router
+from apps.kitchen.thanksgiving import planner, presets, router as tg_router
 from apps.kitchen.thanksgiving.presets import OUR_MENU, preset_dish
 from database import Database, reset_current_user_id, set_current_user_id
 
@@ -104,7 +105,7 @@ class HelperTests(unittest.TestCase):
         status = planner.status_now(tasks, set(), datetime(2026, 11, 26, 12, 10))
         self.assertIn("roast", [t["step_id"] for t in status["current"]])
         self.assertTrue(status["overdue"])  # nothing was checked off
-        self.assertEqual(status["next"][0]["start"], datetime(2026, 11, 26, 13, 30))
+        self.assertEqual(status["next"][0]["start"], datetime(2026, 11, 26, 13, 0))  # whip the cream
 
     def test_grocery_list_merges_and_skips_homemade(self):
         dishes = [
@@ -128,7 +129,7 @@ class RecipeSectionTests(unittest.TestCase):
         pie = preset_dish("pie")
         ing = planner.recipe_sections(pie["ingredients_text"])
         ins = planner.recipe_sections(pie["instructions_text"])
-        self.assertEqual([s["heading"] for s in ing], ["Crust", "Filling", "To serve"])
+        self.assertEqual([s["heading"] for s in ing], ["Crust", "Filling", "Whipped cream"])
         crust_steps = planner.sections_for_step(ins, "Crust")
         self.assertEqual(len(crust_steps), 1)
         self.assertIn("coin-size", " ".join(crust_steps[0]["lines"]))
@@ -298,19 +299,70 @@ class RouteTests(unittest.TestCase):
         self.assertNotIn("The Menu</h2>", timeline)
         self.assertNotIn("Dinner date", timeline)
 
-    def test_menu_card_has_photos_and_leaves_out_house_prep(self):
+    def test_menu_card_is_a_multicourse_menu_without_names_or_house_prep(self):
         self.client.get("/thanksgiving")
         page = self.client.get("/thanksgiving/menu").text
         card = page.split('<article class="feast"')[1].split("</article>")[0]
-        self.assertIn('src="/thanksgiving/photos/turkey.jpg"', card)
+        self.assertNotIn("<img", card)
+        self.assertIn("Four o&#39;clock", card)
+        courses = re.findall(r'class="course-name">([^<]+)<', card)
+        self.assertEqual(courses, ["To begin", "The main course", "Alongside", "To finish"])
+        main = card.split('course-name">The main course')[1].split('course-name">Alongside')[0]
+        for name in ("Roast turkey", "Gravy", "Cranberry sauce"):
+            self.assertIn(name, main)
+        self.assertIn("Green bean casserole", card)
         self.assertIn("Sharp cheddar, Gruyère and goat cheese", card)
+        self.assertIn("softly whipped cream", card)
         self.assertNotIn("House prep", card)
-        self.assertIn("House prep tasks", page)  # still reachable from the kitchen list
-        self.assertIn("Wikimedia Commons", card)  # photo credits
-        r = self.client.get("/thanksgiving/photos/turkey.jpg")
-        self.assertEqual((r.status_code, r.headers["content-type"]), (200, "image/jpeg"))
-        self.assertEqual(self.client.get("/thanksgiving/photos/menu.json").status_code, 404)
-        self.assertEqual(self.client.get("/thanksgiving/photos/..%2Frouter.py").status_code, 404)
+        for who in ("Parrisa", "Janice"):
+            self.assertNotIn(who, card)  # who makes what stays off the shareable card
+        self.assertIn("Parrisa's", page)  # ...but shows in the kitchen list below it
+        self.assertIn("House prep tasks", page)
+        self.assertEqual(self.client.get("/thanksgiving/photos/turkey.jpg").status_code, 404)
+
+    def test_janice_brings_green_beans_and_cranberry_is_made_tuesday(self):
+        self.client.get("/thanksgiving")
+        plan = tg_router.store().get_plan()
+        dishes = {d["name"]: d for d in tg_router.store().get_dishes(plan["id"])}
+        beans, cran = dishes["Green bean casserole"], dishes["Cranberry sauce"]
+        self.assertEqual((beans["cook"], beans["ingredients_text"]), ("Janice", ""))  # nothing to buy
+        warm = next(s for s in beans["steps"] if s["id"] == "warm")
+        self.assertEqual((warm["anchor"], warm["temp"]), ("T-25", 400))  # same oven temperature as the mac
+        self.assertEqual(next(s for s in cran["steps"] if s["id"] == "make")["anchor"], "D-2 18:00")
+        self.assertIn("Janice's", self.dish_page(beans))
+        grocery = self.client.get("/thanksgiving/shopping").text
+        self.assertIn("cranberries", grocery)
+        self.assertIn("powdered sugar", grocery.lower())  # the pie's whipped cream
+        self.assertNotIn("crispy fried onions", grocery)
+
+    def test_plan_made_earlier_gets_the_new_dishes_once(self):
+        self.client.get("/thanksgiving")
+        plan = tg_router.store().get_plan()
+        conn = self.db.connect()
+        # Make it look like the plan from before 11/22.
+        conn.execute("DELETE FROM tg_dishes WHERE plan_id = ? AND name IN ('Green bean casserole', 'Cranberry sauce')",
+                     (plan["id"],))
+        conn.execute("UPDATE tg_dishes SET cook = '' WHERE plan_id = ? AND name = 'Mac and cheese'", (plan["id"],))
+        pie = next(d for d in tg_router.store().get_dishes(plan["id"]) if d["name"] == "Pumpkin pie")
+        old_ingredients = pie["ingredients_text"].replace(presets.WHIPPED_CREAM_INGREDIENTS, "To serve:\nwhipped cream")
+        old_steps = [s for s in pie["steps"] if s["id"] != "cream"]
+        conn.execute("UPDATE tg_dishes SET ingredients_text = ?, instructions_text = ?, steps_json = ? WHERE id = ?",
+                     (old_ingredients, pie["instructions_text"].split("\nWhipped cream:")[0], json.dumps(old_steps), pie["id"]))
+        conn.execute("DELETE FROM tg_checks WHERE plan_id = ? AND kind = 'migration' AND item_key IN "
+                     "('add-green-beans-janice', 'add-cranberry', 'mac-by-parrisa', 'pie-whipped-cream')", (plan["id"],))
+        conn.commit()
+        for _ in range(2):
+            tg_router.configure(self.db)
+        dishes = tg_router.store().get_dishes(plan["id"])
+        names = [d["name"] for d in dishes]
+        self.assertEqual((names.count("Green bean casserole"), names.count("Cranberry sauce")), (1, 1))
+        by_name = {d["name"]: d for d in dishes}
+        self.assertEqual(by_name["Mac and cheese"]["cook"], "Parrisa")
+        pie = by_name["Pumpkin pie"]
+        self.assertIn("1 cup cold heavy cream", pie["ingredients_text"])
+        self.assertNotIn("To serve:", pie["ingredients_text"])
+        self.assertEqual(pie["instructions_text"].count("Whipped cream:"), 1)
+        self.assertEqual([s["id"] for s in pie["steps"]].count("cream"), 1)
 
     def test_menu_lists_dishes_and_each_opens_its_own_page(self):
         self.client.get("/thanksgiving")
