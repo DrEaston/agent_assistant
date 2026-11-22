@@ -228,20 +228,27 @@ class MotionWatcher:
             cap.release()
 
 
-# ---------------------------------------------------------------- Dieter's face (a full-screen window)
+# ---------------------------------------------------------------- Dieter's face
 
 class Face:
-    """Dieter's own full-screen window: black while the screen rests, then orange eyes that open, look around,
-    blink and fade away when someone arrives. Used when no Dieter page is listening (a listening page shows its
-    own black screen and eyes). All drawing happens on one Tk thread; other threads only queue requests."""
+    """Dieter living on the screen: a small pair of cartoon eyes in the lower-right corner (just above where the
+    page's "Talk to Dieter" button sits), always on top. They blink and glance around now and then, close their
+    orange lids while the screen rests, and open and look around when someone walks in.
 
-    WHITE, IRIS, PUPIL, SHINE = "#fbf7ef", "#ea580c", "#1c140e", "#ffffff"
+    While resting (and no Dieter page is showing its own sleep screen) a full-screen black window covers the rest
+    of the screen; touching it wakes Dieter. All drawing happens on one Tk thread; other threads queue requests.
+    """
 
-    def __init__(self, on_touch=None):
+    OUTLINE, WHITE, PUPIL, SHINE, LID = "#1c140e", "#ffffff", "#111111", "#ffffff", "#ea580c"
+    KEY = "#1d150f"  # see-through colour around the eyes (next to the outline colour, so edges blend cleanly)
+    BOX = (124, 70)  # the eyes' size at 100% display scaling, in pixels
+    SS = 3           # drawn this many times larger, then shrunk, for smooth edges
+
+    def __init__(self, on_touch=None, settings=None):
         import queue
         self.on_touch = on_touch
+        self.settings = settings if settings is not None else {}
         self._q = queue.Queue()
-        self._state = "hidden"  # hidden | resting | eyes
         self._ready = threading.Event()
         threading.Thread(target=self._run, name="face", daemon=True).start()
         self._ready.wait(5)
@@ -251,123 +258,196 @@ class Face:
         self._q.put(("rest", None))
 
     def eyes(self, side="center"):
-        self._q.put(("eyes", side))
+        self._q.put(("wake", side))
 
     def hide(self):
-        self._q.put(("hide", None))
+        self._q.put(("unrest", None))
 
-    # the Tk thread
+    # ------------------------------------------------ the Tk thread
     def _run(self):
         try:
             import tkinter as tk
+            from PIL import Image, ImageDraw, ImageTk
         except ImportError:
             self._ready.set()
             return
+        self.Image, self.ImageDraw, self.ImageTk = Image, ImageDraw, ImageTk
+        if sys.platform == "win32":
+            import ctypes
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)  # sharp, real-size pixels on scaled displays
+            except (AttributeError, OSError):
+                pass
+            self.scale = ctypes.windll.user32.GetDpiForSystem() / 96 if hasattr(ctypes.windll.user32, "GetDpiForSystem") else 1.0
+        else:
+            self.scale = 1.0
         root = self.root = tk.Tk()
         root.withdraw()
         root.title("Dieter")
-        root.configure(bg="black", cursor="none")
-        self.canvas = tk.Canvas(root, bg="black", highlightthickness=0, cursor="none")
-        self.canvas.pack(fill="both", expand=True)
+
+        # the black screen while resting
+        self.rest_win = tk.Toplevel(root, bg="black", cursor="none")
+        self.rest_win.withdraw()
+        self.rest_win.overrideredirect(True)
         for event in ("<Motion>", "<KeyPress>", "<ButtonPress>"):
-            root.bind(event, self._touched)
-        self._shown_at = 0.0
-        self._anim = None
-        root.after(50, self._poll)
+            self.rest_win.bind(event, self._touched)
+
+        # the eyes
+        w, h = int(self.BOX[0] * self.scale), int(self.BOX[1] * self.scale)
+        self.size = (w, h)
+        win = self.eyes_win = tk.Toplevel(root, bg=self.KEY)
+        win.overrideredirect(True)
+        win.attributes("-topmost", True)
+        win.attributes("-transparentcolor", self.KEY)
+        try:
+            win.attributes("-toolwindow", True)
+        except tk.TclError:
+            pass
+        self.label = tk.Label(win, bg=self.KEY, bd=0, highlightthickness=0)
+        self.label.pack()
+        self.label.bind("<ButtonPress>", lambda e: self._double_blink())
+        self._place()
+
+        # what the eyes are doing: lid 0 = open, 1 = shut; look x, y from -1 to 1
+        self.lid, self.lid_to = 1.0, 1.0
+        self.look, self.look_to = [0.0, 0.0], [0.0, 0.0]
+        self.resting = False
+        self._rested_at = 0.0
+        self._drawn = None
+        self._script = []  # pending [(time, action)] for the current little performance
+        self._next_blink = time.time() + 3
+        self._next_glance = time.time() + 8
+        if self.settings.get("eyes", True):
+            win.deiconify()
+        else:
+            win.withdraw()
+        root.after(16, self._tick)
+        root.after(2000, self._keep_on_top)
         self._ready.set()
         root.mainloop()
 
-    def _poll(self):
-        while not self._q.empty():
-            what, arg = self._q.get_nowait()
-            if what == "rest":
-                self._show()
-                self._state = "resting"
-                self.canvas.delete("all")
-            elif what == "eyes":
-                self._show()
-                self._state = "eyes"
-                self._start_eyes(arg)
-            elif what == "hide":
-                self._hide()
-        self.root.after(50, self._poll)
+    def _place(self):
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        w, h = self.size
+        right = int(self.settings.get("eyes_right", 28) * self.scale)
+        bottom = int(self.settings.get("eyes_bottom", 112) * self.scale)  # sits above the "Talk to Dieter" button
+        self.eyes_win.geometry(f"{w}x{h}+{sw - w - right}+{sh - h - bottom}")
 
-    def _show(self):
-        if self._state == "hidden":
-            self.root.deiconify()
-            self.root.attributes("-fullscreen", True)
-            self.root.attributes("-topmost", True)
-            self._shown_at = time.time()
-        self.root.attributes("-alpha", 1.0)
-        self.root.lift()
-        self.root.focus_force()
-
-    def _hide(self):
-        if self._anim:
-            self.root.after_cancel(self._anim)
-            self._anim = None
-        self.canvas.delete("all")
-        self.root.withdraw()
-        self._state = "hidden"
+    def _keep_on_top(self):
+        # A full-screen browser can end up above us; quietly come back on top.
+        if self.eyes_win.winfo_viewable():
+            self.eyes_win.attributes("-topmost", True)
+            self.eyes_win.lift()
+        self.root.after(2000, self._keep_on_top)
 
     def _touched(self, _event):
-        if time.time() - self._shown_at < 1.2:  # the tap or wiggle that put it to sleep
-            return
-        if self._state == "resting" and self.on_touch:
+        if time.time() - self._rested_at > 1.2 and self.resting and self.on_touch:
             self.on_touch()
-        elif self._state == "eyes":
-            self._hide()
 
-    # eyes: open, glance toward whoever's there, look around, blink, settle, fade
-    def _start_eyes(self, side):
-        first = {"left": -1.0, "right": 1.0}.get(side, 0.0)
-        self._looks = [(0.0, 0, 0), (0.5, 0, 0), (0.95, first or -0.8, 0.15), (1.55, -(first or -0.8), 0.1),
-                       (2.15, 0.5, -0.45), (2.6, 0, 0), (3.6, 0, 0)]
-        self._t0 = time.time()
-        if self._anim:
-            self.root.after_cancel(self._anim)
-        self._frame()
+    # ------------------------------------------------ behaviour
+    def _do(self, what, arg):
+        now = time.time()
+        if what == "rest":
+            self.resting = True
+            self._rested_at = now
+            self._script = []
+            self.lid_to, self.look_to = 1.0, [0.0, 0.25]  # eyes drift down and close
+            sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+            self.rest_win.geometry(f"{sw}x{sh}+0+0")
+            self.rest_win.deiconify()
+            self.rest_win.attributes("-topmost", True)
+            self.rest_win.focus_force()
+            self.eyes_win.lift()
+        elif what == "unrest":
+            self._end_rest()
+        elif what == "wake":
+            self._end_rest()
+            first = {"left": -1.0, "right": 1.0}.get(arg, 0.0)
+            other = -(first or -0.8)
+            # (seconds from now, lid, look) - open, glance toward whoever's there, look around, blink, settle
+            self._script = [(now + t, lid, look) for t, lid, look in (
+                (0.0, 0.0, (0.0, 0.0)), (0.45, None, (first or -0.8, 0.1)), (1.1, None, (other, 0.05)),
+                (1.75, 1.0, None), (1.88, 0.0, (0.5, -0.5)), (2.5, None, (0.0, 0.0)))]
+            self._next_blink = now + 4
+            self._next_glance = now + 9
 
-    def _frame(self):
-        t = time.time() - self._t0
-        openness = min(1.0, t / 0.45)
-        if 1.85 < t < 2.15:  # blink
-            openness = abs(t - 2.0) / 0.15
-        lx = ly = 0.0
-        for (ta, xa, ya), (tb, xb, yb) in zip(self._looks, self._looks[1:]):
-            if ta <= t <= tb:
-                k = (t - ta) / (tb - ta)
-                k = k * k * (3 - 2 * k)  # ease in and out
-                lx, ly = xa + (xb - xa) * k, ya + (yb - ya) * k
-                break
-        self._draw(max(openness, 0.06), lx, ly)
-        if t > 3.0:  # fade out
-            alpha = max(0.0, 1 - (t - 3.0) / 0.8)
-            self.root.attributes("-alpha", alpha)
-            if alpha <= 0:
-                self._anim = None
-                self._hide()
-                return
-        self._anim = self.root.after(16, self._frame)
+    def _end_rest(self):
+        self.resting = False
+        self.rest_win.withdraw()
+        self.lid_to = 0.0
 
-    def _draw(self, openness, lx, ly):
-        c = self.canvas
-        w, h = c.winfo_width() or 1920, c.winfo_height() or 1080
-        size = min(w * 0.7 / 400, h * 0.5 / 200)  # same proportions as the page's eyes
-        rx, ry = 62 * size, 74 * size * openness
-        c.delete("all")
-        for ex in (w / 2 - 80 * size, w / 2 + 80 * size):
-            ey = h / 2
-            c.create_oval(ex - rx, ey - ry, ex + rx, ey + ry, fill=self.WHITE, outline="")
-            if openness > 0.35:
-                px, py = ex + lx * 26 * size, ey + 8 * size + ly * 30 * size * openness
-                ir, irv = 32 * size, min(32 * size, ry * 0.7)
-                c.create_oval(px - ir, py - irv, px + ir, py + irv, fill=self.IRIS, outline="")
-                pr, prv = 17 * size, min(17 * size, ry * 0.4)
-                c.create_oval(px - pr, py - prv, px + pr, py + prv, fill=self.PUPIL, outline="")
-                sr = 8 * size
-                c.create_oval(px + 10 * size - sr, py - 12 * size - sr, px + 10 * size + sr, py - 12 * size + sr,
-                              fill=self.SHINE, outline="")
+    def _double_blink(self):
+        now = time.time()
+        self._script = [(now, 1.0, (0.0, 0.0)), (now + 0.12, 0.0, None), (now + 0.3, 1.0, None), (now + 0.42, 0.0, None)]
+
+    def _tick(self):
+        import random
+        while not self._q.empty():
+            self._do(*self._q.get_nowait())
+        now = time.time()
+        while self._script and self._script[0][0] <= now:
+            _, lid, look = self._script.pop(0)
+            if lid is not None:
+                self.lid_to = lid
+            if look is not None:
+                self.look_to = list(look)
+        if not self.resting and not self._script:
+            if now >= self._next_blink:
+                self._script = [(now, 1.0, None), (now + 0.12, 0.0, None)]
+                self._next_blink = now + random.uniform(3, 7)
+            elif now >= self._next_glance:
+                spot = (random.choice((-0.8, -0.5, 0.5, 0.8)), random.uniform(-0.4, 0.3))
+                self._script = [(now, None, spot), (now + random.uniform(0.9, 1.6), None, (0.0, 0.0))]
+                self._next_glance = now + random.uniform(8, 16)
+        # ease toward the targets (lids shut fast for blinks, close slowly for sleep)
+        lid_speed = 0.08 if self.resting else 0.45
+        self.lid += (self.lid_to - self.lid) * lid_speed
+        for i in (0, 1):
+            self.look[i] += (self.look_to[i] - self.look[i]) * 0.22
+        state = (round(self.lid, 2), round(self.look[0], 2), round(self.look[1], 2))
+        if state != self._drawn:
+            self._drawn = state
+            self._draw(*state)
+        self.root.after(33, self._tick)
+
+    # ------------------------------------------------ drawing
+    def _draw(self, lid, lx, ly):
+        Image, ImageDraw = self.Image, self.ImageDraw
+        s = self.SS * self.scale
+        W, H = int(self.BOX[0] * s), int(self.BOX[1] * s)
+        img = Image.new("RGB", (W, H), self.KEY)
+        d = ImageDraw.Draw(img)
+        line = max(2, int(3 * s))
+        for cx in (34, 90):
+            cy, rx, ry = 35, 26, 31
+            box = [(cx - rx) * s, (cy - ry) * s, (cx + rx) * s, (cy + ry) * s]
+            # white of the eye
+            d.ellipse(box, fill=self.WHITE)
+            # pupil and its shine dots, moved by where Dieter is looking
+            px, py = cx + lx * 9, cy + 3 + ly * 11
+            d.ellipse([(px - 14) * s, (py - 14) * s, (px + 14) * s, (py + 14) * s], fill=self.PUPIL)
+            d.ellipse([(px + 1) * s, (py - 10) * s, (px + 10) * s, (py - 1) * s], fill=self.SHINE)
+            d.ellipse([(px - 8) * s, (py + 4) * s, (px - 4) * s, (py + 8) * s], fill=self.SHINE)
+            # the orange lid, coming down from the top with a curved edge, kept inside the eye
+            if lid > 0.02:
+                from PIL import ImageChops
+                edge = (cy - ry) + lid * (2 * ry + 6)
+                curve = [(cx - rx * 1.7) * s, (edge - 2.6 * ry) * s, (cx + rx * 1.7) * s, edge * s]
+                eye = Image.new("L", (W, H), 0)
+                ImageDraw.Draw(eye).ellipse(box, fill=255)
+                lid_mask = Image.new("L", (W, H), 0)
+                ImageDraw.Draw(lid_mask).ellipse(curve, fill=255)
+                edge_mask = Image.new("L", (W, H), 0)
+                ImageDraw.Draw(edge_mask).arc(curve, 0, 180, fill=255, width=line)
+                img.paste(self.LID, (0, 0, W, H), ImageChops.multiply(lid_mask, eye))
+                img.paste(self.OUTLINE, (0, 0, W, H), ImageChops.multiply(edge_mask, eye))
+                if lid > 0.9:  # shut: a sleepy curved line across the lid
+                    d.arc([(cx - rx * 0.7) * s, (cy - ry * 0.45) * s, (cx + rx * 0.7) * s, (cy + ry * 0.4) * s],
+                          25, 155, fill=self.OUTLINE, width=line)
+            d.ellipse(box, outline=self.OUTLINE, width=line)
+        img = img.reduce(self.SS)
+        self._photo = self.ImageTk.PhotoImage(img)
+        self.label.configure(image=self._photo)
 
 
 # ---------------------------------------------------------------- the helper
@@ -442,11 +522,7 @@ class Helper:
         self.watcher.stop()
         self.monitor.on()
         if self.face:
-            # A listening Dieter page shows the eyes itself; otherwise Dieter's own window does.
-            if self.page_listening() and reason != "test":
-                self.face.hide()
-            else:
-                self.face.eyes(side)
+            self.face.eyes(side)  # Dieter's eyes in the corner open and look toward whoever's there
         return self._emit(type="wake", reason=reason, side=side, was_asleep=was_asleep)
 
     def _motion(self, side):
@@ -603,9 +679,9 @@ def main():
     if "--open-only" in sys.argv:  # the sign-in shortcut: just open the Dieter page (the helper runs separately)
         open_dieter(load_settings())
         return
-    face = Face()
-    helper = Helper(face=face)
-    face.on_touch = lambda: helper.wake("touch")
+    helper = Helper()
+    helper.face = Face(on_touch=lambda: helper.wake("touch"), settings=helper.settings)
+    face = helper.face
     try:
         server = serve(helper)
     except OSError:

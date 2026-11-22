@@ -107,7 +107,7 @@ class FakeFace:
 
 
 class FaceTests(unittest.TestCase):
-    """Dieter's own window shows the black screen and eyes, unless a Dieter page is listening and does it."""
+    """Dieter's corner eyes always wake up; the black resting screen is skipped when a Dieter page shows its own."""
 
     def setUp(self):
         self.settings = patch.object(dh, "load_settings", return_value={"sensitivity": "medium", "camera": 0})
@@ -149,7 +149,8 @@ class FaceTests(unittest.TestCase):
         self.assertTrue(self.wait_for(lambda: self.helper.watcher.watching))
         self.helper.watcher.see("left")
         listening.join(3)
-        self.assertEqual(self.face.calls, ["hide"])
+        # no black screen from Dieter over the page's own sleep screen, but the corner eyes still wake up
+        self.assertEqual(self.face.calls, [("eyes", "left")])
 
     def test_test_the_eyes_always_shows_them(self):
         self.helper.wake("test")
