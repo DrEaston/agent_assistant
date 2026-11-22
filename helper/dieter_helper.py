@@ -25,7 +25,9 @@ from urllib.parse import parse_qs, urlsplit
 VERSION = "0.1.0"
 PORT = 47613
 ALLOWED_ORIGINS = {"https://askdieter.ai", "https://www.askdieter.ai", "http://localhost:8000", "http://127.0.0.1:8000"}
-SETTINGS_FILE = Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / "Dieter" / "helper.json"
+# The page "Open Dieter" shows (override with "dieter_page" in helper.json).
+DIETER_PAGE = "https://askdieter.ai/thanksgiving/cook"
+SETTINGS_FILE =Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / "Dieter" / "helper.json"
 # Share of the picture that has to change to count as someone there. Higher = needs more movement.
 SENSITIVITY = {"high": 0.004, "medium": 0.012, "low": 0.03}
 
@@ -226,18 +228,168 @@ class MotionWatcher:
             cap.release()
 
 
+# ---------------------------------------------------------------- Dieter's face (a full-screen window)
+
+class Face:
+    """Dieter's own full-screen window: black while the screen rests, then orange eyes that open, look around,
+    blink and fade away when someone arrives. Used when no Dieter page is listening (a listening page shows its
+    own black screen and eyes). All drawing happens on one Tk thread; other threads only queue requests."""
+
+    WHITE, IRIS, PUPIL, SHINE = "#fbf7ef", "#ea580c", "#1c140e", "#ffffff"
+
+    def __init__(self, on_touch=None):
+        import queue
+        self.on_touch = on_touch
+        self._q = queue.Queue()
+        self._state = "hidden"  # hidden | resting | eyes
+        self._ready = threading.Event()
+        threading.Thread(target=self._run, name="face", daemon=True).start()
+        self._ready.wait(5)
+
+    # called from any thread
+    def rest(self):
+        self._q.put(("rest", None))
+
+    def eyes(self, side="center"):
+        self._q.put(("eyes", side))
+
+    def hide(self):
+        self._q.put(("hide", None))
+
+    # the Tk thread
+    def _run(self):
+        try:
+            import tkinter as tk
+        except ImportError:
+            self._ready.set()
+            return
+        root = self.root = tk.Tk()
+        root.withdraw()
+        root.title("Dieter")
+        root.configure(bg="black", cursor="none")
+        self.canvas = tk.Canvas(root, bg="black", highlightthickness=0, cursor="none")
+        self.canvas.pack(fill="both", expand=True)
+        for event in ("<Motion>", "<KeyPress>", "<ButtonPress>"):
+            root.bind(event, self._touched)
+        self._shown_at = 0.0
+        self._anim = None
+        root.after(50, self._poll)
+        self._ready.set()
+        root.mainloop()
+
+    def _poll(self):
+        while not self._q.empty():
+            what, arg = self._q.get_nowait()
+            if what == "rest":
+                self._show()
+                self._state = "resting"
+                self.canvas.delete("all")
+            elif what == "eyes":
+                self._show()
+                self._state = "eyes"
+                self._start_eyes(arg)
+            elif what == "hide":
+                self._hide()
+        self.root.after(50, self._poll)
+
+    def _show(self):
+        if self._state == "hidden":
+            self.root.deiconify()
+            self.root.attributes("-fullscreen", True)
+            self.root.attributes("-topmost", True)
+            self._shown_at = time.time()
+        self.root.attributes("-alpha", 1.0)
+        self.root.lift()
+        self.root.focus_force()
+
+    def _hide(self):
+        if self._anim:
+            self.root.after_cancel(self._anim)
+            self._anim = None
+        self.canvas.delete("all")
+        self.root.withdraw()
+        self._state = "hidden"
+
+    def _touched(self, _event):
+        if time.time() - self._shown_at < 1.2:  # the tap or wiggle that put it to sleep
+            return
+        if self._state == "resting" and self.on_touch:
+            self.on_touch()
+        elif self._state == "eyes":
+            self._hide()
+
+    # eyes: open, glance toward whoever's there, look around, blink, settle, fade
+    def _start_eyes(self, side):
+        first = {"left": -1.0, "right": 1.0}.get(side, 0.0)
+        self._looks = [(0.0, 0, 0), (0.5, 0, 0), (0.95, first or -0.8, 0.15), (1.55, -(first or -0.8), 0.1),
+                       (2.15, 0.5, -0.45), (2.6, 0, 0), (3.6, 0, 0)]
+        self._t0 = time.time()
+        if self._anim:
+            self.root.after_cancel(self._anim)
+        self._frame()
+
+    def _frame(self):
+        t = time.time() - self._t0
+        openness = min(1.0, t / 0.45)
+        if 1.85 < t < 2.15:  # blink
+            openness = abs(t - 2.0) / 0.15
+        lx = ly = 0.0
+        for (ta, xa, ya), (tb, xb, yb) in zip(self._looks, self._looks[1:]):
+            if ta <= t <= tb:
+                k = (t - ta) / (tb - ta)
+                k = k * k * (3 - 2 * k)  # ease in and out
+                lx, ly = xa + (xb - xa) * k, ya + (yb - ya) * k
+                break
+        self._draw(max(openness, 0.06), lx, ly)
+        if t > 3.0:  # fade out
+            alpha = max(0.0, 1 - (t - 3.0) / 0.8)
+            self.root.attributes("-alpha", alpha)
+            if alpha <= 0:
+                self._anim = None
+                self._hide()
+                return
+        self._anim = self.root.after(16, self._frame)
+
+    def _draw(self, openness, lx, ly):
+        c = self.canvas
+        w, h = c.winfo_width() or 1920, c.winfo_height() or 1080
+        size = min(w * 0.7 / 400, h * 0.5 / 200)  # same proportions as the page's eyes
+        rx, ry = 62 * size, 74 * size * openness
+        c.delete("all")
+        for ex in (w / 2 - 80 * size, w / 2 + 80 * size):
+            ey = h / 2
+            c.create_oval(ex - rx, ey - ry, ex + rx, ey + ry, fill=self.WHITE, outline="")
+            if openness > 0.35:
+                px, py = ex + lx * 26 * size, ey + 8 * size + ly * 30 * size * openness
+                ir, irv = 32 * size, min(32 * size, ry * 0.7)
+                c.create_oval(px - ir, py - irv, px + ir, py + irv, fill=self.IRIS, outline="")
+                pr, prv = 17 * size, min(17 * size, ry * 0.4)
+                c.create_oval(px - pr, py - prv, px + pr, py + prv, fill=self.PUPIL, outline="")
+                sr = 8 * size
+                c.create_oval(px + 10 * size - sr, py - 12 * size - sr, px + 10 * size + sr, py - 12 * size + sr,
+                              fill=self.SHINE, outline="")
+
+
 # ---------------------------------------------------------------- the helper
 
 class Helper:
-    def __init__(self, monitor=None, watcher_cls=MotionWatcher):
+    def __init__(self, monitor=None, watcher_cls=MotionWatcher, face=None):
         self.settings = load_settings()
         self.monitor = monitor or Monitor(self.settings)
         self.watcher = watcher_cls(self._motion, self.settings)
+        self.face = face
         self.asleep = False
         self._events = []
         self._next_id = 1
+        self._listeners = 0  # Dieter pages waiting on /events right now
+        self._last_listened = 0.0
         self._cond = threading.Condition()
         self.monitor.keep_pc_awake()
+
+    def page_listening(self):
+        # A page asks again right after each answer, so a gap of a moment between asks still counts as listening.
+        with self._cond:
+            return self._listeners > 0 or time.time() - self._last_listened < 3.0
 
     # events the page waits for
     def _emit(self, **event):
@@ -251,14 +403,19 @@ class Helper:
     def events_after(self, after, timeout=25.0):
         deadline = time.time() + timeout
         with self._cond:
-            while True:
-                found = [e for e in self._events if e["id"] > after]
-                if found:
-                    return found
-                left = deadline - time.time()
-                if left <= 0:
-                    return []
-                self._cond.wait(left)
+            self._listeners += 1
+            try:
+                while True:
+                    found = [e for e in self._events if e["id"] > after]
+                    if found:
+                        return found
+                    left = deadline - time.time()
+                    if left <= 0:
+                        return []
+                    self._cond.wait(left)
+            finally:
+                self._listeners -= 1
+                self._last_listened = time.time()
 
     def latest_id(self):
         with self._cond:
@@ -274,6 +431,8 @@ class Helper:
     def _sleep_now(self):
         if not self.asleep:
             return
+        if self.face and not self.page_listening():
+            self.face.rest()  # no Dieter page is showing its sleep screen, so Dieter's own window goes black
         self.monitor.off()
         self.watcher.start()
 
@@ -282,6 +441,12 @@ class Helper:
         self.asleep = False
         self.watcher.stop()
         self.monitor.on()
+        if self.face:
+            # A listening Dieter page shows the eyes itself; otherwise Dieter's own window does.
+            if self.page_listening() and reason != "test":
+                self.face.hide()
+            else:
+                self.face.eyes(side)
         return self._emit(type="wake", reason=reason, side=side, was_asleep=was_asleep)
 
     def _motion(self, side):
@@ -400,6 +565,7 @@ def tray(helper, server):
 
     menu = pystray.Menu(
         pystray.MenuItem(f"Dieter helper {VERSION}", None, enabled=False),
+        pystray.MenuItem("Open Dieter", lambda: open_dieter(helper.settings), default=True),
         pystray.MenuItem("Sleep the screen now", lambda: helper.sleep()),
         pystray.MenuItem("Test the eyes", lambda: helper.wake("test")),
         pystray.MenuItem("Motion sensitivity", pystray.Menu(level("high"), level("medium"), level("low"))),
@@ -408,13 +574,45 @@ def tray(helper, server):
     pystray.Icon("dieter-helper", image, "Dieter helper", menu).run()
 
 
+def find_browser():
+    """Chrome if it's installed, otherwise Edge (always on Windows)."""
+    for path in (r"%ProgramFiles%\Google\Chrome\Application\chrome.exe",
+                 r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe",
+                 r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe",
+                 r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
+                 r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"):
+        full = os.path.expandvars(path)
+        if os.path.exists(full):
+            return full
+    return None
+
+
+def open_dieter(settings):
+    """Open the Dieter page full screen, as its own app window (F11 leaves full screen)."""
+    import subprocess
+    import webbrowser
+    page = settings.get("dieter_page", DIETER_PAGE)
+    browser = find_browser()
+    if browser:
+        subprocess.Popen([browser, f"--app={page}", "--start-fullscreen"])
+    else:
+        webbrowser.open(page)
+
+
 def main():
-    helper = Helper()
+    if "--open-only" in sys.argv:  # the sign-in shortcut: just open the Dieter page (the helper runs separately)
+        open_dieter(load_settings())
+        return
+    face = Face()
+    helper = Helper(face=face)
+    face.on_touch = lambda: helper.wake("touch")
     try:
         server = serve(helper)
     except OSError:
         print("Another Dieter helper is already running.")
         return
+    if "--quiet" not in sys.argv:
+        face.eyes()  # hello
     tray(helper, server)
 
 
