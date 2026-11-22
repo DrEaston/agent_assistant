@@ -1,0 +1,423 @@
+{# Hands-free cook mode: the tablet keeps listening, acts on phrases that start with "Dieter" (and on replies in
+   the few seconds after Dieter speaks), and talks back. Quick commands run right here; anything else goes to the
+   AI, which may decide it wasn't meant for it. Plan changes wait for a spoken "yes".
+   Included by tg_cook.html, which provides window.tgCook and fires "tg:alert". #}
+<style>
+.hf-bar { position: sticky; top: 0; z-index: 30; margin: 0 auto .75rem; max-width: 80rem;
+  background: #1f2937; color: #f9fafb; border-radius: 14px; padding: .7rem .9rem;
+  display: flex; flex-direction: column; gap: .45rem; box-shadow: 0 6px 20px rgba(0,0,0,.18); }
+.hf-top { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.hf-dot { width: 14px; height: 14px; border-radius: 50%; background: #6b7280; flex: none; }
+.hf-bar[data-mode="listening"] .hf-dot { background: #22c55e; }
+.hf-bar[data-mode="follow"] .hf-dot { background: #facc15; box-shadow: 0 0 0 6px rgba(250,204,21,.25); }
+.hf-bar[data-mode="thinking"] .hf-dot { background: #60a5fa; animation: hf-pulse 1s infinite; }
+.hf-bar[data-mode="speaking"] .hf-dot { background: #f472b6; animation: hf-pulse 1s infinite; }
+.hf-bar[data-mode="follow"] { outline: 3px solid #facc15; }
+@keyframes hf-pulse { 50% { opacity: .35; } }
+.hf-status { font-weight: 700; font-size: 1.05rem; flex: 1; min-width: 10rem; }
+.hf-bar button { min-height: 40px; background: #374151; color: #fff; border-color: #4b5563; }
+.hf-bar button.primary { background: #16a34a; border-color: #16a34a; }
+.hf-heard { font-size: .95rem; color: #d1d5db; }
+.hf-heard .ignored { color: #9ca3af; font-style: italic; }
+.hf-heard .mine { color: #fff; font-weight: 600; }
+.hf-said { font-size: 1rem; }
+.hf-changes { margin: 0; padding-left: 1.1rem; font-size: .95rem; color: #e5e7eb; }
+.hf-help { font-size: .85rem; color: #9ca3af; }
+#hf-toggle[aria-pressed="true"] { background: #16a34a; border-color: #16a34a; color: #fff; }
+</style>
+
+<section class="hf-bar" id="hf-bar" data-mode="off" aria-live="polite" hidden>
+  <div class="hf-top">
+    <span class="hf-dot" aria-hidden="true"></span>
+    <span class="hf-status" id="hf-status">Listening for “Dieter”</span>
+    <button type="button" class="primary" id="hf-yes" hidden>Yes</button>
+    <button type="button" id="hf-no" hidden>No</button>
+    <button type="button" id="hf-talk">Talk</button>
+    <button type="button" id="hf-stop">Stop</button>
+  </div>
+  <div class="hf-said" id="hf-said" hidden></div>
+  <ul class="hf-changes" id="hf-changes" hidden></ul>
+  <div class="hf-heard" id="hf-heard"></div>
+  <div class="hf-help" id="hf-help">Say “Dieter, next step”, “Dieter, how much butter?”, “Dieter, 12 minute timer”, “Dieter, mark it done”, “Dieter, go to the gravy”, or ask anything. “Dieter, quiet” stops talking.</div>
+</section>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const bar = $("hf-bar"), toggle = $("hf-toggle");
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const FOLLOW_MS = 8000, ANSWER_MS = 15000;  // listen without the name this long after Dieter talks (longer for yes/no)
+  let utterance = 0;
+  let active = false, paused = false, speaking = false, rec = null, restartTimer = null, lastError = "";
+  let followUntil = 0, awaiting = false, history = [], lastSpoken = "", lastStep = null, localUndo = null, serverUndo = false;
+  let tone = null, restarts = [], lastHeard = { text: "", at: 0 }, thinking = false;
+  const queue = [];
+
+  const cook = () => window.tgCook;
+  function device() { try { return JSON.parse(localStorage.getItem("tg-voice-device") || "{}"); } catch (e) { return {}; } }
+  function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+  function report(event, detail) {
+    fetch("/thanksgiving/api/voice-log", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event: "handsfree-" + event, detail: String(detail || "").slice(0, 300), agent: navigator.userAgent }) }).catch(() => {});
+  }
+  async function post(url, body) {
+    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || `Something went wrong (${r.status}).`);
+    return data;
+  }
+
+  // ---------- what the bar shows
+  function mode() {
+    if (!active) return "off";
+    if (speaking) return "speaking";
+    if (thinking) return "thinking";
+    if (paused) return "paused";
+    return Date.now() < followUntil ? "follow" : "listening";
+  }
+  const LABELS = { listening: "Listening for “Dieter”", follow: "Go ahead, I'm listening", thinking: "Thinking…",
+                   speaking: "Talking… (tap Stop to cut me off)", paused: "Paused while Tell Dieter is open", off: "" };
+  function render() {
+    const m = mode();
+    bar.dataset.mode = m;
+    $("hf-status").textContent = awaiting && m === "follow" ? "Say “yes” to do it, or “no”"
+      : awaiting && m === "listening" ? "Say “Dieter, yes” or “Dieter, no” (or tap)" : LABELS[m];
+    $("hf-yes").hidden = $("hf-no").hidden = !awaiting;
+  }
+  setInterval(() => { if (active) render(); }, 500);
+  function showHeard(text, kind) {
+    $("hf-heard").innerHTML = `Heard: <span class="${kind}">“${esc(text)}”</span>${kind === "ignored" ? " · not for me" : ""}`;
+  }
+  function showSaid(text, changes) {
+    $("hf-said").hidden = !text; $("hf-said").textContent = text || "";
+    $("hf-changes").hidden = !(changes && changes.length);
+    $("hf-changes").innerHTML = (changes || []).map((c) => `<li>${esc(c)}</li>`).join("");
+  }
+
+  // ---------- sound
+  function beep() {
+    if (!tone) return;
+    try {
+      const o = tone.createOscillator(), g = tone.createGain(), t0 = tone.currentTime;
+      o.frequency.value = 880; o.connect(g); g.connect(tone.destination);
+      g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.15); o.start(t0); o.stop(t0 + 0.16);
+    } catch (e) {}
+  }
+  function speak(text, opts = {}) {
+    text = String(text || "").replace(/→/g, " to ").replace(/[·•]/g, ",").replace(/°F/g, " degrees").trim();
+    if (!text) return;
+    if (!opts.quiet) lastSpoken = text;
+    if (!("speechSynthesis" in window)) { showSaid(text); followUntil = Date.now() + (awaiting ? ANSWER_MS : FOLLOW_MS); return; }
+    if (speaking && opts.queue) { queue.push(text); return; }
+    const id = ++utterance;  // a newer speak() or hush() makes this one's "finished" a no-op
+    speechSynthesis.cancel();
+    speaking = true; stopRecognition(); render();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "en-US"; u.rate = 1.02;
+    const done = () => {
+      if (id !== utterance) return;
+      utterance++;
+      speaking = false;
+      if (queue.length) { speak(queue.shift()); return; }
+      followUntil = Date.now() + (awaiting ? ANSWER_MS : FOLLOW_MS);
+      render(); startRecognition();
+    };
+    u.onend = done; u.onerror = done;
+    // Some Chrome builds never fire onend for long speech; don't get stuck deaf.
+    setTimeout(done, 2500 + text.length * 90);
+    speechSynthesis.speak(u);
+  }
+  function hush() {
+    queue.length = 0; utterance++;
+    if ("speechSynthesis" in window) speechSynthesis.cancel();
+    if (speaking) { speaking = false; render(); startRecognition(); }
+  }
+
+  // ---------- the always-on mic
+  function stopRecognition() {
+    clearTimeout(restartTimer);
+    if (rec) { rec.onend = null; try { rec.abort(); } catch (e) {} rec = null; }
+  }
+  function startRecognition() {
+    if (!active || paused || speaking || rec || document.hidden) return;
+    // Chrome ends recognition every so often; restart it, but back off if it keeps ending instantly.
+    const t = Date.now();
+    restarts = restarts.filter((x) => t - x < 60000); restarts.push(t);
+    if (restarts.length > 25) { report("restart-storm", lastError); restartTimer = setTimeout(startRecognition, 5000); restarts = []; return; }
+    rec = new Recognition();
+    rec.lang = "en-US"; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
+    let handledIndex = -1;
+    rec.onresult = (event) => {
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) { if (i > handledIndex) { handledIndex = i; heard(result[0].transcript); } }
+        else interim += result[0].transcript;
+      }
+      if (interim.trim()) $("hf-heard").innerHTML = `Hearing: <span>${esc(interim.trim())}</span>`;
+    };
+    rec.onerror = (event) => {
+      lastError = event.error;
+      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        report("mic-blocked", event.error);
+        turnOff("I need microphone permission. Allow it in Chrome's site settings, then tap Hands-free again.");
+      } else if (event.error !== "no-speech" && event.error !== "aborted") {
+        report("recognition-error", event.error);
+      }
+    };
+    rec.onend = () => {
+      rec = null;
+      if (!active || paused || speaking) return;
+      restartTimer = setTimeout(startRecognition, lastError === "network" ? 3000 : 200);
+      lastError = "";
+    };
+    try { rec.start(); } catch (e) { rec = null; restartTimer = setTimeout(startRecognition, 1000); }
+  }
+
+  // ---------- one phrase heard
+  async function heard(text) {
+    text = (text || "").trim();
+    if (!text) return;
+    const key = text.toLowerCase();
+    if (key === lastHeard.text && Date.now() - lastHeard.at < 3000) return;  // Android sometimes repeats a result
+    lastHeard = { text: key, at: Date.now() };
+    const followUp = Date.now() < followUntil;
+    const d = device();
+    let data;
+    try {
+      data = await post("/thanksgiving/api/handsfree/heard", { text, follow_up: followUp, device: d.name || "", sass: d.sass || "normal" });
+    } catch (e) { $("hf-heard").textContent = "Can't reach Dieter right now."; return; }
+    if (!data.addressed) { showHeard(text, "ignored"); return; }
+    showHeard(text, "mine");
+    beep();
+    followUntil = 0;
+    if (data.command) { run(data.command); return; }
+    ask(data.ask, data.via);
+  }
+
+  async function ask(text, via) {
+    thinking = true; render();
+    const d = device();
+    let data;
+    try {
+      data = await post("/thanksgiving/api/handsfree/ask", { text, via, history, device: d.name || "", sass: d.sass || "normal" });
+    } catch (e) { thinking = false; speak(e.message); return; }
+    thinking = false;
+    if (data.ignored) { showHeard(text, "ignored"); render(); return; }
+    history.push({ role: "user", content: text });
+    let say = data.question || data.reply || "";
+    if (!say && data.changes.length) say = "Here's what I'd change.";
+    if (data.problems.length) say += " " + data.problems[0];
+    history.push({ role: "assistant", content: [data.question || data.reply, ...data.changes].join("\n") });
+    history = history.slice(-8);
+    awaiting = !!data.can_apply;
+    if (awaiting) say += " Should I do it?";
+    showSaid(data.question || data.reply, data.changes.concat((data.warnings || []).map((w) => "Heads up: " + w)));
+    speak(say || "Hmm, I'm not sure. Try saying it another way.");
+  }
+
+  // ---------- quick commands, carried out right here
+  function words(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((w) => w.length > 1); }
+  function stem(w) { return w.replace(/(es|s)$/, ""); }
+  function stepSpeech(dish, step) {
+    const c = cook(), t = c.now();
+    let when;
+    if (c.isDone(step)) when = "That one's done.";
+    else if (step.start_ms <= t && step.end_ms > t) when = "Do it now.";
+    else if (step.start_ms < t) when = "It's running late.";
+    else when = `At ${step.clock}, ${c.rel(step.start_ms)}.`;
+    const temp = step.temp ? ` Oven at ${step.temp} degrees.` : "";
+    const detail = step.detail ? ` ${step.detail}` : "";
+    return `${dish.name}: ${step.title}. ${when}${temp}${detail}`;
+  }
+  function soonestUndone() {
+    const c = cook();
+    return c.steps().filter((s) => !c.isDone(s)).sort((a, b) => a.start_ms - b.start_ms)[0] || null;
+  }
+  function currentStep() {
+    const c = cook(), dish = c.dish();
+    if (!dish) return null;
+    const t = c.now();
+    return dish.steps.find((s) => !c.isDone(s) && s.start_ms <= t && s.end_ms > t) || c.nextStep(dish) || null;
+  }
+  function linesOf(dish, section) {
+    const pick = (secs) => (section ? secs.filter((s) => s.heading.toLowerCase().startsWith(section.toLowerCase())) : []);
+    const secs = pick(dish.ingredient_sections || []);
+    return (secs.length ? secs : (dish.ingredient_sections || [])).flatMap((s) => s.lines);
+  }
+  function findDish(name) {
+    const want = words(name).map(stem).filter((w) => !["the", "and", "of"].includes(w));
+    let best = null, bestScore = 0;
+    for (const d of cook().dishes()) {
+      const have = words(d.name).map(stem);
+      const score = want.filter((w) => have.some((h) => h.startsWith(w) || w.startsWith(h))).length;
+      if (score > bestScore) { best = d; bestScore = score; }
+    }
+    return best;
+  }
+  function minutesText(m) {
+    if (m % 60 === 0) return m === 60 ? "one hour" : `${m / 60} hour`;
+    if (m > 60) return `${Math.floor(m / 60)} hour ${m % 60} minute`;
+    return `${m} minute`;
+  }
+
+  function run(cmd) {
+    const c = cook();
+    if (!c || !c.ready()) { speak("Give me a second, I'm still loading the plan."); return; }
+    const dish = c.dish();
+    switch (cmd.type) {
+      case "wake": speak("Yes?"); break;
+      case "next": {
+        let d = dish, s = d && c.nextStep(d);
+        if (!s) { const any = soonestUndone(); if (any) { d = any.dish; s = d.steps.find((x) => x.key === any.key); c.select(d.id); } }
+        if (!s) { speak("Everything's done. Go eat!"); break; }
+        lastStep = { dish: d, step: s };
+        speak(stepSpeech(d, s));
+        break;
+      }
+      case "read":
+        if (lastSpoken) speak(lastSpoken);
+        else run({ type: "next" });
+        break;
+      case "ingredients": {
+        if (!dish) { speak("Pick a recipe first. Say, Dieter, go to the gravy."); break; }
+        const step = currentStep();
+        const lines = linesOf(dish, step && step.section);
+        speak(lines.length ? `${dish.name} ingredients: ${lines.join(". ")}.` : `${dish.name} doesn't list ingredients.`);
+        break;
+      }
+      case "amount": {
+        const want = words(cmd.item).map(stem).filter((w) => !["the", "of", "do", "need"].includes(w));
+        const match = (d) => linesOf(d).filter((line) => { const have = words(line).map(stem); return want.every((w) => have.includes(w)); });
+        let hits = dish ? match(dish) : [], where = dish;
+        if (!hits.length) for (const d of c.dishes()) { const h = match(d); if (h.length) { hits = h; where = d; break; } }
+        speak(hits.length ? `${where === dish ? "" : where.name + ": "}${hits.slice(0, 3).join(". ")}.`
+                          : `I don't see ${cmd.item} in ${dish ? "the " + dish.name : "any recipe"}.`);
+        break;
+      }
+      case "goto": {
+        const d = findDish(cmd.dish);
+        if (!d) { speak(`I don't have a dish called ${cmd.dish}.`); break; }
+        c.select(d.id);
+        const s = c.nextStep(d);
+        if (s) lastStep = { dish: d, step: s };
+        speak(s ? `${d.name}. Next: ${s.title}, ${c.isDone(s) ? "" : c.rel(s.start_ms)}.` : `${d.name}. All steps are done.`);
+        break;
+      }
+      case "timer": {
+        const label = cmd.label ? cmd.label.replace(/^./, (x) => x.toUpperCase()) : (dish ? dish.name : "Timer");
+        c.startTimer(cmd.minutes, label);
+        speak(`${minutesText(cmd.minutes)} timer started${cmd.label ? " for " + cmd.label : ""}.`);
+        break;
+      }
+      case "timer_left": {
+        const timers = c.timers(), t = c.now();
+        if (!timers.length) { speak("No timers running."); break; }
+        speak(timers.map((tm) => {
+          const left = Math.max(0, Math.round((tm.ends_ms - t) / 1000));
+          if (!left) return `${tm.label} is done`;
+          const m = Math.floor(left / 60), s = left % 60;
+          return `${tm.label}: ${m ? m + " minute" + (m === 1 ? "" : "s") : ""}${m && s ? " " : ""}${s && m < 5 ? s + " seconds" : ""} left`;
+        }).join(". ") + ".");
+        break;
+      }
+      case "stop_timer": {
+        const timers = c.timers().slice().sort((a, b) => a.ends_ms - b.ends_ms);
+        if (!timers.length) { speak("No timers running."); break; }
+        const tm = timers[0];
+        c.stopTimer(tm.id);
+        speak(`Stopped the ${tm.label} timer.`);
+        break;
+      }
+      case "done": {
+        let target = lastStep && !c.isDone(lastStep.step) ? lastStep : null;
+        if (!target) { const s = currentStep(); if (s) target = { dish, step: s }; }
+        if (!target) { speak("There's nothing left to check off here."); break; }
+        c.setDone(target.step.key, true);
+        localUndo = () => c.setDone(target.step.key, false);
+        const next = c.nextStep(target.dish);
+        lastStep = null;
+        speak(`Done: ${target.step.title}.` + (next && next.key !== target.step.key ? ` Next up: ${next.title}, ${c.rel(next.start_ms)}.` : ""));
+        break;
+      }
+      case "quiet": hush(); followUntil = 0; render(); break;
+      case "yes":
+        if (!awaiting) { speak("There's nothing waiting for a yes."); break; }
+        apply(); break;
+      case "no":
+        if (!awaiting) { speak("Okay."); break; }
+        cancel(); break;
+      case "undo":
+        if (localUndo) { localUndo(); localUndo = null; speak("Undone."); }
+        else if (serverUndo) {
+          serverUndo = false;
+          post("/thanksgiving/api/command/undo").then(() => { speak("Undone. The plan is back the way it was."); document.dispatchEvent(new CustomEvent("tg:changed")); })
+            .catch((e) => speak(e.message));
+        } else speak("Nothing to undo.");
+        break;
+      case "sleep": speak("Hands-free off."); setTimeout(() => turnOff(), 1200); break;
+      default: speak("I didn't catch that.");
+    }
+  }
+
+  async function apply() {
+    awaiting = false; render();
+    try {
+      await post("/thanksgiving/api/command/apply");
+      history = []; localUndo = null; serverUndo = true;
+      showSaid("Done. The plan is updated.", []);
+      speak("Done. The plan is updated.");
+      document.dispatchEvent(new CustomEvent("tg:changed"));
+    } catch (e) { speak(e.message); }
+  }
+  async function cancel() {
+    awaiting = false; history = []; render();
+    await post("/thanksgiving/api/command/cancel").catch(() => {});
+    showSaid("Okay, nothing changed.", []);
+    speak("Okay, nothing changed.");
+  }
+
+  // ---------- on / off
+  function turnOn() {
+    if (!Recognition) { alertBox("Hands-free needs Chrome (or Edge) with speech recognition. Use Tell Dieter instead."); return; }
+    try { tone = tone || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { tone = null; }
+    active = true; paused = false; awaiting = false; followUntil = 0;
+    bar.hidden = false; toggle.setAttribute("aria-pressed", "true");
+    showSaid("", []); $("hf-heard").textContent = "";
+    report("on", device().name || "unnamed");
+    speak("Hands-free is on. Say Dieter, then what you need.");  // this tap also unlocks speech on Android
+  }
+  function turnOff(message) {
+    active = false; hush(); stopRecognition(); speaking = false; thinking = false;
+    if (awaiting) post("/thanksgiving/api/command/cancel").catch(() => {});
+    awaiting = false;
+    toggle.setAttribute("aria-pressed", "false");
+    if (message) { alertBox(message); } else { bar.hidden = true; }
+    render();
+  }
+  function alertBox(message) {
+    bar.hidden = false; bar.dataset.mode = "off";
+    $("hf-status").textContent = message;
+    $("hf-yes").hidden = $("hf-no").hidden = true;
+  }
+
+  // Sit right under cook mode's alerts, where it's visible while cooking.
+  const alerts = document.getElementById("alerts");
+  if (alerts) alerts.after(bar);
+
+  toggle.addEventListener("click", () => (active ? turnOff() : turnOn()));
+  $("hf-stop").addEventListener("click", () => { if (speaking) { hush(); } else { turnOff(); } });
+  $("hf-yes").addEventListener("click", apply);
+  $("hf-no").addEventListener("click", cancel);
+  // Talk: skip the name for the next few seconds (for a loud kitchen, or if it keeps missing "Dieter").
+  $("hf-talk").addEventListener("click", () => {
+    if (!active) turnOn();
+    hush(); beep(); followUntil = Date.now() + FOLLOW_MS; render(); startRecognition();
+  });
+  document.addEventListener("tg:alert", (event) => { if (active) speak(event.detail.text, { queue: true, quiet: true }); });
+  document.addEventListener("tg:voice-opened", () => { if (active) { paused = true; hush(); stopRecognition(); render(); } });
+  document.addEventListener("tg:voice-closed", () => { if (active) { paused = false; render(); startRecognition(); } });
+  document.addEventListener("visibilitychange", () => { if (active && !document.hidden) startRecognition(); });
+})();
+</script>

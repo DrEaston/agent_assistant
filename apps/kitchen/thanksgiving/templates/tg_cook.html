@@ -76,6 +76,7 @@ body { overflow-x: hidden; }
   <span class="clock" id="clock">--:--</span>
   <span class="sub" id="dinner-label"></span>
   <span class="spacer"></span>
+  <button type="button" id="hf-toggle" aria-pressed="false">🎙 Hands-free</button>
   <a class="button" href="/thanksgiving">Plan</a>
   <a class="button" href="#report">Report problem</a>
 </header>
@@ -96,6 +97,7 @@ body { overflow-x: hidden; }
   </aside>
 </div>
 {% include "tg_voice.html" %}
+{% include "tg_handsfree.html" %}
 {% endblock %}
 {% block feedback %}
 <details class="feedback card" id="report">
@@ -267,7 +269,16 @@ body { overflow-x: hidden; }
     const alerts = activeAlerts();
     renderAlerts(alerts); renderTabs(alerts); renderRecipe(forceRecipe); renderSide();
     if (alerts.length && now() - lastChime > CHIME_EVERY_MS) { lastChime = now(); chime(); }
+    // Tell hands-free mode about each new alert once, so it can say it out loud.
+    for (const a of alerts) {
+      if (announced.has(a.key)) continue;
+      announced.add(a.key);
+      document.dispatchEvent(new CustomEvent("tg:alert", { detail: a.type === "timer"
+        ? { text: `Timer done: ${a.timer.label}.` }
+        : { text: `${a.dish.name}: time to ${a.step.title.replace(/^./, c => c.toLowerCase())}.` } }));
+    }
   }
+  const announced = new Set();
 
   // ---------- sound, vibration, wake lock
   function chime() {
@@ -368,6 +379,35 @@ body { overflow-x: hidden; }
       .then(() => { ev.target.text.value = ""; $("report-sent").hidden = false; })
       .catch(() => { $("offline").hidden = false; });
   });
+
+  // What hands-free mode (tg_handsfree.html) can see and do. Same effects as tapping.
+  window.tgCook = {
+    ready: () => !!state,
+    now,
+    dishes: () => (state ? state.dishes : []),
+    dish: () => state && state.dishes.find(d => d.id === selected),
+    select(id) { selected = id; safeSet("tg-dish", id); renderAll(true); window.scrollTo({ top: 0 }); },
+    nextStep, isDone, rel,
+    steps: allSteps,
+    alerts: activeAlerts,
+    setDone(key, value) {
+      pendingDone.set(key, value); handled.set(key, Date.now()); renderAll(true);
+      act(() => post("/thanksgiving/api/steps/done", { key, done: value }));
+    },
+    timers: () => (state ? state.timers : []),
+    startTimer(minutes, label) {
+      const dish = state && state.dishes.find(d => d.id === selected);
+      const name = label || (dish ? dish.name : "Timer");
+      state.timers.push({ id: -Date.now(), dish_id: dish && dish.id, label: name, ends_ms: now() + minutes * 60000 });
+      renderAll();
+      act(() => post("/thanksgiving/api/timers", { dish_id: dish && dish.id, label: name, minutes }));
+    },
+    stopTimer(id) {
+      handled.set("timer:" + id, Date.now()); state.timers = state.timers.filter(t => t.id !== id); renderAll();
+      if (id > 0) act(() => post(`/thanksgiving/api/timers/${id}/dismiss`));
+    },
+    refresh: poll,
+  };
 
   poll();
   setInterval(poll, POLL_MS);

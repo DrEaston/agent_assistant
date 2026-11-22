@@ -15,7 +15,7 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from . import planner, sizes, voice
+from . import handsfree, planner, sizes, voice
 from .presets import CATEGORIES, OUR_MENU, PRESET_BUTTONS, preset_dish
 from .store import ThanksgivingStore
 
@@ -306,6 +306,41 @@ def set_dish_size(dish_id: int, scale: str = Form(...)):
     return back(f"size-{dish_id}")  # lands on the dropdown without opening the editor
 
 
+def _run_command(text, history, device, sass, spoken=""):
+    """Ask the AI about one request and keep its checked changes pending until Apply. Shared by Tell Dieter and
+    hands-free mode (spoken="name"|"follow-up": short spoken replies, and the AI may decide it wasn't meant for it)."""
+    plan = require_plan()
+    context = plan_context(plan)
+    summary = voice.plan_summary(plan, context["dishes"], context["tasks"], context["cooks"], context["now"])
+    try:
+        result = voice.understand(text, summary, [h for h in history if isinstance(h, dict)], _state["voice_model"],
+                                  sass=sass, spoken_prompt=handsfree.spoken_prompt(spoken) if spoken else "")
+    except Exception as exc:
+        print(f"Warning: voice command failed: {exc}")
+        raise HTTPException(status_code=503, detail="Dieter couldn't think that through right now. Try again.") from exc
+    if result.get("ignore"):
+        print("Hands-free: " + json.dumps({"device": device or "unnamed", "said": text[:200], "ignored": "by AI"}))
+        return {"ignored": True, "reply": "", "question": "", "changes": [], "problems": [], "warnings": [],
+                "can_apply": False}
+    actions, changes, problems = voice.check(result["actions"], plan, context["dishes"], context["tasks"],
+                                             context["cooks"])
+    warnings = voice.knock_on(plan, context["dishes"], actions, plan["ovens"])
+    _state["voice_pending"][plan["id"]] = actions
+    # Logged so "it did something dumb" can be looked up later.
+    print("Tell Dieter: " + json.dumps({"device": device or "unnamed", "sass": sass, "hands_free": spoken or "",
+                                        "said": text[:500], "reply": result["reply"], "question": result["question"],
+                                        "changes": changes, "problems": problems, "warnings": warnings,
+                                        "model": voice.model_name() if _state["voice_model"] is None else "test"}))
+    return {"ignored": False, "reply": result["reply"], "question": result["question"], "changes": changes,
+            "problems": problems, "warnings": warnings, "can_apply": bool(actions)}
+
+
+def _device_and_sass(data):
+    # Each device can name itself and pick its own sass level (saved on that device).
+    sass = data.get("sass") if data.get("sass") in voice.SASS_LEVELS else "normal"
+    return str(data.get("device") or "").strip()[:40], sass
+
+
 @router.post("/thanksgiving/api/command")
 async def api_command(request: Request):
     """Turn a spoken or typed request into a preview of changes. Nothing is saved until Apply."""
@@ -313,30 +348,47 @@ async def api_command(request: Request):
     text = str(data.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="Say or type what to change.")
-    plan = require_plan()
-    context = plan_context(plan)
-    summary = voice.plan_summary(plan, context["dishes"], context["tasks"], context["cooks"], context["now"])
     history = data.get("history") if isinstance(data.get("history"), list) else []
-    # Each device can name itself and pick its own sass level (saved on that device).
-    sass = data.get("sass") if data.get("sass") in voice.SASS_LEVELS else "normal"
-    device = str(data.get("device") or "").strip()[:40]
-    try:
-        result = voice.understand(text, summary, [h for h in history if isinstance(h, dict)], _state["voice_model"],
-                                  sass=sass)
-    except Exception as exc:
-        print(f"Warning: voice command failed: {exc}")
-        raise HTTPException(status_code=503, detail="Dieter couldn't think that through right now. Try again.") from exc
-    actions, changes, problems = voice.check(result["actions"], plan, context["dishes"], context["tasks"],
-                                             context["cooks"])
-    warnings = voice.knock_on(plan, context["dishes"], actions, plan["ovens"])
-    _state["voice_pending"][plan["id"]] = actions
-    # Logged so "it did something dumb" can be looked up later.
-    print("Tell Dieter: " + json.dumps({"device": device or "unnamed", "sass": sass,
-                                        "said": text[:500], "reply": result["reply"], "question": result["question"],
-                                        "changes": changes, "problems": problems, "warnings": warnings,
-                                        "model": voice.model_name() if _state["voice_model"] is None else "test"}))
-    return {"reply": result["reply"], "question": result["question"], "changes": changes, "problems": problems,
-            "warnings": warnings, "can_apply": bool(actions)}
+    device, sass = _device_and_sass(data)
+    result = _run_command(text, history, device, sass)
+    result.pop("ignored", None)
+    return result
+
+
+@router.post("/thanksgiving/api/handsfree/heard")
+async def api_handsfree_heard(request: Request):
+    """One phrase from the hands-free mic. Returns {"addressed": false} for chatter, a quick command for the
+    tablet to carry out itself, or the AI's answer (same fields as /api/command)."""
+    data = await _json(request)
+    text = str(data.get("text") or "").strip()[:500]
+    device, sass = _device_and_sass(data)
+    heard = handsfree.hear(text, follow_up=bool(data.get("follow_up")))
+    if not heard["addressed"]:
+        if heard["near_miss"]:
+            # Only the first few words: enough to tune the wake word without logging the kitchen's conversation.
+            print("Hands-free near miss: " + json.dumps({"device": device or "unnamed",
+                                                         "start": " ".join(text.split()[:3])}))
+        return {"addressed": False}
+    quick = handsfree.command(heard["rest"])
+    if quick:
+        print("Hands-free: " + json.dumps({"device": device or "unnamed", "said": text[:200], "via": heard["via"],
+                                           "command": quick}))
+        return {"addressed": True, "via": heard["via"], "command": quick}
+    # Not a quick command: the tablet plays its "heard you" tone, then asks the AI via /handsfree/ask.
+    return {"addressed": True, "via": heard["via"], "ask": heard["rest"]}
+
+
+@router.post("/thanksgiving/api/handsfree/ask")
+async def api_handsfree_ask(request: Request):
+    """The AI's answer to a hands-free phrase, kept short for speaking. It may decide the phrase wasn't for it."""
+    data = await _json(request)
+    text = str(data.get("text") or "").strip()[:500]
+    if not text:
+        raise HTTPException(status_code=400, detail="Nothing to ask.")
+    history = data.get("history") if isinstance(data.get("history"), list) else []
+    device, sass = _device_and_sass(data)
+    via = "follow-up" if data.get("via") == "follow-up" else "name"
+    return _run_command(text, history, device, sass, spoken=via)
 
 
 @router.post("/thanksgiving/api/voice-log")

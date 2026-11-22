@@ -520,6 +520,46 @@ class RouteTests(unittest.TestCase):
         self.assertNotIn("Sass level for this device", system)
         self.assertIn("This device:", self.client.get("/thanksgiving").text)
 
+    def test_handsfree_ignores_chatter_and_runs_quick_commands(self):
+        self.client.get("/thanksgiving")
+        seen = self.voice_with({"reply": "Should not be called.", "question": "", "actions": []})
+        heard = lambda text, **kw: self.client.post("/thanksgiving/api/handsfree/heard", json={"text": text, **kw}).json()
+        self.assertEqual({"addressed": False}, heard("we can do the next step after dinner"))
+        self.assertEqual({"addressed": False}, heard("next step"))  # no name, no follow-up window
+        self.assertEqual({"type": "next"}, heard("next step", follow_up=True)["command"])
+        self.assertEqual({"type": "next"}, heard("Dieter, next step")["command"])
+        self.assertEqual({"type": "timer", "minutes": 12, "label": ""}, heard("Peter, start a 12 minute timer")["command"])
+        r = heard("Dieter can the crust sit overnight?")
+        self.assertEqual("can the crust sit overnight", r["ask"])
+        self.assertNotIn("messages", seen)  # the quick path never calls the AI
+
+    def test_handsfree_ask_can_ignore_or_propose(self):
+        self.client.get("/thanksgiving")
+        plan, pie = self.pie()
+        seen = self.voice_with({"ignore": True})
+        r = self.client.post("/thanksgiving/api/handsfree/ask", json={"text": "pass the salt", "via": "follow-up"}).json()
+        self.assertTrue(r["ignored"])
+        system = " ".join(m["content"] for m in seen["messages"] if m["role"] == "system")
+        self.assertIn("read aloud", system)
+        self.assertIn("may be a reply to you", system)
+        # Typed Tell Dieter never gets the "ignore" instructions.
+        self.client.post("/thanksgiving/api/command", json={"text": "pass the salt"})
+        self.assertNotIn("read aloud", " ".join(m["content"] for m in seen["messages"] if m["role"] == "system"))
+        self.voice_with({"reply": "Pushing the dough back half an hour.", "question": "",
+                         "actions": [{"type": "shift", "dish_id": pie["id"], "step_ids": ["dough"], "days": 0,
+                                      "minutes": 30}]})
+        r = self.client.post("/thanksgiving/api/handsfree/ask", json={"text": "push the dough back half an hour"}).json()
+        self.assertFalse(r["ignored"])
+        self.assertTrue(r["can_apply"], r)
+        self.assertEqual(200, self.client.post("/thanksgiving/api/command/apply").status_code)
+
+    def test_cook_mode_has_hands_free(self):
+        self.client.get("/thanksgiving")
+        page = self.client.get("/thanksgiving/cook").text
+        self.assertIn('id="hf-toggle"', page)
+        self.assertIn("/thanksgiving/api/handsfree/heard", page)
+        self.assertNotIn('id="hf-toggle"', self.client.get("/thanksgiving").text)
+
     def test_voice_answers_questions_without_changes(self):
         self.client.get("/thanksgiving")
         self.voice_with({"reply": "Yes: wrapped tight, the dough keeps 3 days in the fridge or a month frozen.",

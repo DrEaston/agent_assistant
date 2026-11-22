@@ -113,6 +113,7 @@
   function open() {
     // Start listening straight away (this tap counts as permission to use the mic). Don't focus the text box:
     // that pops up the keyboard, whose own voice-typing button fills the box but never sends.
+    document.dispatchEvent(new CustomEvent("tg:voice-opened"));  // hands-free pauses so the mics don't fight
     sheet.hidden = false;
     $("voice-open").hidden = true;
     if (Recognition || (navigator.mediaDevices && window.MediaRecorder)) mic.click();

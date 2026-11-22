@@ -111,12 +111,15 @@ def default_model(messages):
     return response.choices[0].message.content
 
 
-def understand(text, summary, history=(), model=None, sass="normal"):
-    """Ask the model for actions. history: earlier [{"role", "content"}] turns. sass: this device's level."""
+def understand(text, summary, history=(), model=None, sass="normal", spoken_prompt=""):
+    """Ask the model for actions. history: earlier [{"role", "content"}] turns. sass: this device's level.
+    spoken_prompt: extra instructions when the phrase came from the hands-free mic (it may answer {"ignore": true})."""
     messages = [{"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "system", "content": "The plan:\n" + summary}]
     if SASS_LEVELS.get(sass):
         messages.append({"role": "system", "content": SASS_LEVELS[sass]})
+    if spoken_prompt:
+        messages.append({"role": "system", "content": spoken_prompt})
     messages.extend({"role": h["role"], "content": str(h["content"])[:2000]} for h in list(history)[-8:]
                     if h.get("role") in ("user", "assistant"))
     messages.append({"role": "user", "content": text[:1000]})
@@ -125,9 +128,11 @@ def understand(text, summary, history=(), model=None, sass="normal"):
         data = json.loads(raw or "{}")
     except json.JSONDecodeError:
         return {"reply": "That one went over my head. Try saying it another way?", "question": "", "actions": []}
+    if spoken_prompt and isinstance(data, dict) and data.get("ignore") is True:
+        return {"reply": "", "question": "", "actions": [], "ignore": True}
     actions = data.get("actions") if isinstance(data.get("actions"), list) else []
     return {"reply": str(data.get("reply") or "")[:800], "question": str(data.get("question") or "")[:300],
-            "actions": [a for a in actions if isinstance(a, dict)][:15]}
+            "actions": [a for a in actions if isinstance(a, dict)][:15], "ignore": False}
 
 
 # ---------------------------------------------------------------- checking
