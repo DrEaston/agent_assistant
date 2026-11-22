@@ -1,0 +1,82 @@
+{% extends "tg_page.html" %}
+{% from "tg_macros.html" import render_sections, size_picker, recipe_block, kind_pill, task_row, day_chart with context %}
+{% block title %}{{ dish.name }}{% endblock %}
+{% block page %}
+<section id="dish-{{ dish.id }}" class="dish-page">
+  <a class="small" href="/thanksgiving/menu">← Menu</a>
+  <div class="section-head" style="margin-top:.4rem">
+    <h2>{{ dish.name }}</h2>
+    <a class="small" href="#edit" data-open-editor>Edit dish</a>
+  </div>
+  {% if dish.notes %}<p class="muted">{{ dish.notes }}</p>{% endif %}
+  <div class="card">
+    <h3 class="card-title">Recipe{% if dish.size_label %} <span data-size-label-for="{{ dish.id }}">· {{ dish.size_label }}</span>{% endif %}</h3>
+    {{ size_picker(dish) }}
+    <div data-recipe-for="{{ dish.id }}">
+    {% if dish.ingredient_sections or dish.instruction_sections %}
+      {{ render_sections(dish.ingredient_sections, dish.instruction_sections) }}
+    {% else %}
+      <p class="muted">No recipe yet. Paste the ingredients and steps under Edit dish.</p>
+    {% endif %}
+    </div>
+  </div>
+  <h3 class="block-title">Steps</h3>
+  <div class="card">
+  {% for t in dish_tasks %}{{ task_row(t, show_dish=False) }}{% else %}<p class="muted">No steps yet.</p>{% endfor %}
+  </div>
+  <div class="card" id="edit" style="margin-top:1rem">
+      <details class="editor">
+        <summary>Edit dish, recipe, and steps</summary>
+        <form method="post" action="/thanksgiving/dishes/{{ dish.id }}/save" class="stack" style="margin-top:.75rem">
+          <div class="row">
+            <div class="field" style="flex:2 1 12rem"><label>Name</label><input type="text" name="name" value="{{ dish.name }}"></div>
+            <div class="field"><label>Type</label>
+              <select name="category">{% for value, label in categories %}<option value="{{ value }}" {% if dish.category == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+          </div>
+          <div class="field"><label>Steps</label>
+            <div class="step-edit step-head"><span>Day</span><span>Time</span><span>Step</span><span>Min</span><span>Type</span><span>°F</span><span>Remove</span></div>
+            {% for step in dish.steps %}
+              {% set when = planner.resolve_anchor(step.anchor, dinner) %}
+              <div class="step-edit">
+                <input type="hidden" name="step_id" value="{{ step.id }}">
+                <select name="step_day" aria-label="Day">{% for d in day_choices %}<option value="{{ d.offset }}" {% if planner.day_offset_of(when, dinner) == d.offset %}selected{% endif %}>{{ d.label }}</option>{% endfor %}</select>
+                <input type="time" name="step_time" value="{{ when.strftime('%H:%M') }}" aria-label="Time">
+                <input class="s-title" type="text" name="step_title" value="{{ step.title }}" aria-label="Step">
+                <input type="number" name="step_minutes" value="{{ step.minutes }}" min="0" aria-label="Minutes">
+                <select name="step_kind" aria-label="Type">{% for k, label in step_kinds.items() %}<option value="{{ k }}" {% if step.kind == k %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+                <input type="number" name="step_temp" value="{{ step.temp or '' }}" min="0" placeholder="°F" aria-label="Oven temperature">
+                <label class="small" style="font-weight:500"><input type="checkbox" name="step_remove" value="{{ step.id }}"> Remove</label>
+                <input class="detail" type="text" name="step_detail" value="{{ step.detail }}" placeholder="Note (optional)" aria-label="Step note">
+              </div>
+            {% endfor %}
+            <div class="step-edit">
+              <select name="new_step_day" aria-label="New step day">{% for d in day_choices %}<option value="{{ d.offset }}" {% if d.offset == 0 %}selected{% endif %}>{{ d.label }}</option>{% endfor %}</select>
+              <input type="time" name="new_step_time" value="12:00" aria-label="New step time">
+              <input class="s-title" type="text" name="new_step_title" placeholder="+ Add a step" aria-label="New step">
+              <input type="number" name="new_step_minutes" placeholder="Min" min="0" aria-label="New step minutes">
+              <select name="new_step_kind" aria-label="New step type">{% for k, label in step_kinds.items() %}<option value="{{ k }}">{{ label }}</option>{% endfor %}</select>
+              <input type="number" name="new_step_temp" placeholder="°F" min="0" aria-label="New step oven temperature">
+            </div>
+            <p class="small muted">Thanksgiving-day steps move with dinner time. Earlier days keep their clock time.</p>
+          </div>
+          {% if dish.size_options %}<p class="small muted">Edit the recipe as written (full batch). The batch size above scales it.</p>{% endif %}
+          <div class="field"><label>Ingredients (one per line)</label><textarea name="ingredients_text">{{ dish.base_ingredients_text }}</textarea></div>
+          <div class="field"><label>Recipe steps (one per line)</label><textarea name="instructions_text">{{ dish.base_instructions_text }}</textarea></div>
+          <div class="field"><label>Notes</label><input type="text" name="notes" value="{{ dish.notes }}"></div>
+          <div class="row"><button class="primary" type="submit">Save dish</button></div>
+        </form>
+        {% if dish.category == 'turkey' %}
+        <form method="post" action="/thanksgiving/dishes/{{ dish.id }}/turkey" class="row card" style="margin-top:.75rem">
+          <div class="field"><label>Turkey weight (lb)</label><input type="number" step="0.5" name="weight_lb" value="13" min="4" max="40"></div>
+          <label class="row" style="font-weight:500"><input type="checkbox" name="frozen" value="1" checked> Frozen (needs thawing)</label>
+          <button type="submit">Recalculate turkey timing</button>
+          <span class="small muted">Replaces the turkey steps with times for this weight.</span>
+        </form>
+        {% endif %}
+        <form method="post" action="/thanksgiving/dishes/{{ dish.id }}/delete" style="margin-top:.75rem">
+          <button class="quiet danger" type="submit" data-confirm="Delete {{ dish.name }} and its steps?">Delete dish</button>
+        </form>
+      </details>
+  </div>
+</section>
+{% endblock %}

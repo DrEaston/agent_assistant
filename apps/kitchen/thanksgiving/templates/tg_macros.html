@@ -1,0 +1,73 @@
+{# Shared pieces for the Thanksgiving pages. Import with context. #}
+{% macro render_sections(ing, ins) -%}
+<div class="recipe-view">
+  {% if ing %}<div><h4>Ingredients</h4>{% for s in ing %}{% if s.heading %}<h5>{{ s.heading }}</h5>{% endif %}<ul>{% for line in s.lines %}<li>{{ line }}</li>{% endfor %}</ul>{% endfor %}</div>{% endif %}
+  {% if ins %}<div><h4>How to</h4>{% for s in ins %}{% if s.heading %}<h5>{{ s.heading }}</h5>{% endif %}<ol>{% for line in s.lines %}<li>{{ line }}</li>{% endfor %}</ol>{% endfor %}</div>{% endif %}
+</div>
+{%- endmacro %}
+{% macro size_picker(dish) -%}
+  {%- if dish.size_options -%}
+  <form method="post" action="/thanksgiving/dishes/{{ dish.id }}/size" class="row size-form">
+    <span class="size-label">Batch size</span>
+    <select name="scale" data-autosubmit data-size-for="{{ dish.id }}" aria-label="Batch size for {{ dish.name }}">
+      {% for option in dish.size_options %}<option value="{{ option.value }}"{% if option.value == dish.size_value %} selected{% endif %}>{{ option.label }}</option>{% endfor %}
+    </select>
+    <noscript><button type="submit">Save</button></noscript>
+  </form>
+  {%- endif -%}
+{%- endmacro %}
+{% macro recipe_block(dish, section='') -%}
+  {{ size_picker(dish) }}
+  {%- set ing = planner.sections_for_step(dish.ingredient_sections, section) -%}
+  {%- set ins = planner.sections_for_step(dish.instruction_sections, section) -%}
+  <div data-recipe-for="{{ dish.id }}">
+  {%- if ing or ins -%}
+    {{ render_sections(ing, ins) }}
+    <details class="full-recipe"><summary>Full {{ dish.name|lower }} recipe</summary>{{ render_sections(dish.ingredient_sections, dish.instruction_sections) }}</details>
+  {%- else -%}
+    {{ render_sections(dish.ingredient_sections, dish.instruction_sections) }}
+  {%- endif -%}
+  </div>
+{%- endmacro %}
+{% macro kind_pill(task) -%}
+  {%- if task.kind in ('oven', 'stove', 'passive', 'check', 'shop') -%}
+  <span class="pill kind-{{ task.kind }}">{{ step_kinds[task.kind] }}{% if task.temp %} {{ task.temp }}°F{% endif %}</span>
+  {%- endif -%}
+{%- endmacro %}
+{% macro task_row(t, show_dish=True) -%}
+    {% set is_overdue = not t.done and t.end <= now and t.kind != 'passive' %}
+    <div class="task{% if t.done %} done{% endif %}{% if is_overdue %} overdue{% endif %}" id="task-{{ t.key|replace(':', '-') }}">
+      <form method="post" action="/thanksgiving/steps/toggle">
+        <input type="hidden" name="key" value="{{ t.key }}">
+        <input type="hidden" name="anchor" value="task-{{ t.key|replace(':', '-') }}">
+        {% if not t.done %}<input type="hidden" name="done" value="1">{% endif %}
+        <button class="check" type="submit" aria-label="{% if t.done %}Mark not done{% else %}Mark done{% endif %}: {{ t.title }}">{% if t.done %}✓{% endif %}</button>
+      </form>
+      <div class="t-time">{{ planner.format_clock(t.start) }}</div>
+      {% set d = dishes_by_id.get(t.dish_id) %}
+      <div class="t-body">
+        {% set has_recipe = d and (d.ingredient_sections or d.instruction_sections) %}
+        {% if has_recipe %}<details class="t-more"><summary>{% endif %}
+        <div class="t-title">{{ t.title }}{% if has_recipe %} <span class="t-open">Recipe</span>{% endif %}</div>
+        <div class="t-meta">{% if show_dish %}<span class="small muted">{{ t.dish_name }}</span>{% else %}<span class="small muted">{{ planner.short_date(t.start) }}</span>{% endif %}{{ kind_pill(t) }}
+          {% if t.minutes %}<span class="small muted">{{ planner.format_duration(t.minutes) }}</span>{% endif %}</div>
+        {% if t.detail %}<div class="t-detail">{{ t.detail }}</div>{% endif %}
+        {% if has_recipe %}</summary>{{ recipe_block(d, t.section) }}<a class="small open-dish" href="/thanksgiving/menu/{{ d.id }}">Open the full recipe →</a></details>{% endif %}
+      </div>
+    </div>
+{%- endmacro %}
+{% macro day_chart(day) -%}
+    {% if day.date == dinner.date() and dinner_day_chart %}
+    <div class="card chart" style="margin-bottom:.6rem">
+      <div class="small muted" style="margin-bottom:.3rem">Oven and stove on Thanksgiving</div>
+      {% for lane_name, rows in (('Oven', dinner_day_chart.oven), ('Stove', dinner_day_chart.stove)) %}
+        {% for row in rows %}
+        <div class="chart-lane"><span class="small muted">{% if loop.first %}{{ lane_name }}{% endif %}</span>
+          <div class="chart-row">{% for b in row %}<div class="bar {{ b.kind }}" style="left: {{ b.left }}%; width: {{ b.width }}%"
+              title="{{ b.dish_name }}: {{ b.title }} {{ planner.format_clock(b.start) }}–{{ planner.format_clock(b.end) }}">{{ b.dish_name }}{% if b.temp %} {{ b.temp }}°{% endif %}</div>{% endfor %}</div></div>
+        {% endfor %}
+      {% endfor %}
+      <div class="ticks">{% for t in dinner_day_chart.ticks %}<span style="left: {{ t.left }}%">{{ t.label }}</span>{% endfor %}</div>
+    </div>
+    {% endif %}
+{%- endmacro %}

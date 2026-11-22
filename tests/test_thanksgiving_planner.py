@@ -269,13 +269,14 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(next(s for s in turkey["steps"] if s["id"] == "out")["cook"], "Parrisa")
         self.client.get("/thanksgiving")
         self.assertEqual(len(tg_router.store().get_dishes(plan["id"])), len(OUR_MENU))  # not duplicated
-        self.assertIn("Roast the turkey", r.text)
-        self.assertIn("Shopping list", r.text)
-        self.assertIn("Yukon Gold", r.text)
+        pages = self.all_pages()
+        self.assertIn("Roast the turkey", pages)
+        self.assertIn("Shopping list", pages)
+        self.assertIn("Yukon Gold", pages)
 
     def test_steps_expand_to_their_recipe_section(self):
         self.client.get("/thanksgiving")
-        page = self.client.get("/thanksgiving").text
+        page = self.client.get("/thanksgiving/timeline").text
         self.assertIn("Roll, crimp, and freeze the pie shell", page)
         self.assertIn('class="t-open"', page)
         self.assertIn("coin-size pieces", page)
@@ -283,6 +284,62 @@ class RouteTests(unittest.TestCase):
         pie = next(d for d in state["dishes"] if d["name"] == "Pumpkin pie")
         self.assertEqual([s["heading"] for s in pie["instruction_sections"]][0], "Crust")
         self.assertEqual(next(s for s in pie["steps"] if s["key"].endswith(":dough"))["section"], "Crust")
+
+    def test_each_tab_is_its_own_page(self):
+        self.client.get("/thanksgiving")
+        for url, heading in [("/thanksgiving", "Up next"), ("/thanksgiving/timeline", "<h2>Timeline</h2>"),
+                             ("/thanksgiving/menu", "<h2>Menu</h2>"), ("/thanksgiving/recipes", "<h2>Recipes</h2>"),
+                             ("/thanksgiving/shopping", "Shopping list"), ("/thanksgiving/settings", "Dinner date")]:
+            page = self.client.get(url).text
+            self.assertIn(heading, page, url)
+            self.assertIn(f'<a href="{url}" aria-current="page">', page, url)
+            self.assertIn('id="voice-live"', page, url)  # Tell Dieter on every page
+        timeline = self.client.get("/thanksgiving/timeline").text
+        self.assertNotIn("<h2>Menu</h2>", timeline)
+        self.assertNotIn("Dinner date", timeline)
+
+    def test_menu_lists_dishes_and_each_opens_its_own_page(self):
+        self.client.get("/thanksgiving")
+        plan, mac = self.mac()
+        menu = self.client.get("/thanksgiving/menu").text
+        self.assertIn(f'href="/thanksgiving/menu/{mac["id"]}"', menu)
+        self.assertIn("steps done", menu)
+        self.assertNotIn('name="ingredients_text"', menu)  # the editor lives on the dish page
+        page = self.dish_page(mac)
+        self.assertIn("<h2>Mac and cheese</h2>", page)
+        self.assertIn('name="ingredients_text"', page)
+        self.assertIn("Ingredients", page)
+        self.assertNotIn("Roast the turkey", page)  # only this dish's steps
+        self.assertEqual(self.client.get("/thanksgiving/menu/99999").status_code, 404)
+        recipes = self.client.get("/thanksgiving/recipes").text
+        self.assertIn(f'href="#recipe-{mac["id"]}"', recipes)
+
+    def test_saves_return_to_the_page_they_came_from(self):
+        self.client.get("/thanksgiving")
+        plan, mac = self.mac()
+        key = f"{mac['id']}:{mac['steps'][0]['id']}"
+        r = self.client.post("/thanksgiving/steps/toggle", data={"key": key, "done": "1"}, follow_redirects=False,
+                             headers={"referer": f"http://testserver/thanksgiving/menu/{mac['id']}"})
+        self.assertEqual(r.headers["location"], f"/thanksgiving/menu/{mac['id']}")
+        r = self.client.post("/thanksgiving/steps/toggle", data={"key": key, "anchor": "task-x"}, follow_redirects=False,
+                             headers={"referer": "http://evil.example/elsewhere"})
+        self.assertEqual(r.headers["location"], "/thanksgiving/timeline#task-x")
+        r = self.client.post("/thanksgiving/groceries/add", data={"text": "Ice"}, follow_redirects=False)
+        self.assertEqual(r.headers["location"], "/thanksgiving/shopping")
+        r = self.client.post("/thanksgiving/dishes/add", data={"name": "Rolls"}, follow_redirects=False)
+        self.assertTrue(r.headers["location"].startswith("/thanksgiving/menu/"))
+
+    def test_finished_days_can_fold_away(self):
+        self.client.get("/thanksgiving")
+        plan = tg_router.store().get_plan()
+        context = tg_router.plan_context(plan)
+        first_day = context["days"][0]
+        for task in first_day["tasks"]:
+            tg_router.store().set_checked(plan["id"], "step", task["key"], True)
+        page = self.client.get("/thanksgiving/timeline").text
+        self.assertEqual(page.count('class="day all-done"'), 1)
+        self.assertIn(f"all {len(first_day['tasks'])} done", page)
+        self.assertIn('id="hide-done" checked', page)
 
     def test_saved_old_pie_upgrades_on_startup(self):
         from apps.kitchen.thanksgiving import presets
@@ -295,6 +352,17 @@ class RouteTests(unittest.TestCase):
         upgraded = tg_router.store().get_dish(plan["id"], pie["id"])
         self.assertIn("Crust:", upgraded["instructions_text"])
 
+    def all_pages(self):
+        """Every planner page (each tab and each dish page), joined, for checks that don't care which page."""
+        plan = tg_router.store().get_plan()
+        urls = ["/thanksgiving", "/thanksgiving/timeline", "/thanksgiving/menu", "/thanksgiving/recipes",
+                "/thanksgiving/shopping", "/thanksgiving/settings"]
+        urls += [f"/thanksgiving/menu/{d['id']}" for d in tg_router.store().get_dishes(plan["id"])]
+        return "\n".join(self.client.get(u).text for u in urls)
+
+    def dish_page(self, dish):
+        return self.client.get(f"/thanksgiving/menu/{dish['id']}").text
+
     def mac(self):
         plan = tg_router.store().get_plan()
         return plan, next(d for d in tg_router.store().get_dishes(plan["id"]) if d["name"] == "Mac and cheese")
@@ -303,15 +371,15 @@ class RouteTests(unittest.TestCase):
         self.client.get("/thanksgiving")
         plan, mac = self.mac()
         self.assertEqual(mac["scale"], 1.0)
-        page = self.client.get("/thanksgiving").text
+        page = self.dish_page(mac)
         self.assertIn("Batch size", page)
         self.assertIn('value="1" selected>Full · 9x13 pan · about 8 servings', page)
         self.assertIn("Half · 8x8 pan · about 4 servings", page)
         self.assertNotIn("Thanksgiving: 3", page)
         r = self.client.post(f"/thanksgiving/dishes/{mac['id']}/size", data={"scale": "0.5"}, follow_redirects=False)
-        self.assertEqual(r.headers["location"], f"/thanksgiving#size-{mac['id']}")
+        self.assertEqual(r.headers["location"], f"/thanksgiving/menu/{mac['id']}#size-{mac['id']}")
         self.assertEqual(self.mac()[1]["scale"], 0.5)
-        page = self.client.get("/thanksgiving").text
+        page = self.dish_page(mac)
         self.assertIn("8 oz elbow macaroni", page)
         self.assertIn("buttered 8x8 dish", page)
         self.assertIn("1 lb elbow macaroni", page)  # the editor keeps the recipe as written
@@ -329,10 +397,11 @@ class RouteTests(unittest.TestCase):
     def test_size_picker_shows_wherever_the_recipe_opens(self):
         self.client.get("/thanksgiving")
         plan, mac = self.mac()
-        page = self.client.get("/thanksgiving").text
-        # Dish card, View recipe, and each timeline step's recipe all carry the picker.
+        page = self.all_pages()
+        # The dish page, the Recipes page, and each timeline step's recipe all carry the picker.
         self.assertGreaterEqual(page.count('aria-label="Batch size for Mac and cheese"'), 3)
-        self.assertIn(f'View recipe<span data-size-label-for="{mac["id"]}"> · Full · 9x13 pan · about 8 servings</span>', page)
+        self.assertIn(f'<span data-size-label-for="{mac["id"]}">· Full · 9x13 pan · about 8 servings</span>',
+                      self.dish_page(mac))
         # The recipe text sits in blocks the page refreshes in place when the size changes.
         self.assertGreaterEqual(page.count(f'data-recipe-for="{mac["id"]}"'), 2)
         state = self.client.get("/thanksgiving/api/state").json()
@@ -359,7 +428,7 @@ class RouteTests(unittest.TestCase):
         self.assertIn("goat cheese last", upgraded["instructions_text"])
         self.assertEqual(upgraded["scale"], 0.5)
         self.assertEqual(upgraded["steps"], mac["steps"])
-        page = self.client.get("/thanksgiving").text
+        page = self.dish_page(mac)
         self.assertIn("2 oz goat cheese, crumbled", page)  # half batch
         self.assertIn("5 oz sharp cheddar", page)
 
@@ -746,7 +815,7 @@ class RouteTests(unittest.TestCase):
         saved = self.mac()[1]
         self.assertIn("1 lb elbow macaroni", saved["ingredients_text"])
         self.assertIn("1 cup frozen peas", saved["ingredients_text"])
-        self.assertIn("1/2 cup frozen peas", self.client.get("/thanksgiving").text)
+        self.assertIn("1/2 cup frozen peas", self.dish_page(mac))
 
     def test_mac_and_cheese_joins_existing_plan_once(self):
         self.client.get("/thanksgiving")
@@ -786,9 +855,9 @@ class RouteTests(unittest.TestCase):
     def test_text_is_escaped(self):
         self.setup_plan()
         self.client.post("/thanksgiving/dishes/add", data={"name": "<script>alert(1)</script>"})
-        r = self.client.get("/thanksgiving")
-        self.assertNotIn("<script>alert(1)</script>", r.text)
-        self.assertIn("&lt;script&gt;", r.text)
+        pages = self.all_pages()
+        self.assertNotIn("<script>alert(1)</script>", pages)
+        self.assertIn("&lt;script&gt;", pages)
 
     def test_cook_state_and_actions(self):
         plan = self.setup_plan()

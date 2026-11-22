@@ -1,0 +1,19 @@
+{% extends "tg_page.html" %}
+{% from "tg_macros.html" import render_sections, size_picker, recipe_block, kind_pill, task_row, day_chart with context %}
+{% block title %}Recipes{% endblock %}
+{% block page %}
+<section id="recipes">
+  <div class="section-head"><h2>Recipes</h2></div>
+  <nav class="recipe-jump" aria-label="Jump to a recipe">{% for dish in dishes if dish.ingredient_sections or dish.instruction_sections %}<a href="#recipe-{{ dish.id }}">{{ dish.name }}</a>{% endfor %}</nav>
+  {% for dish in dishes if dish.ingredient_sections or dish.instruction_sections %}
+  <article class="card recipe-card" id="recipe-{{ dish.id }}">
+    <div class="section-head"><h3>{{ dish.name }}{% if dish.size_label %} <span class="muted small" data-size-label-for="{{ dish.id }}">· {{ dish.size_label }}</span>{% endif %}</h3>
+      <a class="small" href="/thanksgiving/menu/{{ dish.id }}">Steps and edit →</a></div>
+    {{ size_picker(dish) }}
+    <div data-recipe-for="{{ dish.id }}">{{ render_sections(dish.ingredient_sections, dish.instruction_sections) }}</div>
+  </article>
+  {% else %}
+  <p class="muted">No recipes yet. Open a dish in the <a href="/thanksgiving/menu">Menu</a> to add one.</p>
+  {% endfor %}
+</section>
+{% endblock %}

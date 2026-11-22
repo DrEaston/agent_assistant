@@ -1,0 +1,42 @@
+{% extends "tg_page.html" %}
+{% from "tg_macros.html" import render_sections, size_picker, recipe_block, kind_pill, task_row, day_chart with context %}
+{% block title %}Thanksgiving plan{% endblock %}
+{% block page %}
+<section id="now">
+  <div class="now-grid">
+    {% if status.overdue %}
+    <div class="card overdue"><h3>Overdue</h3>
+      {% for t in status.overdue[-4:] %}<div class="now-item"><strong>{{ t.title }}</strong>
+        <div class="small muted">{{ t.dish_name }} · was {{ planner.short_date(t.start) }} {{ planner.format_clock(t.start) }}</div></div>{% endfor %}
+      {% if status.overdue|length > 4 %}<p class="small muted">+ {{ status.overdue|length - 4 }} more in the timeline</p>{% endif %}
+    </div>
+    {% endif %}
+    <div class="card"><h3>Happening now</h3>
+      {% for t in status.current %}<div class="now-item"><strong>{{ t.title }}</strong>
+        <div class="small muted">{{ t.dish_name }} · until {{ planner.format_clock(t.end) }}</div></div>
+      {% else %}<p class="muted small">Nothing in progress.</p>{% endfor %}
+    </div>
+    <div class="card"><h3>Up next</h3>
+      {% for t in status.next %}<div class="now-item"><strong>{{ t.title }}</strong>
+        <div class="small muted">{{ t.dish_name }} · {{ planner.short_date(t.start) }} {{ planner.format_clock(t.start) }}</div></div>
+      {% else %}<p class="muted small">All done. Enjoy dinner!</p>{% endfor %}
+    </div>
+  </div>
+  {% if conflicts %}
+  <div class="banner warn stack" style="margin-top:.9rem">
+    <strong>Schedule clashes to fix</strong>
+    {% for w in conflicts %}<div class="small">{{ planner.short_date(w.when) }} {{ planner.format_clock(w.when) }}: {{ w.text }}</div>{% endfor %}
+  </div>
+  {% endif %}
+</section>
+
+<section id="today">
+  {% set today = days|selectattr("date", "equalto", now.date())|first %}
+  {% if today %}
+  {% set left = today.tasks|rejectattr("done")|list %}
+  <div class="section-head"><h2>Today</h2><a class="small" href="/thanksgiving/timeline">Whole timeline →</a></div>
+  {% if left %}<div class="card">{% for t in left %}{{ task_row(t) }}{% endfor %}</div>
+  {% else %}<p class="muted">Everything for today is done.</p>{% endif %}
+  {% endif %}
+</section>
+{% endblock %}

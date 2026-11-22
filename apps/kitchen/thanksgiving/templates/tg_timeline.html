@@ -1,0 +1,26 @@
+{% extends "tg_page.html" %}
+{% from "tg_macros.html" import render_sections, size_picker, recipe_block, kind_pill, task_row, day_chart with context %}
+{% block title %}Timeline{% endblock %}
+{% block page %}
+<section id="timeline">
+  <div class="section-head">
+    <h2>Timeline</h2>
+    <label class="row small hide-toggle"><input type="checkbox" id="hide-done" checked> Hide finished days</label>
+  </div>
+  {% for day in days %}
+  {% set left = day.tasks|rejectattr("done")|list %}
+  <div class="day{% if day.tasks and not left %} all-done{% endif %}">
+    <div class="day-summary"><strong>{{ day.label }}</strong><span class="muted small">{{ day.subtitle }} · all {{ day.tasks|length }} done</span>
+      <button type="button" class="quiet day-show">Show</button></div>
+    <div class="day-body">
+    <div class="day-head"><h3>{{ day.label }}</h3><span class="muted small">{{ day.subtitle }}</span>
+      {% if day.tasks and not left %}<span class="pill done-pill">All done</span>{% endif %}</div>
+    {{ day_chart(day) }}
+    {% for t in day.tasks %}{{ task_row(t) }}{% endfor %}
+    </div>
+  </div>
+  {% else %}
+  <p class="muted">Add dishes in the <a href="/thanksgiving/menu">Menu</a> to build the timeline.</p>
+  {% endfor %}
+</section>
+{% endblock %}

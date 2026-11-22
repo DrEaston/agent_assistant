@@ -12,6 +12,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Form, HTTPException, Request
@@ -89,8 +90,15 @@ def require_plan():
     return plan
 
 
-def back(anchor=""):
-    return RedirectResponse(url="/thanksgiving" + (f"#{anchor}" if anchor else ""), status_code=303)
+def back(page="/thanksgiving", anchor="", request=None):
+    """Redirect after a form post. With a request, go back to the Thanksgiving page the form was on
+    (the timeline, a dish page…), falling back to `page`."""
+    if request is not None:
+        referer = urlsplit(request.headers.get("referer") or "")
+        if referer.path.startswith("/thanksgiving") and not referer.path.startswith(("/thanksgiving/api",
+                                                                                    "/thanksgiving/cook")):
+            page = referer.path
+    return RedirectResponse(url=page + (f"#{anchor}" if anchor else ""), status_code=303)
 
 
 def render(name, **context):
@@ -190,19 +198,60 @@ def create_default_plan(request):
     return store().get_plan()
 
 
-@router.get("/thanksgiving", response_class=HTMLResponse)
-def plan_page(request: Request):
+def render_page(request, template, tab, **extra):
+    """One tab of the planner (they share tg_page.html: header, tabs, Tell Dieter)."""
     plan = store().get_plan() or create_default_plan(request)
     context = plan_context(plan)
     day_choices = []
     for offset in range(7, -1, -1):
         day = context["dinner"] - planner.timedelta(days=offset)
         day_choices.append({"offset": offset, "label": "Thanksgiving" if offset == 0 else planner.short_date(day)})
-    return render(
-        "tg_plan.html", **context, planner=planner, categories=CATEGORIES, presets=PRESET_BUTTONS,
-        step_kinds=planner.KIND_LABELS, day_choices=day_choices, library=library_recipes(),
-        page_url=str(request.url.path),
-    )
+    context.update(extra)
+    if callable(context.get("dish")):
+        context.update(context.pop("dish")(context))
+    return render(template, **context, planner=planner, categories=CATEGORIES, presets=PRESET_BUTTONS,
+                  step_kinds=planner.KIND_LABELS, day_choices=day_choices, tab=tab,
+                  page_url=str(request.url.path))
+
+
+@router.get("/thanksgiving", response_class=HTMLResponse)
+def plan_page(request: Request):
+    return render_page(request, "tg_now.html", "now")
+
+
+@router.get("/thanksgiving/timeline", response_class=HTMLResponse)
+def timeline_page(request: Request):
+    return render_page(request, "tg_timeline.html", "timeline")
+
+
+@router.get("/thanksgiving/menu", response_class=HTMLResponse)
+def menu_page(request: Request):
+    return render_page(request, "tg_menu.html", "menu", library=library_recipes())
+
+
+@router.get("/thanksgiving/menu/{dish_id}", response_class=HTMLResponse)
+def dish_page(request: Request, dish_id: int):
+    def pick(context):
+        dish = context["dishes_by_id"].get(dish_id)
+        if not dish:
+            raise HTTPException(status_code=404, detail="That dish isn't on the menu.")
+        return {"dish": dish, "dish_tasks": [t for t in context["tasks"] if t["dish_id"] == dish_id]}
+    return render_page(request, "tg_dish.html", "menu", dish=pick)
+
+
+@router.get("/thanksgiving/recipes", response_class=HTMLResponse)
+def recipes_page(request: Request):
+    return render_page(request, "tg_recipes.html", "recipes")
+
+
+@router.get("/thanksgiving/shopping", response_class=HTMLResponse)
+def shopping_page(request: Request):
+    return render_page(request, "tg_shopping.html", "shopping")
+
+
+@router.get("/thanksgiving/settings", response_class=HTMLResponse)
+def settings_page(request: Request):
+    return render_page(request, "tg_settings.html", "settings")
 
 
 @router.post("/thanksgiving/setup")
@@ -228,7 +277,7 @@ def save_settings(dinner_date: str = Form(...), dinner_time: str = Form(...), co
     # Cook names are no longer shown or edited (you use one device per cook instead); keep what's saved.
     cooks_text = ", ".join(parse_cooks(cooks)) if cooks is not None else plan["cooks"]
     store().update_plan(plan["id"], dinner_at, cooks_text, max(1, min(ovens, 2)))
-    return back("settings")
+    return back("/thanksgiving/settings")
 
 
 @router.post("/thanksgiving/dishes/add")
@@ -244,7 +293,7 @@ def add_dish(preset: str = Form(""), meal_id: int = Form(0), name: str = Form(""
     if not dish:
         raise HTTPException(status_code=400, detail="Pick a dish, a recipe, or type a name.")
     dish_id = store().add_dish(plan["id"], dish)
-    return back(f"dish-{dish_id}")
+    return back(f"/thanksgiving/menu/{dish_id}")
 
 
 @router.post("/thanksgiving/dishes/{dish_id}/save")
@@ -297,11 +346,11 @@ async def save_dish(dish_id: int, request: Request):
         "notes": form.get("notes", existing["notes"]),
         "steps": steps,
     })
-    return back(f"dish-{dish_id}")
+    return back(f"/thanksgiving/menu/{dish_id}")
 
 
 @router.post("/thanksgiving/dishes/{dish_id}/size")
-def set_dish_size(dish_id: int, scale: str = Form(...)):
+def set_dish_size(request: Request, dish_id: int, scale: str = Form(...)):
     plan = require_plan()
     dish = store().get_dish(plan["id"], dish_id)
     if not dish:
@@ -310,7 +359,7 @@ def set_dish_size(dish_id: int, scale: str = Form(...)):
     if value is None:
         raise HTTPException(status_code=400, detail="Pick one of the listed sizes.")
     store().set_scale(plan["id"], dish_id, value)
-    return back(f"size-{dish_id}")  # lands on the dropdown without opening the editor
+    return back(f"/thanksgiving/menu/{dish_id}", f"size-{dish_id}", request)  # back to the dropdown
 
 
 # ---------------------------------------------------------------- Tell Dieter: fast first pass, deep when needed
@@ -619,28 +668,28 @@ def retime_turkey(dish_id: int, weight_lb: float = Form(...), frozen: str = Form
     dish["steps"] = steps
     dish["notes"] = f"{weight_lb:g} lb turkey." + ("" if frozen else " Fresh / already thawed.")
     store().update_dish(plan["id"], dish_id, dish)
-    return back(f"dish-{dish_id}")
+    return back(f"/thanksgiving/menu/{dish_id}")
 
 
 @router.post("/thanksgiving/dishes/{dish_id}/delete")
 def delete_dish(dish_id: int):
     plan = require_plan()
     store().delete_dish(plan["id"], dish_id)
-    return back("menu")
+    return back("/thanksgiving/menu")
 
 
 @router.post("/thanksgiving/steps/toggle")
-def toggle_step(key: str = Form(...), done: str = Form(""), anchor: str = Form("timeline")):
+def toggle_step(request: Request, key: str = Form(...), done: str = Form(""), anchor: str = Form("")):
     plan = require_plan()
     store().set_checked(plan["id"], "step", key, bool(done))
-    return back(anchor)
+    return back("/thanksgiving/timeline", anchor, request)
 
 
 @router.post("/thanksgiving/groceries/toggle")
 def toggle_grocery(key: str = Form(...), done: str = Form("")):
     plan = require_plan()
     store().set_checked(plan["id"], "grocery", key, bool(done))
-    return back("shopping")
+    return back("/thanksgiving/shopping")
 
 
 @router.post("/thanksgiving/groceries/add")
@@ -648,14 +697,14 @@ def add_grocery(text: str = Form(...)):
     plan = require_plan()
     if text.strip():
         store().add_extra_grocery(plan["id"], text.strip())
-    return back("shopping")
+    return back("/thanksgiving/shopping")
 
 
 @router.post("/thanksgiving/groceries/{item_id}/delete")
 def delete_grocery(item_id: int):
     plan = require_plan()
     store().delete_extra_grocery(plan["id"], item_id)
-    return back("shopping")
+    return back("/thanksgiving/shopping")
 
 
 @router.post("/thanksgiving/feedback")

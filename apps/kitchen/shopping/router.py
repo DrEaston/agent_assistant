@@ -130,7 +130,7 @@ def dish_sources(dish_parts):
             text = "\n".join(line for s in sections for line in s["lines"])
             title = f"{dish['name']} ({pick['part'].lower()})"
         entries.append({"key": f"{dish['id']}:{pick['part']}", "title": title, "text": text,
-                        "url": "/thanksgiving#menu"})
+                        "url": "/thanksgiving/menu"})
     return entries
 
 

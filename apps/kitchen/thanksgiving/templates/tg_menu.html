@@ -1,0 +1,49 @@
+{% extends "tg_page.html" %}
+{% from "tg_macros.html" import render_sections, size_picker, recipe_block, kind_pill, task_row, day_chart with context %}
+{% block title %}Menu{% endblock %}
+{% block page %}
+<section id="menu">
+  <div class="section-head"><h2>Menu</h2><span class="small muted">{{ dishes|length }} dishes</span></div>
+  <div class="card menu-list">
+  {% for dish in dishes %}
+    {% set steps = tasks|selectattr("dish_id", "equalto", dish.id)|list %}
+    {% set left = steps|rejectattr("done")|sort(attribute="start")|list %}
+    <a class="menu-row" href="/thanksgiving/menu/{{ dish.id }}" id="dish-{{ dish.id }}">
+      <div class="menu-main">
+        <strong>{{ dish.name }}</strong>
+        <div class="small muted">
+          {%- if dish.size_label %}{{ dish.size_label }} · {% endif -%}
+          {%- if steps %}{{ steps|length - left|length }} of {{ steps|length }} step{{ '' if steps|length == 1 else 's' }} done{% else %}No steps{% endif -%}
+          {%- if left %} · next: {{ planner.short_date(left[0].start)[:3] }} {{ planner.format_clock(left[0].start) }}, {{ left[0].title }}{% endif -%}
+        </div>
+      </div>
+      <span class="menu-progress{% if steps and not left %} all{% endif %}">{% if steps and not left %}✓{% else %}›{% endif %}</span>
+    </a>
+  {% else %}
+    <p class="muted">No dishes yet. Add some below.</p>
+  {% endfor %}
+  </div>
+  <div class="card stack" style="margin-top:1rem">
+    <strong>Add a dish</strong>
+    <form method="post" action="/thanksgiving/dishes/add" class="add-grid">
+      {% for key, label in presets %}<button type="submit" name="preset" value="{{ key }}">+ {{ label }}</button>{% endfor %}
+    </form>
+    <div class="row">
+      {% if library %}
+      <form method="post" action="/thanksgiving/dishes/add" class="row">
+        <select name="meal_id" aria-label="Recipe from the Kitchen library" required>
+          <option value="">From your Kitchen recipes…</option>
+          {% for r in library %}<option value="{{ r.id }}">{{ r.title }}</option>{% endfor %}
+        </select>
+        <button type="submit">Add recipe</button>
+      </form>
+      {% endif %}
+      <form method="post" action="/thanksgiving/dishes/add" class="row">
+        <input type="text" name="name" placeholder="Or type a dish name" aria-label="Dish name" required>
+        <button type="submit">Add</button>
+      </form>
+    </div>
+  </div>
+
+</section>
+{% endblock %}

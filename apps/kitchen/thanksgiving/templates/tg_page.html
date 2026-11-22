@@ -1,0 +1,246 @@
+{% extends "tg_base.html" %}
+{# Shared layout for the Thanksgiving pages: header with tabs, styles, scripts, and Tell Dieter. #}
+{% block head %}
+<style>
+.top { background: #2a2118; color: #fff; padding: 1rem 1rem 0; }
+.top-inner, .wrap { max-width: 72rem; margin: 0 auto; }
+.top h1 { font-size: 1.4rem; }
+.top .sub { color: #e7dccd; margin-top: .2rem; }
+.top .row { justify-content: space-between; }
+.cook-link { background: var(--accent); border-color: var(--accent); color: #fff; font-size: 1.05rem; }
+.tabs { display: flex; gap: .25rem; margin-top: .9rem; overflow-x: auto; }
+.tabs a { color: #e7dccd; text-decoration: none; padding: .6rem .9rem; border-radius: 10px 10px 0 0; font-weight: 600; white-space: nowrap; }
+.tabs a:hover { background: rgba(255,255,255,.08); color: #fff; }
+.wrap { padding: 1.25rem 1rem; }
+section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
+.section-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: .6rem; margin-bottom: .75rem; }
+.now-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .75rem; }
+.now-grid h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: .4rem; }
+.now-item { padding: .35rem 0; border-top: 1px solid var(--line); }
+.now-item:first-of-type { border-top: 0; }
+.overdue h3 { color: var(--warn); }
+.day { margin-bottom: 1.25rem; }
+.day-head { display: flex; gap: .6rem; align-items: baseline; padding: .5rem 0; position: sticky; top: 0; background: var(--bg); z-index: 1; }
+.day-head h3 { font-size: 1.1rem; }
+.task { display: grid; grid-template-columns: 44px 5.5rem 1fr; gap: .25rem .75rem; align-items: start;
+  padding: .6rem .5rem; border-bottom: 1px solid var(--line); }
+.task.done .t-title, .task.done .t-time { color: var(--muted); text-decoration: line-through; }
+.task.overdue .t-time { color: var(--warn); font-weight: 700; }
+.task form { margin: 0; }
+.check { width: 40px; height: 40px; min-height: 40px; padding: 0; border-radius: 10px; font-size: 1.2rem; }
+.task.done .check { background: var(--ok-soft); border-color: #bcd9a0; color: var(--ok); }
+.t-time { font-variant-numeric: tabular-nums; font-weight: 600; padding-top: .5rem; }
+.t-title { font-weight: 600; }
+.t-meta { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .25rem; align-items: center; }
+.t-detail { color: var(--muted); font-size: .9rem; margin-top: .2rem; }
+.t-more > summary { list-style: none; cursor: pointer; }
+.t-more > summary::-webkit-details-marker { display: none; }
+.t-open { display: inline-block; margin-left: .4rem; padding: 0 .5rem; border-radius: 999px; font-size: .75rem;
+  font-weight: 700; color: var(--accent); background: var(--accent-soft); vertical-align: middle; }
+.t-open::after { content: " ▾"; }
+.t-more[open] .t-open::after { content: " ▴"; }
+.recipe-view { display: grid; grid-template-columns: minmax(12rem, 1fr) 2fr; gap: .5rem 1.5rem; margin-top: .6rem;
+  padding: .8rem 1rem; background: #fffaf4; border: 1px solid var(--line); border-radius: 12px; font-size: .95rem; }
+.recipe-view h4 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 .3rem; }
+.recipe-view h5 { font-size: .95rem; margin: .6rem 0 .2rem; }
+.recipe-view ul, .recipe-view ol { margin: 0; padding-left: 1.2rem; }
+.recipe-view li { padding: .15rem 0; }
+.full-recipe, .view-recipe { margin-top: .6rem; }
+.full-recipe > summary, .view-recipe > summary { font-weight: 600; color: var(--accent); }
+@media (max-width: 720px) { .recipe-view { grid-template-columns: 1fr; } }
+.filter { display: flex; gap: .4rem; flex-wrap: wrap; }
+.filter button[aria-pressed=true] { background: #2a2118; color: #fff; border-color: #2a2118; }
+.chart { position: relative; }
+.chart-lane { display: grid; grid-template-columns: 4.5rem 1fr; gap: .5rem; align-items: center; margin: .3rem 0; }
+.chart-row { position: relative; height: 30px; background: #f6f0e8; border-radius: 6px; }
+.bar { position: absolute; top: 3px; height: 24px; border-radius: 5px; color: #fff; font-size: .72rem; font-weight: 700;
+  padding: 0 .35rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; line-height: 24px; }
+.bar.oven { background: var(--oven); } .bar.stove { background: var(--stove); }
+.ticks { position: relative; height: 1.2rem; margin-left: 5rem; font-size: .72rem; color: var(--muted); }
+.ticks span { position: absolute; transform: translateX(-50%); }
+.add-grid { display: flex; flex-wrap: wrap; gap: .4rem; }
+.dishes { display: grid; grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); gap: .9rem; }
+.dish h3 { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.dish-steps { margin: .5rem 0 0; padding: 0; list-style: none; font-size: .9rem; }
+.dish-steps li { padding: .15rem 0; display: flex; gap: .5rem; }
+.dish-steps .when { color: var(--muted); min-width: 7.5rem; font-variant-numeric: tabular-nums; }
+.size-form { margin-top: .5rem; gap: .5rem; }
+.size-form label, .size-form .size-label { font-size: .85rem; color: var(--muted); font-weight: 600; }
+.size-form select { min-height: 40px; }
+.editor { margin-top: .75rem; border-top: 1px solid var(--line); padding-top: .75rem; }
+.editor summary { font-weight: 600; color: var(--accent); }
+.step-edit { display: grid; grid-template-columns: 1.6fr 1fr 2.5fr .8fr 1.2fr .8fr auto; gap: .35rem; align-items: center;
+  padding: .4rem 0; border-bottom: 1px dashed var(--line); }
+.step-edit input, .step-edit select { min-height: 38px; padding: .3rem .45rem; width: 100%; }
+.step-edit .detail { grid-column: 1 / -1; }
+.step-head { font-size: .75rem; color: var(--muted); font-weight: 700; border-bottom: 0; padding-bottom: 0; }
+.editor-wide { grid-column: 1 / -1; }
+.dish-open { grid-column: 1 / -1; }
+.grocery-section h3 { margin: 1rem 0 .4rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.grocery { display: flex; gap: .6rem; align-items: center; padding: .35rem 0; border-bottom: 1px solid var(--line); }
+.grocery.done .g-text { color: var(--muted); text-decoration: line-through; }
+.grocery .g-from { color: var(--muted); font-size: .8rem; }
+.grocery .g-amount { font-weight: 600; margin-left: .35rem; }
+.grocery.done .g-amount { color: var(--muted); }
+@media (max-width: 720px) {
+  .task { grid-template-columns: 44px 1fr; }
+  .t-time { grid-column: 2; padding-top: 0; }
+  .t-body { grid-column: 2; }
+  .step-edit { grid-template-columns: 1fr 1fr; }
+  .step-edit .s-title { grid-column: 1 / -1; }
+  .step-head { display: none; }
+  .dishes { grid-template-columns: 1fr; }
+}
+
+.tabs a[aria-current=page] { background: var(--bg); color: #2a2118; }
+.card-title, .block-title { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 .4rem; }
+.block-title { margin: 1.25rem 0 .5rem; }
+.menu-list { padding: 0; overflow: hidden; }
+.menu-row { display: flex; gap: .75rem; align-items: center; justify-content: space-between; padding: .85rem 1rem;
+  border-bottom: 1px solid var(--line); color: inherit; text-decoration: none; }
+.menu-row:last-child { border-bottom: 0; }
+.menu-row:hover { background: #fffaf4; }
+.menu-main { min-width: 0; }
+.menu-progress { font-size: 1.4rem; color: var(--muted); }
+.menu-progress.all { color: var(--ok); font-size: 1.1rem; }
+.open-dish { display: inline-block; margin-top: .5rem; }
+.recipe-jump { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: 1rem; }
+.recipe-jump a { padding: .35rem .7rem; border: 1px solid var(--line); border-radius: 999px; background: #fff; text-decoration: none; font-weight: 600; font-size: .9rem; }
+.recipe-card { margin-bottom: 1rem; scroll-margin-top: 1rem; }
+.recipe-card .section-head { margin-bottom: 0; }
+.hide-toggle { gap: .4rem; font-weight: 600; color: var(--muted); }
+.day-summary { display: none; gap: .6rem; align-items: center; padding: .55rem .5rem; border-bottom: 1px solid var(--line); }
+.day-summary .day-show { margin-left: auto; }
+.done-pill { background: var(--ok-soft); color: var(--ok); }
+.hide-done .day.all-done:not(.shown) .day-body { display: none; }
+.hide-done .day.all-done:not(.shown) .day-summary { display: flex; }
+.hide-done .day.all-done:not(.shown) { margin-bottom: 0; }
+#edit .editor { margin-top: 0; border-top: 0; padding-top: 0; }
+#menu form.row { flex-wrap: wrap; max-width: 100%; min-width: 0; }
+#menu select { max-width: 100%; min-width: 0; }
+</style>
+{% endblock %}
+{% block body %}
+<header class="top">
+  <div class="top-inner">
+    <div class="row">
+      <div>
+        <h1>Thanksgiving</h1>
+        <div class="sub">Dinner {{ planner.short_date(dinner) }} at {{ planner.format_clock(dinner) }}
+          {%- if days_until > 1 %} · {{ days_until }} days to go{% elif days_until == 1 %} · tomorrow{% elif days_until == 0 %} · today{% endif %}</div>
+      </div>
+      <a class="button cook-link" href="/thanksgiving/cook">Open cook mode →</a>
+    </div>
+    <nav class="tabs" aria-label="Sections">
+      {%- for key, label, href in [("now", "Now", "/thanksgiving"), ("timeline", "Timeline", "/thanksgiving/timeline"),
+            ("menu", "Menu", "/thanksgiving/menu"), ("recipes", "Recipes", "/thanksgiving/recipes"),
+            ("shopping", "Shopping", "/thanksgiving/shopping"), ("settings", "Settings", "/thanksgiving/settings")] %}
+      <a href="{{ href }}"{% if tab == key %} aria-current="page"{% endif %}>{{ label }}</a>
+      {%- endfor %}
+    </nav>
+  </div>
+</header>
+
+<main class="wrap" id="page">
+{% block page %}{% endblock %}
+</main>
+
+<script>
+(function () {
+  // In-page confirmation for deletes (no browser dialogs).
+  document.querySelectorAll("[data-confirm]").forEach(btn => {
+    btn.addEventListener("click", (event) => {
+      if (btn.dataset.armed) return;
+      event.preventDefault();
+      btn.dataset.armed = "1";
+      const label = btn.textContent;
+      btn.textContent = "Tap again to delete";
+      setTimeout(() => { delete btn.dataset.armed; btn.textContent = label; }, 4000);
+    });
+  });
+
+  // Batch size saves in the background and updates the recipe text in place, so the page
+  // doesn't reload or jump. If anything fails, fall back to a normal form submit.
+  function swapAll(selector, fresh) {
+    const now = [...document.querySelectorAll(selector)];
+    const next = [...fresh.querySelectorAll(selector)];
+    now.forEach((el, i) => {
+      if (!next[i]) return;
+      const open = [...el.querySelectorAll("details")].map((d) => d.open);
+      el.innerHTML = next[i].innerHTML;
+      el.querySelectorAll("details").forEach((d, j) => { if (open[j]) d.open = true; });
+    });
+  }
+  document.addEventListener("change", async (event) => {
+    const select = event.target.closest("select[data-autosubmit]");
+    if (!select) return;
+    const dishId = select.dataset.sizeFor;
+    document.querySelectorAll(`select[data-size-for="${dishId}"]`).forEach((s) => { s.value = select.value; });
+    try {
+      const saved = await fetch(`/thanksgiving/api/dishes/${dishId}/size`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scale: select.value }),
+      });
+      if (!saved.ok) throw new Error(saved.status);
+      await refreshPage();
+    } catch (error) {
+      select.form.submit();
+    }
+  });
+
+  // Re-read this page and swap its content in place (after a size change or a voice change).
+  async function refreshPage() {
+    const page = await fetch(location.pathname, { cache: "no-store" });
+    if (!page.ok) throw new Error(page.status);
+    swapAll("#page", new DOMParser().parseFromString(await page.text(), "text/html"));
+    applyHideDone();
+  }
+
+  // Old links went to sections of one long page (/thanksgiving#menu). Send them to the page that has it now.
+  if (location.pathname === "/thanksgiving" && location.hash) {
+    const h = location.hash, m = h.match(/^#(?:dish|size)-(\d+)$/);
+    const to = m ? "/thanksgiving/menu/" + m[1]
+      : { "#timeline": "/thanksgiving/timeline", "#menu": "/thanksgiving/menu", "#recipes": "/thanksgiving/recipes",
+          "#shopping": "/thanksgiving/shopping", "#settings": "/thanksgiving/settings" }[h]
+      || (h.startsWith("#task-") ? "/thanksgiving/timeline" + h : "");
+    if (to) location.replace(to);
+  }
+
+  // The dish editor opens from "Edit dish" or a #edit link.
+  function openEditor() { const ed = document.querySelector("#edit details.editor"); if (ed) ed.open = true; }
+  if (location.hash === "#edit") openEditor();
+  document.addEventListener("click", (event) => { if (event.target.closest("[data-open-editor]")) openEditor(); });
+
+  // Timeline: finished days fold to one line unless "Hide finished days" is off (remembered on this device).
+  function hideDone() { try { return localStorage.getItem("tg-hide-done-days") !== "0"; } catch (e) { return true; } }
+  function applyHideDone() {
+    document.body.classList.toggle("hide-done", hideDone());
+    const box = document.getElementById("hide-done");
+    if (box) box.checked = hideDone();
+  }
+  applyHideDone();
+  document.addEventListener("change", (event) => {
+    if (event.target.id !== "hide-done") return;
+    try { localStorage.setItem("tg-hide-done-days", event.target.checked ? "1" : "0"); } catch (e) {}
+    applyHideDone();
+  });
+  document.addEventListener("click", (event) => {
+    const show = event.target.closest(".day-show");
+    if (show) show.closest(".day").classList.add("shown");
+  });
+
+  // After a voice change (checked boxes, moved steps…), refresh the plan in place right away. The Tell Dieter
+  // panel stays open, so Undo is still reachable. If the refresh fails, reload when the panel closes instead.
+  let changedByVoice = false;
+  document.addEventListener("tg:changed", async () => {
+    changedByVoice = true;
+    try {
+      await refreshPage();
+      changedByVoice = false;
+    } catch (error) { /* reload on close instead */ }
+  });
+  document.addEventListener("tg:voice-closed", () => { if (changedByVoice) location.reload(); });
+})();
+</script>
+{% include "tg_voice.html" %}
+{% endblock %}

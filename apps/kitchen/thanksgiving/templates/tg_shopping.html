@@ -1,0 +1,35 @@
+{% extends "tg_page.html" %}
+{% from "tg_macros.html" import render_sections, size_picker, recipe_block, kind_pill, task_row, day_chart with context %}
+{% block title %}Shopping{% endblock %}
+{% block page %}
+<section id="shopping">
+  <div class="section-head"><div><h2>Shopping list</h2>
+    <a class="small" href="/apps/recipes/grocery-lists/new">Shopping for just a few dishes? Make a separate list →</a></div>
+    <form method="post" action="/thanksgiving/groceries/add" class="row">
+      <input type="text" name="text" placeholder="Add an item" aria-label="Add a shopping item" required>
+      <button type="submit">Add</button>
+    </form>
+  </div>
+  <div class="card">
+  {% for section in groceries %}
+    <div class="grocery-section"><h3>{{ section.name }}</h3>
+    {% if section.name == "Check the pantry" %}<p class="g-from" style="margin:0 0 .3rem">Staples most kitchens have. Check before you go; add any you're out of.</p>{% endif %}
+    {% for item in section["items"] %}
+      {% set got = item.key in grocery_checked %}
+      <div class="grocery{% if got %} done{% endif %}">
+        <form method="post" action="/thanksgiving/groceries/toggle">
+          <input type="hidden" name="key" value="{{ item.key }}">{% if not got %}<input type="hidden" name="done" value="1">{% endif %}
+          <button class="check" type="submit" aria-label="{% if got %}Not bought{% else %}Got it{% endif %}: {{ item.text }}">{% if got %}✓{% endif %}</button>
+        </form>
+        <div style="flex:1"><span class="g-text">{{ item.text }}</span>{% if item.amount %} <strong class="g-amount">{{ item.amount }}</strong>{% endif %}
+          {% if item.parts %}<div class="g-from">{% for part in item.parts %}{{ part.dish }}{% if part.amount and item.parts|length > 1 %} {{ part.amount }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}</div>
+        {% if item.extra_id %}<form method="post" action="/thanksgiving/groceries/{{ item.extra_id }}/delete"><button class="quiet" type="submit" aria-label="Remove {{ item.text }}">✕</button></form>{% endif %}
+      </div>
+    {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted">Ingredients from your dishes show up here.</p>
+  {% endfor %}
+  </div>
+</section>
+{% endblock %}

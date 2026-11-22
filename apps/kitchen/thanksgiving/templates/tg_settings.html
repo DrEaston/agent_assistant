@@ -1,0 +1,14 @@
+{% extends "tg_page.html" %}
+{% from "tg_macros.html" import render_sections, size_picker, recipe_block, kind_pill, task_row, day_chart with context %}
+{% block title %}Settings{% endblock %}
+{% block page %}
+<section id="settings">
+  <div class="section-head"><h2>Settings</h2></div>
+  <form method="post" action="/thanksgiving/settings" class="card row">
+    <div class="field"><label>Dinner date</label><input type="date" name="dinner_date" value="{{ dinner.strftime('%Y-%m-%d') }}" required></div>
+    <div class="field"><label>Dinner time</label><input type="time" name="dinner_time" value="{{ dinner.strftime('%H:%M') }}" required></div>
+    <div class="field"><label>Ovens</label><select name="ovens"><option value="1" {% if plan.ovens == 1 %}selected{% endif %}>1</option><option value="2" {% if plan.ovens == 2 %}selected{% endif %}>2</option></select></div>
+    <button class="primary" type="submit">Save</button>
+  </form>
+</section>
+{% endblock %}
