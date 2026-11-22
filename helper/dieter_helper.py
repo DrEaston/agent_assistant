@@ -441,15 +441,25 @@ def find_browser():
 
 
 def open_dieter(settings):
-    """Open the Dieter page full screen, as its own app window (F11 leaves full screen)."""
+    """Open the Dieter page as the kitchen screen: Chrome kiosk mode, so no address bar, tabs or taskbar
+    (Alt+F4 closes it). It uses its own Chrome profile in %LOCALAPPDATA%\\Dieter\\kiosk-browser: kiosk mode only
+    takes hold when Chrome starts fresh, which a separate profile guarantees even with normal Chrome open.
+    Sign in to askdieter.ai once there and it stays signed in. "kiosk": false in helper.json opens a normal
+    app window instead."""
     import subprocess
     import webbrowser
     page = settings.get("dieter_page", DIETER_PAGE)
     browser = find_browser()
-    if browser:
-        subprocess.Popen([browser, f"--app={page}", "--start-fullscreen"])
-    else:
+    if not browser:
         webbrowser.open(page)
+        return
+    if settings.get("kiosk", True):
+        profile = SETTINGS_FILE.parent / "kiosk-browser"
+        subprocess.Popen([browser, "--kiosk", page, f"--user-data-dir={profile}", "--no-first-run",
+                          "--no-default-browser-check", "--disable-session-crashed-bubble",
+                          "--autoplay-policy=no-user-gesture-required"])  # the step chime may play without a tap
+    else:
+        subprocess.Popen([browser, f"--app={page}", "--start-fullscreen"])
 
 
 def main():
