@@ -195,8 +195,12 @@ function Ensure-RandomSecret {
         $keyFile = New-TemporaryFile
         try {
             Set-Content -Path $keyFile -Value ([Convert]::ToBase64String($bytes)) -NoNewline
+            # gcloud reports progress on stderr; with "Stop" that would abort even on success.
+            $ErrorActionPreference = "Continue"
             & $gcloud secrets create $Name --replication-policy automatic --data-file $keyFile *> $null
-            if ($LASTEXITCODE -ne 0) { throw "Failed to create Secret Manager secret '$Name'." }
+            $created = ($LASTEXITCODE -eq 0)
+            $ErrorActionPreference = $previous
+            if (-not $created) { throw "Failed to create Secret Manager secret '$Name'." }
         } finally {
             Remove-Item -LiteralPath $keyFile -Force -ErrorAction SilentlyContinue
         }
