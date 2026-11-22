@@ -84,6 +84,22 @@ class HelperTests(unittest.TestCase):
         time.sleep(0.8)
         self.assertNotIn("off", self.monitor.calls)
 
+    def test_a_wake_during_a_slow_dim_still_brings_the_screen_back(self):
+        # Dimming the real screen takes ~2 s; a wake that arrived halfway used to leave it dark for good.
+        calls = self.monitor.calls
+        dimming = threading.Event()
+
+        def slow_off():
+            dimming.set()
+            time.sleep(0.4)
+            calls.append("off")
+
+        self.monitor.off = slow_off
+        self.helper.sleep()
+        self.assertTrue(dimming.wait(2))
+        self.helper.wake("asked")  # mid-dim
+        self.assertEqual(calls[-2:], ["off", "on"])
+
     def test_events_wait_for_the_next_one(self):
         start = self.helper.latest_id()
         threading.Timer(0.1, lambda: self.helper.wake("asked")).start()

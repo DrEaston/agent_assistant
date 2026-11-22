@@ -916,7 +916,12 @@ async def api_alert(request: Request):
     state = data.get("state")
     if not key or state not in ("ack", "snooze"):
         raise HTTPException(status_code=400, detail="Bad alert update")
-    until = int(time.time() * 1000) + int(data.get("minutes") or 5) * 60_000 if state == "snooze" else 0
+    try:
+        minutes = int(data.get("minutes") or 5)
+    except (TypeError, ValueError):
+        minutes = 5
+    minutes = max(1, min(minutes, 24 * 60))  # a snooze is minutes to hours, never "forever"
+    until = int(time.time() * 1000) + minutes * 60_000 if state == "snooze" else 0
     store().set_alert(plan["id"], key, state, until)
     return {"ok": True}
 

@@ -154,6 +154,8 @@ class Monitor:
             return
         if self.can_dim:
             level = self.settings.pop("dimmed_from", None)
+            if level is None and self._get_brightness() == 0:
+                level = 75  # dark with nothing saved to go back to: never leave the kitchen screen black
             if level is not None:
                 self._set_brightness(level)
                 save_settings(self.settings)
@@ -247,6 +249,9 @@ class Helper:
         self._events = []
         self._next_id = 1
         self._cond = threading.Condition()
+        # Dimming and waking the screen take turns: dimming takes a moment, and a wake that slipped in halfway
+        # used to find nothing to undo and leave the screen dark.
+        self._screen = threading.Lock()
         self.monitor.keep_pc_awake()
 
     # events the page waits for
@@ -282,16 +287,18 @@ class Helper:
         threading.Timer(0.6, self._sleep_now).start()
 
     def _sleep_now(self):
-        if not self.asleep:
-            return
-        self.monitor.off()
-        self.watcher.start()
+        with self._screen:
+            if not self.asleep:
+                return
+            self.monitor.off()
+            self.watcher.start()
 
     def wake(self, reason="asked", side="center"):
         was_asleep = self.asleep
         self.asleep = False
         self.watcher.stop()
-        self.monitor.on()
+        with self._screen:  # waits for a dim that's still going, then undoes it
+            self.monitor.on()
         # The Dieter page (cook mode) hears this and shows Dieter's eyes; reason "test" shows them even if awake.
         return self._emit(type="wake", reason=reason, side=side, was_asleep=was_asleep)
 

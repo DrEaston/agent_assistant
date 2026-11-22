@@ -1,6 +1,7 @@
 import json
 import re
 import tempfile
+import time
 import unittest
 import warnings
 from datetime import datetime
@@ -958,6 +959,12 @@ class RouteTests(unittest.TestCase):
         self.assertIn(key, tg_router.store().get_checked(plan["id"], "step"))
         self.client.post("/thanksgiving/api/alerts", json={"key": key, "state": "snooze", "minutes": 5})
         self.assertEqual(self.client.get("/thanksgiving/api/state").json()["alerts"][key]["state"], "snooze")
+        # "Later:" 10 min / 1 h / 2 h / 4 h; anything silly is held to between a minute and a day
+        for minutes, expected in ((240, 240), (10, 10), (100000, 24 * 60), ("soon", 5), (-3, 1)):
+            before = int(time.time() * 1000)
+            self.client.post("/thanksgiving/api/alerts", json={"key": key, "state": "snooze", "minutes": minutes})
+            until = self.client.get("/thanksgiving/api/state").json()["alerts"][key]["until_ms"]
+            self.assertAlmostEqual((until - before) / 60_000, expected, delta=0.1, msg=minutes)
 
         timer = self.client.post("/thanksgiving/api/timers", json={"dish_id": turkey["id"], "label": "Baste", "minutes": 10}).json()
         timers = self.client.get("/thanksgiving/api/state").json()["timers"]
