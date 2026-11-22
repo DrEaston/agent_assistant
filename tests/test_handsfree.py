@@ -62,6 +62,9 @@ class QuickCommandTests(unittest.TestCase):
     def test_spoken_prompt_depends_on_how_it_was_heard(self):
         self.assertIn("almost certainly for you", spoken_prompt("name"))
         self.assertIn("may be a reply to you", spoken_prompt("follow-up"))
+        conversation = spoken_prompt("conversation")
+        self.assertIn("\"end\": true", conversation)
+        self.assertIn("{\"ignore\": true}", conversation)
 
 
 if __name__ == "__main__":

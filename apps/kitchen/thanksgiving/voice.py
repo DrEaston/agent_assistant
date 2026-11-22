@@ -132,7 +132,8 @@ def understand(text, summary, history=(), model=None, sass="normal", spoken_prom
         return {"reply": "", "question": "", "actions": [], "ignore": True}
     actions = data.get("actions") if isinstance(data.get("actions"), list) else []
     return {"reply": str(data.get("reply") or "")[:800], "question": str(data.get("question") or "")[:300],
-            "actions": [a for a in actions if isinstance(a, dict)][:15], "ignore": False}
+            "actions": [a for a in actions if isinstance(a, dict)][:15], "ignore": False,
+            "end": bool(spoken_prompt) and data.get("end") is True}
 
 
 # ---------------------------------------------------------------- checking

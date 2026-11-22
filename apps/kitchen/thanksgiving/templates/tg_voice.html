@@ -35,6 +35,9 @@
 .voice-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .voice-hint { font-size: .85rem; color: var(--muted); }
 .voice-device { font-size: .85rem; color: var(--muted); }
+.voice-live { font-weight: 700; padding: .5rem .75rem; border-radius: 10px; background: var(--ok-soft); color: #365314; }
+.voice-msg.ignored { opacity: .55; }
+.voice-aside { font-size: .8rem; color: var(--muted); }
 .voice-device-form { display: flex; flex-wrap: wrap; gap: .5rem; align-items: end; margin-top: .5rem; }
 .voice-device-form label { display: flex; flex-direction: column; gap: .2rem; font-weight: 600; }
 </style>
@@ -48,6 +51,7 @@
     </div>
     <p class="voice-hint" id="voice-hint">Try “the pie's getting pushed to the weekend”, “add a step to toast the pecans Wednesday morning”, “move dinner to 5”, or “can I make the crust four days ahead?”. You'll see the changes before anything is saved.</p>
     <div class="voice-log" id="voice-log" aria-live="polite"></div>
+    <div class="voice-live" id="voice-live" aria-live="polite" hidden></div>
     <div class="voice-actions" id="voice-decide" hidden>
       <button type="button" class="primary" id="voice-apply">Apply</button>
       <button type="button" id="voice-cancel">Cancel</button>
@@ -129,7 +133,7 @@
     if (Recognition || (navigator.mediaDevices && window.MediaRecorder)) mic.click();
   }
   function close() {
-    if (recognition) { recognition.onend = null; recognition.abort(); recognition = null; }
+    endConversation();
     if (recorder && recorder.state === "recording") { recorder.onstop = null; stopListening(); }
     mic.classList.remove("recording"); mic.textContent = "🎤";
     sheet.hidden = true; $("voice-open").hidden = false;
@@ -137,6 +141,15 @@
     if ($("voice-decide").hidden === false) call("/thanksgiving/api/command/cancel").catch(() => {});
     $("voice-decide").hidden = true;
     document.dispatchEvent(new CustomEvent("tg:voice-closed"));
+  }
+
+  function showResult(data) {
+    let html = esc(data.question || data.reply || "");
+    if (data.changes.length) html += `<ul class="voice-changes">${data.changes.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>`;
+    if (data.problems.length) html += data.problems.map((p) => `<div class="voice-problem">${esc(p)}</div>`).join("");
+    if ((data.warnings || []).length) html += data.warnings.map((w) => `<div class="voice-warning">Heads up: ${esc(w)}</div>`).join("");
+    say("dieter", html || "I'm not sure what to change. Try saying it another way.");
+    $("voice-decide").hidden = !data.can_apply;
   }
 
   async function send(message) {
@@ -155,24 +168,25 @@
                                                              sass: device.sass || "normal" });
       thinking.remove();
       history.push({ role: "user", content: message });
-      let html = esc(data.question || data.reply || "");
-      if (data.changes.length) html += `<ul class="voice-changes">${data.changes.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>`;
-      if (data.problems.length) html += data.problems.map((p) => `<div class="voice-problem">${esc(p)}</div>`).join("");
-      if ((data.warnings || []).length) html += data.warnings.map((w) => `<div class="voice-warning">Heads up: ${esc(w)}</div>`).join("");
-      say("dieter", html || "I'm not sure what to change. Try saying it another way.");
+      showResult(data);
       history.push({ role: "assistant", content: [data.question || data.reply, ...data.changes].join("\n") });
-      $("voice-decide").hidden = !data.can_apply;
     } catch (error) {
       thinking.remove();
       say("dieter", `<span class="voice-problem">${esc(error.message)}</span>`);
     }
   }
 
+  // Say something in the panel, and out loud while a conversation is going.
+  function answer(message) {
+    say("dieter", esc(message));
+    if (convo) speakOut(message);
+  }
+
   $("voice-apply").addEventListener("click", async () => {
     $("voice-decide").hidden = true;
     try {
       await call("/thanksgiving/api/command/apply");
-      say("dieter", "Done. The plan is updated.");
+      answer("Done. The plan is updated.");
       history = [];
       $("voice-undo-row").hidden = false;
       document.dispatchEvent(new CustomEvent("tg:changed"));
@@ -182,13 +196,13 @@
     $("voice-decide").hidden = true;
     history = [];
     await call("/thanksgiving/api/command/cancel").catch(() => {});
-    say("dieter", "Okay, nothing changed.");
+    answer("Okay, nothing changed.");
   });
   $("voice-undo").addEventListener("click", async () => {
     $("voice-undo-row").hidden = true;
     try {
       await call("/thanksgiving/api/command/undo");
-      say("dieter", "Undone. Everything is back the way it was.");
+      answer("Undone. Everything is back the way it was.");
       document.dispatchEvent(new CustomEvent("tg:changed"));
     } catch (error) { say("dieter", `<span class="voice-problem">${esc(error.message)}</span>`); }
   });
@@ -196,7 +210,6 @@
   $("voice-open").addEventListener("click", open);
   $("voice-close").addEventListener("click", close);
 
-  // Talk to it: tap the mic, speak, and it sends by itself when you pause (or tap again to send now).
   const SILENCE_MS = 1500, MAX_MS = 30000, NO_SPEECH_MS = 8000, LOUD = 0.02;
   let watcher = null, audioCtx = null, statusEl = null;
 
@@ -210,51 +223,199 @@
       body: JSON.stringify({ event, detail: String(detail || "").slice(0, 300), agent: navigator.userAgent }) }).catch(() => {});
   }
 
-  // Chrome (Android, desktop) and newer Safari have speech recognition built in: it shows your words as you
-  // talk and ends by itself when you pause. Use it when available; otherwise record and transcribe on the server.
+  // ---------- Conversation: one tap on 🎤 keeps the mic open. Each sentence is sent when you pause, Dieter
+  // answers out loud, and the mic stays open until 2 minutes pass with nothing said to Dieter. It turns itself
+  // off when two phrases in a row clearly aren't for it, or when you wrap up ("thanks, that's all").
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let recognition = null;
-  function listenWithRecognition() {
-    if (recognition) { recognition.stop(); return; }
+  const CONVO_MS = 120000, MAX_IGNORED = 2;
+  let recognition = null, convo = null, speaking = false, utter = 0, lastPhrase = { text: "", at: 0 };
+
+  function speakOut(message, after) {
+    message = String(message || "").replace(/→/g, " to ").replace(/[·•]/g, ",").replace(/°F/g, " degrees").trim();
+    if (!message || !("speechSynthesis" in window)) { if (after) after(); return; }
+    const id = ++utter;  // a newer speakOut() or hushOut() makes this one's "finished" a no-op
+    speechSynthesis.cancel();
+    speaking = true; stopRecognition(); tick();
+    const u = new SpeechSynthesisUtterance(message);
+    u.lang = "en-US"; u.rate = 1.02;
+    const done = () => {
+      if (id !== utter) return;
+      utter++; speaking = false;
+      if (after) after();
+      if (convo) { tick(); listenNext(); }
+    };
+    u.onend = done; u.onerror = done;
+    setTimeout(done, 2500 + message.length * 90);  // some Chrome builds never fire onend for long speech
+    speechSynthesis.speak(u);
+  }
+  function hushOut() {
+    utter++;
+    if ("speechSynthesis" in window) speechSynthesis.cancel();
+    if (speaking) { speaking = false; if (convo) listenNext(); }
+  }
+  function stopRecognition() {
+    if (recognition) { recognition.onend = null; try { recognition.abort(); } catch (e) {} recognition = null; }
+  }
+
+  function tick() {
+    if (!convo) return;
+    const left = Math.max(0, convo.until - Date.now());
+    if (!left && !speaking && !convo.thinking) { endConversation("Mic off. Tap 🎤 to talk again."); return; }
+    $("voice-live").textContent = speaking ? "🔊 Talking… tap ■ to stop"
+      : convo.thinking ? "Thinking…"
+      : `🎙 Listening, just talk · ${Math.floor(left / 60000)}:${String(Math.ceil(left / 1000) % 60).padStart(2, "0")} · tap ■ to end`;
+  }
+
+  function startConversation() {
+    convo = { until: Date.now() + CONVO_MS, ignored: 0, thinking: false, timer: setInterval(tick, 500) };
+    mic.classList.add("recording"); mic.textContent = "■"; mic.setAttribute("aria-label", "End the conversation");
+    text.placeholder = "Listening… just talk";
+    $("voice-live").hidden = false;
+    $("voice-hint").hidden = true;
+    report("listen-start", "conversation");
+    // Speaking needs a tap first on Android; this tap counts. An empty utterance unlocks it silently.
+    try { if ("speechSynthesis" in window) speechSynthesis.speak(new SpeechSynthesisUtterance("")); } catch (e) {}
+    tick();
+    listenNext();
+  }
+
+  function endConversation(message) {
+    if (!convo) return;
+    clearInterval(convo.timer);
+    convo = null;
+    stopRecognition(); hushOut();
+    mic.classList.remove("recording"); mic.textContent = "🎤"; mic.setAttribute("aria-label", "Start talking");
+    text.placeholder = "Or type it here"; text.value = "";
+    $("voice-live").hidden = true;
+    if (message) say("dieter", `<span class="muted">${esc(message)}</span>`);
+  }
+
+  function listenNext() {
+    if (!convo || speaking || recognition) return;
     recognition = new Recognition();
     recognition.lang = "en-US";
+    recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.continuous = false;
-    let finalText = "", gotResult = false;
-    mic.classList.add("recording"); mic.textContent = "■"; mic.setAttribute("aria-label", "Send now");
-    text.value = ""; text.placeholder = "Listening…";
+    let handledIndex = -1;
     recognition.onresult = (event) => {
-      gotResult = true;
       let interim = "";
-      finalText = "";
-      for (const result of event.results) {
-        if (result.isFinal) finalText += result[0].transcript; else interim += result[0].transcript;
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          if (i > handledIndex) { handledIndex = i; const phrase = result[0].transcript.trim(); if (phrase) heardPhrase(phrase); }
+        } else interim += result[0].transcript;
       }
-      text.value = (finalText + interim).trim();
+      text.value = interim.trim();
     };
     recognition.onerror = (event) => {
-      report("recognition-error", event.error);
-      const messages = { "not-allowed": "I need microphone permission. Allow it in Chrome's site settings, or type instead.",
-        "no-speech": "I didn't hear anything. Tap 🎤 and try again.", "network": "Speech recognition needs internet. Check the connection or type it." };
-      say("dieter", `<span class="voice-problem">${esc(messages[event.error] || "The microphone stopped (" + event.error + "). Try again or type it.")}</span>`);
+      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        report("recognition-error", event.error);
+        endConversation("I need microphone permission. Allow it in Chrome's site settings, or type instead.");
+      } else if (event.error !== "no-speech" && event.error !== "aborted") {
+        report("recognition-error", event.error);
+      }
     };
-    recognition.onend = () => {
-      recognition = null;
-      mic.classList.remove("recording"); mic.textContent = "🎤"; mic.setAttribute("aria-label", "Start talking");
-      text.placeholder = "Or type it here";
-      const spoken = (text.value || finalText).trim();
-      if (spoken) send(spoken);
-      else if (!gotResult) report("recognition-empty", "");
-    };
+    // Chrome ends recognition every so often; keep it going for the rest of the conversation.
+    recognition.onend = () => { recognition = null; if (convo && !speaking) setTimeout(listenNext, 200); };
     try { recognition.start(); }
-    catch (error) { report("recognition-start", error && error.message); recognition = null; listenWithRecording(); }
+    catch (error) { report("recognition-start", error && error.message); recognition = null; setTimeout(listenNext, 1000); }
+  }
+
+  async function heardPhrase(phrase) {
+    if (!convo) return;
+    text.value = "";
+    const key = phrase.toLowerCase();
+    if (key === lastPhrase.text && Date.now() - lastPhrase.at < 3000) return;  // Android sometimes repeats a result
+    lastPhrase = { text: key, at: Date.now() };
+    say("you", esc(phrase));
+    const bubble = log.lastChild;
+    convo.thinking = true; tick();
+    const device = loadDevice();
+    let heard;
+    try {
+      heard = await call("/thanksgiving/api/handsfree/heard", { text: phrase, follow_up: true, device: device.name || "",
+                                                               sass: device.sass || "normal" });
+    } catch (error) {
+      if (convo) convo.thinking = false;
+      say("dieter", `<span class="voice-problem">${esc(error.message)}</span>`);
+      return;
+    }
+    if (heard.command) {
+      if (convo) { convo.thinking = false; convo.ignored = 0; convo.until = Date.now() + CONVO_MS; }
+      quick(heard.command, phrase, bubble);
+      return;
+    }
+    await askAI(heard.ask || phrase, bubble);
+  }
+
+  function quick(cmd, phrase, bubble) {
+    const reply = (message) => answer(message);
+    switch (cmd.type) {
+      case "yes":
+        if (!$("voice-decide").hidden) $("voice-apply").click(); else reply("There's nothing waiting for a yes.");
+        break;
+      case "no":
+        if (!$("voice-decide").hidden) $("voice-cancel").click(); else reply("Okay.");
+        break;
+      case "undo":
+        if (window.tgHandsfree && window.tgHandsfree.hasLocalUndo()) window.tgHandsfree.run(cmd, reply);
+        else if (!$("voice-undo-row").hidden) $("voice-undo").click();
+        else reply("Nothing to undo.");
+        break;
+      case "quiet": hushOut(); break;
+      case "sleep": endConversation("Mic off. Tap 🎤 to talk again."); break;
+      case "wake": reply("Yes?"); break;
+      default:
+        // Cook-mode commands (next step, timers, how much…) run on the cook page; elsewhere the AI answers.
+        if (window.tgHandsfree) window.tgHandsfree.run(cmd, reply);
+        else askAI(phrase, bubble);
+    }
+  }
+
+  async function askAI(message, bubble) {
+    if (!convo) return;
+    convo.thinking = true; tick();
+    say("dieter", "<span class='muted'>Thinking…</span>");
+    const thinking = log.lastChild;
+    const device = loadDevice();
+    let data;
+    try {
+      data = await call("/thanksgiving/api/handsfree/ask", { text: message, via: "conversation", history,
+                                                            device: device.name || "", sass: device.sass || "normal" });
+    } catch (error) {
+      thinking.remove();
+      if (convo) convo.thinking = false;
+      say("dieter", `<span class="voice-problem">${esc(error.message)}</span>`);
+      return;
+    }
+    thinking.remove();
+    if (!convo) return;
+    convo.thinking = false;
+    if (data.ignored) {
+      bubble.classList.add("ignored");
+      bubble.insertAdjacentHTML("beforeend", ' <span class="voice-aside">· not for me</span>');
+      convo.ignored += 1;
+      if (convo.ignored >= MAX_IGNORED) endConversation("Sounds like you've moved on, so I turned the mic off. Tap 🎤 to talk again.");
+      else tick();
+      return;
+    }
+    convo.ignored = 0;
+    convo.until = Date.now() + CONVO_MS;
+    $("voice-undo-row").hidden = true;
+    history.push({ role: "user", content: message });
+    showResult(data);
+    history.push({ role: "assistant", content: [data.question || data.reply, ...data.changes].join("\n") });
+    history = history.slice(-12);
+    const spoken = (data.question || data.reply || "") + (data.can_apply ? " Should I do it?" : "");
+    speakOut(spoken, () => { if (data.end) endConversation("Mic off. Tap 🎤 to talk again."); });
   }
 
   mic.addEventListener("click", () => {
-    const busy = recognition || (recorder && recorder.state === "recording");
-    if (!busy) report("listen-start", Recognition ? "speech recognition" : "recording");
-    if (Recognition && !(recorder && recorder.state === "recording")) { listenWithRecognition(); return; }
-    listenWithRecording();
+    if (convo) { endConversation(); return; }
+    if (recorder && recorder.state === "recording") { listenWithRecording(); return; }
+    if (Recognition) { startConversation(); return; }
+    report("listen-start", "recording");
+    listenWithRecording();  // no speech recognition in this browser: record one phrase and transcribe it
   });
 
   async function listenWithRecording() {

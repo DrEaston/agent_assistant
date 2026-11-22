@@ -321,7 +321,7 @@ def _run_command(text, history, device, sass, spoken=""):
     if result.get("ignore"):
         print("Hands-free: " + json.dumps({"device": device or "unnamed", "said": text[:200], "ignored": "by AI"}))
         return {"ignored": True, "reply": "", "question": "", "changes": [], "problems": [], "warnings": [],
-                "can_apply": False}
+                "can_apply": False, "end": False}
     actions, changes, problems = voice.check(result["actions"], plan, context["dishes"], context["tasks"],
                                              context["cooks"])
     warnings = voice.knock_on(plan, context["dishes"], actions, plan["ovens"])
@@ -332,7 +332,7 @@ def _run_command(text, history, device, sass, spoken=""):
                                         "changes": changes, "problems": problems, "warnings": warnings,
                                         "model": voice.model_name() if _state["voice_model"] is None else "test"}))
     return {"ignored": False, "reply": result["reply"], "question": result["question"], "changes": changes,
-            "problems": problems, "warnings": warnings, "can_apply": bool(actions)}
+            "problems": problems, "warnings": warnings, "can_apply": bool(actions), "end": bool(result.get("end"))}
 
 
 def _device_and_sass(data):
@@ -352,6 +352,7 @@ async def api_command(request: Request):
     device, sass = _device_and_sass(data)
     result = _run_command(text, history, device, sass)
     result.pop("ignored", None)
+    result.pop("end", None)
     return result
 
 
@@ -387,7 +388,7 @@ async def api_handsfree_ask(request: Request):
         raise HTTPException(status_code=400, detail="Nothing to ask.")
     history = data.get("history") if isinstance(data.get("history"), list) else []
     device, sass = _device_and_sass(data)
-    via = "follow-up" if data.get("via") == "follow-up" else "name"
+    via = data.get("via") if data.get("via") in ("follow-up", "conversation") else "name"
     return _run_command(text, history, device, sass, spoken=via)
 
 

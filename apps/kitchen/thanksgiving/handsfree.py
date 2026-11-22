@@ -165,6 +165,18 @@ _FOLLOW_UP = ("It was heard in the few seconds after you last spoke, without you
               "{\"ignore\": true} and nothing else.")
 
 
+_CONVERSATION = ("The cook tapped the mic to talk with you for a couple of minutes; every phrase the mic hears comes to "
+                 "you, without your name. Treat it as a conversation: short follow-ups (\"and the gravy?\", \"Sunday "
+                 "instead\") are for you. If the phrase is clearly not for you (people talking to each other, the TV, "
+                 "a different topic than cooking and this plan), reply with {\"ignore\": true} and nothing else. If "
+                 "the cook is wrapping up (\"thanks\", \"that's it\", \"got it\"), give a short sign-off and add "
+                 "\"end\": true.")
+
+
 def spoken_prompt(via):
-    """Extra instructions for the AI when a phrase came from the hands-free mic. via: "name" or "follow-up"."""
+    """Extra instructions for the AI when a phrase came from an open mic.
+    via: "name" (hands-free, started with Dieter), "follow-up" (hands-free, just after Dieter spoke),
+    or "conversation" (the Tell Dieter mic left open for a conversation)."""
+    if via == "conversation":
+        return _SPOKEN + _CONVERSATION
     return _SPOKEN + (_FOLLOW_UP if via == "follow-up" else _BY_NAME)

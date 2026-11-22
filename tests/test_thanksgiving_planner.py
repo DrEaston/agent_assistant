@@ -553,6 +553,17 @@ class RouteTests(unittest.TestCase):
         self.assertTrue(r["can_apply"], r)
         self.assertEqual(200, self.client.post("/thanksgiving/api/command/apply").status_code)
 
+    def test_conversation_mic_can_end_itself(self):
+        self.client.get("/thanksgiving")
+        seen = self.voice_with({"reply": "Happy cooking!", "question": "", "actions": [], "end": True})
+        r = self.client.post("/thanksgiving/api/handsfree/ask", json={"text": "thanks that's it", "via": "conversation"}).json()
+        self.assertTrue(r["end"])
+        self.assertIn("tapped the mic", " ".join(m["content"] for m in seen["messages"] if m["role"] == "system"))
+        # Typed Tell Dieter can't be ended (or ignored) by the model.
+        r = self.client.post("/thanksgiving/api/command", json={"text": "thanks"}).json()
+        self.assertNotIn("end", r)
+        self.assertIn('id="voice-live"', self.client.get("/thanksgiving").text)
+
     def test_cook_mode_has_hands_free(self):
         self.client.get("/thanksgiving")
         page = self.client.get("/thanksgiving/cook").text

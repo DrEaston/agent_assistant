@@ -263,29 +263,29 @@
     return `${m} minute`;
   }
 
-  function run(cmd) {
+  function run(cmd, out = speak) {  // out: who says the answer (the Tell Dieter panel passes its own)
     const c = cook();
-    if (!c || !c.ready()) { speak("Give me a second, I'm still loading the plan."); return; }
+    if (!c || !c.ready()) { out("Give me a second, I'm still loading the plan."); return; }
     const dish = c.dish();
     switch (cmd.type) {
-      case "wake": speak("Yes?"); break;
+      case "wake": out("Yes?"); break;
       case "next": {
         let d = dish, s = d && c.nextStep(d);
         if (!s) { const any = soonestUndone(); if (any) { d = any.dish; s = d.steps.find((x) => x.key === any.key); c.select(d.id); } }
-        if (!s) { speak("Everything's done. Go eat!"); break; }
+        if (!s) { out("Everything's done. Go eat!"); break; }
         lastStep = { dish: d, step: s };
-        speak(stepSpeech(d, s));
+        out(stepSpeech(d, s));
         break;
       }
       case "read":
-        if (lastSpoken) speak(lastSpoken);
-        else run({ type: "next" });
+        if (lastSpoken) out(lastSpoken);
+        else run({ type: "next" }, out);
         break;
       case "ingredients": {
-        if (!dish) { speak("Pick a recipe first. Say, Dieter, go to the gravy."); break; }
+        if (!dish) { out("Pick a recipe first. Say, Dieter, go to the gravy."); break; }
         const step = currentStep();
         const lines = linesOf(dish, step && step.section);
-        speak(lines.length ? `${dish.name} ingredients: ${lines.join(". ")}.` : `${dish.name} doesn't list ingredients.`);
+        out(lines.length ? `${dish.name} ingredients: ${lines.join(". ")}.` : `${dish.name} doesn't list ingredients.`);
         break;
       }
       case "amount": {
@@ -293,29 +293,29 @@
         const match = (d) => linesOf(d).filter((line) => { const have = words(line).map(stem); return want.every((w) => have.includes(w)); });
         let hits = dish ? match(dish) : [], where = dish;
         if (!hits.length) for (const d of c.dishes()) { const h = match(d); if (h.length) { hits = h; where = d; break; } }
-        speak(hits.length ? `${where === dish ? "" : where.name + ": "}${hits.slice(0, 3).join(". ")}.`
+        out(hits.length ? `${where === dish ? "" : where.name + ": "}${hits.slice(0, 3).join(". ")}.`
                           : `I don't see ${cmd.item} in ${dish ? "the " + dish.name : "any recipe"}.`);
         break;
       }
       case "goto": {
         const d = findDish(cmd.dish);
-        if (!d) { speak(`I don't have a dish called ${cmd.dish}.`); break; }
+        if (!d) { out(`I don't have a dish called ${cmd.dish}.`); break; }
         c.select(d.id);
         const s = c.nextStep(d);
         if (s) lastStep = { dish: d, step: s };
-        speak(s ? `${d.name}. Next: ${s.title}, ${c.isDone(s) ? "" : c.rel(s.start_ms)}.` : `${d.name}. All steps are done.`);
+        out(s ? `${d.name}. Next: ${s.title}, ${c.isDone(s) ? "" : c.rel(s.start_ms)}.` : `${d.name}. All steps are done.`);
         break;
       }
       case "timer": {
         const label = cmd.label ? cmd.label.replace(/^./, (x) => x.toUpperCase()) : (dish ? dish.name : "Timer");
         c.startTimer(cmd.minutes, label);
-        speak(`${minutesText(cmd.minutes)} timer started${cmd.label ? " for " + cmd.label : ""}.`);
+        out(`${minutesText(cmd.minutes)} timer started${cmd.label ? " for " + cmd.label : ""}.`);
         break;
       }
       case "timer_left": {
         const timers = c.timers(), t = c.now();
-        if (!timers.length) { speak("No timers running."); break; }
-        speak(timers.map((tm) => {
+        if (!timers.length) { out("No timers running."); break; }
+        out(timers.map((tm) => {
           const left = Math.max(0, Math.round((tm.ends_ms - t) / 1000));
           if (!left) return `${tm.label} is done`;
           const m = Math.floor(left / 60), s = left % 60;
@@ -325,40 +325,40 @@
       }
       case "stop_timer": {
         const timers = c.timers().slice().sort((a, b) => a.ends_ms - b.ends_ms);
-        if (!timers.length) { speak("No timers running."); break; }
+        if (!timers.length) { out("No timers running."); break; }
         const tm = timers[0];
         c.stopTimer(tm.id);
-        speak(`Stopped the ${tm.label} timer.`);
+        out(`Stopped the ${tm.label} timer.`);
         break;
       }
       case "done": {
         let target = lastStep && !c.isDone(lastStep.step) ? lastStep : null;
         if (!target) { const s = currentStep(); if (s) target = { dish, step: s }; }
-        if (!target) { speak("There's nothing left to check off here."); break; }
+        if (!target) { out("There's nothing left to check off here."); break; }
         c.setDone(target.step.key, true);
         localUndo = () => c.setDone(target.step.key, false);
         const next = c.nextStep(target.dish);
         lastStep = null;
-        speak(`Done: ${target.step.title}.` + (next && next.key !== target.step.key ? ` Next up: ${next.title}, ${c.rel(next.start_ms)}.` : ""));
+        out(`Done: ${target.step.title}.` + (next && next.key !== target.step.key ? ` Next up: ${next.title}, ${c.rel(next.start_ms)}.` : ""));
         break;
       }
       case "quiet": hush(); followUntil = 0; render(); break;
       case "yes":
-        if (!awaiting) { speak("There's nothing waiting for a yes."); break; }
+        if (!awaiting) { out("There's nothing waiting for a yes."); break; }
         apply(); break;
       case "no":
-        if (!awaiting) { speak("Okay."); break; }
+        if (!awaiting) { out("Okay."); break; }
         cancel(); break;
       case "undo":
-        if (localUndo) { localUndo(); localUndo = null; speak("Undone."); }
+        if (localUndo) { localUndo(); localUndo = null; out("Undone."); }
         else if (serverUndo) {
           serverUndo = false;
-          post("/thanksgiving/api/command/undo").then(() => { speak("Undone. The plan is back the way it was."); document.dispatchEvent(new CustomEvent("tg:changed")); })
-            .catch((e) => speak(e.message));
-        } else speak("Nothing to undo.");
+          post("/thanksgiving/api/command/undo").then(() => { out("Undone. The plan is back the way it was."); document.dispatchEvent(new CustomEvent("tg:changed")); })
+            .catch((e) => out(e.message));
+        } else out("Nothing to undo.");
         break;
-      case "sleep": speak("Hands-free off."); setTimeout(() => turnOff(), 1200); break;
-      default: speak("I didn't catch that.");
+      case "sleep": out("Hands-free off."); setTimeout(() => turnOff(), 1200); break;
+      default: out("I didn't catch that.");
     }
   }
 
@@ -402,6 +402,13 @@
     $("hf-status").textContent = message;
     $("hf-yes").hidden = $("hf-no").hidden = true;
   }
+
+  // The Tell Dieter panel's conversation mic uses the same quick commands (next step, timers, how much…).
+  window.tgHandsfree = {
+    run: (cmd, out) => run(cmd, out),
+    hasLocalUndo: () => !!localUndo,
+    busy: () => active,
+  };
 
   // Sit right under cook mode's alerts, where it's visible while cooking.
   const alerts = document.getElementById("alerts");
