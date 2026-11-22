@@ -1,44 +1,27 @@
 {#- Sleep and wake for the kitchen screen (cook mode).
-    With the Dieter helper running on this PC (helper/), Sleep turns the monitor fully off and the helper's webcam
-    wakes it when someone walks by. Without it, Sleep just blacks out the page. Either way, waking shows the eyes,
-    then cook mode fades back in. Step alerts and finished timers wake it too. -#}
+    With the Dieter helper running on this PC (helper/), Sleep also dims the screen and the helper's webcam wakes
+    it when someone walks by. Without it, Sleep just blacks out the page. Either way, waking makes the "Talk to
+    Dieter" bubble come alive with Dieter's eyes (tg_voice.html, window.dieterBubble), then cook mode fades back in.
+    The page listens to the helper the whole time it's open, so the helper's tray menu (Sleep, Test the eyes) and
+    step alerts or finished timers work too. -#}
 <style>
-.sleep-screen { position: fixed; inset: 0; z-index: 1000; background: #000; display: grid; place-items: center;
-  opacity: 1; transition: opacity .9s ease; cursor: none; }
+.sleep-screen { position: fixed; inset: 0; z-index: 1000; background: #000; opacity: 1; transition: opacity .9s ease;
+  cursor: none; }
 .sleep-screen[hidden] { display: none; }
 .sleep-screen.fading { opacity: 0; }
-.sleep-eyes { width: min(70vw, 560px); opacity: 0; transition: opacity .5s ease; }
-.sleep-eyes.show { opacity: 1; }
-.sleep-eyes .lid { transform-box: fill-box; transform-origin: center; transform: scaleY(.08); }
-.sleep-eyes.show .lid { animation: eye-open .45s ease-out forwards, eye-blink .32s ease-in-out 1.15s 1; }
-.sleep-eyes .pupils { transition: transform .5s cubic-bezier(.3, 1.4, .5, 1); }
 .sleep-note { position: absolute; bottom: 1.5rem; left: 0; right: 0; text-align: center; color: #3f3f46; font-size: .85rem; }
-@keyframes eye-open { from { transform: scaleY(.08); } to { transform: scaleY(1); } }
-@keyframes eye-blink { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(.08); } }
-@media (prefers-reduced-motion: reduce) {
-  .sleep-eyes.show .lid { animation: none; transform: none; } .sleep-eyes .pupils { transition: none; }
-}
 </style>
 <div class="sleep-screen" id="sleep-screen" hidden aria-hidden="true">
-  <svg class="sleep-eyes" id="sleep-eyes" viewBox="0 0 400 200" role="img" aria-label="Dieter waking up">
-    <g class="lid">
-      <ellipse cx="120" cy="100" rx="62" ry="74" fill="#fbf7ef"/>
-      <ellipse cx="280" cy="100" rx="62" ry="74" fill="#fbf7ef"/>
-      <g class="pupils" id="sleep-pupils">
-        <circle cx="120" cy="108" r="30" fill="#1c140e"/><circle cx="280" cy="108" r="30" fill="#1c140e"/>
-        <circle cx="131" cy="96" r="9" fill="#fff"/><circle cx="291" cy="96" r="9" fill="#fff"/>
-      </g>
-    </g>
-  </svg>
   <div class="sleep-note" id="sleep-note"></div>
 </div>
 <script>
 (function () {
   const HELPER = "http://127.0.0.1:47613";
   const $ = (id) => document.getElementById(id);
-  const screen = $("sleep-screen"), eyes = $("sleep-eyes"), pupils = $("sleep-pupils"), button = $("sleep-btn");
+  const screen = $("sleep-screen"), button = $("sleep-btn");
+  const pause = (ms) => new Promise((r) => setTimeout(r, ms));
   let helper = null;        // the helper's /status when it's running on this PC
-  let asleep = false, waking = false, sleptAt = 0, lastEvent = 0, polling = false;
+  let asleep = false, waking = false, sleptAt = 0, lastEvent = 0;
 
   async function helperCall(path, method = "GET", timeoutMs = 2500) {
     const ctl = new AbortController();
@@ -51,56 +34,66 @@
   async function findHelper() {
     helper = await helperCall("/status", "GET", 1500);
     if (helper) lastEvent = helper.last_event || 0;
-    button.title = helper ? "Turn the screen off; the webcam wakes it" : "Black out the screen (tap to wake)";
+    button.title = helper ? "Dim the screen; the webcam wakes it" : "Black out the screen (tap to wake)";
   }
 
-  async function sleep() {
+  // fromHelper: the helper already knows (its tray menu put the screen to sleep), so don't tell it again.
+  async function sleep(fromHelper = false) {
     if (asleep) return;
     asleep = true; waking = false; sleptAt = Date.now();
-    eyes.classList.remove("show"); screen.classList.remove("fading"); screen.hidden = false;
+    screen.classList.remove("fading"); screen.hidden = false;
     $("sleep-note").textContent = helper ? "" : "Tap, move the mouse, or press a key to wake";
+    if (fromHelper) return;
     if (!helper) await findHelper();
-    if (helper && await helperCall("/sleep", "POST")) listen();
+    if (helper) helperCall("/sleep", "POST");
   }
 
-  // Wait for the helper to say someone walked by (long poll; the helper answers within 25 s either way).
+  // Listen to the helper for as long as the page is open (long poll; it answers within 25 s either way).
   async function listen() {
-    if (polling) return;
-    polling = true;
-    while (asleep && !waking) {
+    for (;;) {
+      if (!helper) {
+        await findHelper();
+        if (!helper) { await pause(10000); continue; }
+      }
       const data = await helperCall(`/events?after=${lastEvent}`, "GET", 30000);
-      if (!data) { await new Promise((r) => setTimeout(r, 2000)); continue; }
+      if (!data) { helper = null; await pause(3000); continue; }
       for (const ev of data.events || []) {
         lastEvent = Math.max(lastEvent, ev.id);
-        if (ev.type === "wake") wake(ev.side || "center", false);
+        if (ev.type === "sleep") sleep(true);
+        else if (ev.type === "wake" && asleep) wake(ev.side || "center", false);
+        else if (ev.type === "wake" && ev.reason === "test" && window.dieterBubble) window.dieterBubble.perform(ev.side || "center");
       }
     }
-    polling = false;
   }
 
   function wake(side = "center", tellHelper = true) {
     if (!asleep || waking) return;
     waking = true;
-    if (tellHelper && helper) helperCall("/wake", "POST");  // turn the monitor on and the camera off
+    if (tellHelper && helper) helperCall("/wake", "POST");  // bring the screen back and turn the camera off
     $("sleep-note").textContent = "";
-    const dx = side === "left" ? -24 : side === "right" ? 24 : 0;
-    pupils.style.transform = "translate(0, 0)";
-    eyes.classList.remove("show"); void eyes.getBoundingClientRect(); eyes.classList.add("show");
-    setTimeout(() => { pupils.style.transform = `translate(${dx}px, 4px)`; }, 650);     // glance at whoever's there
-    setTimeout(() => { pupils.style.transform = "translate(0, 0)"; }, 1700);
-    setTimeout(() => { screen.classList.add("fading"); }, 2300);
-    setTimeout(() => { screen.hidden = true; screen.classList.remove("fading"); eyes.classList.remove("show");
-                       asleep = false; waking = false; }, 3250);
+    // Dieter's bubble comes alive over the dark screen, then the page fades back in around it.
+    const lasts = window.dieterBubble ? window.dieterBubble.perform(side) : 0;
+    const fadeAt = Math.max(400, lasts - 1000);
+    setTimeout(() => { screen.classList.add("fading"); }, fadeAt);
+    setTimeout(() => { screen.hidden = true; screen.classList.remove("fading"); asleep = false; waking = false; }, fadeAt + 950);
   }
 
-  button.addEventListener("click", sleep);
+  button.addEventListener("click", () => sleep());
+  // Full screen on/off. On the kitchen PC the helper presses F11, which also undoes the full screen the kitchen
+  // window starts in (a page can't leave Chrome's own full screen by itself). Elsewhere: the browser's full screen.
+  const fullscreen = $("fullscreen-btn");
+  if (fullscreen) fullscreen.addEventListener("click", async () => {
+    if (!document.fullscreenElement && helper && await helperCall("/fullscreen", "POST")) return;
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+  });
   // Someone at the keyboard, mouse, or screen. (Ignore the first second: that's the tap that put it to sleep.)
   for (const type of ["pointerdown", "pointermove", "keydown", "touchstart"]) {
     document.addEventListener(type, () => { if (asleep && Date.now() - sleptAt > 1200) wake("center"); }, true);
   }
   // A step alert or finished timer wakes it (cook mode raises tg:alert once per new alert).
   document.addEventListener("tg:alert", () => { if (asleep) wake("center"); });
-  window.tgSleep = { sleep, wake: (side) => wake(side || "center"), status: () => ({ asleep, helper }) };
-  findHelper();
+  window.tgSleep = { sleep: () => sleep(), wake: (side) => wake(side || "center"), status: () => ({ asleep, helper }) };
+  listen();
 })();
 </script>

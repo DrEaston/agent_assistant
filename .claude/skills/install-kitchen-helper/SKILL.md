@@ -51,6 +51,19 @@ Settings live in `%LOCALAPPDATA%\Dieter\helper.json` (`sensitivity`: high/medium
    - Tap 🌙 Sleep, step away for a few seconds, then walk past the webcam.
    - Too jumpy or not waking: change sensitivity from the tray menu.
 
+## This PC's quirks (HP OmniStudio All-in-One, set up Nov 2026)
+
+- **Smart App Control blocks `DieterHelper.exe`** (task result `0x800711C7`; CodeIntegrity log event 3077).
+  Don't turn Smart App Control off. Run from source instead: point the "Dieter helper" task at
+  `helper\.venv\Scripts\pythonw.exe` with argument `"<repo>\helper\dieter_helper.py"` and working directory
+  `<repo>\helper` (same trigger and settings as `install.ps1`). Updating is then `git pull` plus restarting the task.
+- **Modern Standby:** `powercfg /a` lists "Standby (S0 Low Power Idle)". Real monitor-off sends the PC into
+  standby and locks it, so the helper dims the built-in screen instead (`Monitor.can_dim`). Check with the
+  System log, Kernel-Power events 506/507 (entering/exiting Modern Standby).
+- **Dieter at sign-in:** `Dieter.lnk` in the Startup folder runs `pythonw.exe dieter_helper.py --open-only`,
+  which opens `dieter_page` from `helper.json` (default: Thanksgiving cook mode) full screen in Chrome.
+- The long-term plan for this PC is `docs/kitchen_pc_plan.md`.
+
 ## Troubleshooting
 
 - **Page doesn't find the helper** (Sleep only blacks out the page): check `/status` above; check the browser

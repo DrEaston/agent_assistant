@@ -15,6 +15,7 @@ Later the "hey Dieter" listener joins this same helper.
 
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -25,7 +26,16 @@ from urllib.parse import parse_qs, urlsplit
 VERSION = "0.1.0"
 PORT = 47613
 ALLOWED_ORIGINS = {"https://askdieter.ai", "https://www.askdieter.ai", "http://localhost:8000", "http://127.0.0.1:8000"}
-SETTINGS_FILE = Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / "Dieter" / "helper.json"
+# Pull request previews (https://pr-12---dieter-preview-2hu6ba6ata-uc.a.run.app). The "2hu6ba6ata" part is unique
+# to Dieter's Google Cloud project, so no one else's site can have one of these addresses.
+PREVIEW_ORIGIN = re.compile(r"https://[a-z0-9-]+---dieter-preview-2hu6ba6ata-uc\.a\.run\.app")
+
+
+def origin_allowed(origin):
+    return origin in ALLOWED_ORIGINS or bool(origin and PREVIEW_ORIGIN.fullmatch(origin))
+# The page "Open Dieter" shows (override with "dieter_page" in helper.json).
+DIETER_PAGE = "https://askdieter.ai/thanksgiving/cook"
+SETTINGS_FILE =Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / "Dieter" / "helper.json"
 # Share of the picture that has to change to count as someone there. Higher = needs more movement.
 SENSITIVITY = {"high": 0.004, "medium": 0.012, "low": 0.03}
 
@@ -49,29 +59,116 @@ def save_settings(settings):
 
 # ---------------------------------------------------------------- the monitor (Windows)
 
-class Monitor:
-    """Turn the display off and on. On other systems these do nothing (so the helper can be tested anywhere)."""
+def _powershell(command, timeout=10):
+    """Run a short PowerShell command without a window; returns its output ('' on failure)."""
+    import subprocess
+    try:
+        done = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+                              capture_output=True, text=True, timeout=timeout,
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return done.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
 
-    def __init__(self):
+
+class Monitor:
+    """Darken the screen and bring it back. On other systems these do nothing (so the helper can be tested anywhere).
+
+    Built-in screens (all-in-ones, laptops): the backlight goes to its lowest level while the page shows black, and
+    Windows is told the display is still needed. Telling Windows "monitor off" instead would, on PCs with Modern
+    Standby (most new ones), put the whole PC into standby a second later: the webcam freezes, nothing can wake it
+    but a key, and Windows asks to sign in again.
+    Separate monitors (no backlight control): the old way, monitor off, then a mouse nudge to wake it.
+    """
+
+    def __init__(self, settings=None):
         self.win = sys.platform == "win32"
+        self.settings = settings if settings is not None else {}
+        self._display_request = None
         if self.win:
             import ctypes
+            self.ctypes = ctypes
             self.user32 = ctypes.windll.user32
             self.kernel32 = ctypes.windll.kernel32
+            self.can_dim = self._get_brightness() is not None
+            # If the helper stopped while the screen was dimmed, put the brightness back.
+            if self.can_dim and self.settings.get("dimmed_from") is not None:
+                self._set_brightness(self.settings.pop("dimmed_from"))
+                save_settings(self.settings)
+
+    def press_f11(self):
+        """Full screen on/off for the window in front (Chrome's own F11)."""
+        if not self.win:
+            return False
+        VK_F11, KEYEVENTF_KEYUP = 0x7A, 0x0002
+        self.user32.keybd_event(VK_F11, 0, 0, 0)
+        self.user32.keybd_event(VK_F11, 0, KEYEVENTF_KEYUP, 0)
+        return True
 
     def keep_pc_awake(self):
         # ES_CONTINUOUS | ES_SYSTEM_REQUIRED: the PC itself never sleeps while the helper runs (the screen may).
         if self.win:
             self.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)
 
+    # built-in screen brightness (WMI), 0-100
+    def _get_brightness(self):
+        out = _powershell("(Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightness "
+                          "-ErrorAction Stop | Select-Object -First 1).CurrentBrightness")
+        return int(out) if out.isdigit() else None
+
+    def _set_brightness(self, level):
+        _powershell("Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightnessMethods | "
+                    f"Invoke-CimMethod -MethodName WmiSetBrightness -Arguments @{{Timeout=0; Brightness={int(level)}}}"
+                    " | Out-Null")
+
+    # a process-wide "the display is in use" request, so Windows doesn't switch the screen off or go to standby
+    def _hold_display(self, hold):
+        k = self.kernel32
+        if hold and self._display_request is None:
+            ct = self.ctypes
+
+            class REASON_CONTEXT(ct.Structure):
+                _fields_ = [("Version", ct.c_ulong), ("Flags", ct.c_ulong), ("SimpleReasonString", ct.c_wchar_p)]
+
+            k.PowerCreateRequest.restype = ct.c_void_p
+            k.PowerCreateRequest.argtypes = [ct.POINTER(REASON_CONTEXT)]
+            k.PowerSetRequest.argtypes = k.PowerClearRequest.argtypes = [ct.c_void_p, ct.c_int]
+            k.CloseHandle.argtypes = [ct.c_void_p]
+            self._reason = REASON_CONTEXT(0, 1, "Dieter kitchen screen is resting, watching for someone")
+            handle = k.PowerCreateRequest(ct.byref(self._reason))
+            if handle and handle != ct.c_void_p(-1).value:
+                k.PowerSetRequest(handle, 0)  # PowerRequestDisplayRequired
+                self._display_request = handle
+        elif not hold and self._display_request is not None:
+            k.PowerClearRequest(self._display_request, 0)
+            k.CloseHandle(self._display_request)
+            self._display_request = None
+
     def off(self):
-        if self.win:
+        if not self.win:
+            return
+        if self.can_dim:
+            self._hold_display(True)
+            if self.settings.get("dimmed_from") is None:
+                current = self._get_brightness()
+                self.settings["dimmed_from"] = current if current else 100
+                save_settings(self.settings)
+            self._set_brightness(0)
+        else:
             # WM_SYSCOMMAND, SC_MONITORPOWER, 2 = off. PostMessage so a busy window can't block us.
             self.user32.PostMessageW(0xFFFF, 0x0112, 0xF170, 2)
 
     def on(self):
         if not self.win:
             return
+        if self.can_dim:
+            level = self.settings.pop("dimmed_from", None)
+            if level is None and self._get_brightness() == 0:
+                level = 75  # dark with nothing saved to go back to: never leave the kitchen screen black
+            if level is not None:
+                self._set_brightness(level)
+                save_settings(self.settings)
+            self._hold_display(False)
         # ES_DISPLAY_REQUIRED without ES_CONTINUOUS: counts as activity once, doesn't pin the screen on.
         self.kernel32.SetThreadExecutionState(0x00000002)
         # A one-pixel mouse nudge (and back) is what reliably turns a sleeping monitor on in Windows 10/11.
@@ -155,12 +252,15 @@ class MotionWatcher:
 class Helper:
     def __init__(self, monitor=None, watcher_cls=MotionWatcher):
         self.settings = load_settings()
-        self.monitor = monitor or Monitor()
+        self.monitor = monitor or Monitor(self.settings)
         self.watcher = watcher_cls(self._motion, self.settings)
         self.asleep = False
         self._events = []
         self._next_id = 1
         self._cond = threading.Condition()
+        # Dimming and waking the screen take turns: dimming takes a moment, and a wake that slipped in halfway
+        # used to find nothing to undo and leave the screen dark.
+        self._screen = threading.Lock()
         self.monitor.keep_pc_awake()
 
     # events the page waits for
@@ -196,16 +296,19 @@ class Helper:
         threading.Timer(0.6, self._sleep_now).start()
 
     def _sleep_now(self):
-        if not self.asleep:
-            return
-        self.monitor.off()
-        self.watcher.start()
+        with self._screen:
+            if not self.asleep:
+                return
+            self.monitor.off()
+            self.watcher.start()
 
     def wake(self, reason="asked", side="center"):
         was_asleep = self.asleep
         self.asleep = False
         self.watcher.stop()
-        self.monitor.on()
+        with self._screen:  # waits for a dim that's still going, then undoes it
+            self.monitor.on()
+        # The Dieter page (cook mode) hears this and shows Dieter's eyes; reason "test" shows them even if awake.
         return self._emit(type="wake", reason=reason, side=side, was_asleep=was_asleep)
 
     def _motion(self, side):
@@ -231,7 +334,7 @@ def make_handler(helper):
 
         def _cors(self):
             origin = self.headers.get("Origin", "")
-            if origin in ALLOWED_ORIGINS:
+            if origin_allowed(origin):
                 self.send_header("Access-Control-Allow-Origin", origin)
                 self.send_header("Vary", "Origin")
                 self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -252,7 +355,7 @@ def make_handler(helper):
         def _allowed(self):
             # Only pages from askdieter.ai (or a local Dieter) may control the screen.
             origin = self.headers.get("Origin")
-            return origin is None or origin in ALLOWED_ORIGINS
+            return origin is None or origin_allowed(origin)
 
         def do_OPTIONS(self):
             self.send_response(204 if self._allowed() else 403)
@@ -280,6 +383,10 @@ def make_handler(helper):
                 return self._json({"ok": True})
             if path == "/wake":
                 return self._json({"ok": True, "event": helper.wake("asked")})
+            if path == "/fullscreen":
+                # The page's full-screen button: press F11 for it. The page was just tapped, so it's the window
+                # in front, and F11 also undoes Chrome's own full screen (which a page can't do by itself).
+                return self._json({"ok": helper.monitor.press_f11()})
             return self._json({"detail": "Not found."}, 404)
 
     return Handler
@@ -324,6 +431,7 @@ def tray(helper, server):
 
     menu = pystray.Menu(
         pystray.MenuItem(f"Dieter helper {VERSION}", None, enabled=False),
+        pystray.MenuItem("Open Dieter", lambda: open_dieter(helper.settings), default=True),
         pystray.MenuItem("Sleep the screen now", lambda: helper.sleep()),
         pystray.MenuItem("Test the eyes", lambda: helper.wake("test")),
         pystray.MenuItem("Motion sensitivity", pystray.Menu(level("high"), level("medium"), level("low"))),
@@ -332,7 +440,43 @@ def tray(helper, server):
     pystray.Icon("dieter-helper", image, "Dieter helper", menu).run()
 
 
+def find_browser():
+    """Chrome if it's installed, otherwise Edge (always on Windows)."""
+    for path in (r"%ProgramFiles%\Google\Chrome\Application\chrome.exe",
+                 r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe",
+                 r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe",
+                 r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
+                 r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"):
+        full = os.path.expandvars(path)
+        if os.path.exists(full):
+            return full
+    return None
+
+
+def open_dieter(settings):
+    """Open the Dieter page as the kitchen screen: its own window, full screen (no address bar, tabs or taskbar).
+    F11, or the page's ⛶ button, switches full screen off and on. It uses its own Chrome profile in
+    %LOCALAPPDATA%\\Dieter\\kiosk-browser: Chrome ignores the full-screen setting when it opens a window in an
+    already-running Chrome, and a separate profile always starts fresh. Sign in to askdieter.ai once there and it
+    stays signed in. "kiosk": true in helper.json locks it in kiosk mode instead (only Alt+F4 gets out)."""
+    import subprocess
+    import webbrowser
+    page = settings.get("dieter_page", DIETER_PAGE)
+    browser = find_browser()
+    if not browser:
+        webbrowser.open(page)
+        return
+    profile = SETTINGS_FILE.parent / "kiosk-browser"
+    window = ["--kiosk", page] if settings.get("kiosk") else [f"--app={page}", "--start-fullscreen"]
+    subprocess.Popen([browser, *window, f"--user-data-dir={profile}", "--no-first-run",
+                      "--no-default-browser-check", "--disable-session-crashed-bubble",
+                      "--autoplay-policy=no-user-gesture-required"])  # the step chime may play without a tap
+
+
 def main():
+    if "--open-only" in sys.argv:  # the sign-in shortcut: just open the Dieter page (the helper runs separately)
+        open_dieter(load_settings())
+        return
     helper = Helper()
     try:
         server = serve(helper)
