@@ -52,7 +52,7 @@ from apps.kitchen.stalled_issue_evaluation import (
 )
 from apps.kitchen.import_images import UnsupportedRecipeImage, is_heic, normalize_recipe_image
 from apps.kitchen.thanksgiving.router import configure as configure_thanksgiving, router as thanksgiving_router
-from core import ui as core_ui
+from core import internal as core_internal, proxy as core_proxy, ui as core_ui
 from apps.kitchen.shopping import router as shopping
 from apps.registry import app_shell_for_path, global_nav_apps, launcher_cards
 from apps.pipeline import (
@@ -127,15 +127,37 @@ if cloud_persistence.enabled:
     except Exception as exc:
         print(f"Warning: Cloud persistence seed failed - {exc}")
 
-# Thanksgiving planner: self-contained Kitchen slice with its own router and templates.
+# Thanksgiving planner: a self-contained Kitchen slice. When THANKSGIVING_SERVICE_URL is set it runs as its own
+# Cloud Run service with its own database (apps/kitchen/thanksgiving/service.py): this app keeps the address and
+# the sign-in and forwards /thanksgiving requests there, signed (core/proxy.py, core/internal.py). Otherwise it
+# runs inside this app.
+THANKSGIVING_SERVICE_URL = os.getenv("THANKSGIVING_SERVICE_URL", "").strip().rstrip("/")
 configure_thanksgiving(db)
-app.include_router(thanksgiving_router)
+if THANKSGIVING_SERVICE_URL:
+    _PROXY_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
+
+    @app.api_route("/thanksgiving", methods=_PROXY_METHODS, include_in_schema=False)
+    @app.api_route("/thanksgiving/{rest:path}", methods=_PROXY_METHODS, include_in_schema=False)
+    async def thanksgiving_proxy(request: Request, rest: str = ""):
+        return await core_proxy.forward(request, THANKSGIVING_SERVICE_URL, request.state.current_user, "Thanksgiving")
+else:
+    app.include_router(thanksgiving_router)
+
+
+def remote_thanksgiving():
+    """The user's Thanksgiving plan and sized dishes from the Thanksgiving service (for shopping lists)."""
+    data = core_internal.call(THANKSGIVING_SERVICE_URL, "GET", "/thanksgiving/api/internal/dishes",
+                              core_proxy.signer_user(dict(db.get_user_by_id(get_current_user_id()) or {})))
+    return data.get("plan"), data.get("dishes") or []
+
+
 # Shopping lists read recipes and the meal plan through these (defined further down this file).
 shopping.configure(
     db,
     meal_sources=lambda ids: shopping_meal_sources(ids),
     pending_meals=lambda: shopping_pending_meals(),
     component_sources=lambda ids: shopping_component_sources(ids),
+    thanksgiving=remote_thanksgiving if THANKSGIVING_SERVICE_URL else None,
 )
 app.include_router(shopping.router)
 
@@ -345,6 +367,18 @@ async def load_authenticated_user(request: Request, call_next):
         "/api/app-feedback/codex-runs",
         "/api/app-feedback/stalled",
     )
+    if path.startswith("/internal/"):
+        # Another Dieter service (e.g. Thanksgiving) calling back as a user: signed header instead of a cookie.
+        signed = core_internal.verify(request.headers.get(core_internal.HEADER))
+        row = db.get_user_by_id(signed["id"]) if signed else None
+        if not row or row["status"] != "active":
+            return JSONResponse({"detail": "Not allowed."}, status_code=401)
+        request.state.current_user = dict(row)
+        user_token = set_current_user_id(row["id"])
+        try:
+            return await call_next(request)
+        finally:
+            reset_current_user_id(user_token)
     public_exact_paths = {"/cct-roadmap"}
     if DEMO_MODE:
         public_exact_paths.update({"/", "/demo"})
@@ -371,6 +405,38 @@ async def load_authenticated_user(request: Request, call_next):
         return response
     finally:
         reset_current_user_id(user_token)
+
+
+# ---------------------------------------------------------------- calls from other Dieter services
+# Signed by core/internal.py and checked in load_authenticated_user. These are the platform's side of the
+# contract with apps that run as their own services.
+
+REPORT_FIELDS = ("title", "area", "page_url", "page_title", "reporter_name", "reporter_email", "raw_feedback")
+
+
+@app.get("/internal/kitchen/library")
+def internal_kitchen_library():
+    from apps.kitchen.thanksgiving.router import local_library
+    return local_library(db)
+
+
+@app.get("/internal/kitchen/library/{meal_id}")
+def internal_kitchen_recipe(meal_id: int):
+    from apps.kitchen.thanksgiving.router import local_library_recipe
+    recipe = local_library_recipe(db, meal_id)
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return recipe
+
+
+@app.post("/internal/studio/reports")
+async def internal_studio_report(request: Request):
+    data = await request.json()
+    fields = {k: str(data.get(k) or "")[:4000] for k in REPORT_FIELDS}
+    if not fields["raw_feedback"].strip():
+        raise HTTPException(status_code=400, detail="Describe the problem.")
+    db.add_app_feedback_report(**fields)
+    return {"ok": True}
 
 
 # ============================================================================
@@ -5316,7 +5382,7 @@ def codex_worker_token_valid(token):
     """Validate the shared local-worker token for Codex run polling."""
     if not CODEX_WORKER_ENABLED:
         return False
-    expected = CODEX_WORKER_TOKEN or REGISTRATION_CODE or os.getenv("SECRET_KEY", "")
+    expected = CODEX_WORKER_TOKEN  # its own key only; never fall back to other secrets
     return bool(expected and token and hmac.compare_digest(str(token), str(expected)))
 
 def next_feedback_issue(status="open", area=""):

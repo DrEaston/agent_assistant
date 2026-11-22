@@ -26,9 +26,10 @@ _templates = ui.templates(Path(__file__).parent / "templates")
 _state = {"db": None, "store": None, "meal_sources": None, "pending_meals": None, "component_sources": None}
 
 
-def configure(db, meal_sources, pending_meals, component_sources):
+def configure(db, meal_sources, pending_meals, component_sources, thanksgiving=None):
+    # thanksgiving: () -> (plan, sized dishes) when Thanksgiving runs as its own service; None = read it here.
     _state.update(db=db, store=ShoppingStore(db), meal_sources=meal_sources, pending_meals=pending_meals,
-                  component_sources=component_sources)
+                  component_sources=component_sources, thanksgiving=thanksgiving)
 
 
 def store():
@@ -71,6 +72,12 @@ def friendly_date(value):
 
 def _thanksgiving():
     """The user's Thanksgiving plan and dishes, or (None, []) when there is no plan."""
+    if _state.get("thanksgiving"):
+        try:
+            return _state["thanksgiving"]()
+        except Exception as exc:
+            print(f"Warning: Thanksgiving dishes unavailable: {exc}")
+            return None, []
     from apps.kitchen.thanksgiving import router as tg_router, sizes
     try:
         plan = tg_router.store().get_plan()

@@ -13,4 +13,5 @@ COPY . .
 EXPOSE 8000
 
 # Run Uvicorn
-CMD ["sh", "-c", "uvicorn api:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# APP_MODULE picks which Dieter service this container runs (set by scripts/deploy_cloud_run.ps1).
+CMD ["sh", "-c", "uvicorn ${APP_MODULE:-api:app} --host 0.0.0.0 --port ${PORT:-8000}"]

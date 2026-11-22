@@ -6,7 +6,16 @@ param(
     [string]$DataPrefix = $env:DIETER_GCS_PREFIX,
     [string]$OpenAiSecretName = "dieter-openai-api-key",
     [string]$RegistrationCode = $env:DIETER_REGISTRATION_CODE,
-    [int]$MinInstances = -1
+    [int]$MinInstances = -1,
+    # Which app this service runs: "api:app" (the main app) or e.g. "apps.kitchen.thanksgiving.service:app".
+    [string]$AppModule = "api:app",
+    # Requests one instance handles at once. There is still only one instance (each app's SQLite file has one owner).
+    [int]$Concurrency = 8,
+    # Extra NAME=value settings for this service, comma-separated (e.g. "PLATFORM_URL=https://...").
+    [string]$ExtraEnv = "",
+    # Shared key that signs calls between Dieter services (core/internal.py). Created with a random value if missing.
+    [string]$InternalKeySecretName = "dieter-internal-key",
+    [string]$AppSecretKeyName = "dieter-secret-key"
 )
 
 $ErrorActionPreference = "Stop"
@@ -170,7 +179,39 @@ if ($secretIamExitCode -ne 0) {
     throw "Failed to grant Cloud Run access to Secret Manager secret '$OpenAiSecretName'."
 }
 
-$envVars = "DB_PATH=/tmp/projects.db,UPLOADS_DIR=/tmp/uploads,GCS_BUCKET=$DataBucket,GCS_PREFIX=$DataPrefix,APP_TIMEZONE=America/Phoenix,LLM_PROVIDER=$llmProvider,OPENAI_MODEL=$openAiModel"
+# Random keys this app needs, kept in Secret Manager. Never printed; each is generated once.
+#   dieter-internal-key: signs calls between Dieter services (core/internal.py)
+#   dieter-secret-key:   SECRET_KEY, signs the app's confirm-before-saving tokens
+function Ensure-RandomSecret {
+    param([string]$Name)
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & $gcloud secrets describe $Name *> $null
+    $exists = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $previous
+    if (-not $exists) {
+        $bytes = New-Object byte[] 48
+        [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+        $keyFile = New-TemporaryFile
+        try {
+            Set-Content -Path $keyFile -Value ([Convert]::ToBase64String($bytes)) -NoNewline
+            & $gcloud secrets create $Name --replication-policy automatic --data-file $keyFile *> $null
+            if ($LASTEXITCODE -ne 0) { throw "Failed to create Secret Manager secret '$Name'." }
+        } finally {
+            Remove-Item -LiteralPath $keyFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & $gcloud secrets add-iam-policy-binding $Name `
+        --member "serviceAccount:$runtimeServiceAccount" `
+        --role "roles/secretmanager.secretAccessor" *> $null
+    $ErrorActionPreference = $previous
+}
+Ensure-RandomSecret $InternalKeySecretName
+Ensure-RandomSecret $AppSecretKeyName
+
+$envVars = "APP_MODULE=$AppModule,DB_PATH=/tmp/projects.db,UPLOADS_DIR=/tmp/uploads,GCS_BUCKET=$DataBucket,GCS_PREFIX=$DataPrefix,APP_TIMEZONE=America/Phoenix,LLM_PROVIDER=$llmProvider,OPENAI_MODEL=$openAiModel"
 if ($env:DEMO_MODE) {
     $envVars = "$envVars,DEMO_MODE=$($env:DEMO_MODE)"
 }
@@ -192,6 +233,9 @@ if ($openAiTranscriptionModel) {
 if ($RegistrationCode) {
     $envVars = "$envVars,DIETER_REGISTRATION_CODE=$RegistrationCode"
 }
+if ($ExtraEnv) {
+    $envVars = "$envVars,$ExtraEnv"
+}
 
 & $gcloud run deploy $ServiceName `
     --source . `
@@ -199,8 +243,8 @@ if ($RegistrationCode) {
     --allow-unauthenticated `
     --min-instances $MinInstances `
     --max-instances 1 `
-    --concurrency 1 `
+    --concurrency $Concurrency `
     --memory 1Gi `
     --cpu 1 `
     --update-env-vars $envVars `
-    --set-secrets "OPENAI_API_KEY=$OpenAiSecretName`:latest"
+    --set-secrets "OPENAI_API_KEY=$OpenAiSecretName`:latest,DIETER_INTERNAL_KEY=$InternalKeySecretName`:latest,SECRET_KEY=$AppSecretKeyName`:latest"

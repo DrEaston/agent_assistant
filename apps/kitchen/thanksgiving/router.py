@@ -20,6 +20,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from starlette.concurrency import run_in_threadpool
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from core import internal
+
 from . import handsfree, menu, planner, sizes, voice
 from .presets import CATEGORIES, OUR_MENU, PRESET_BUTTONS, preset_dish
 from .store import ThanksgivingStore
@@ -36,8 +38,11 @@ _templates = Environment(
 _state = {"db": None, "store": None}
 
 
-def configure(db, voice_model=None, fast_model=None, speaker=None):
+def configure(db, voice_model=None, fast_model=None, speaker=None, platform=None):
     _state["db"] = db
+    # The rest of Dieter (recipe library, problem reports): read directly when running inside the main app,
+    # or over HTTP when Thanksgiving runs as its own service (see service.py).
+    _state["platform"] = platform or LocalPlatform(db)
     _state["store"] = ThanksgivingStore(db)
     _state["voice_model"] = voice_model  # deep model; None = OpenAI (voice.default_model); tests pass a fake
     _state["fast_model"] = fast_model  # quick first pass; None = OpenAI (voice.fast_default_model)
@@ -140,9 +145,57 @@ def plan_context(plan, now=None):
     }
 
 
+class LocalPlatform:
+    """Inside the main app: read the shared database directly."""
+
+    def __init__(self, db):
+        self.db = db
+
+    def library(self):
+        return local_library(self.db)
+
+    def library_recipe(self, meal_id):
+        return local_library_recipe(self.db, meal_id)
+
+    def report(self, fields):
+        self.db.add_app_feedback_report(**fields)
+
+
+class RemotePlatform:
+    """Thanksgiving as its own service: ask the main app, as the signed-in user."""
+
+    def __init__(self, base_url):
+        self.base_url = base_url
+
+    def library(self):
+        return internal.call(self.base_url, "GET", "/internal/kitchen/library", internal.current_user.get())
+
+    def library_recipe(self, meal_id):
+        return internal.call(self.base_url, "GET", f"/internal/kitchen/library/{int(meal_id)}",
+                             internal.current_user.get())
+
+    def report(self, fields):
+        internal.call(self.base_url, "POST", "/internal/studio/reports", internal.current_user.get(), fields)
+
+
 def library_recipes():
-    """Ready recipes from the Kitchen library the user can pull into the plan."""
-    db = _state["db"]
+    """Ready recipes from the Kitchen library the user can pull into the plan ([] if it can't be reached)."""
+    try:
+        return _state["platform"].library() or []
+    except Exception as exc:
+        print(f"Warning: Kitchen library unavailable: {exc}")
+        return []
+
+
+def library_recipe(meal_id):
+    try:
+        return _state["platform"].library_recipe(meal_id)
+    except Exception as exc:
+        print(f"Warning: Kitchen recipe {meal_id} unavailable: {exc}")
+        return None
+
+
+def local_library(db):
     try:
         meals = [dict(row) for row in db.get_recipe_complete_meals()]
     except Exception:
@@ -156,8 +209,7 @@ def library_recipes():
     return recipes
 
 
-def library_recipe(meal_id):
-    db = _state["db"]
+def local_library_recipe(db, meal_id):
     meal = next((dict(m) for m in db.get_recipe_complete_meals() if m["id"] == meal_id), None)
     if not meal:
         return None
@@ -584,6 +636,15 @@ async def api_handsfree_ask(request: Request):
     return await _answer_request(data, spoken=via)
 
 
+@router.get("/thanksgiving/api/internal/dishes")
+def api_internal_dishes():
+    """The plan and its dishes at their chosen batch size, for Kitchen shopping lists (which live in the main app)."""
+    plan = store().get_plan()
+    if not plan:
+        return {"plan": None, "dishes": []}
+    return {"plan": dict(plan), "dishes": [sizes.with_size(d) for d in store().get_dishes(plan["id"])]}
+
+
 @router.get("/thanksgiving/api/speak")
 def api_speak(text: str = ""):
     """Hands-free's voice: OpenAI speech for `text`, streamed as mp3 so the tablet starts talking right away.
@@ -733,7 +794,7 @@ def save_feedback(request, text, page):
         raise HTTPException(status_code=400, detail="Describe the problem.")
     user = getattr(request.state, "current_user", None) or {}
     get = user.get if hasattr(user, "get") else (lambda k, d="": getattr(user, k, d))
-    _state["db"].add_app_feedback_report(
+    _state["platform"].report(dict(
         title=f"[Thanksgiving] {text.splitlines()[0][:80]}",
         area=FEEDBACK_AREA,
         page_url=page[:300],
@@ -741,7 +802,7 @@ def save_feedback(request, text, page):
         reporter_name=get("name", "") or "",
         reporter_email=get("email", "") or "",
         raw_feedback=text[:4000],
-    )
+    ))
 
 
 def _int(values, index):
