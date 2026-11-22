@@ -380,6 +380,28 @@ class RouteTests(unittest.TestCase):
         tg_router.configure(self.db)
         self.assertEqual(self.mac()[1]["instructions_text"], "My own notes")  # your edits are never overwritten
 
+    def test_speak_streams_the_voice(self):
+        said = []
+
+        def speaker(text):
+            said.append(text)
+            yield b"ID3"
+            yield b"more"
+        tg_router.configure(self.db, speaker=speaker)
+        r = self.client.get("/thanksgiving/api/speak", params={"text": "  Next, baste the turkey.  "})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.headers["content-type"], "audio/mpeg")
+        self.assertEqual(r.content, b"ID3more")
+        self.assertEqual(said, ["Next, baste the turkey."])
+        self.assertEqual(self.client.get("/thanksgiving/api/speak", params={"text": " "}).status_code, 400)
+
+    def test_speak_fails_cleanly_so_the_tablet_uses_its_own_voice(self):
+        def speaker(text):
+            raise RuntimeError("no voice today")
+            yield b""
+        tg_router.configure(self.db, speaker=speaker)
+        self.assertEqual(self.client.get("/thanksgiving/api/speak", params={"text": "Hello"}).status_code, 502)
+
     def voice_with(self, reply):
         """Swap in a fake model that returns `reply` (a dict) and records what it was shown."""
         seen = {}

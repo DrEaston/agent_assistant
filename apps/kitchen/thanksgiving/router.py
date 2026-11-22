@@ -15,7 +15,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -35,11 +35,12 @@ _templates = Environment(
 _state = {"db": None, "store": None}
 
 
-def configure(db, voice_model=None, fast_model=None):
+def configure(db, voice_model=None, fast_model=None, speaker=None):
     _state["db"] = db
     _state["store"] = ThanksgivingStore(db)
     _state["voice_model"] = voice_model  # deep model; None = OpenAI (voice.default_model); tests pass a fake
     _state["fast_model"] = fast_model  # quick first pass; None = OpenAI (voice.fast_default_model)
+    _state["speaker"] = speaker  # text -> mp3 chunks; None = OpenAI (voice.speech_chunks); tests pass a fake
     _state["deep_jobs"] = {}  # ticket -> deep model call in progress for an escalated request
     _state["voice_pending"] = {}  # plan id -> checked actions waiting for Apply
     _state["voice_undo"] = {}  # plan id -> undo record for the last applied command
@@ -493,6 +494,32 @@ async def api_handsfree_ask(request: Request):
         raise HTTPException(status_code=400, detail="Nothing to ask.")
     via = data.get("via") if data.get("via") in ("follow-up", "conversation") else "name"
     return await _answer_request(data, spoken=via)
+
+
+@router.get("/thanksgiving/api/speak")
+def api_speak(text: str = ""):
+    """Hands-free's voice: OpenAI speech for `text`, streamed as mp3 so the tablet starts talking right away.
+    A GET so an <audio> element can play it while it downloads. The tablet falls back to its own voice on error."""
+    text = text.strip()[:voice.SPEECH_MAX_CHARS]
+    if not text:
+        raise HTTPException(status_code=400, detail="Nothing to say.")
+    chunks = (_state.get("speaker") or voice.speech_chunks)(text)
+    try:
+        first = next(chunks)  # fail here (a clean error) rather than mid-stream
+    except StopIteration:
+        first = b""
+    except Exception as error:
+        print("Hands-free voice failed: " + json.dumps({"error": str(error)[:200]}))
+        raise HTTPException(status_code=502, detail="Voice unavailable.")
+
+    def body():
+        yield first
+        try:
+            yield from chunks
+        except Exception as error:
+            print("Hands-free voice cut off: " + json.dumps({"error": str(error)[:200]}))
+
+    return StreamingResponse(body(), media_type="audio/mpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.post("/thanksgiving/api/voice-log")

@@ -104,17 +104,21 @@
       g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.15); o.start(t0); o.stop(t0 + 0.16);
     } catch (e) {}
   }
+  // One audio player, reused: the tap that turns hands-free on unlocks it, so later replies can play on phones.
+  const player = new Audio();
+  player.preload = "auto";
+  let natural = true;  // OpenAI's voice; switches to the device's own voice for the session if it keeps failing
+  let voiceFailures = 0;
+
   function speak(text, opts = {}) {
     text = String(text || "").replace(/→/g, " to ").replace(/[·•]/g, ",").replace(/°F/g, " degrees").trim();
     if (!text) return;
     if (!opts.quiet) lastSpoken = text;
-    if (!("speechSynthesis" in window)) { showSaid(text); followUntil = Date.now() + (awaiting ? ANSWER_MS : FOLLOW_MS); return; }
+    if (!natural && !("speechSynthesis" in window)) { showSaid(text); followUntil = Date.now() + (awaiting ? ANSWER_MS : FOLLOW_MS); return; }
     if (speaking && opts.queue) { queue.push(text); return; }
     const id = ++utterance;  // a newer speak() or hush() makes this one's "finished" a no-op
-    speechSynthesis.cancel();
+    stopVoices();
     speaking = true; stopRecognition(); render();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "en-US"; u.rate = 1.02;
     const done = () => {
       if (id !== utterance) return;
       utterance++;
@@ -123,14 +127,39 @@
       followUntil = Date.now() + (awaiting ? ANSWER_MS : FOLLOW_MS);
       render(); startRecognition();
     };
+    // Don't get stuck deaf if the end of the audio never gets reported.
+    setTimeout(done, 8000 + text.length * 100);
+    if (natural) playNatural(text, id, done); else deviceVoice(text, done);
+  }
+  function playNatural(text, id, done) {
+    let fellBack = false;
+    const fallback = (why) => {
+      if (fellBack || id !== utterance) return;
+      fellBack = true;
+      report("voice-fallback", why);
+      if (++voiceFailures >= 2) natural = false;
+      if ("speechSynthesis" in window) deviceVoice(text, done); else { showSaid(text); done(); }
+    };
+    player.onended = () => { if (id === utterance) { voiceFailures = 0; done(); } };
+    player.onerror = () => fallback("audio error");
+    player.src = "/thanksgiving/api/speak?text=" + encodeURIComponent(text);
+    const playing = player.play();
+    if (playing && playing.catch) playing.catch((e) => fallback(e && e.name));
+  }
+  function deviceVoice(text, done) {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "en-US"; u.rate = 1.02;
     u.onend = done; u.onerror = done;
-    // Some Chrome builds never fire onend for long speech; don't get stuck deaf.
-    setTimeout(done, 2500 + text.length * 90);
     speechSynthesis.speak(u);
+  }
+  function stopVoices() {
+    player.onended = player.onerror = null;
+    try { player.pause(); } catch (e) {}
+    if ("speechSynthesis" in window) speechSynthesis.cancel();
   }
   function hush() {
     queue.length = 0; utterance++;
-    if ("speechSynthesis" in window) speechSynthesis.cancel();
+    stopVoices();
     if (speaking) { speaking = false; render(); startRecognition(); }
   }
 

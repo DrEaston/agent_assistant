@@ -124,6 +124,40 @@ def openai_model(name, timeout=60, **options):
     return call
 
 
+# ---------- Spoken voice for hands-free cooking (OpenAI text-to-speech, streamed as mp3)
+SPEECH_INSTRUCTIONS = ("A warm, relaxed, friendly kitchen helper talking to someone who is cooking. "
+                       "Clear and natural, at a brisk conversational pace. Never sing-song or announcer-like.")
+SPEECH_MAX_CHARS = 1200
+_speech_cache = {}  # text -> mp3 bytes; steps and alerts repeat, so these replay instantly
+SPEECH_CACHE_SIZE = 200
+
+
+def speech_model_name():
+    return os.getenv("OPENAI_TTS_MODEL") or "gpt-4o-mini-tts"
+
+
+def speech_voice():
+    return os.getenv("OPENAI_TTS_VOICE") or "coral"
+
+
+def speech_chunks(text):
+    """Yield mp3 bytes for `text` as OpenAI produces them, so playback can start before it's finished."""
+    text = str(text or "").strip()[:SPEECH_MAX_CHARS]
+    if text in _speech_cache:
+        yield _speech_cache[text]
+        return
+    parts = []
+    with _client(30).audio.speech.with_streaming_response.create(
+            model=speech_model_name(), voice=speech_voice(), input=text,
+            instructions=SPEECH_INSTRUCTIONS, response_format="mp3") as response:
+        for chunk in response.iter_bytes(4096):
+            parts.append(chunk)
+            yield chunk
+    if len(_speech_cache) >= SPEECH_CACHE_SIZE:
+        _speech_cache.pop(next(iter(_speech_cache)))
+    _speech_cache[text] = b"".join(parts)
+
+
 def default_model(messages):
     return openai_model(model_name())(messages)
 
