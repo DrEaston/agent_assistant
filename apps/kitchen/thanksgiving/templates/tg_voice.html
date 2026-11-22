@@ -1,9 +1,16 @@
 {# "Tell Dieter": speak or type a change to the plan, see a preview, then Apply / Cancel / Undo.
    Included by tg_plan.html and tg_cook.html. After a change it fires "tg:changed" on document. #}
 <style>
-.voice-fab { position: fixed; z-index: 40; right: calc(1rem + env(safe-area-inset-right, 0px));
-  bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); border-radius: 999px; padding: .7rem 1.1rem;
-  background: #2a2118; color: #fff; border-color: #2a2118; box-shadow: 0 6px 20px rgba(42,33,24,.25); font-size: 1rem; }
+/* A big speech bubble in the corner: the way in to talking with Dieter. */
+.voice-fab { position: fixed; z-index: 40; right: calc(1.25rem + env(safe-area-inset-right, 0px));
+  bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px)); min-height: 64px; padding: .9rem 1.5rem;
+  border-radius: 28px 28px 8px 28px; background: var(--accent); border: 3px solid #fff; color: #fff;
+  font-size: 1.2rem; font-weight: 800; gap: .55rem; box-shadow: 0 10px 28px rgba(194,65,12,.38), 0 2px 6px rgba(42,33,24,.2); }
+.voice-fab::after { content: ""; position: absolute; right: 14px; bottom: -14px; border: 9px solid transparent;
+  border-top-color: var(--accent); border-right-color: var(--accent); }
+.voice-fab:hover { background: #9a3412; border-color: #fff; }
+.voice-fab:hover::after { border-top-color: #9a3412; border-right-color: #9a3412; }
+.voice-fab .voice-fab-icon { font-size: 1.5rem; line-height: 1; }
 .voice-sheet { position: fixed; z-index: 45; left: 0; right: 0; bottom: 0; max-height: 80vh; overflow-y: auto;
   background: var(--panel); border-top: 1px solid var(--line); border-radius: 18px 18px 0 0;
   box-shadow: 0 -8px 30px rgba(42,33,24,.18); padding: 1rem max(1rem, env(safe-area-inset-right, 0px))
@@ -30,8 +37,13 @@
 .voice-warning { color: #92400e; margin-top: .3rem; font-size: .92rem; }
 .voice-input { display: flex; gap: .5rem; }
 .voice-input input { flex: 1; min-width: 0; }
-.voice-mic { min-width: 52px; font-size: 1.2rem; }
-.voice-mic.recording { background: var(--warn); border-color: var(--warn); color: #fff; }
+.voice-talk { display: flex; justify-content: center; padding: .25rem 0; }
+.voice-mic { width: 84px; height: 84px; min-height: 84px; padding: 0; border-radius: 50%; font-size: 2.2rem;
+  background: var(--accent); border: 4px solid #fff; color: #fff;
+  box-shadow: 0 8px 24px rgba(194,65,12,.35), 0 0 0 1px var(--line); }
+.voice-mic:hover { background: #9a3412; border-color: #fff; }
+.voice-mic.recording { background: var(--warn); box-shadow: 0 0 0 0 rgba(185,28,28,.45); animation: voice-ring 1.6s infinite; }
+@keyframes voice-ring { 0% { box-shadow: 0 0 0 0 rgba(185,28,28,.45); } 100% { box-shadow: 0 0 0 22px rgba(185,28,28,0); } }
 .voice-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .voice-hint { font-size: .85rem; color: var(--muted); }
 .voice-device { font-size: .85rem; color: var(--muted); }
@@ -42,7 +54,7 @@
 .voice-device-form label { display: flex; flex-direction: column; gap: .2rem; font-weight: 600; }
 </style>
 
-<button type="button" class="voice-fab" id="voice-open" aria-haspopup="dialog">🎤 Tell Dieter</button>
+<button type="button" class="voice-fab" id="voice-open" aria-haspopup="dialog"><span class="voice-fab-icon" aria-hidden="true">🎤</span> Talk to Dieter</button>
 <section class="voice-sheet" id="voice-sheet" role="dialog" aria-labelledby="voice-title" hidden>
   <div class="voice-inner">
     <div class="voice-head">
@@ -59,8 +71,8 @@
     <div class="voice-actions" id="voice-undo-row" hidden>
       <button type="button" id="voice-undo">Undo that</button>
     </div>
+    <div class="voice-talk"><button type="button" class="voice-mic" id="voice-mic" aria-label="Start talking">🎤</button></div>
     <form class="voice-input" id="voice-form">
-      <button type="button" class="voice-mic" id="voice-mic" aria-label="Start talking">🎤</button>
       <input type="text" id="voice-text" placeholder="Or type it here" aria-label="What should change?" autocomplete="off">
       <button type="submit">Send</button>
     </form>
