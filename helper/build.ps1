@@ -4,7 +4,11 @@ $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $here
 
-if (-not (Test-Path ".venv")) { py -3.11 -m venv .venv }
+if (-not (Test-Path ".venv")) {
+    # Python 3.11 or newer (the py launcher picks the newest installed if 3.11 is missing)
+    try { py -3.11 -m venv .venv 2>$null } catch { }
+    if (-not (Test-Path ".venv")) { py -3 -m venv .venv }
+}
 .\.venv\Scripts\python.exe -m pip install --quiet --upgrade pip
 .\.venv\Scripts\python.exe -m pip install --quiet -r requirements.txt
 
