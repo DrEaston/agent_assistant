@@ -446,7 +446,8 @@
     if (!convo) return;
     const left = Math.max(0, convo.until - Date.now());
     if (!left && !speaking && !convo.thinking) { endConversation("Mic off. Tap 🎤 to talk again."); return; }
-    $("voice-live").textContent = speaking ? "🔊 Talking…" : convo.thinking ? "Thinking…" : "🎙 Listening…";
+    $("voice-live").textContent = speaking ? "🔊 Talking…" : convo.thinking ? "Thinking…"
+      : `🎙 Listening · ${Math.ceil(left / 1000)}s`;
   }
 
   function startConversation() {
