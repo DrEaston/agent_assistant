@@ -836,19 +836,29 @@
     wakeStarts = wakeStarts.filter((t) => now - t < 60000); wakeStarts.push(now);
     if (wakeStarts.length > 25) { wakeStarts = []; wakeTimer = setTimeout(startWake, 5000); return; }  // keeps dying: back off
     const rec = new Recognition();
-    rec.lang = "en-US"; rec.continuous = true; rec.interimResults = false; rec.maxAlternatives = 1;
-    let lastError = "";
+    // Words as they come in (interim results), not only finished sentences: with kitchen noise (the range hood)
+    // Chrome may never decide a sentence has ended, so "Hey Dieter" was never heard. Once the phrase shows up, wait
+    // for a short pause (or the end of the sentence) to catch whatever follows it ("hey dieter, what's next").
+    rec.lang = "en-US"; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
+    let lastError = "", heardAt = null, latest = "";
+    const wakeNow = () => {
+      clearTimeout(heardAt); heardAt = null;
+      const rest = wakeRest(latest) || "";
+      report("wake", (rest ? "with words" : "name only") + (sheet.hidden ? "" : ", chat open"));
+      stopWake();
+      if (window.tgSleep && window.tgSleep.status().asleep) window.tgSleep.wake();  // the kitchen screen was off
+      if (sheet.hidden) open();  // the chat, with the mic on
+      else if (!convo) startConversation();  // chat already open: just turn the mic on
+      if (rest) setTimeout(() => { if (convo) heardPhrase(rest); }, 400);
+    };
     rec.onresult = (event) => {
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (!event.results[i].isFinal) continue;
-        const rest = wakeRest(event.results[i][0].transcript);
-        if (rest === null) continue;
-        report("wake", (rest ? "with words" : "name only") + (sheet.hidden ? "" : ", chat open"));
-        stopWake();
-        if (window.tgSleep && window.tgSleep.status().asleep) window.tgSleep.wake();  // the kitchen screen was off
-        if (sheet.hidden) open();  // the chat, with the mic on
-        else if (!convo) startConversation();  // chat already open: just turn the mic on
-        if (rest) setTimeout(() => { if (convo) heardPhrase(rest); }, 400);
+        const transcript = event.results[i][0].transcript;
+        if (wakeRest(transcript) === null) continue;
+        latest = transcript;
+        if (event.results[i].isFinal) { wakeNow(); return; }
+        clearTimeout(heardAt);
+        heardAt = setTimeout(wakeNow, 900);  // no new words for a moment: go
         return;
       }
     };
@@ -858,6 +868,7 @@
       else if (event.error !== "no-speech" && event.error !== "aborted") reportOnce("wake-error", event.error);
     };
     rec.onend = () => {
+      if (heardAt && wakeRec === rec) { wakeNow(); return; }  // stopped right after the phrase: still counts
       wakeRec = null; showEar();
       if (wakeWanted()) wakeTimer = setTimeout(startWake, lastError === "network" ? 3000 : 250);  // Chrome stops every so often
     };
