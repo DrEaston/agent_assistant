@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS tg_alerts (
 );
 """
 
-CATEGORY_ORDER = ("prep", "turkey", "side", "bread", "dessert", "other")
+CATEGORY_ORDER = ("prep", "appetizer", "turkey", "side", "bread", "dessert", "other")
 
 
 class ThanksgivingStore:

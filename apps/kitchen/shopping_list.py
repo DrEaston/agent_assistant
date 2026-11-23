@@ -17,7 +17,7 @@ _PANTRY_FIRST = ("tomato paste", "crushed tomato", "diced tomato", "tomato sauce
                  "panko", "fried onion", "evaporated", "condensed", "puree", "purée", "soup", "peanut butter",
                  "noodle", "pasta", "macaroni", "cavatappi", "broth", "stock", "coconut milk", "oats", "can ")
 AISLES = (
-    ("Frozen", ("frozen",)),
+    ("Frozen", ("frozen", "puff pastry")),
     ("Pantry & baking", _PANTRY_FIRST),
     ("Sauces & condiments", ("hot sauce", "soy sauce", "ketchup", "mayo", "mustard", "vinegar", "worcestershire",
                              "bbq", "barbecue", r"honey\b", r"jam\b", "salsa", "dressing", "vinaigrette",

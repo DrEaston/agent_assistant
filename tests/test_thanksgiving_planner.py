@@ -170,7 +170,9 @@ class RecipeSectionTests(unittest.TestCase):
         self.assertEqual(items["Russet potatoes"]["amount"], "2 lb")
         self.assertEqual(items["Onions"]["amount"], "4")  # 2 + 1/2 + 1, rounded up
         self.assertEqual(items["Celery"]["amount"], "7 ribs")
-        self.assertEqual(items["Eggs"]["amount"], "3")
+        self.assertEqual(items["Eggs"]["amount"], "4")  # 3 for the pie and stuffing, 1 for the pigs' egg wash
+        self.assertEqual(items["Puff pastry"]["amount"], "1 sheet")
+        self.assertEqual(items["Little Smokies"]["amount"], "2 packages")  # mac and cheese + pigs in a blanket
         self.assertEqual(items["Broth"]["amount"], "1 quart (4 cups) + some")
         self.assertEqual(items["Whole milk"]["amount"], "1 quart (4 cups)")
         self.assertEqual(items["Lemons"]["amount"], "1")
@@ -308,7 +310,12 @@ class RouteTests(unittest.TestCase):
         self.assertNotIn("<img", card)
         self.assertIn("Four o&#39;clock", card)
         courses = re.findall(r'class="course-name">([^<]+)<', card)
-        self.assertEqual(courses, ["To begin", "The main course", "Alongside", "To finish"])
+        self.assertEqual(courses, ["Before dinner", "To begin", "The main course", "Alongside", "To finish"])
+        before = card.split('course-name">Before dinner')[1].split('course-name">To begin')[0]
+        for name in ("Charcuterie board", "Fresh veggies", "Pigs in a blanket"):
+            self.assertIn(name, before)
+        self.assertIn("Thinly sliced potatoes baked in cream", card)  # scalloped, not the whipped potatoes' blurb
+        self.assertIn("Russets and Yukon Golds", card)
         main = card.split('course-name">The main course')[1].split('course-name">Alongside')[0]
         for name in ("Roast turkey", "Gravy", "Cranberry sauce"):
             self.assertIn(name, main)
@@ -491,6 +498,26 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(r.json(), {"ok": True})
         self.assertEqual(self.mac()[1]["scale"], 0.5)
         self.assertEqual(self.client.post(f"/thanksgiving/api/dishes/{mac['id']}/size", json={"scale": "9"}).status_code, 400)
+
+    def test_plan_made_before_the_appetizers_gets_them_once(self):
+        self.client.get("/thanksgiving")
+        plan = tg_router.store().get_plan()
+        conn = self.db.connect()
+        new = ("Charcuterie board", "Fresh veggies", "Pigs in a blanket", "Scalloped potatoes", "Braised onions")
+        conn.execute(f"DELETE FROM tg_dishes WHERE name IN ({','.join('?' * len(new))})", new)
+        conn.execute("DELETE FROM tg_checks WHERE kind = 'migration' AND item_key IN "
+                     "('add-charcuterie', 'add-veggies', 'add-pigs', 'add-scalloped-janice', 'add-onions-janice')")
+        conn.commit()
+        tg_router.configure(self.db)  # restart
+        dishes = {d["name"]: d for d in tg_router.store().get_dishes(plan["id"])}
+        for name in new:
+            self.assertIn(name, dishes)
+        self.assertEqual(dishes["Charcuterie board"]["cook"], "Parrisa")
+        self.assertEqual(dishes["Braised onions"]["cook"], "Janice")
+        self.assertEqual(dishes["Pigs in a blanket"]["category"], "appetizer")
+        tg_router.configure(self.db)  # a second restart adds nothing twice
+        names = [d["name"] for d in tg_router.store().get_dishes(plan["id"])]
+        self.assertEqual(names.count("Pigs in a blanket"), 1)
 
     def test_saved_mac_gets_goat_cheese_swap_on_restart(self):
         from apps.kitchen.thanksgiving import presets

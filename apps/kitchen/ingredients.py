@@ -34,6 +34,7 @@ UNIT_ALIASES = {
     "box": ("box", "boxes"),
     "jar": ("jar", "jars"),
     "slice": ("slice", "slices"),
+    "sheet": ("sheet", "sheets"),
     "dozen": ("dozen",),
 }
 UNIT_WORDS = {alias: unit for unit, aliases in UNIT_ALIASES.items() for alias in aliases}
@@ -83,6 +84,7 @@ ITEMS = (
     ("broth", "Broth", ("broth", "stock")),
     ("stuffing", "Stuffing cubes", ("stuffing cubes", "stuffing mix")),
     ("smokies", "Little Smokies", ("smokies",)),
+    ("puff-pastry", "Puff pastry", ("puff pastry",)),
     ("turkey", "Turkey", ("turkey",)),
     ("pasta", "Pasta", ("macaroni", "cavatappi", "pasta", "noodles")),
     ("panko", "Panko", ("panko", "breadcrumbs", "bread crumbs")),
