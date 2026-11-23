@@ -251,5 +251,36 @@ class MainSiteChatTests(unittest.TestCase):
         return {internal.HEADER: internal.sign({"id": self.user_id})}
 
 
+class PrimingTests(unittest.TestCase):
+    """The warm-up must send exactly what a real question starts with, or Anthropic's cached copy doesn't match."""
+
+    def test_site_chat_primes_the_same_tools_and_instructions(self):
+        from core.connector import agent
+        setup = demo_setup([])
+        primed = []
+        with mock.patch.object(agent, "create", lambda **k: primed.append(k) or NS(usage=None, stop_reason="end_turn")):
+            chat.prime(setup)
+        claude = script("Hi.")
+        chat.answer(setup, "hello", model_call=claude)
+        self.assertEqual(primed[0]["system"], claude.seen[0]["system"])
+        self.assertEqual([t["name"] for t in primed[0]["tools"]], claude.seen[0]["tools"])
+        self.assertEqual(primed[0]["max_tokens"], 8)
+        self.assertEqual(primed[0]["system"][0]["cache_control"], {"type": "ephemeral", "ttl": "1h"})
+
+    def test_thanksgiving_primes_both_ways_of_talking(self):
+        from apps.kitchen.thanksgiving import brain
+        from core.connector import agent
+        primed = []
+        with mock.patch.object(agent, "prime", lambda system, tools: primed.append((system, tools))):
+            brain.prime(None)
+        self.assertEqual(len(primed), 2)
+        spoken, typed = (t for _, t in primed)
+        self.assertEqual(primed[0][0], agent.cached_system(brain.PERSONA))
+        self.assertEqual(spoken, brain._tools(brain.connector.tools(), None, True))
+        self.assertEqual(typed, brain._tools(brain.connector.tools(), None, False))
+        self.assertIn("stay_quiet", [t["name"] for t in spoken])
+        self.assertNotIn("stay_quiet", [t["name"] for t in typed])
+
+
 if __name__ == "__main__":
     unittest.main()

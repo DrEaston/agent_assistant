@@ -89,11 +89,12 @@ def _spoken(prompt):
             .replace('add "end": true', "call end_conversation"))
 
 
-def understand(text, summary, history=(), sass="normal", spoken_prompt="", handoff="", plan=None, context=None,
-               kitchen_tools=None, model_call=None):
-    """Claude's answer to one request. plan/context: the plan and plan_context() it was asked about (to check
-    proposed changes). kitchen_tools: the Kitchen ToolSet (local or remote), or None."""
-    local = connector.tools()
+def _open_page(on_open):
+    return open_page_tool([nav.PAGES, kitchen_nav.PAGES], on_open=on_open)
+
+
+def _tools(local, kitchen_tools, spoken):
+    """The tool list Claude gets. prime() must build exactly the same list, or the cached copy doesn't match."""
     kitchen_schemas = []
     if kitchen_tools is not None:
         try:
@@ -101,15 +102,32 @@ def understand(text, summary, history=(), sass="normal", spoken_prompt="", hando
         except Exception as exc:
             print(f"Warning: Kitchen tools unavailable: {exc}")
     schemas = [s for s in local.list() if s["name"] in LOCAL_TOOLS] + kitchen_schemas
-    tools = agent.api_tools(schemas) + EXTRA_TOOLS + [SAVE_TOOL] + (SPOKEN_TOOLS if spoken_prompt else [])
+    tools = agent.api_tools(schemas) + EXTRA_TOOLS + [SAVE_TOOL] + (SPOKEN_TOOLS if spoken else [])
+    tools.append(agent.api_tools([_open_page(lambda url, page: "").schema()])[0])
+    return tools
+
+
+def prime(kitchen_tools=None):
+    """Before the cook's first question: have Claude read and cache the instructions and tools (agent.prime), for
+    talking out loud and for typing, so the first answer is as quick as the rest."""
+    local = connector.tools()
+    for spoken in (True, False):
+        agent.prime(agent.cached_system(PERSONA), _tools(local, kitchen_tools, spoken))
+
+
+def understand(text, summary, history=(), sass="normal", spoken_prompt="", handoff="", plan=None, context=None,
+               kitchen_tools=None, model_call=None):
+    """Claude's answer to one request. plan/context: the plan and plan_context() it was asked about (to check
+    proposed changes). kitchen_tools: the Kitchen ToolSet (local or remote), or None."""
+    local = connector.tools()
+    tools = _tools(local, kitchen_tools, bool(spoken_prompt))
     state = {"actions": [], "ignore": False, "end": False, "do": []}
 
     def opened(url, page):
         state["do"] = [{"type": "navigate", "url": url, "title": page.title}]  # one page per answer: the last one
         return f"Opening {page.title} on their screen now."
 
-    open_page = open_page_tool([nav.PAGES, kitchen_nav.PAGES], on_open=opened)
-    tools.append(agent.api_tools([open_page.schema()])[0])
+    open_page = _open_page(opened)
 
     def call_tool(name, args):
         if name == "propose_changes":

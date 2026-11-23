@@ -6,6 +6,7 @@ answers. Settings: ANTHROPIC_API_KEY, DIETER_CLAUDE_MODEL (default claude-opus-5
 
 import json
 import os
+import time
 
 from .tools import ToolError
 
@@ -45,11 +46,35 @@ def warm():
         print(f"Warning: Claude warm-up failed: {exc}")
 
 
-def create(system, messages, tools, effort="low"):
+def create(system, messages, tools, effort="low", max_tokens=16000):
     """One Messages API call. If a safety check declines, Anthropic re-runs it on its recommended fallback model."""
     return _anthropic().beta.messages.create(
-        model=model_name(), max_tokens=16000, system=system, messages=messages, tools=tools,
+        model=model_name(), max_tokens=max_tokens, system=system, messages=messages, tools=tools,
         output_config={"effort": effort}, betas=[FALLBACK_BETA], fallbacks="default")
+
+
+def prime(system, tools):
+    """Have Anthropic read and cache the instructions and tools before the first real question.
+
+    The first answer after a quiet spell is slow (15+ seconds) because the whole prompt is read from scratch; later
+    ones reuse the cached copy and take about 2. A tiny request with the same tools and system does that reading
+    ahead of time, so the first real question is quick too. Kept for an hour (cached_system)."""
+    started = time.time()
+    try:
+        response = create(system=system, messages=[{"role": "user", "content": "Warming up. Reply OK."}],
+                          tools=tools, max_tokens=8)
+        _log_usage("prime", response, started)
+    except Exception as exc:
+        print(f"Warning: Claude prime failed: {exc}")
+
+
+def _log_usage(what, response, started):
+    usage = getattr(response, "usage", None)
+    print("Claude call: " + json.dumps({
+        "what": what, "ms": int((time.time() - started) * 1000), "stop": getattr(response, "stop_reason", ""),
+        "input": getattr(usage, "input_tokens", None), "cache_read": getattr(usage, "cache_read_input_tokens", None),
+        "cache_write": getattr(usage, "cache_creation_input_tokens", None),
+        "output": getattr(usage, "output_tokens", None)}))
 
 
 def api_tools(schemas):
@@ -59,7 +84,8 @@ def api_tools(schemas):
 
 def cached_system(text):
     """The system prompt as a cached block: it (and the tools before it) is the same on every request."""
-    return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
+    # An hour, not the default 5 minutes: kitchen conversations have long pauses, and a miss costs 15+ seconds.
+    return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral", "ttl": "1h"}}]
 
 
 def run(system, messages, tools, call_tool, effort="low", max_rounds=6, model_call=None):
@@ -67,8 +93,11 @@ def run(system, messages, tools, call_tool, effort="low", max_rounds=6, model_ca
     problem Claude should see. Returns the final text ("" if Claude only used tools)."""
     model_call = model_call or create
     messages = list(messages)
-    for _ in range(max_rounds):
+    for round_number in range(max_rounds):
+        started = time.time()
         response = model_call(system=system, messages=messages, tools=tools, effort=effort)
+        if model_call is create:
+            _log_usage(f"round {round_number + 1}", response, started)
         if response.stop_reason == "refusal":
             return "I can't help with that one."
         messages.append({"role": "assistant", "content": response.content})

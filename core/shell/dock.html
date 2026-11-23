@@ -57,6 +57,7 @@
   let recorder = null, chunks = [], stream = null;
 
   function open(startListening) {
+    if (!sheet.open) fetch("/api/dieter/warm", { method: "POST" }).catch(() => {});  // get Dieter ready
     if (!sheet.open) sheet.showModal();
     if (startListening) toggleMic(); else input.focus();
     follow();

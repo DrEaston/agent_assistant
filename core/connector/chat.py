@@ -82,6 +82,20 @@ def _schemas(setup):
     return schemas
 
 
+def _system(setup):
+    return agent.cached_system(setup.persona + "".join("\n\n" + n.strip() for n in setup.notes if n))
+
+
+def _tools(setup, schemas):
+    open_page = open_page_tool(setup.page_lists, on_open=lambda url, page: "")
+    return agent.api_tools(schemas + [open_page.schema()]) + ([SAVE_TOOL] if setup.savers else [])
+
+
+def prime(setup):
+    """When the chat opens: have Claude read and cache the instructions and tools, so the first answer is quick."""
+    agent.prime(_system(setup), _tools(setup, _schemas(setup)))
+
+
 def answer(setup, text, history=(), page_url="", page_title="", model_call=None):
     text = str(text or "").strip()[:1000]
     state = {"do": []}
@@ -94,7 +108,7 @@ def answer(setup, text, history=(), page_url="", page_title="", model_call=None)
     open_page = open_page_tool(setup.page_lists, on_open=opened)
     schemas = _schemas(setup)
     names = {s["name"] for s in schemas}
-    tools = agent.api_tools(schemas + [open_page.schema()]) + ([SAVE_TOOL] if setup.savers else [])
+    tools = _tools(setup, schemas)
     pending = []
     try:
         pending = list(setup.pending() or [])
@@ -128,7 +142,7 @@ def answer(setup, text, history=(), page_url="", page_title="", model_call=None)
                 state["do"].append({"type": "navigate", "url": out["open_url"], "title": out.get("title", "")})
         return out
 
-    system = agent.cached_system(setup.persona + "".join("\n\n" + n.strip() for n in setup.notes if n))
+    system = _system(setup)
     messages = [{"role": h["role"], "content": str(h["content"])[:2000]} for h in list(history)[-8:]
                 if isinstance(h, dict) and h.get("role") in ("user", "assistant") and str(h.get("content") or "").strip()]
     while messages and messages[0]["role"] != "user":

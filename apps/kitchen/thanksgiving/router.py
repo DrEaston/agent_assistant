@@ -868,8 +868,9 @@ def _model_label(job):
 
 
 def warm_up():
-    """Open the AI connections before the cook's first phrase (a cold one adds a few seconds to that phrase)."""
-    if _state.get("fast_model") is not None or _state.get("warmed", 0) > time.time() - 240:
+    """Get Claude ready before the cook's first phrase: a cold start added 15+ seconds to the first answer. The
+    cached copy lasts an hour, so this runs at most every 50 minutes."""
+    if _state.get("fast_model") is not None or _state.get("warmed", 0) > time.time() - 50 * 60:
         return
     _state["warmed"] = time.time()
     if agent.available() and _state.get("claude_call") is None:
@@ -879,11 +880,13 @@ def warm_up():
 
 
 def _warm_claude():
-    agent.warm()
     try:
-        _state["platform"].kitchen_tools().list()  # also fetches and remembers Kitchen's tool list
+        kitchen_tools = _state["platform"].kitchen_tools()
+        kitchen_tools.list()  # fetches and remembers Kitchen's tool list
     except Exception as exc:
         print(f"Warning: Kitchen tools warm-up failed: {exc}")
+        kitchen_tools = None
+    brain.prime(kitchen_tools)
 
 
 def _ping(name, timeout):

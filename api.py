@@ -29,6 +29,7 @@ import base64
 import re
 import html
 import sqlite3
+import contextvars
 import threading
 import mimetypes
 import time
@@ -193,14 +194,15 @@ from apps.kitchen import nav as kitchen_nav  # noqa: E402
 from apps.kitchen.thanksgiving import nav as thanksgiving_nav  # noqa: E402
 
 connector_auth = connector_oauth.OAuth(db, lambda user_id: dict(db.get_user_by_id(user_id) or {}) or None)
+KITCHEN_TOOLS = kitchen_connector.tools()
+THANKSGIVING_TOOLS = (RemoteToolSet("thanksgiving", THANKSGIVING_SERVICE_URL, "/thanksgiving/api/connector/tools")
+                      if THANKSGIVING_SERVICE_URL else thanksgiving_connector.tools())
 CONNECTOR_TOOLSETS = [
-    kitchen_connector.tools(),
-    RemoteToolSet("thanksgiving", THANKSGIVING_SERVICE_URL, "/thanksgiving/api/connector/tools")
-    if THANKSGIVING_SERVICE_URL else thanksgiving_connector.tools(),
+    KITCHEN_TOOLS,
+    THANKSGIVING_TOOLS,
     # Every app's pages (apps/<app>/nav.py): links Claude can hand over. Dieter's own chat opens them instead.
     ToolSet("dieter", [open_page_tool([kitchen_nav.PAGES, thanksgiving_nav.PAGES])]),
-    studio_connector.tools(),  # Studio reports, for the admin. Keep it after Kitchen and Thanksgiving: those
-    # two are CONNECTOR_TOOLSETS[:2] for Dieter's chat.
+    studio_connector.tools(),  # Studio reports, for the admin
 ]
 
 
@@ -219,7 +221,7 @@ def connector_run_as(user, fn):
 from core.connector.tools import serve_tools  # noqa: E402
 
 serve_tools(app, "/internal/connector/kitchen/tools",  # without the review-card tools: only Dieter's own chat shows cards
-            ToolSet("kitchen", [t for t in CONNECTOR_TOOLSETS[0].tools.values()
+            ToolSet("kitchen", [t for t in KITCHEN_TOOLS.tools.values()
                                 if t.name not in kitchen_connector.PROPOSAL_TOOLS]))
 
 # Dieter's chat on the main site's pages (core/connector/chat.py, behind Ask Dieter in core/shell/dock.html). Kitchen
@@ -232,7 +234,7 @@ from apps.kitchen import recipe_changes as kitchen_recipe_changes  # noqa: E402
 
 SITE_PAGES = [Page("today.home", "Today", "Dieter's home page: today across every app.", "/")]
 DIETER_CHAT = dieter_chat.ChatSetup(
-    toolsets=CONNECTOR_TOOLSETS[:2],
+    toolsets=[KITCHEN_TOOLS, THANKSGIVING_TOOLS],
     page_lists=[SITE_PAGES, kitchen_nav.PAGES, thanksgiving_nav.PAGES],
     notes=[kitchen_connector.CHAT_NOTES],
     savers=kitchen_connector.savers(),
@@ -4422,6 +4424,24 @@ def dieter_chat_handles(message):
     if path.startswith(DIETER_CHAT_PATHS):
         return True
     return path in ("", "/") and not message_requests_planner_action(message.content)
+
+
+_dieter_chat_primed = {"at": 0.0}
+
+
+@app.post("/api/dieter/warm")
+def dieter_chat_warm():
+    """Ask Dieter opened: get Claude ready (core/connector/chat.prime) so the first answer is quick. The cached copy
+    lasts an hour, so this does the work at most every 50 minutes."""
+    if (not claude_agent.available() or current_user_is_guest_session()
+            or time.time() - _dieter_chat_primed["at"] < 50 * 60):
+        return {"ok": True}
+    _dieter_chat_primed["at"] = time.time()
+    user = dict_from_row(db.get_user_by_id(get_current_user_id())) or {}
+    context = contextvars.copy_context()
+    threading.Thread(target=context.run, args=(connector_run_as, user, lambda: dieter_chat.prime(DIETER_CHAT)),
+                     daemon=True).start()
+    return {"ok": True}
 
 
 def dieter_chat_reply(message):
