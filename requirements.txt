@@ -1,11 +1,12 @@
-fastapi>=0.115
-uvicorn>=0.30
+fastapi==0.165.0
+starlette==1.10.0  # comes with fastapi; pinned so the preview and the live site run the same version
+uvicorn==0.54.0
 jinja2==3.1.2
 openai>=1.3.0
-anthropic>=1.5,<2  # Claude as Dieter's brain
+anthropic>=1.17,<2  # Claude as Dieter's brain
 python-dotenv>=1.0.0
 python-multipart>=0.0.18
 Pillow>=12.2.0
 google-cloud-storage>=2.19.0
 PyMuPDF>=1.24.0
-httpx>=0.27,<1  # TestClient and signed calls between Dieter services
+httpx>=0.28,<1  # TestClient and signed calls between Dieter services
