@@ -183,6 +183,7 @@ app.include_router(shopping.router)
 
 # Claude's connector (core/connector): /mcp for the tools, /oauth/* and /.well-known/* for signing in. Each app
 # adds its ToolSet here; an app running as its own service is reached through RemoteToolSet.
+from apps.issues import connector as studio_connector  # noqa: E402
 from apps.kitchen import connector as kitchen_connector  # noqa: E402
 from apps.kitchen.thanksgiving import connector as thanksgiving_connector  # noqa: E402
 from core.connector import oauth as connector_oauth, server as connector_server  # noqa: E402
@@ -194,6 +195,7 @@ from apps.kitchen.thanksgiving import nav as thanksgiving_nav  # noqa: E402
 connector_auth = connector_oauth.OAuth(db, lambda user_id: dict(db.get_user_by_id(user_id) or {}) or None)
 CONNECTOR_TOOLSETS = [
     kitchen_connector.tools(),
+    studio_connector.tools(),  # Studio reports, for the admin
     RemoteToolSet("thanksgiving", THANKSGIVING_SERVICE_URL, "/thanksgiving/api/connector/tools")
     if THANKSGIVING_SERVICE_URL else thanksgiving_connector.tools(),
     # Every app's pages (apps/<app>/nav.py): links Claude can hand over. Dieter's own chat opens them instead.
@@ -8299,7 +8301,7 @@ def delete_blocker_form(project_id: int, blocker_id: int):
 
 
 # ============================================================================
-# STUDIO (apps/issues): problem reports and change requests, sent to Claude Code
+# STUDIO (apps/issues): problem reports and change requests, for Claude to read through the connector
 # ============================================================================
 
 studio_routes.configure(db, require_admin, summarize=model_app_feedback_summary, areas=studio_area_options())

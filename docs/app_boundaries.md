@@ -43,10 +43,12 @@ Use shared modules only for behavior that is genuinely reused across apps. App-s
 
 ## Changes with Claude Code
 
-The Codex issue worker is retired. Changes now go through GitHub (see `CLAUDE.md`):
+The Codex issue worker and the GitHub-issue route are retired. Changes are asked for in a Claude chat (see
+`CLAUDE.md`):
 
-- Studio (`apps/issues/`) collects reports and sends one to Claude Code as a GitHub issue labelled `claude`.
-- `.github/workflows/claude.yml` runs Claude Code on that issue; it asks questions there or opens a pull request.
+- Studio (`apps/issues/`) collects reports ("Report a problem" on any page). Claude reads them and marks them done
+  through the connector (`apps/issues/connector.py`).
+- Claude makes the change on a branch and opens a pull request.
 - `ci.yml` runs the tests, `preview.yml` deploys each pull request to the `dieter-preview` service (read-only copy
   of the live data) and posts the link, `deploy.yml` puts `main` live after a merge, and `undo.yml` switches the
   live site back to the previous version.
