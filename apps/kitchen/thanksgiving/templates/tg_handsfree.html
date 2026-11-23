@@ -246,7 +246,7 @@
     const d = device();
     let data;
     try {
-      data = await post("/thanksgiving/api/handsfree/ask", { text, via, history, device: d.name || "", sass: d.sass || "normal",
+      data = await post("/thanksgiving/api/handsfree/ask", { text, via, history, device: d.name || "", sass: d.sass || "normal", brain: d.brain || "",
                                                             two_step: true });
       if (data.escalate) {
         // The quick pass handed off to the careful model: say the "one moment" line while it works.

@@ -184,6 +184,10 @@ def connector_run_as(user, fn):
         reset_current_user_id(user_token)
 
 
+# The Thanksgiving service's Claude brain uses Kitchen's tools too (signed calls, checked by the /internal/ middleware).
+from core.connector.tools import serve_tools  # noqa: E402
+
+serve_tools(app, "/internal/connector/kitchen/tools", CONNECTOR_TOOLSETS[0])
 app.include_router(connector_auth.router())
 app.include_router(connector_server.make_router(CONNECTOR_TOOLSETS, connector_auth.authenticate, connector_run_as,
                                                 signer=core_proxy.signer_user))

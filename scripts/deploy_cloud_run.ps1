@@ -21,7 +21,8 @@ param(
     # Previews: read a copy of the live data at startup and never write it back (bucket read access only).
     [switch]$DataReadOnly,
     # Fine-grained GitHub token Studio uses to open issues for Claude Code (main service only, if it exists).
-    [string]$GitHubTokenSecretName = "dieter-github-token"
+    [string]$GitHubTokenSecretName = "dieter-github-token",
+    [string]$AnthropicSecretName = "dieter-anthropic-api-key"
 )
 
 $ErrorActionPreference = "Stop"
@@ -270,6 +271,23 @@ if ($ServiceName -eq "dieter" -and $GitHubTokenSecretName) {
     $ErrorActionPreference = $previous
     if ($hasGitHubToken) {
         $secrets = "$secrets,DIETER_GITHUB_TOKEN=$GitHubTokenSecretName`:latest"
+    }
+}
+
+# Claude as Dieter's brain (Tell Dieter → This device → Brain), once the key exists in Secret Manager.
+if ($AnthropicSecretName) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & $gcloud secrets describe $AnthropicSecretName *> $null
+    $hasAnthropicKey = ($LASTEXITCODE -eq 0)
+    if ($hasAnthropicKey) {
+        & $gcloud secrets add-iam-policy-binding $AnthropicSecretName `
+            --member "serviceAccount:$runtimeServiceAccount" `
+            --role "roles/secretmanager.secretAccessor" *> $null
+    }
+    $ErrorActionPreference = $previous
+    if ($hasAnthropicKey) {
+        $secrets = "$secrets,ANTHROPIC_API_KEY=$AnthropicSecretName`:latest"
     }
 }
 

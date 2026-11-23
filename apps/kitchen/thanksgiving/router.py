@@ -4,6 +4,7 @@ Mounted from api.py with configure(db) + app.include_router(router). Renders its
 templates (autoescaped) and does not use templates/base.html.
 """
 
+import contextvars
 import json
 import os
 import re
@@ -21,9 +22,10 @@ from starlette.concurrency import run_in_threadpool
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from core import internal
+from core.connector import agent
 from database import get_current_user_id
 
-from . import handsfree, menu, planner, sizes, voice
+from . import brain, handsfree, menu, planner, sizes, voice
 from .presets import CATEGORIES, OUR_MENU, PRESET_BUTTONS, preset_dish
 from .store import ThanksgivingStore
 
@@ -39,7 +41,7 @@ _templates = Environment(
 _state = {"db": None, "store": None}
 
 
-def configure(db, voice_model=None, fast_model=None, speaker=None, platform=None):
+def configure(db, voice_model=None, fast_model=None, speaker=None, platform=None, claude_call=None):
     _state["db"] = db
     # The rest of Dieter (recipe library, problem reports): read directly when running inside the main app,
     # or over HTTP when Thanksgiving runs as its own service (see service.py).
@@ -48,6 +50,7 @@ def configure(db, voice_model=None, fast_model=None, speaker=None, platform=None
     _state["voice_model"] = voice_model  # deep model; None = OpenAI (voice.default_model); tests pass a fake
     _state["fast_model"] = fast_model  # quick first pass; None = OpenAI (voice.fast_default_model)
     _state["speaker"] = speaker  # text -> mp3 chunks; None = OpenAI (voice.speech_chunks); tests pass a fake
+    _state["claude_call"] = claude_call  # Claude brain's model call; None = the Anthropic API; tests pass a fake
     _state["deep_jobs"] = {}  # ticket -> deep model call in progress for an escalated request
     _state["voice_pending"] = {}  # plan id -> checked actions waiting for Apply
     _state["voice_undo"] = {}  # plan id -> undo record for the last applied command
@@ -180,6 +183,11 @@ class LocalPlatform:
     def new_list(self, title, lines):
         return local_new_list(self.db, title, lines)
 
+    def kitchen_tools(self):
+        from apps.kitchen import connector as kitchen_connector
+
+        return kitchen_connector.tools()
+
     def library(self):
         return local_library(self.db)
 
@@ -209,6 +217,11 @@ class RemotePlatform:
     def new_list(self, title, lines):
         return internal.call(self.base_url, "POST", "/internal/kitchen/lists", internal.current_user.get(),
                              {"title": title, "lines": list(lines)})
+
+    def kitchen_tools(self):
+        from core.connector.tools import RemoteToolSet
+
+        return RemoteToolSet("kitchen", self.base_url, "/internal/connector/kitchen/tools")
 
 
 def library_recipes():
@@ -571,15 +584,26 @@ def _empty_answer(**extra):
     return answer
 
 
-def _start_deep(plan, text, history, summary, sass, prompt, handoff, device, spoken):
+def _start_deep(plan, text, history, summary, sass, prompt, handoff, device, spoken, which="classic", context=None):
     now = time.time()
     for old, job in list(_state["deep_jobs"].items()):
         if now - job["started"] > JOB_MAX_AGE:
             _state["deep_jobs"].pop(old, None)
     ticket = secrets.token_urlsafe(9)
-    future = _thinkers.submit(voice.understand, text, summary, history, _state["voice_model"], sass, prompt, handoff)
+    run = contextvars.copy_context().run  # the worker thread acts as the same signed-in user
+    if which == "claude":
+        try:
+            kitchen = _state["platform"].kitchen_tools()
+        except Exception as exc:
+            print(f"Warning: Kitchen tools unavailable: {exc}")
+            kitchen = None
+        future = _thinkers.submit(run, brain.understand, text, summary, history, sass, prompt, handoff, plan,
+                                  context or plan_context(plan), kitchen, _state.get("claude_call"))
+    else:
+        future = _thinkers.submit(run, voice.understand, text, summary, history, _state["voice_model"], sass, prompt,
+                                  handoff)
     _state["deep_jobs"][ticket] = {"future": future, "plan_id": plan["id"], "text": text, "sass": sass,
-                                   "device": device, "spoken": spoken, "started": now}
+                                   "device": device, "spoken": spoken, "started": now, "brain": which}
     return ticket
 
 
@@ -588,7 +612,7 @@ def _log_tier(device, text, route, note, ms):
                                               "note": str(note or "")[:200], "ms": ms}))
 
 
-def _answer(text, history, device, sass, spoken=""):
+def _answer(text, history, device, sass, spoken="", which="classic"):
     """First answer to one request: the fast model's reply, an ignore, or an escalation ticket for the deep model.
     spoken: "" (typed), or how an open mic heard it ("name" / "follow-up" / "conversation")."""
     plan = require_plan()
@@ -603,6 +627,11 @@ def _answer(text, history, device, sass, spoken=""):
         forced = "the cook pushed back on the last answer"
     else:
         forced = ""
+    if which == "claude":
+        # One model does it all: say a quick line while Claude works, then show its answer.
+        ticket = _start_deep(plan, text, history, summary, sass, prompt, forced, device, spoken, "claude", context)
+        _log_tier(device, text, "claude", forced, 0)
+        return _empty_answer(escalate=True, ticket=ticket, say_now="One sec.")
     started = time.perf_counter()
     ticket = None
     if forced or CHANGE_WORDS.search(lowered):
@@ -662,11 +691,16 @@ def _finish(ticket):
                                         "hands_free": job["spoken"] or "", "said": job["text"][:500],
                                         "reply": result["reply"], "question": result["question"],
                                         "changes": changes, "problems": problems, "warnings": warnings,
-                                        "applied": applied, "ms": deep_ms,
-                                        "model": voice.model_name() if _state["voice_model"] is None else "test"}))
+                                        "applied": applied, "ms": deep_ms, "model": _model_label(job)}))
     return _empty_answer(reply=result["reply"], question=result["question"], changes=changes, problems=problems,
                          warnings=warnings, can_apply=bool(actions) and not applied, applied=applied,
                          end=bool(result.get("end")), tier="deep")
+
+
+def _model_label(job):
+    if job.get("brain") == "claude":
+        return agent.model_name() if _state.get("claude_call") is None else "test-claude"
+    return voice.model_name() if _state["voice_model"] is None else "test"
 
 
 def warm_up():
@@ -692,10 +726,19 @@ async def _answer_request(data, spoken=""):
         raise HTTPException(status_code=400, detail="Say or type what to change.")
     history = data.get("history") if isinstance(data.get("history"), list) else []
     device, sass = _device_and_sass(data)
-    result = await run_in_threadpool(_answer, text, history, device, sass, spoken)
+    result = await run_in_threadpool(_answer, text, history, device, sass, spoken, _brain_for(data))
     if result.get("escalate") and not data.get("two_step"):
         result = await run_in_threadpool(_finish, result["ticket"])
     return result
+
+
+def _brain_for(data):
+    """"claude" or "classic" (OpenAI): the device's choice (This device → Brain), else DIETER_BRAIN, else classic.
+    Claude needs ANTHROPIC_API_KEY; without it every device stays on classic."""
+    choice = data.get("brain") if data.get("brain") in ("claude", "classic") else os.getenv("DIETER_BRAIN", "classic")
+    if choice == "claude" and not (_state.get("claude_call") or agent.available()):
+        return "classic"
+    return choice if choice in ("claude", "classic") else "classic"
 
 
 def _device_and_sass(data):

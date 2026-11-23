@@ -95,6 +95,7 @@ class RemoteToolSet:
         return name.startswith(self.prefix + "_")
 
     def list(self, user=None):
+        user = user or internal.current_user.get()
         try:
             return self._call(self.base_url, "GET", self.path, user, timeout=10)["tools"]
         except Exception as exc:
@@ -102,12 +103,13 @@ class RemoteToolSet:
             return []
 
     def call(self, name, arguments, user=None):
-        import httpx
-
+        user = user or internal.current_user.get()
         try:
             data = self._call(self.base_url, "POST", f"{self.path}/{name}", user, {"arguments": arguments or {}},
                               timeout=60)
-        except httpx.HTTPStatusError as exc:
+        except Exception as exc:  # an HTTP status error from httpx (or httpx2): the service's own message
+            if getattr(getattr(exc, "response", None), "status_code", None) is None:
+                raise
             try:
                 detail = exc.response.json().get("error")
             except ValueError:

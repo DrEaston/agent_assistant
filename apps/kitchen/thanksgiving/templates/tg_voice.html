@@ -197,7 +197,7 @@
       <button type="submit">Send</button>
     </form>
     <details class="voice-device">
-      <summary>This device: <span id="voice-device-label">unnamed</span> · Sass: <span id="voice-sass-label">Normal</span></summary>
+      <summary>This device: <span id="voice-device-label">unnamed</span> · Sass: <span id="voice-sass-label">Normal</span> · Brain: <span id="voice-brain-label">Classic</span></summary>
       <div class="voice-device-form">
         <label>Name <input type="text" id="voice-device-name" maxlength="40" placeholder="Kitchen tablet"></label>
         <label>Sass
@@ -205,6 +205,12 @@
             <option value="normal">Normal</option>
             <option value="extra">Extra</option>
             <option value="super">Super</option>
+          </select>
+        </label>
+        <label>Brain
+          <select id="voice-brain">
+            <option value="classic">Classic</option>
+            <option value="claude">Claude (new)</option>
           </select>
         </label>
         <button type="button" id="voice-device-save">Save on this device</button>
@@ -222,6 +228,7 @@
 
   // "This device": a name and sass level saved only on this device and sent with every command.
   const SASS_NAMES = { normal: "Normal", extra: "Extra", super: "Super" };
+  const BRAIN_NAMES = { classic: "Classic", claude: "Claude (new)" };
   function loadDevice() {
     try { return JSON.parse(localStorage.getItem("tg-voice-device") || "{}"); } catch (e) { return {}; }
   }
@@ -231,9 +238,12 @@
     $("voice-sass-label").textContent = SASS_NAMES[d.sass] || "Normal";
     $("voice-device-name").value = d.name || "";
     $("voice-sass").value = SASS_NAMES[d.sass] ? d.sass : "normal";
+    $("voice-brain-label").textContent = BRAIN_NAMES[d.brain] || "Classic";
+    $("voice-brain").value = BRAIN_NAMES[d.brain] ? d.brain : "classic";
   }
   $("voice-device-save").addEventListener("click", () => {
-    const d = { name: $("voice-device-name").value.trim().slice(0, 40), sass: $("voice-sass").value };
+    const d = { name: $("voice-device-name").value.trim().slice(0, 40), sass: $("voice-sass").value,
+                brain: $("voice-brain").value };
     try { localStorage.setItem("tg-voice-device", JSON.stringify(d)); } catch (e) {}
     showDevice();
     say("dieter", d.sass === "super" ? "Super sass unlocked. You asked for this." : `Saved. Sass: ${esc(SASS_NAMES[d.sass])}.`);
@@ -322,7 +332,7 @@
       const said = about && !history.length
         ? `About the step "${about.title}" (${about.dish}, due ${about.when}): ${message}` : message;
       let data = await call("/thanksgiving/api/command", { text: said, history, device: device.name || "",
-                                                           sass: device.sass || "normal", two_step: true });
+                                                           sass: device.sass || "normal", brain: device.brain || "", two_step: true });
       if (data.escalate) {
         // The quick pass handed this to the careful model: say so right away, then wait for its answer.
         thinking.innerHTML = `${esc(data.say_now)} <span class="muted">Thinking it through…</span>`;
@@ -521,7 +531,7 @@
     let heard;
     try {
       heard = await call("/thanksgiving/api/handsfree/heard", { text: phrase, follow_up: true, device: device.name || "",
-                                                               sass: device.sass || "normal" });
+                                                               sass: device.sass || "normal", brain: device.brain || "" });
     } catch (error) {
       if (convo) convo.thinking = false;
       say("dieter", `<span class="voice-problem">${esc(error.message)}</span>`);
@@ -569,7 +579,7 @@
     let data;
     try {
       data = await call("/thanksgiving/api/handsfree/ask", { text: message, via: "conversation", history,
-                                                            device: device.name || "", sass: device.sass || "normal",
+                                                            device: device.name || "", sass: device.sass || "normal", brain: device.brain || "",
                                                             two_step: true });
       if (data.escalate) {
         // Say the quick "one moment" line out loud while the careful model works, then wait for both.

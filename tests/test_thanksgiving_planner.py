@@ -807,6 +807,84 @@ class RouteTests(unittest.TestCase):
         self.client.post("/thanksgiving/api/command/undo")
         self.assertEqual(tg_router.store().get_extra_groceries(plan["id"]), [])
 
+    def claude_with(self, *turns):
+        """A fake Claude that plays `turns` in order. Each turn: a list of ("text", str) / ("tool", name, input)."""
+        from types import SimpleNamespace as NS
+        seen = {"calls": []}
+        script = list(turns)
+
+        def call(system, messages, tools, effort):
+            seen["calls"].append({"system": system, "messages": [dict(m) for m in messages], "tools": tools})
+            blocks = []
+            for i, part in enumerate(script.pop(0) if script else [("text", "Done.")]):
+                if part[0] == "text":
+                    blocks.append(NS(type="text", text=part[1]))
+                else:
+                    blocks.append(NS(type="tool_use", id=f"t{len(seen['calls'])}-{i}", name=part[1], input=part[2]))
+            stop = "tool_use" if any(b.type == "tool_use" for b in blocks) else "end_turn"
+            return NS(stop_reason=stop, content=blocks)
+
+        tg_router.configure(self.db, claude_call=call)
+        return seen
+
+    def test_claude_brain_reads_the_list_and_adds_to_it_with_undo(self):
+        self.client.get("/thanksgiving")
+        plan = tg_router.store().get_plan()
+        seen = self.claude_with(
+            [("tool", "thanksgiving_get_shopping_list", {})],
+            [("tool", "propose_changes", {"actions": [{"type": "grocery", "text": "heavy whipping cream",
+                                                         "amount": "1 pint"}]})],
+            [("text", "Whipping cream's on the list. One pint covers the pie.")])
+        r = self.client.post("/thanksgiving/api/command", json={"text": "put whipping cream on the list",
+                                                                "brain": "claude"}).json()
+        self.assertEqual(r["reply"], "Whipping cream's on the list. One pint covers the pie.")
+        self.assertTrue(r["applied"])
+        self.assertEqual(r["changes"], ["Shopping list: add “1 pint heavy whipping cream”"])
+        first = seen["calls"][0]
+        self.assertIn("You are Dieter", first["system"][0]["text"])
+        self.assertIn("cache_control", first["system"][0])
+        self.assertIn("The cook says: put whipping cream on the list", first["messages"][-1]["content"])
+        self.assertIn("Pumpkin pie", first["messages"][-1]["content"])  # the plan comes along
+        names = {t["name"] for t in first["tools"]}
+        self.assertTrue({"propose_changes", "thanksgiving_get_shopping_list", "kitchen_get_shopping_list"} <= names)
+        self.assertNotIn("stay_quiet", names)  # typed, so it can't ignore you
+        listing = seen["calls"][1]["messages"][-1]["content"][0]
+        self.assertEqual(listing["type"], "tool_result")
+        self.assertIn('"to_buy"', listing["content"])
+        self.assertEqual([e["text"] for e in tg_router.store().get_extra_groceries(plan["id"])],
+                         ["1 pint heavy whipping cream"])
+        self.client.post("/thanksgiving/api/command/undo")
+        self.assertEqual(tg_router.store().get_extra_groceries(plan["id"]), [])
+
+    def test_claude_brain_plan_changes_wait_for_apply(self):
+        self.client.get("/thanksgiving")
+        self.claude_with(
+            [("tool", "propose_changes", {"actions": [{"type": "dinner", "date": "2026-11-26", "time": "17:00"}]})],
+            [("text", "I'd push dinner to five.")])
+        r = self.client.post("/thanksgiving/api/command", json={"text": "dinner at 5", "brain": "claude"}).json()
+        self.assertFalse(r["applied"])
+        self.assertTrue(r["can_apply"])
+        self.assertEqual(tg_router.store().get_plan()["dinner_at"], "2026-11-26T16:00")
+        self.client.post("/thanksgiving/api/command/apply")
+        self.assertEqual(tg_router.store().get_plan()["dinner_at"], "2026-11-26T17:00")
+
+    def test_claude_brain_stays_quiet_when_the_mic_hears_someone_else(self):
+        self.client.get("/thanksgiving")
+        seen = self.claude_with([("tool", "stay_quiet", {})], [("text", "")])
+        r = self.client.post("/thanksgiving/api/handsfree/ask", json={"text": "pass the salt", "via": "follow-up",
+                                                                      "brain": "claude"}).json()
+        self.assertTrue(r["ignored"])
+        system = " ".join(block["text"] for block in seen["calls"][0]["system"])
+        self.assertIn("call stay_quiet", system)
+        self.assertNotIn('{"ignore": true}', system)
+
+    def test_claude_brain_needs_a_key_or_stays_classic(self):
+        self.assertEqual(tg_router._brain_for({"brain": "claude"}), "classic")  # no key in tests
+        self.claude_with()
+        self.assertEqual(tg_router._brain_for({"brain": "claude"}), "claude")
+        self.assertEqual(tg_router._brain_for({"brain": "classic"}), "classic")
+        self.assertEqual(tg_router._brain_for({}), "classic")
+
     def test_voice_moves_dinner_and_undo_restores_it(self):
         self.client.get("/thanksgiving")
         self.voice_with({"reply": "Fashionably late.", "question": "", "actions": [

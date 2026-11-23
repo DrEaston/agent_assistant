@@ -74,6 +74,43 @@ class PieceTests(unittest.TestCase):
             remote.call("demo_fail", {"why": "because"}, {"id": 1})
 
 
+class AgentLoopTests(unittest.TestCase):
+    def test_tool_errors_go_back_to_claude_and_the_loop_ends(self):
+        from types import SimpleNamespace as NS
+        from core.connector import agent
+
+        turns = [NS(stop_reason="tool_use", content=[NS(type="tool_use", id="a", name="demo_fail", input={}),
+                                                     NS(type="tool_use", id="b", name="demo_ok", input={"x": 1})]),
+                 NS(stop_reason="end_turn", content=[NS(type="text", text="All set.")])]
+        sent = []
+
+        def model_call(system, messages, tools, effort):
+            sent.append([dict(m) for m in messages])
+            return turns.pop(0)
+
+        def call_tool(name, args):
+            if name == "demo_fail":
+                raise ToolError("Not on the list.")
+            return {"ok": args["x"]}
+
+        self.assertEqual(agent.run("sys", [{"role": "user", "content": "hi"}], [], call_tool, model_call=model_call),
+                         "All set.")
+        results = sent[1][-1]["content"]
+        self.assertEqual([(r["tool_use_id"], r.get("is_error", False)) for r in results], [("a", True), ("b", False)])
+        self.assertEqual(results[1]["content"], '{"ok": 1}')
+
+    def test_refusals_and_runaway_loops_get_a_plain_answer(self):
+        from types import SimpleNamespace as NS
+        from core.connector import agent
+
+        refused = agent.run("s", [], [], lambda n, a: None,
+                            model_call=lambda **k: NS(stop_reason="refusal", content=[]))
+        self.assertEqual(refused, "I can't help with that one.")
+        looping = agent.run("s", [], [], lambda n, a: "ok", max_rounds=2, model_call=lambda **k: NS(
+            stop_reason="tool_use", content=[NS(type="tool_use", id="x", name="demo", input={})]))
+        self.assertIn("more steps", looping)
+
+
 class ConnectorFlowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
