@@ -16,7 +16,6 @@ from apps.kitchen import shopping_list
 from apps.kitchen.manifest import APP as KITCHEN_APP
 from core import ui
 
-from . import portable
 from .store import ShoppingStore
 
 router = APIRouter()
@@ -379,42 +378,6 @@ async def preview(request: Request):
             "sections": [{"name": s["name"], "items": [{"text": i["text"], "amount": i["amount"],
                                                          "dishes": i["dishes"]} for i in s["items"]]}
                          for s in sections]}
-
-
-# ---------------------------------------------------------------- calls from other Dieter apps
-
-# Portable items (core/portable_list.py). /internal/ paths are signed by core/internal.py and checked in
-# api.py's load_authenticated_user, which runs them as the signed-in user.
-
-@router.post("/internal/kitchen/lists")
-async def internal_new_list(request: Request):
-    """A new Kitchen list from another app: portable items (followed and checked from both apps) and/or typed-in
-    lines (the older Thanksgiving "Finish trip" sends lines)."""
-    data = await request.json()
-    lines = [str(line)[:200] for line in (data.get("lines") or [])[:200] if str(line).strip()]
-    try:
-        made = portable.create_list(_state["db"], data.get("title") or "Shopping list", lines,
-                                    data.get("items") or [], data.get("source"))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from None
-    return {"id": made["id"], "url": made["url"]}
-
-
-@router.get("/internal/kitchen/lists/{list_id}/linked")
-def internal_linked_state(list_id: int, app: str = ""):
-    return portable.linked_state(_state["db"], list_id, app)
-
-
-@router.post("/internal/kitchen/lists/{list_id}/linked/check")
-async def internal_linked_check(request: Request, list_id: int):
-    data = await request.json()
-    return {"ok": portable.check(_state["db"], list_id, data.get("app"), data.get("key"), data.get("done"))}
-
-
-@router.post("/internal/kitchen/lists/{list_id}/linked/remove")
-async def internal_linked_remove(request: Request, list_id: int):
-    data = await request.json()
-    return {"ok": portable.remove(_state["db"], list_id, data.get("app"), data.get("key"))}
 
 
 @router.post(BASE + "/feedback")
