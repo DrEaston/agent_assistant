@@ -1,7 +1,7 @@
 {% extends "tg_base.html" %}
 {% from "tg_menu_card.html" import menu_style %}
 {% from "tg_macros.html" import render_sections %}
-{#- A recipe from the shareable menu, for anyone with the link: the recipe as written, no names, notes or timeline. -#}
+{#- A dish from the shareable menu, for anyone with the link: who's bringing it and the recipe as written; no notes or timeline. -#}
 {% block title %}{{ dish.name }}{% endblock %}
 {% block head %}
 <meta property="og:title" content="{{ dish.name }} · Thanksgiving">
@@ -12,6 +12,7 @@
 .public-recipe .back { display: inline-block; margin-bottom: 1rem; font-weight: 600; }
 .recipe-head { text-align: center; font-family: "Cormorant Garamond", Georgia, "Times New Roman", serif; margin-bottom: 1.25rem; }
 .recipe-head .feast-title { font-size: clamp(2.2rem, 7vw, 3rem); }
+.recipe-head .from-cook { margin-top: .6rem; color: var(--gold, #9a6b1f); font-weight: 600; letter-spacing: .08em; }
 .recipe-view { display: grid; grid-template-columns: minmax(12rem, 1fr) 2fr; gap: .5rem 1.5rem; padding: 1rem 1.25rem;
   background: #fffdf8; border: 1px solid #e7dcc8; border-radius: 12px; font-size: 1rem; }
 .recipe-view h4 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 .3rem; }
@@ -28,8 +29,9 @@
     <span class="feast-eyebrow">Thanksgiving</span>
     <h1 class="feast-title">{{ dish.name }}</h1>
     {% if blurb %}<span class="dish-desc">{{ blurb }}</span>{% endif %}
+    {% if dish.cook %}<span class="feast-when from-cook">From {{ dish.cook }}</span>{% endif %}
   </header>
-  {{ render_sections(ingredient_sections, instruction_sections) }}
+  {% if ingredient_sections or instruction_sections %}{{ render_sections(ingredient_sections, instruction_sections) }}{% endif %}
 </main>
 {% endblock %}
 {% block feedback %}{% endblock %}

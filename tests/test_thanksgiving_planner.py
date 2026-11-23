@@ -502,6 +502,23 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(self.mac()[1]["scale"], 0.5)
         self.assertEqual(self.client.post(f"/thanksgiving/api/dishes/{mac['id']}/size", json={"scale": "9"}).status_code, 400)
 
+    def test_checked_groceries_wait_in_the_cart(self):
+        self.client.get("/thanksgiving")
+        page = self.client.get("/thanksgiving/shopping").text
+        self.assertNotIn('id="in-the-cart"', page)
+        key = re.search(r'name="key" value="([^"]+)"', page).group(1)
+        r = self.client.post("/thanksgiving/groceries/toggle", data={"key": key, "done": "1", "row": "g-produce-1"},
+                             follow_redirects=False)
+        self.assertEqual(r.headers["location"], "/thanksgiving/shopping#g-produce-1")
+        page = self.client.get("/thanksgiving/shopping").text
+        cart = page.split('id="in-the-cart"')[1]
+        self.assertIn("In the cart (1)", cart)
+        self.assertIn(f'value="{key}"', cart)
+        self.assertEqual(page.count(f'name="key" value="{key}"'), 1)  # gone from its aisle
+        self.assertIn('aria-label="Not bought', cart)  # uncheck it from the cart
+        self.client.post("/thanksgiving/groceries/toggle", data={"key": key, "row": "<script>"})
+        self.assertNotIn('id="in-the-cart"', self.client.get("/thanksgiving/shopping").text)
+
     def test_plan_made_before_the_appetizers_gets_them_once(self):
         self.client.get("/thanksgiving")
         plan = tg_router.store().get_plan()

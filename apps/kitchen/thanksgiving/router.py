@@ -290,10 +290,10 @@ def has_recipe(dish):
 
 
 def public_recipe(request, dish_id):
-    """Signed out: one dish's recipe as written. Only dishes on the shared menu; no cook, notes or timeline."""
+    """Signed out: one dish's recipe as written, and who's bringing it. Only dishes on the shared menu; no notes or timeline."""
     plan = store().household_plan()
     dish = next((d for d in store().get_dishes(plan["id"]) if d["id"] == dish_id), None) if plan else None
-    if not dish or dish.get("category") == "prep" or not has_recipe(dish):
+    if not dish or dish.get("category") == "prep" or not (has_recipe(dish) or (dish.get("cook") or "").strip()):
         raise HTTPException(status_code=404, detail="That recipe isn't on the menu.")
     return render("tg_recipe_public.html", dish=dish, blurb=menu.entry_for(dish).get("description") or menu.blurb(dish),
                   ingredient_sections=planner.recipe_sections(dish["ingredients_text"] or ""),

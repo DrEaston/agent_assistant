@@ -1,6 +1,18 @@
 {% extends "tg_page.html" %}
 {% from "tg_macros.html" import render_sections, size_picker, recipe_block, kind_pill, task_row, day_chart with context %}
 {% block title %}Shopping{% endblock %}
+{% macro grocery_row(item, row_id, got) %}
+      <div class="grocery{% if got %} done{% endif %}" id="{{ row_id }}">
+        <form method="post" action="/thanksgiving/groceries/toggle" data-grocery-toggle>
+          <input type="hidden" name="row" value="{{ row_id }}">
+          <input type="hidden" name="key" value="{{ item.key }}">{% if not got %}<input type="hidden" name="done" value="1">{% endif %}
+          <button class="check" type="submit" aria-label="{% if got %}Not bought{% else %}Got it{% endif %}: {{ item.text }}">{% if got %}✓{% endif %}</button>
+        </form>
+        <div style="flex:1"><span class="g-text">{{ item.text }}</span>{% if item.amount %} <strong class="g-amount">{{ item.amount }}</strong>{% endif %}
+          {% if item.parts %}<div class="g-from">{% for part in item.parts %}{{ part.dish }}{% if part.amount and item.parts|length > 1 %} {{ part.amount }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}</div>
+        {% if item.extra_id %}<form method="post" action="/thanksgiving/groceries/{{ item.extra_id }}/delete"><button class="quiet" type="submit" aria-label="Remove {{ item.text }}">✕</button></form>{% endif %}
+      </div>
+{% endmacro %}
 {% block page %}
 <section id="shopping">
   <div class="section-head"><div><h2>Shopping list</h2>
@@ -10,27 +22,33 @@
       <button type="submit">Add</button>
     </form>
   </div>
+  {#- Checked items leave their aisle and wait, folded, in the cart at the bottom, where they can be unchecked. -#}
+  {% set cart = namespace(items=[], left=0) %}
   <div class="card">
   {% for section in groceries %}
+    {% set slug = section.name|lower|replace(' & ', '-')|replace(' ', '-') %}
+    {% set rows = [] %}
+    {% for item in section["items"] %}
+      {% if item.key in grocery_checked %}{% set cart.items = cart.items + [(item, "c-" ~ slug ~ "-" ~ loop.index)] %}
+      {% else %}{% set _ = rows.append((item, "g-" ~ slug ~ "-" ~ loop.index)) %}{% endif %}
+    {% endfor %}
+    {% set cart.left = cart.left + rows|length %}
+    {% if rows %}
     <div class="grocery-section"><h3>{{ section.name }}</h3>
     {% if section.name == "Check the pantry" %}<p class="g-from" style="margin:0 0 .3rem">Staples most kitchens have. Check before you go; add any you're out of.</p>{% endif %}
-    {% for item in section["items"] %}
-      {% set got = item.key in grocery_checked %}
-      <div class="grocery{% if got %} done{% endif %}" id="g-{{ loop.index }}-{{ section.name|lower|replace(' ', '-')|replace('&', '') }}">
-        <form method="post" action="/thanksgiving/groceries/toggle" data-grocery-toggle>
-          <input type="hidden" name="row" value="g-{{ loop.index }}-{{ section.name|lower|replace(' ', '-')|replace('&', '') }}">
-          <input type="hidden" name="key" value="{{ item.key }}">{% if not got %}<input type="hidden" name="done" value="1">{% endif %}
-          <button class="check" type="submit" aria-label="{% if got %}Not bought{% else %}Got it{% endif %}: {{ item.text }}">{% if got %}✓{% endif %}</button>
-        </form>
-        <div style="flex:1"><span class="g-text">{{ item.text }}</span>{% if item.amount %} <strong class="g-amount">{{ item.amount }}</strong>{% endif %}
-          {% if item.parts %}<div class="g-from">{% for part in item.parts %}{{ part.dish }}{% if part.amount and item.parts|length > 1 %} {{ part.amount }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}</div>
-        {% if item.extra_id %}<form method="post" action="/thanksgiving/groceries/{{ item.extra_id }}/delete"><button class="quiet" type="submit" aria-label="Remove {{ item.text }}">✕</button></form>{% endif %}
-      </div>
-    {% endfor %}
+    {% for item, row_id in rows %}{{ grocery_row(item, row_id, False) }}{% endfor %}
     </div>
+    {% endif %}
   {% else %}
     <p class="muted">Ingredients from your dishes show up here.</p>
   {% endfor %}
+  {% if groceries and cart.left == 0 %}<p class="muted">Everything's in the cart.</p>{% endif %}
+  {% if cart.items %}
+    <details class="grocery-section in-cart" id="in-the-cart">
+      <summary>In the cart ({{ cart.items|length }})</summary>
+      {% for item, row_id in cart.items %}{{ grocery_row(item, row_id, True) }}{% endfor %}
+    </details>
+  {% endif %}
   </div>
 </section>
 {% endblock %}

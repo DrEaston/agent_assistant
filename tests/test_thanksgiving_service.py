@@ -95,23 +95,26 @@ class ServiceTests(unittest.TestCase):
             self.assertNotIn(private, menu.text)
         self.assertIn("Dinner at four o&#39;clock", menu.text)
         self.assertIn("Guests are welcome from three o&#39;clock", menu.text)
-        # Dishes with a recipe link to it; Janice's (no recipe) and house prep don't.
+        # Dishes with a recipe or a named cook link to their page; house prep doesn't.
         from apps.kitchen.thanksgiving import router as tg_router
         household = tg_router.store().household_plan()  # the shared menu is the first plan made
         dishes = {d["name"]: d for d in tg_router.store().get_dishes(household["id"])}
         self.assertIn(f'href="/thanksgiving/menu/{dishes["Pumpkin pie"]["id"]}"', menu.text)
-        self.assertNotIn(f'href="/thanksgiving/menu/{dishes["Green bean casserole"]["id"]}"', menu.text)
+        self.assertIn(f'href="/thanksgiving/menu/{dishes["Green bean casserole"]["id"]}"', menu.text)
         pie = client.get(f'/thanksgiving/menu/{dishes["Pumpkin pie"]["id"]}', headers=anon)
         self.assertEqual(pie.status_code, 200)
         self.assertIn("pumpkin puree", pie.text)
         self.assertIn("1 can (15 oz)", pie.text)  # the recipe as written: one pie, though we're making two
         for private in ("Parrisa", "Janice", "Batch size", "Edit dish", "Report a problem", "Notes"):
-            self.assertNotIn(private, pie.text)
+            self.assertNotIn(private, pie.text)  # nobody's named on our own dishes
         mac = client.get(f'/thanksgiving/menu/{dishes["Mac and cheese"]["id"]}', headers=anon)
         self.assertEqual(mac.status_code, 200)
-        self.assertNotIn("Parrisa", mac.text)
-        for hidden in ("Green bean casserole", "House prep"):
-            self.assertEqual(client.get(f'/thanksgiving/menu/{dishes[hidden]["id"]}', headers=anon).status_code, 404)
+        self.assertIn("From Parrisa", mac.text)
+        beans = client.get(f'/thanksgiving/menu/{dishes["Green bean casserole"]["id"]}', headers=anon)
+        self.assertEqual(beans.status_code, 200)
+        self.assertIn("From Janice", beans.text)
+        self.assertNotIn("Janice is bringing it", beans.text)  # the private note stays private
+        self.assertEqual(client.get(f'/thanksgiving/menu/{dishes["House prep"]["id"]}', headers=anon).status_code, 404)
         self.assertEqual(client.get("/thanksgiving/menu/99999", headers=anon).status_code, 404)
         self.assertEqual(client.post(f'/thanksgiving/menu/{dishes["Pumpkin pie"]["id"]}', headers=anon).status_code, 401)
         self.assertIn('property="og:title"', menu.text)
