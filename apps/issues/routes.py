@@ -1,23 +1,21 @@
 """Dieter Studio: the inbox for problem reports and change requests.
 
-The old Codex pipeline (plans, approvals, a desktop runner) is retired. Studio now:
-  - collects reports (this form, "Report a problem" on any page, other services via /internal/studio/reports)
-  - sends one to Claude Code as a GitHub issue, where the conversation, pull request and preview happen
-  - keeps each report's history, including archived Codex runs
+Studio collects reports (this form, "Report a problem" on any page, other services via
+/internal/studio/reports) and keeps each one's history, including archived Codex runs. Claude reads them and marks
+them done through the connector (apps/issues/connector.py): Curtis asks in a Claude chat, from any device.
+(Sending a report to Claude Code as a GitHub issue was retired; old reports keep their issue link.)
 
 The main app calls configure() at startup and includes `router`.
 """
 
 import re
 from pathlib import Path
-from urllib.parse import quote
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from core import ui
 
-from . import github
 from .manifest import APP
 from .store import StudioStore
 
@@ -54,7 +52,6 @@ def store():
 def render(name, request, **context):
     context.setdefault("app", APP)
     context.setdefault("page_url", str(request.url.path))
-    context.setdefault("github_enabled", github.enabled())
     return HTMLResponse(_templates.get_template(name).render(**context))
 
 
@@ -104,7 +101,7 @@ def studio_new(request: Request, area: str = "", page: str = ""):
 
 @router.post(BASE + "/create")
 def studio_create(request: Request, text: str = Form(...), area: str = Form(""), page: str = Form(""),
-                  page_title: str = Form(""), send: str = Form("")):
+                  page_title: str = Form("")):
     admin(request)
     text = (text or "").strip()
     if not text:
@@ -118,8 +115,6 @@ def studio_create(request: Request, text: str = Form(...), area: str = Form(""),
                                            page_title=page_title[:200] or "Studio", raw_feedback=text[:4000],
                                            **_user_fields(request))
     db.append_app_feedback_report_action(report_id, "created", "Report created in Studio.")
-    if send and github.enabled():
-        return _send(report_id)
     return RedirectResponse(url=f"{BASE}/{report_id}", status_code=303)
 
 
@@ -133,33 +128,10 @@ def studio_old_links(rest: str = ""):
 
 
 @router.get(BASE + "/{report_id}")
-def studio_report(request: Request, report_id: int, sent: int = 0, error: str = ""):
+def studio_report(request: Request, report_id: int):
     admin(request)
     report = require_report(report_id)
-    return render("studio_report.html", request, report=report, sent=sent, error=error,
-                  issue=github.issue_state(report.get("github_issue_url")))
-
-
-@router.post(BASE + "/{report_id}/send")
-def studio_send(request: Request, report_id: int):
-    admin(request)
-    return _send(report_id)
-
-
-def _send(report_id):
-    report = require_report(report_id)
-    if report.get("github_issue_url"):
-        return RedirectResponse(url=f"{BASE}/{report_id}", status_code=303)
-    if not github.enabled():
-        return RedirectResponse(url=f"{BASE}/{report_id}?error=" + quote("GitHub isn't connected yet."), status_code=303)
-    try:
-        url = github.create_issue(report)
-    except Exception as exc:
-        print(f"Warning: Studio could not open a GitHub issue: {exc}")
-        return RedirectResponse(url=f"{BASE}/{report_id}?error=" + quote("GitHub didn't accept it. Try again."),
-                                status_code=303)
-    store().set_github_issue(report_id, url)
-    return RedirectResponse(url=f"{BASE}/{report_id}?sent=1", status_code=303)
+    return render("studio_report.html", request, report=report)
 
 
 @router.post(BASE + "/{report_id}/status")

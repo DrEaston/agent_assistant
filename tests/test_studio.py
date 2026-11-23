@@ -1,18 +1,18 @@
-"""Dieter Studio after the Codex pipeline: an inbox that sends requests to Claude Code via GitHub issues."""
+"""Dieter Studio: an inbox of problem reports that Claude reads and closes through the connector."""
 
 import json
 import tempfile
 import unittest
 import warnings
 from pathlib import Path
-from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from apps.issues import github, routes
+from apps.issues import connector, routes
 from apps.issues.store import StudioStore
-from database import Database
+from core.connector.tools import ToolError
+from database import Database, reset_current_user_id, set_current_user_id
 
 
 class StudioTests(unittest.TestCase):
@@ -62,18 +62,16 @@ class StudioTests(unittest.TestCase):
         self.assertIsNone(row)
 
     def test_inbox_create_status_and_delete(self):
-        with patch.object(github, "token", return_value=""):
-            r = self.client.post("/apps/issues/create", data={"text": "Make the grocery list bigger", "page": "/apps/recipes"},
-                                 follow_redirects=False)
-            self.assertEqual(r.status_code, 303)
-            report_id = int(r.headers["location"].rsplit("/", 1)[-1])
-            report = StudioStore(self.db).report(report_id)
-            self.assertEqual((report["title"], report["area"]), ("Drafted title", "Kitchen / Recipes"))
-            home = self.client.get("/apps/issues")
-            self.assertIn("Drafted title", home.text)
-            self.assertIn("GitHub isn't connected yet", home.text)
-            page = self.client.get(f"/apps/issues/{report_id}")
-            self.assertNotIn('action="/apps/issues/%d/send"' % report_id, page.text)
+        r = self.client.post("/apps/issues/create", data={"text": "Make the grocery list bigger", "page": "/apps/recipes"},
+                             follow_redirects=False)
+        self.assertEqual(r.status_code, 303)
+        report_id = int(r.headers["location"].rsplit("/", 1)[-1])
+        report = StudioStore(self.db).report(report_id)
+        self.assertEqual((report["title"], report["area"]), ("Drafted title", "Kitchen / Recipes"))
+        self.assertIn("Drafted title", self.client.get("/apps/issues").text)
+        page = self.client.get(f"/apps/issues/{report_id}")
+        self.assertIn("Studio reports", page.text)  # how to ask Claude about it
+        self.assertNotIn("/send", page.text)
         self.client.post(f"/apps/issues/{report_id}/status", data={"status": "done"})
         self.assertEqual(StudioStore(self.db).report(report_id)["status"], "done")
         self.assertIn("Drafted title", self.client.get("/apps/issues?show=done").text)
@@ -81,40 +79,42 @@ class StudioTests(unittest.TestCase):
         self.client.post(f"/apps/issues/{report_id}/delete")
         self.assertIsNone(StudioStore(self.db).report(report_id))
 
-    def test_send_to_claude_opens_one_github_issue(self):
+    def test_old_github_link_still_shows(self):
         report_id = self.add_report()
-        opened = []
+        conn = self.db.connect()
+        conn.execute("UPDATE app_feedback_reports SET github_issue_url = ?, status = 'sent' WHERE id = ?",
+                     ("https://github.com/DrEaston/agent_assistant/issues/9", report_id))
+        conn.commit()
+        page = self.client.get(f"/apps/issues/{report_id}").text
+        self.assertIn("Old GitHub issue", page)
+        self.assertIn("With Claude", page)
 
-        def fake_create(report, client=None):
-            opened.append(github.issue_body(report))
-            return "https://github.com/DrEaston/agent_assistant/issues/101"
-
-        with patch.object(github, "token", return_value="t"), patch.object(github, "create_issue", fake_create), \
-                patch.object(github, "issue_state", return_value={"state": "open", "comments": 2}):
-            r = self.client.post(f"/apps/issues/{report_id}/send", follow_redirects=False)
-            self.assertEqual(r.headers["location"], f"/apps/issues/{report_id}?sent=1")
-            self.client.post(f"/apps/issues/{report_id}/send")  # a second tap doesn't open another issue
-            page = self.client.get(f"/apps/issues/{report_id}?sent=1")
-        self.assertEqual(len(opened), 1)
-        self.assertIn("@claude", opened[0])
-        self.assertIn("The timer didn't ring.", opened[0])
-        self.assertIn("https://askdieter.ai/apps/recipes", opened[0])
-        report = StudioStore(self.db).report(report_id)
-        self.assertEqual(report["status"], "sent")
-        self.assertEqual(report["history"][-1]["action"], "sent_to_claude")
-        self.assertIn("Open on GitHub", page.text)
-        self.assertIn("2 replies", page.text)
-
-    def test_github_failure_is_shown_not_raised(self):
+    def test_claude_reads_and_closes_reports_as_admin_only(self):
         report_id = self.add_report()
-
-        def broken(report, client=None):
-            raise RuntimeError("401")
-
-        with patch.object(github, "token", return_value="t"), patch.object(github, "create_issue", broken):
-            r = self.client.post(f"/apps/issues/{report_id}/send")
-        self.assertIn("GitHub didn", r.text)
-        self.assertEqual(StudioStore(self.db).report(report_id)["github_issue_url"], "")
+        admin = self.db.create_user("curtis@example.com", "Curtis", "x", "admin")
+        token = set_current_user_id(admin)
+        try:
+            listed = connector.list_reports({})["reports"]
+            self.assertEqual([(r["id"], r["title"], r["page"]) for r in listed], [(report_id, "Timer", "/apps/recipes")])
+            report = connector.get_report({"report_id": report_id})
+            self.assertEqual(report["text"], "The timer didn't ring.")
+            done = connector.set_status({"report_id": report_id, "status": "done", "note": "Timer chimes now."})
+            self.assertEqual(done["status"], "Done")
+            self.assertEqual(connector.list_reports({})["reports"], [])
+            self.assertEqual(StudioStore(self.db).report(report_id)["history"][-1]["summary"], "Timer chimes now.")
+            with self.assertRaises(ToolError):
+                connector.set_status({"report_id": report_id, "status": "sent"})
+            with self.assertRaises(ToolError):
+                connector.get_report({"report_id": 9999})
+        finally:
+            reset_current_user_id(token)
+        member = self.db.create_user("guest@example.com", "Guest", "x", "member")
+        token = set_current_user_id(member)
+        try:
+            with self.assertRaises(ToolError):
+                connector.list_reports({})
+        finally:
+            reset_current_user_id(token)
 
     def test_old_addresses_redirect(self):
         for old, new in (("/apps/assistant/feedback", "/apps/issues"), ("/apps/assistant/feedback/7", "/apps/issues/7"),
@@ -130,7 +130,7 @@ class CodexRetiredTests(unittest.TestCase):
             import api
         paths = {getattr(r, "path", "") for r in api.app.routes}
         self.assertFalse([p for p in paths if p.startswith("/api/app-feedback")])
-        self.assertIn("/apps/issues/{report_id}/send", paths)
+        self.assertNotIn("/apps/issues/{report_id}/send", paths)  # GitHub sending is retired too
         self.assertFalse(Path(api.__file__).with_name("scripts").joinpath("run_codex_feedback_worker.py").exists())
 
 

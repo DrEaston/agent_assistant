@@ -10,11 +10,11 @@ shows on the report page without any Codex code.
 
 import json
 
-STATUSES = ("open", "sent", "in_progress", "ready_for_review", "done")
+STATUSES = ("open", "in_progress", "ready_for_review", "done")
 STATUS_LABELS = {
     "open": "New",
     "triaged": "New",
-    "sent": "With Claude",
+    "sent": "With Claude",  # sent as a GitHub issue, before Studio stopped doing that
     "in_progress": "In progress",
     "ready_for_review": "Ready to check",
     "done": "Done",
@@ -84,14 +84,6 @@ class StudioStore:
                              (status, report_id))
         self._commit()
         self.db.append_app_feedback_report_action(report_id, "status", note or f"Marked {STATUS_LABELS[status]}.")
-
-    def set_github_issue(self, report_id, url):
-        self._conn().execute(
-            "UPDATE app_feedback_reports SET github_issue_url = ?, status = 'sent', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (url, report_id))
-        self._commit()
-        self.db.append_app_feedback_report_action(report_id, "sent_to_claude", "Sent to Claude Code as a GitHub issue.",
-                                                  {"issue": url})
 
     def delete(self, report_id):
         self._conn().execute("DELETE FROM app_feedback_reports WHERE id = ?", (report_id,))

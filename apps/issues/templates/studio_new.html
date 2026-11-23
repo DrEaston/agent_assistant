@@ -20,12 +20,7 @@
     </div>
     {{ ui.field("Page (optional)", "page", value=page, placeholder="/apps/recipes") }}
     <div class="row">
-      {% if github_enabled %}
-      <button type="submit" name="send" value="1" class="primary">Send to Claude</button>
-      <button type="submit" class="quiet">Just save it</button>
-      {% else %}
       <button type="submit" class="primary">Save</button>
-      {% endif %}
     </div>
   </form>
   {% endcall %}

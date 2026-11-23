@@ -18,7 +18,7 @@ APP = {
     "show_issue_item": False,
     "show_chat_button": False,
     "band_label": "Studio utility navigation",
-    "subtitle": "Problems and change requests, sent to Claude Code and checked in a preview.",
+    "subtitle": "Problems and change requests you jot down, for Claude to read and fix.",
     "home_label": "Studio Home",
     "nav_items": (
         {"label": "Studio", "url": "/apps/issues"},

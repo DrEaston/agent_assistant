@@ -4,13 +4,15 @@ Dieter is Curtis's personal assistant site (askdieter.ai): Kitchen (recipes, mea
 Thanksgiving planner), Assistant (projects, scheduler), Trainer (workouts, Strava), Music (playlists, Spotify)
 and Studio (problem reports and change requests). FastAPI, Jinja2 and SQLite, on Google Cloud Run.
 
-Curtis usually asks for changes from his phone, through a Studio report that became a GitHub issue. He is not
-reading diffs. Write for him in plain English: what he will see differently, and how to try it.
+Curtis usually asks for changes from his phone, in a Claude chat. He also jots problems down inside Dieter with
+"Report a problem" (Studio); read those with the connector's studio_list_reports / studio_get_report, and mark one
+done with studio_set_status once the fix is live. He is not reading diffs. Write for him in plain English: what he
+will see differently, and how to try it.
 
 ## How a change works
 
-1. Read the issue. If what he wants is unclear, ask one short question in the issue and stop. Don't guess
-   on anything that changes how a page looks or what gets saved.
+1. Work out what he wants (his message, or the Studio report). If it's unclear, ask one short question and stop.
+   Don't guess on anything that changes how a page looks or what gets saved.
 2. Make the change on a branch and open a pull request against `main`. The pull request description says,
    in a few sentences, what changes for him and how to check it in the preview.
 3. The `ci` workflow runs the tests. The `preview` workflow posts a preview link (a copy of the site with a
@@ -39,7 +41,7 @@ reading diffs. Write for him in plain English: what he will see differently, and
 - New-style templates (`apps/*/templates/`) use the shared classes and macros only: no `<style>` blocks, no
   `style=` attributes, no hex colours (`tests/test_design_rules.py`). If something is missing, add it to
   `core/ui` so every app gets it.
-- **Don't change `apps/kitchen/thanksgiving/`** unless the issue is about Thanksgiving. It's live as its own
+- **Don't change `apps/kitchen/thanksgiving/`** unless the change is about Thanksgiving. It's live as its own
   service, deployed separately from a tag.
 - Content (recipes, menu text, photos, plans) belongs in the app's data or content files, not in code.
 - Never print, commit or log secrets. Settings come from environment variables; see `.env.example`.

@@ -16,9 +16,6 @@
   {{ ui.tag(report.status_label, "ok" if report.status == "done" else None) }}
 {% endcall %}
 <main class="wrap">
-  {% if sent %}{% call ui.banner("ok") %}Sent to Claude. It will reply on GitHub with questions or a pull request and a preview link.{% endcall %}{% endif %}
-  {% if error %}{% call ui.banner("warn") %}{{ error }}{% endcall %}{% endif %}
-
   {% call ui.section("What was said") %}
   <div class="card stack">
     {% for line in report.raw_feedback.splitlines() if line.strip() %}<p>{{ line }}</p>{% endfor %}
@@ -28,18 +25,10 @@
 
   {% call ui.section("Claude") %}
   <div class="card stack">
+    <p class="muted">Claude can read this from any chat with Dieter connected. Ask "look at my Studio reports" or name
+      this one (report {{ report.id }}). It marks the report done once the fix is live.</p>
     {% if report.github_issue_url %}
-      <p>The conversation, the pull request and the preview link are on GitHub.
-        {% if issue %}{{ ui.tag("open" if issue.state == "open" else "closed", "info" if issue.state == "open" else "ok") }}
-        {% if issue.comments %}<span class="muted small">{{ issue.comments }} repl{{ "y" if issue.comments == 1 else "ies" }}</span>{% endif %}{% endif %}</p>
-      <div class="row"><a class="button primary" href="{{ report.github_issue_url }}">Open on GitHub</a></div>
-    {% elif github_enabled %}
-      <p class="muted">Claude reads this, asks if anything's unclear, then opens a pull request with a preview you can try before anything goes live.</p>
-      <form method="post" action="/apps/issues/{{ report.id }}/send" class="row">
-        <button type="submit" class="primary">Send to Claude</button>
-      </form>
-    {% else %}
-      <p class="muted">GitHub isn't connected yet. Once it is, a Send to Claude button appears here.</p>
+      <div class="row"><a class="button quiet" href="{{ report.github_issue_url }}">Old GitHub issue</a></div>
     {% endif %}
   </div>
   {% endcall %}
