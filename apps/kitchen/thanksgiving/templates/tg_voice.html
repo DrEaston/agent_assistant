@@ -82,6 +82,9 @@
 .voice-device-form .voice-wake-choice { flex-basis: 100%; }
 .voice-top .voice-ear { position: absolute; top: -.45rem; right: -.35rem; font-size: .9rem; line-height: 1;
   background: var(--panel); border-radius: 999px; padding: .1rem; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
+.voice-mic { position: relative; }
+.voice-mic .voice-ear { position: absolute; top: -.4rem; right: -.4rem; font-size: .95rem; line-height: 1;
+  background: var(--panel); border-radius: 999px; padding: .1rem; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
 .voice-fab .voice-ear { position: absolute; top: -.35rem; left: -.35rem; font-size: 1.1rem; line-height: 1;
   background: var(--panel); border-radius: 999px; padding: .15rem; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
 </style>
@@ -493,7 +496,11 @@
   function tick() {
     if (!convo) return;
     const left = Math.max(0, convo.until - Date.now());
-    if (!left && !speaking && !convo.thinking) { endConversation("Mic off. Tap 🎤 to talk again."); return; }
+    if (!left && !speaking && !convo.thinking) {
+      endConversation(loadDevice().wake && Recognition ? "Mic off. Say “Hey Dieter” or tap 🎤 to talk again."
+                                                       : "Mic off. Tap 🎤 to talk again.");
+      return;
+    }
     $("voice-live").textContent = speaking ? "🔊 Talking…" : convo.thinking ? "Thinking…"
       : `🎙 Listening · ${Math.ceil(left / 1000)}s`;
   }
@@ -505,6 +512,7 @@
     $("voice-live").hidden = false;
     $("voice-hint").hidden = true;
     report("listen-start", "conversation");
+    stopWake();  // one microphone listener at a time
     // Speaking needs a tap first on Android; this tap counts. An empty utterance unlocks it silently.
     try { if (SPEAK_REPLIES && "speechSynthesis" in window) speechSynthesis.speak(new SpeechSynthesisUtterance("")); } catch (e) {}
     tick();
@@ -520,6 +528,7 @@
     text.placeholder = "Or type it here"; text.value = "";
     $("voice-live").hidden = true;
     if (message) say("dieter", `<span class="muted">${esc(message)}</span>`);
+    wakeTimer = setTimeout(startWake, 600);  // mic off, chat still open: "Hey Dieter" turns it back on
   }
 
   function listenNext() {
@@ -774,8 +783,8 @@
     if (resumed.convo && Recognition) startConversation();  // keep listening if we were talking
   }
 
-  // ---------- "Hey Dieter": while the chat is closed, listen only for the wake phrase, then open the chat with the
-  // mic on. Turned on per device (This device → Listen for “Hey Dieter”). The phrase is matched here in the page;
+  // ---------- "Hey Dieter": whenever the mic is off (chat closed, or open but done talking), listen only for the
+  // wake phrase, then open the chat with the mic on. Turned on per device (This device → Listen for “Hey Dieter”). The phrase is matched here in the page;
   // nothing heard while waiting is sent to Dieter. (Chrome's speech recognition itself runs on Google's servers.)
   const WAKE_WORDS = new Set(["dieter", "deiter", "dieder", "dietor", "deeter", "deter", "dieta", "dietr", "diter",
     "dita", "deda", "dida", "peter", "pieter", "dieter's", "detour", "deader", "teeter", "dieters", "ditor"]);
@@ -799,11 +808,16 @@
   }
   window.dieterWakeRest = wakeRest;  // for tests
 
-  let wakeRec = null, wakeTimer = null, wakeBlocked = false, wakeStarts = [];
-  const wakeWanted = () => !!loadDevice().wake && !!Recognition && sheet.hidden && !document.hidden && !wakeBlocked;
+  let wakeRec = null, wakeTimer = null, wakeBlocked = false, wakeStarts = [], wakeReported = new Set();
+  const micBusy = () => !!convo || !!recognition || !!(recorder && recorder.state === "recording");
+  const wakeWanted = () => !!loadDevice().wake && !!Recognition && !micBusy() && !document.hidden && !wakeBlocked;
+  function reportOnce(event, detail) {  // to the server log, once per page, so a silent listener can be diagnosed
+    if (wakeReported.has(event + detail)) return;
+    wakeReported.add(event + detail); report(event, detail);
+  }
   function showEar() {
     const on = !!wakeRec;
-    for (const button of [$("voice-open"), document.getElementById("voice-open-top")]) {
+    for (const button of [$("voice-open"), document.getElementById("voice-open-top"), mic]) {
       if (!button) continue;
       const ear = button.querySelector(".voice-ear");
       if (on && !ear) button.insertAdjacentHTML("beforeend", '<span class="voice-ear" title="Listening for “Hey Dieter”">👂</span>');
@@ -829,10 +843,11 @@
         if (!event.results[i].isFinal) continue;
         const rest = wakeRest(event.results[i][0].transcript);
         if (rest === null) continue;
-        report("wake", rest ? "with words" : "name only");
+        report("wake", (rest ? "with words" : "name only") + (sheet.hidden ? "" : ", chat open"));
         stopWake();
         if (window.tgSleep && window.tgSleep.status().asleep) window.tgSleep.wake();  // the kitchen screen was off
-        open();  // the chat, with the mic on
+        if (sheet.hidden) open();  // the chat, with the mic on
+        else if (!convo) startConversation();  // chat already open: just turn the mic on
         if (rest) setTimeout(() => { if (convo) heardPhrase(rest); }, 400);
         return;
       }
@@ -840,15 +855,17 @@
     rec.onerror = (event) => {
       lastError = event.error;
       if (event.error === "not-allowed" || event.error === "service-not-allowed") { wakeBlocked = true; report("wake-blocked", event.error); }
+      else if (event.error !== "no-speech" && event.error !== "aborted") reportOnce("wake-error", event.error);
     };
     rec.onend = () => {
       wakeRec = null; showEar();
       if (wakeWanted()) wakeTimer = setTimeout(startWake, lastError === "network" ? 3000 : 250);  // Chrome stops every so often
     };
-    try { rec.start(); wakeRec = rec; } catch (e) { wakeTimer = setTimeout(startWake, 1000); }
+    try { rec.start(); wakeRec = rec; reportOnce("wake-listening", sheet.hidden ? "chat closed" : "chat open"); }
+    catch (e) { reportOnce("wake-error", "start: " + e.message); wakeTimer = setTimeout(startWake, 1000); }
     showEar();
   }
-  document.addEventListener("tg:voice-opened", stopWake);
+  document.addEventListener("tg:voice-opened", stopWake);  // open() turns the mic on next
   document.addEventListener("tg:voice-closed", () => { wakeTimer = setTimeout(startWake, 600); });
   document.addEventListener("visibilitychange", () => (document.hidden ? stopWake() : startWake()));
   $("voice-device-save").addEventListener("click", () => { wakeBlocked = false; stopWake(); startWake(); });
