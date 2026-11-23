@@ -24,7 +24,7 @@
 .voice-fab.alive > span { visibility: hidden; }
 @keyframes fab-pop { from { transform: scale(.6); } to { transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .voice-fab { transition: none; animation: none; } }
-.voice-sheet { position: fixed; z-index: 45; left: 0; right: 0; bottom: 0; max-height: 80vh; overflow: hidden;
+.voice-sheet { position: fixed; z-index: 55; left: 0; right: 0; bottom: 0; max-height: 80vh; overflow: hidden;
   display: flex; flex-direction: column;
   background: var(--panel); border-top: 1px solid var(--line); border-radius: 18px 18px 0 0;
   box-shadow: 0 -8px 30px rgba(42,33,24,.18); padding: 1rem max(1rem, env(safe-area-inset-right, 0px))
@@ -72,6 +72,9 @@
 .voice-aside { font-size: .8rem; color: var(--muted); }
 .voice-device-form { display: flex; flex-wrap: wrap; gap: .5rem; align-items: end; margin-top: .5rem; }
 .voice-device-form label { display: flex; flex-direction: column; gap: .2rem; font-weight: 600; }
+.voice-device-form .voice-wake-choice { flex-basis: 100%; }
+.voice-fab .voice-ear { position: absolute; top: -.35rem; left: -.35rem; font-size: 1.1rem; line-height: 1;
+  background: var(--panel); border-radius: 999px; padding: .15rem; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
 </style>
 
 <button type="button" class="voice-fab" id="voice-open" aria-haspopup="dialog">
@@ -201,7 +204,7 @@
       <button type="submit">Send</button>
     </form>
     <details class="voice-device">
-      <summary>This device: <span id="voice-device-label">unnamed</span> · Sass: <span id="voice-sass-label">Normal</span> · Brain: <span id="voice-brain-label">Claude</span></summary>
+      <summary>This device: <span id="voice-device-label">unnamed</span> · Sass: <span id="voice-sass-label">Normal</span> · Brain: <span id="voice-brain-label">Claude</span><span id="voice-wake-label"></span></summary>
       <div class="voice-device-form">
         <label>Name <input type="text" id="voice-device-name" maxlength="40" placeholder="Kitchen tablet"></label>
         <label>Sass
@@ -217,6 +220,8 @@
             <option value="classic">Classic (old)</option>
           </select>
         </label>
+        <label class="voice-wake-choice"><span><input type="checkbox" id="voice-wake"> Listen for “Hey Dieter”</span>
+          <span class="muted small">While this page is open, saying “Hey Dieter” opens this chat with the mic on.</span></label>
         <button type="button" id="voice-device-save">Save on this device</button>
       </div>
     </details>
@@ -245,13 +250,16 @@
     $("voice-sass").value = SASS_NAMES[d.sass] ? d.sass : "normal";
     $("voice-brain-label").textContent = BRAIN_NAMES[d.brain] || "Claude";
     $("voice-brain").value = BRAIN_NAMES[d.brain] ? d.brain : "claude";
+    $("voice-wake").checked = !!d.wake;
+    $("voice-wake-label").textContent = d.wake ? " · Hey Dieter: on" : "";
   }
   $("voice-device-save").addEventListener("click", () => {
     const d = { name: $("voice-device-name").value.trim().slice(0, 40), sass: $("voice-sass").value,
-                brain: $("voice-brain").value };
+                brain: $("voice-brain").value, wake: $("voice-wake").checked };
     try { localStorage.setItem("tg-voice-device", JSON.stringify(d)); } catch (e) {}
     showDevice();
-    say("dieter", d.sass === "super" ? "Super sass unlocked. You asked for this." : `Saved. Sass: ${esc(SASS_NAMES[d.sass])}.`);
+    say("dieter", d.sass === "super" ? "Super sass unlocked. You asked for this." : `Saved. Sass: ${esc(SASS_NAMES[d.sass])}.`
+      + (d.wake ? " I'll listen for “Hey Dieter” whenever this chat is closed." : ""));
     $("voice-device-save").closest("details").open = false;
   });
   showDevice();
@@ -572,8 +580,7 @@
         if (!$("voice-decide").hidden) $("voice-cancel").click(); else reply("Okay.");
         break;
       case "undo":
-        if (window.tgHandsfree && window.tgHandsfree.hasLocalUndo()) window.tgHandsfree.run(cmd, reply);
-        else if (!$("voice-undo-row").hidden) $("voice-undo").click();
+        if (!$("voice-undo-row").hidden) $("voice-undo").click();
         else reply("Nothing to undo.");
         break;
       case "quiet": hushOut(); break;
@@ -581,9 +588,7 @@
       case "close": say("dieter", "Bye for now."); setTimeout(close, 700); break;  // "close", "bye", "that's all"
       case "wake": reply("Yes?"); break;
       default:
-        // Cook-mode commands (next step, timers, how much…) run on the cook page; elsewhere the AI answers.
-        if (window.tgHandsfree) window.tgHandsfree.run(cmd, reply);
-        else askAI(phrase, bubble);
+        askAI(phrase, bubble);  // everything else: Dieter answers
     }
   }
 
@@ -743,5 +748,82 @@
     toLatest();
     if (resumed.convo && Recognition) startConversation();  // keep listening if we were talking
   }
+
+  // ---------- "Hey Dieter": while the chat is closed, listen only for the wake phrase, then open the chat with the
+  // mic on. Turned on per device (This device → Listen for “Hey Dieter”). The phrase is matched here in the page;
+  // nothing heard while waiting is sent to Dieter. (Chrome's speech recognition itself runs on Google's servers.)
+  const WAKE_WORDS = new Set(["dieter", "deiter", "dieder", "dietor", "deeter", "deter", "dieta", "dietr", "diter",
+    "dita", "deda", "dida", "peter", "pieter", "dieter's", "detour", "deader", "teeter", "dieters", "ditor"]);
+  const WAKE_LEADS = new Set(["hey", "hi", "ok", "okay", "yo", "hay", "high"]);
+  function similar(a, b) {  // 0..1, from edit distance
+    const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+    for (let j = 1; j <= b.length; j++) d[0][j] = j;
+    for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    return 1 - d[a.length][b.length] / Math.max(a.length, b.length, 1);
+  }
+  const isDieter = (w) => !!w && (WAKE_WORDS.has(w) || similar(w, "dieter") >= 0.8);
+  // "hey dieter what's next" -> "what's next"; "hey dieter" -> ""; anything else -> null.
+  function wakeRest(text) {
+    const words = String(text || "").toLowerCase().replace(/[’]/g, "'").replace(/[^a-z0-9' ]+/g, " ").trim().split(/\s+/);
+    for (let i = 0; i < Math.min(words.length - 1, 3); i++) {
+      if (WAKE_LEADS.has(words[i]) && isDieter(words[i + 1])) return words.slice(i + 2).join(" ");
+      if (WAKE_LEADS.has(words[i]) && words[i + 1] === "the" && words[i + 2] === "tour") return words.slice(i + 3).join(" ");
+    }
+    return null;
+  }
+  window.dieterWakeRest = wakeRest;  // for tests
+
+  let wakeRec = null, wakeTimer = null, wakeBlocked = false, wakeStarts = [];
+  const wakeWanted = () => !!loadDevice().wake && !!Recognition && sheet.hidden && !document.hidden && !wakeBlocked;
+  function showEar() {
+    let ear = $("voice-open").querySelector(".voice-ear");
+    const on = !!wakeRec;
+    if (on && !ear) $("voice-open").insertAdjacentHTML("beforeend", '<span class="voice-ear" title="Listening for “Hey Dieter”">👂</span>');
+    if (!on && ear) ear.remove();
+  }
+  function stopWake() {
+    clearTimeout(wakeTimer);
+    if (wakeRec) { wakeRec.onend = null; try { wakeRec.abort(); } catch (e) {} wakeRec = null; }
+    showEar();
+  }
+  function startWake() {
+    clearTimeout(wakeTimer);
+    if (!wakeWanted() || wakeRec) { showEar(); return; }
+    const now = Date.now();
+    wakeStarts = wakeStarts.filter((t) => now - t < 60000); wakeStarts.push(now);
+    if (wakeStarts.length > 25) { wakeStarts = []; wakeTimer = setTimeout(startWake, 5000); return; }  // keeps dying: back off
+    const rec = new Recognition();
+    rec.lang = "en-US"; rec.continuous = true; rec.interimResults = false; rec.maxAlternatives = 1;
+    let lastError = "";
+    rec.onresult = (event) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (!event.results[i].isFinal) continue;
+        const rest = wakeRest(event.results[i][0].transcript);
+        if (rest === null) continue;
+        report("wake", rest ? "with words" : "name only");
+        stopWake();
+        if (window.tgSleep && window.tgSleep.status().asleep) window.tgSleep.wake();  // the kitchen screen was off
+        open();  // the chat, with the mic on
+        if (rest) setTimeout(() => { if (convo) heardPhrase(rest); }, 400);
+        return;
+      }
+    };
+    rec.onerror = (event) => {
+      lastError = event.error;
+      if (event.error === "not-allowed" || event.error === "service-not-allowed") { wakeBlocked = true; report("wake-blocked", event.error); }
+    };
+    rec.onend = () => {
+      wakeRec = null; showEar();
+      if (wakeWanted()) wakeTimer = setTimeout(startWake, lastError === "network" ? 3000 : 250);  // Chrome stops every so often
+    };
+    try { rec.start(); wakeRec = rec; } catch (e) { wakeTimer = setTimeout(startWake, 1000); }
+    showEar();
+  }
+  document.addEventListener("tg:voice-opened", stopWake);
+  document.addEventListener("tg:voice-closed", () => { wakeTimer = setTimeout(startWake, 600); });
+  document.addEventListener("visibilitychange", () => (document.hidden ? stopWake() : startWake()));
+  $("voice-device-save").addEventListener("click", () => { wakeBlocked = false; stopWake(); startWake(); });
+  startWake();
 })();
 </script>

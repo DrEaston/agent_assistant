@@ -1085,14 +1085,14 @@ class RouteTests(unittest.TestCase):
         r = self.client.post("/thanksgiving/api/handsfree/ask", json={"text": "thanks that's all", "via": "conversation"}).json()
         self.assertTrue(r["end"])
 
-    def test_cook_mode_has_hands_free(self):
+    def test_hands_free_is_gone_and_hey_dieter_opens_the_chat(self):
         self.client.get("/thanksgiving")
-        page = self.client.get("/thanksgiving/cook").text
-        self.assertIn('id="hf-toggle"', page)
-        self.assertIn("/thanksgiving/api/handsfree/heard", page)
-        self.assertNotIn('id="hf-toggle"', self.client.get("/thanksgiving").text)
-        # The kitchen PC can also be asked out loud, and says so next to the button.
-        self.assertIn("let's go hands-free", page)
+        for url in ("/thanksgiving/cook", "/thanksgiving", "/thanksgiving/timeline"):
+            page = self.client.get(url).text
+            self.assertNotIn('id="hf-toggle"', page)
+            self.assertNotIn('id="hf-bar"', page)
+            self.assertIn('id="voice-wake"', page)  # This device → Listen for "Hey Dieter"
+            self.assertIn("startWake()", page)
 
     def test_tell_dieter_listens_first_closes_by_voice_and_flags_unsaved_changes(self):
         self.client.get("/thanksgiving")
