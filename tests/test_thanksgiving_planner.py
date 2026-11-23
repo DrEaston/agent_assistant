@@ -896,6 +896,32 @@ class RouteTests(unittest.TestCase):
         self.client.post("/thanksgiving/api/command/undo")
         self.assertEqual(tg_router.store().get_extra_groceries(plan["id"]), [])
 
+    def test_claude_brain_opens_pages_on_the_screen(self):
+        self.client.get("/thanksgiving")
+        plan, pie = self.pie()
+        seen = self.claude_with(
+            [("tool", "dieter_open_page", {"page": "thanksgiving.dish", "params": {"dish_id": "../etc"}})],
+            [("tool", "dieter_open_page", {"page": "thanksgiving.dish", "params": {"dish_id": pie["id"]}})],
+            [("text", "Here's the pie.")])
+        r = self.client.post("/thanksgiving/api/command", json={"text": "pull up the pie recipe",
+                                                                "brain": "claude"}).json()
+        self.assertEqual(r["reply"], "Here's the pie.")
+        self.assertEqual(r["do"], [{"type": "navigate", "url": f"/thanksgiving/menu/{pie['id']}", "title": "Dish"}])
+        bad = seen["calls"][1]["messages"][-1]["content"][0]
+        self.assertTrue(bad["is_error"])  # a bad id never becomes an address
+        self.assertIn("dieter_open_page", {t["name"] for t in seen["calls"][0]["tools"]})
+        self.assertIn("pull up", seen["calls"][0]["system"][0]["text"])
+        # Classic answers never move the screen
+        self.voice_with({"reply": "Sure.", "question": "", "actions": []})
+        self.assertEqual(self.client.post("/thanksgiving/api/command", json={"text": "hi"}).json()["do"], [])
+
+    def test_chat_pages_load_the_shared_actions_and_days_have_targets(self):
+        self.client.get("/thanksgiving")
+        page = self.client.get("/thanksgiving/timeline").text
+        self.assertRegex(page, r'<script src="/static/ui/dieter-actions\.js\?v=[0-9a-f]{10}"></script>')
+        self.assertIn('id="day-2026-11-26"', page)
+        self.assertIn("DieterActions.resume()", page)
+
     def test_claude_brain_plan_changes_wait_for_apply(self):
         self.client.get("/thanksgiving")
         self.claude_with(

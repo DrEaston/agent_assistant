@@ -24,11 +24,13 @@
 .voice-fab.alive > span { visibility: hidden; }
 @keyframes fab-pop { from { transform: scale(.6); } to { transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .voice-fab { transition: none; animation: none; } }
-.voice-sheet { position: fixed; z-index: 45; left: 0; right: 0; bottom: 0; max-height: 80vh; overflow-y: auto;
+.voice-sheet { position: fixed; z-index: 45; left: 0; right: 0; bottom: 0; max-height: 80vh; overflow: hidden;
+  display: flex; flex-direction: column;
   background: var(--panel); border-top: 1px solid var(--line); border-radius: 18px 18px 0 0;
   box-shadow: 0 -8px 30px rgba(42,33,24,.18); padding: 1rem max(1rem, env(safe-area-inset-right, 0px))
   calc(1rem + env(safe-area-inset-bottom, 0px)) max(1rem, env(safe-area-inset-left, 0px)); }
-.voice-inner { max-width: 40rem; margin: 0 auto; display: flex; flex-direction: column; gap: .75rem; }
+.voice-inner { max-width: 40rem; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: .75rem;
+  flex: 1 1 auto; min-height: 0; }
 /* Phones and tablets: at most half the screen, so the recipe stays visible. */
 @media (max-width: 899px) { .voice-sheet { max-height: 50vh; } }
 /* Wide screens: a panel down the right side, and the page moves over instead of being covered. */
@@ -40,7 +42,9 @@
 }
 .voice-head { display: flex; justify-content: space-between; align-items: center; }
 .voice-head h2 { font-size: 1.1rem; }
-.voice-log { display: flex; flex-direction: column; gap: .5rem; }
+/* Only the messages scroll; the title, mic and text box stay put. */
+.voice-log { display: flex; flex-direction: column; gap: .5rem; flex: 1 1 auto; min-height: 3rem; overflow-y: auto;
+  overscroll-behavior: contain; }
 .voice-msg { padding: .55rem .8rem; border-radius: 12px; max-width: 92%; }
 .voice-msg.you { align-self: flex-end; background: var(--accent-soft); }
 .voice-msg.dieter { align-self: flex-start; background: #f3ece3; }
@@ -219,6 +223,7 @@
   </div>
 </section>
 
+<script src="{{ asset_url('dieter-actions.js') }}"></script>
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -261,8 +266,9 @@
     div.className = `voice-msg ${who}`;
     div.innerHTML = html;
     log.appendChild(div);
-    div.scrollIntoView({ block: "nearest" });
+    toLatest();
   }
+  function toLatest() { log.scrollTop = log.scrollHeight; }
   async function call(url, body) {
     const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
     const data = await r.json().catch(() => ({}));
@@ -299,6 +305,14 @@
     if ($("voice-decide").hidden === false) call("/thanksgiving/api/command/cancel").catch(() => {});
     $("voice-decide").hidden = true;
     document.dispatchEvent(new CustomEvent("tg:voice-closed"));
+  }
+
+  // An answer can move the screen ("pull up the pie recipe"). The conversation comes along to the next page.
+  function follow(data) {
+    if (!window.DieterActions || !(data.do || []).length) return;
+    DieterActions.run(data.do, { keepChatOn: ["/thanksgiving"], state: {
+      open: true, history, log: log.innerHTML, convo: !!convo, about,
+      decide: !$("voice-decide").hidden, undo: !$("voice-undo-row").hidden } });
   }
 
   function showResult(data) {
@@ -345,6 +359,7 @@
       history.push({ role: "user", content: said });
       showResult(data);
       history.push({ role: "assistant", content: [data.question || data.reply, ...data.changes].join("\n") });
+      follow(data);
     } catch (error) {
       thinking.remove();
       say("dieter", `<span class="voice-problem">${esc(error.message)}</span>`);
@@ -614,6 +629,7 @@
     showResult(data);
     history.push({ role: "assistant", content: [data.question || data.reply, ...data.changes].join("\n") });
     history = history.slice(-12);
+    follow(data);
     const spoken = (data.question || data.reply || "") + (data.can_apply ? " Should I do it?" : "");
     // The AI decided the conversation is over ("thanks, that's all"): close the panel once they've seen the reply.
     speakOut(spoken, () => { if (data.end) setTimeout(close, 1500); });
@@ -709,6 +725,23 @@
       const silentStart = analyser && !heardSpeech && now - started > NO_SPEECH_MS;
       if (paused || silentStart || now - started > MAX_MS) stopListening();
     }, 100);
+  }
+
+  // Dieter just opened this page from the chat: bring the conversation back, where it left off.
+  const resumed = window.DieterActions && DieterActions.resume();
+  if (resumed && resumed.open) {
+    history = Array.isArray(resumed.history) ? resumed.history : [];
+    about = resumed.about || null;
+    log.innerHTML = resumed.log || "";
+    $("voice-hint").hidden = true;
+    $("voice-decide").hidden = !resumed.decide;
+    $("voice-undo-row").hidden = !resumed.undo;
+    document.dispatchEvent(new CustomEvent("tg:voice-opened"));
+    sheet.hidden = false;
+    document.body.classList.add("voice-open");
+    $("voice-open").hidden = true;
+    toLatest();
+    if (resumed.convo && Recognition) startConversation();  // keep listening if we were talking
   }
 })();
 </script>

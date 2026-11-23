@@ -74,6 +74,34 @@ class PieceTests(unittest.TestCase):
             remote.call("demo_fail", {"why": "because"}, {"id": 1})
 
 
+class PageTests(unittest.TestCase):
+    def test_pages_build_safe_addresses(self):
+        from apps.kitchen import nav as kitchen_nav
+        from apps.kitchen.thanksgiving import nav
+        from core.connector.pages import open_page_tool
+
+        pages = {p.name: p for p in nav.PAGES + kitchen_nav.PAGES}
+        self.assertEqual(pages["thanksgiving.dish"].url({"dish_id": 7}), "/thanksgiving/menu/7")
+        timeline = pages["thanksgiving.timeline"]
+        self.assertEqual(timeline.url({}), "/thanksgiving/timeline")
+        self.assertEqual(timeline.url({"day": "2026-11-25"}), "/thanksgiving/timeline#day-2026-11-25")
+        self.assertEqual(timeline.url({"dish_id": 7, "step_id": "dough", "day": "2026-11-23"}),
+                         "/thanksgiving/timeline#task-7-dough")  # the step wins over the day
+        with self.assertRaisesRegex(ToolError, "needs dish_id"):
+            pages["thanksgiving.dish"].url({})
+        for bad in ({"dish_id": "7/../../admin"}, {"dish_id": "x"}):
+            with self.assertRaises(ToolError):
+                pages["thanksgiving.dish"].url(bad)
+        with self.assertRaisesRegex(ToolError, "doesn't take"):
+            pages["kitchen.home"].url({"evil": "1"})
+        tool = open_page_tool([nav.PAGES, kitchen_nav.PAGES])
+        self.assertEqual(tool.handler({"page": "kitchen.recipe", "params": {"recipe_id": 12}}),
+                         {"title": "Recipe", "link": "https://askdieter.ai/apps/recipes/meals/12"})
+        with self.assertRaisesRegex(ToolError, "no page called"):
+            tool.handler({"page": "trainer.week"})
+        self.assertIn("thanksgiving.timeline", tool.schema()["description"])
+
+
 class AgentLoopTests(unittest.TestCase):
     def test_tool_errors_go_back_to_claude_and_the_loop_ends(self):
         from types import SimpleNamespace as NS
@@ -255,7 +283,9 @@ class ConnectorFlowTests(unittest.TestCase):
         self.assertEqual(note.status_code, 202)
         names = {t["name"] for t in self.rpc(token, "tools/list").json()["result"]["tools"]}
         self.assertTrue({"kitchen_get_shopping_list", "kitchen_finish_shopping_list", "thanksgiving_get_plan",
-                         "thanksgiving_finish_trip", "thanksgiving_change_plan"} <= names)
+                         "thanksgiving_finish_trip", "thanksgiving_change_plan", "dieter_open_page"} <= names)
+        link = self.tool(token, "dieter_open_page", page="thanksgiving.shopping")
+        self.assertTrue(link["link"].endswith("/thanksgiving/shopping"))
         self.assertEqual(self.rpc(token, "tools/call", {"name": "music_play"}).json()["error"]["code"], -32602)
         self.assertEqual(self.rpc(token, "nope/nope").json()["error"]["code"], -32601)
         self.assertEqual(self.client.get("/mcp").status_code, 405)

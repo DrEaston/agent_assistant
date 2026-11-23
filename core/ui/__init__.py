@@ -12,6 +12,12 @@ SHELL_DIR = UI_DIR.parent / "shell"
 STATIC_URL = "/static/ui"
 
 
+def asset_url(name):
+    """A shared static file's address with a content hash, so browsers pick up changes (e.g. dieter-actions.js)."""
+    digest = hashlib.sha256((STATIC_DIR / name).read_bytes()).hexdigest()[:10]
+    return f"{STATIC_URL}/{name}?v={digest}"
+
+
 def _css_url():
     # The content hash in the URL lets browsers cache the file forever and still pick up changes.
     digest = hashlib.sha256((STATIC_DIR / "dieter.css").read_bytes()).hexdigest()[:10]

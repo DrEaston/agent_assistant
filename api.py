@@ -163,13 +163,18 @@ app.include_router(shopping.router)
 from apps.kitchen import connector as kitchen_connector  # noqa: E402
 from apps.kitchen.thanksgiving import connector as thanksgiving_connector  # noqa: E402
 from core.connector import oauth as connector_oauth, server as connector_server  # noqa: E402
-from core.connector.tools import RemoteToolSet  # noqa: E402
+from core.connector.pages import open_page_tool  # noqa: E402
+from core.connector.tools import RemoteToolSet, ToolSet  # noqa: E402
+from apps.kitchen import nav as kitchen_nav  # noqa: E402
+from apps.kitchen.thanksgiving import nav as thanksgiving_nav  # noqa: E402
 
 connector_auth = connector_oauth.OAuth(db, lambda user_id: dict(db.get_user_by_id(user_id) or {}) or None)
 CONNECTOR_TOOLSETS = [
     kitchen_connector.tools(),
     RemoteToolSet("thanksgiving", THANKSGIVING_SERVICE_URL, "/thanksgiving/api/connector/tools")
     if THANKSGIVING_SERVICE_URL else thanksgiving_connector.tools(),
+    # Every app's pages (apps/<app>/nav.py): links Claude can hand over. Dieter's own chat opens them instead.
+    ToolSet("dieter", [open_page_tool([kitchen_nav.PAGES, thanksgiving_nav.PAGES])]),
 ]
 
 

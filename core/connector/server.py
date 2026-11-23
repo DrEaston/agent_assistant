@@ -26,6 +26,7 @@ Thanksgiving planner), with more apps to come. Tools act on their real data, as 
   or thanksgiving_finish_trip for the Thanksgiving list) rather than checking it off.
 - Thanksgiving: thanksgiving_get_plan has every dish, step and time. Plan changes go through
   thanksgiving_change_plan; preview first when a change moves several steps.
+- When they want to see something in Dieter (a recipe, a list, a day of the plan), give the link from dieter_open_page.
 - Keep answers short; they're often reading on a phone in a store or kitchen."""
 
 

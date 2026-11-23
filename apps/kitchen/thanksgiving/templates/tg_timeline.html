@@ -9,7 +9,7 @@
   </div>
   {% for day in days %}
   {% set left = day.tasks|rejectattr("done")|list %}
-  <div class="day{% if day.tasks and not left %} all-done{% endif %}">
+  <div class="day{% if day.tasks and not left %} all-done{% endif %}" id="day-{{ day.date }}">
     <div class="day-summary"><strong>{{ day.label }}</strong><span class="muted small">{{ day.subtitle }} · all {{ day.tasks|length }} done</span>
       <button type="button" class="quiet day-show">Show</button></div>
     <div class="day-body">

@@ -21,7 +21,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from starlette.concurrency import run_in_threadpool
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from core import internal
+from core import internal, ui
 from core.connector import agent
 from database import get_current_user_id
 
@@ -38,6 +38,7 @@ _templates = Environment(
     loader=FileSystemLoader(str(Path(__file__).parent / "templates")),
     autoescape=select_autoescape(["html"]),
 )
+_templates.globals["asset_url"] = ui.asset_url  # shared scripts in core/ui/static (served by the main app)
 _state = {"db": None, "store": None}
 
 
@@ -690,7 +691,7 @@ JOB_MAX_AGE = 300
 
 def _empty_answer(**extra):
     answer = {"ignored": False, "reply": "", "question": "", "changes": [], "problems": [], "warnings": [],
-              "can_apply": False, "applied": False, "end": False}
+              "can_apply": False, "applied": False, "end": False, "do": []}  # do: actions for the chat (navigate)
     answer.update(extra)
     return answer
 
@@ -803,10 +804,11 @@ def _finish(ticket):
                                         "hands_free": job["spoken"] or "", "said": job["text"][:500],
                                         "reply": result["reply"], "question": result["question"],
                                         "changes": changes, "problems": problems, "warnings": warnings,
-                                        "applied": applied, "ms": deep_ms, "model": _model_label(job)}))
+                                        "applied": applied, "ms": deep_ms, "model": _model_label(job),
+                                        "opened": [a.get("url") for a in result.get("do") or []]}))
     return _empty_answer(reply=result["reply"], question=result["question"], changes=changes, problems=problems,
                          warnings=warnings, can_apply=bool(actions) and not applied, applied=applied,
-                         end=bool(result.get("end")), tier="deep")
+                         end=bool(result.get("end")), tier="deep", do=result.get("do") or [])
 
 
 def _model_label(job):

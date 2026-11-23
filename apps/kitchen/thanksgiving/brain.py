@@ -8,9 +8,11 @@ list after a trip, using the same tools as the Claude connector (core/connector)
 """
 
 from core.connector import agent
+from core.connector.pages import open_page_tool
 from core.connector.tools import ToolError
 
-from . import connector, voice
+from . import connector, nav, voice
+from .. import nav as kitchen_nav
 
 _ACTIONS = voice.SYSTEM_PROMPT.split("Allowed actions", 1)[1].split("How to think:", 1)[0]
 _THINKING = voice.SYSTEM_PROMPT.split("How to think:", 1)[1]
@@ -32,6 +34,10 @@ The Thanksgiving shopping list: thanksgiving_check_items, thanksgiving_finish_tr
 directly. When they couldn't get something at the store, suggest a swap that store is likely to have, and offer to move
 it to a next-trip list (thanksgiving_finish_trip with next_trip). Kitchen shopping lists (everyday lists, not
 Thanksgiving) use the kitchen_ tools.
+
+Showing things: when they ask to see, open, show or pull up something ("pull up the pie recipe", "show me Wednesday",
+"open my next-trip list"), call dieter_open_page; their screen changes right away and this chat stays open. Say in a
+few words what you opened. Don't open pages they didn't ask for.
 
 How to think:{_THINKING}
 
@@ -73,7 +79,14 @@ def understand(text, summary, history=(), sass="normal", spoken_prompt="", hando
             print(f"Warning: Kitchen tools unavailable: {exc}")
     schemas = [s for s in local.list() if s["name"] in LOCAL_TOOLS] + kitchen_schemas
     tools = agent.api_tools(schemas) + EXTRA_TOOLS + (SPOKEN_TOOLS if spoken_prompt else [])
-    state = {"actions": [], "ignore": False, "end": False}
+    state = {"actions": [], "ignore": False, "end": False, "do": []}
+
+    def opened(url, page):
+        state["do"] = [{"type": "navigate", "url": url, "title": page.title}]  # one page per answer: the last one
+        return f"Opening {page.title} on their screen now."
+
+    open_page = open_page_tool([nav.PAGES, kitchen_nav.PAGES], on_open=opened)
+    tools.append(agent.api_tools([open_page.schema()])[0])
 
     def call_tool(name, args):
         if name == "propose_changes":
@@ -83,6 +96,8 @@ def understand(text, summary, history=(), sass="normal", spoken_prompt="", hando
             _, changes, problems = voice.check(raw, plan, context["dishes"], context["tasks"], context["cooks"])
             state["actions"].extend(raw)
             return {"changes": changes, "problems": problems}
+        if name == open_page.name:
+            return open_page.handler(args)
         if name == "stay_quiet":
             state["ignore"] = True
             return "OK. Say nothing."
@@ -110,4 +125,4 @@ def understand(text, summary, history=(), sass="normal", spoken_prompt="", hando
     if state["ignore"]:
         return {"reply": "", "question": "", "actions": [], "ignore": True, "end": False}
     return {"reply": reply[:800], "question": "", "actions": state["actions"][:15], "ignore": False,
-            "end": bool(spoken_prompt) and state["end"]}
+            "end": bool(spoken_prompt) and state["end"], "do": state["do"]}
