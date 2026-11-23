@@ -455,14 +455,8 @@ def internal_kitchen_recipe(meal_id: int):
     return recipe
 
 
-@app.post("/internal/kitchen/lists")
-async def internal_kitchen_new_list(request: Request):
-    """A new Kitchen shopping list of typed-in lines (Thanksgiving's "Finish trip" → next-trip list)."""
-    from apps.kitchen.thanksgiving.router import local_new_list
-    data = await request.json()
-    title = str(data.get("title") or "Shopping list").strip()[:120] or "Shopping list"
-    lines = [str(line)[:200] for line in (data.get("lines") or [])[:200] if str(line).strip()]
-    return local_new_list(db, title, lines)
+# /internal/kitchen/lists (another app's items on a Kitchen list) lives with the shopping lists:
+# apps/kitchen/shopping/router.py.
 
 
 @app.post("/internal/studio/reports")

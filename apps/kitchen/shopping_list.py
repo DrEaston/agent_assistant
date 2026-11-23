@@ -74,10 +74,13 @@ def item_key(text):
     return f"item-{normalize_key(parsed['item'])}"
 
 
-def build_shopping_list(sources, extras=()):
+def build_shopping_list(sources, extras=(), linked=()):
     """sources: (source name, ingredient text) pairs. extras: [{"id", "text"}] typed-in items.
+    linked: items another app put on the list (core/portable_list.py), as stored: item_key, text, amount, aisle,
+    for, source_label. A linked ingredient that a recipe also needs joins that line.
 
-    Each item: key, text (name), amount (total to buy), parts (per-source amounts), dishes, section, extra_id.
+    Each item: key, text (name), amount (total to buy), parts (per-source amounts), dishes, section, extra_id,
+    linked (source labels of the apps that put it here).
     """
     found = {}
     for source_name, text in sources:
@@ -107,6 +110,21 @@ def build_shopping_list(sources, extras=()):
         key = f"extra-{extra['id']}"
         merged[key] = {"key": key, "text": extra["text"], "dishes": [], "extra_id": extra["id"],
                        "section": aisle_for(extra["text"]), "amount": "", "parts": []}
+    for link in linked:
+        label = link.get("source_label") or "Another app"
+        uses = [f"{name} ({label})" for name in link.get("for") or []] or [label]
+        item = merged.get(link["item_key"])
+        if item:  # a recipe on this list needs it too
+            item["dishes"] = item["dishes"] + uses
+            item["parts"] = item["parts"] + [{"dish": label, "amount": link.get("amount") or ""}]
+            item["amount"] = " + ".join(a for a in (item["amount"], link.get("amount") or "") if a)
+            item.setdefault("linked", []).append(label)
+            continue
+        section = link.get("aisle") if link.get("aisle") in SECTION_ORDER else aisle_for(link["text"])
+        merged[link["item_key"]] = {"key": link["item_key"], "text": link["text"], "extra_id": None,
+                                    "section": section, "amount": link.get("amount") or "", "dishes": uses,
+                                    "parts": [{"dish": label, "amount": link.get("amount") or ""}],
+                                    "linked": [label], "linked_only": True}
     sections = []
     for name in SECTION_ORDER:
         items = sorted((i for i in merged.values() if i["section"] == name), key=lambda i: i["text"].lower())

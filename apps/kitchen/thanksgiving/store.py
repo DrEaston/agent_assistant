@@ -48,6 +48,13 @@ CREATE TABLE IF NOT EXISTS tg_checks (
     checked_at TEXT DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (plan_id, kind, item_key)
 );
+CREATE TABLE IF NOT EXISTS tg_list_links (
+    plan_id INTEGER NOT NULL REFERENCES tg_plans(id) ON DELETE CASCADE,
+    item_key TEXT NOT NULL,
+    list_id INTEGER NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (plan_id, item_key)
+);
 CREATE TABLE IF NOT EXISTS tg_timers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     plan_id INTEGER NOT NULL REFERENCES tg_plans(id) ON DELETE CASCADE,
@@ -346,6 +353,23 @@ class ThanksgivingStore:
                          (plan_id, kind, key))
         else:
             conn.execute("DELETE FROM tg_checks WHERE plan_id = ? AND kind = ? AND item_key = ?", (plan_id, kind, key))
+        self._commit()
+
+    # ---------------------------------------------------------------- items moved to a Kitchen list
+
+    def get_list_links(self, plan_id):
+        """{item key: Kitchen list id} for shopping items moved to a next-trip list (core/portable_list.py)."""
+        rows = self._conn().execute("SELECT item_key, list_id FROM tg_list_links WHERE plan_id = ?",
+                                    (plan_id,)).fetchall()
+        return {row["item_key"]: row["list_id"] for row in rows}
+
+    def set_list_link(self, plan_id, key, list_id):
+        self._conn().execute("INSERT OR REPLACE INTO tg_list_links (plan_id, item_key, list_id) VALUES (?, ?, ?)",
+                             (plan_id, key, int(list_id)))
+        self._commit()
+
+    def delete_list_link(self, plan_id, key):
+        self._conn().execute("DELETE FROM tg_list_links WHERE plan_id = ? AND item_key = ?", (plan_id, key))
         self._commit()
 
     # ---------------------------------------------------------------- timers and alerts (shared across devices)

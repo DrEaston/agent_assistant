@@ -16,6 +16,7 @@ from apps.kitchen import shopping_list
 from apps.kitchen.manifest import APP as KITCHEN_APP
 from core import ui
 
+from . import portable
 from .store import ShoppingStore
 
 router = APIRouter()
@@ -154,7 +155,8 @@ def list_items(grocery_list):
         live_keys = {item["key"] for section in live for item in section["items"]}
         s.convert_legacy(grocery_list, live_keys, shopping_list.item_key)
     extras = s.get_extras(grocery_list["id"])
-    sections = shopping_list.build_shopping_list(sources, extras)
+    linked = s.get_links(grocery_list["id"])  # items another app put here (core/portable_list.py)
+    sections = shopping_list.build_shopping_list(sources, extras, linked)
     checked = s.get_checked(grocery_list["id"])
     buy_keys = [item["key"] for section in sections if section["name"] != shopping_list.PANTRY_CHECK
                 for item in section["items"]]
@@ -297,6 +299,16 @@ def delete_extra(list_id: int, extra_id: int):
     return to_list(list_id, "list")
 
 
+@router.post(BASE + "/{list_id}/linked/remove")
+def remove_linked(list_id: int, key: str = Form(...)):
+    """Take an item another app put here off this list; it goes back on that app's own list."""
+    require_list(list_id)
+    for link in store().get_links(list_id):
+        if link["item_key"] == key:
+            store().remove_link(list_id, link["source_app"], link["source_key"])
+    return to_list(list_id, "list")
+
+
 @router.post(BASE + "/{list_id}/meals/add")
 def add_meal(list_id: int, pick: str = Form("")):
     """pick is "meal:12" (meal plan) or "dish:7:Crust" (a Thanksgiving dish or one part of it)."""
@@ -367,6 +379,42 @@ async def preview(request: Request):
             "sections": [{"name": s["name"], "items": [{"text": i["text"], "amount": i["amount"],
                                                          "dishes": i["dishes"]} for i in s["items"]]}
                          for s in sections]}
+
+
+# ---------------------------------------------------------------- calls from other Dieter apps
+
+# Portable items (core/portable_list.py). /internal/ paths are signed by core/internal.py and checked in
+# api.py's load_authenticated_user, which runs them as the signed-in user.
+
+@router.post("/internal/kitchen/lists")
+async def internal_new_list(request: Request):
+    """A new Kitchen list from another app: portable items (followed and checked from both apps) and/or typed-in
+    lines (the older Thanksgiving "Finish trip" sends lines)."""
+    data = await request.json()
+    lines = [str(line)[:200] for line in (data.get("lines") or [])[:200] if str(line).strip()]
+    try:
+        made = portable.create_list(_state["db"], data.get("title") or "Shopping list", lines,
+                                    data.get("items") or [], data.get("source"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    return {"id": made["id"], "url": made["url"]}
+
+
+@router.get("/internal/kitchen/lists/{list_id}/linked")
+def internal_linked_state(list_id: int, app: str = ""):
+    return portable.linked_state(_state["db"], list_id, app)
+
+
+@router.post("/internal/kitchen/lists/{list_id}/linked/check")
+async def internal_linked_check(request: Request, list_id: int):
+    data = await request.json()
+    return {"ok": portable.check(_state["db"], list_id, data.get("app"), data.get("key"), data.get("done"))}
+
+
+@router.post("/internal/kitchen/lists/{list_id}/linked/remove")
+async def internal_linked_remove(request: Request, list_id: int):
+    data = await request.json()
+    return {"ok": portable.remove(_state["db"], list_id, data.get("app"), data.get("key"))}
 
 
 @router.post(BASE + "/feedback")

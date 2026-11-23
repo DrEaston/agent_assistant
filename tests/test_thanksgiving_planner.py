@@ -536,19 +536,59 @@ class RouteTests(unittest.TestCase):
         list_id = int(re.search(r"trip=(\d+)&n=1", r.headers["location"]).group(1))
         made = ShoppingStore(self.db).get_list(list_id)
         self.assertTrue(made["title"].startswith("Next trip"))
-        self.assertEqual(len(ShoppingStore(self.db).get_extras(list_id)), 1)
+        linked = ShoppingStore(self.db).get_links(list_id)  # a portable item, still tied to Thanksgiving
+        self.assertEqual([(l["source_app"], l["source_key"]) for l in linked], [("thanksgiving", later)])
+        self.assertEqual(ShoppingStore(self.db).get_extras(list_id), [])
         page = self.client.get(r.headers["location"]).text
         self.assertIn("1 item moved to", page)
         self.assertIn(f'href="/apps/recipes/grocery-lists/{list_id}"', page)
         aside = page.split('id="set-aside"')[1]
         self.assertIn("Not buying now (2)", aside)
-        self.assertIn("On a next-trip list", aside)
+        self.assertIn(f'<a href="/apps/recipes/grocery-lists/{list_id}">On your next-trip list</a>', aside)
         self.assertIn("Don't need", aside)
         self.assertNotIn('href="/thanksgiving/shopping/finish"', page)  # nothing left to decide
         self.client.post("/thanksgiving/groceries/put-back", data={"key": skip})
         page = self.client.get("/thanksgiving/shopping").text
         self.assertIn("Not buying now (1)", page)
         self.assertIn(f'name="key" value="{skip}"', page)
+
+    def test_next_trip_items_stay_linked_to_thanksgiving(self):
+        from apps.kitchen.shopping import router as shopping
+        from apps.kitchen.shopping.store import ShoppingStore
+        self.client.get("/thanksgiving")
+        keys = re.findall(r'name="key" value="([^"]+)"', self.client.get("/thanksgiving/shopping").text)
+        milk, herbs = keys[0], keys[1]
+        r = self.client.post("/thanksgiving/shopping/finish", data={f"pick-{milk}": "next", f"pick-{herbs}": "next"},
+                             follow_redirects=False)
+        list_id = int(re.search(r"trip=(\d+)", r.headers["location"]).group(1))
+        page = self.client.get("/thanksgiving/shopping").text
+        self.assertIn(f'<a href="/apps/recipes/grocery-lists/{list_id}">On your next-trip list</a>', page)
+        # On the Kitchen list they're ordinary items, with Thanksgiving's keys and what they're for.
+        self.addCleanup(shopping._state.update, dict(shopping._state))
+        shopping.configure(self.db, meal_sources=lambda ids: [], pending_meals=lambda: [],
+                           component_sources=lambda ids: [])
+        kitchen = shopping.list_items(ShoppingStore(self.db).get_list(list_id))
+        on_list = {i["key"]: i for section in kitchen["sections"] for i in section["items"]}
+        self.assertEqual(set(on_list), {milk, herbs})
+        self.assertEqual(on_list[milk]["linked"], ["Thanksgiving"])
+        # Bought on the Kitchen list: in the cart here too.
+        ShoppingStore(self.db).set_checked(list_id, milk, True)
+        page = self.client.get("/thanksgiving/shopping").text
+        self.assertIn("Not buying now (1)", page)
+        self.assertIn(f'value="{milk}"', page.split('id="in-the-cart"')[1].split('id="set-aside"')[0])
+        # Unchecked here: unchecked on the Kitchen list too, so it's back to waiting on the next trip.
+        self.client.post("/thanksgiving/groceries/toggle", data={"key": milk, "done": ""})
+        self.assertNotIn(milk, ShoppingStore(self.db).get_checked(list_id))
+        self.assertIn("Not buying now (2)", self.client.get("/thanksgiving/shopping").text)
+        # Put back here: off the Kitchen list.
+        self.client.post("/thanksgiving/groceries/put-back", data={"key": herbs})
+        self.assertEqual([l["source_key"] for l in ShoppingStore(self.db).get_links(list_id)], [milk])
+        # The Kitchen list deleted: the item comes back to buy here, not lost.
+        ShoppingStore(self.db).delete_list(list_id)
+        page = self.client.get("/thanksgiving/shopping").text
+        self.assertNotIn('id="set-aside"', page)
+        self.assertIn(f'name="key" value="{milk}"', page)
+        self.assertEqual(tg_router.store().get_list_links(tg_router.store().get_plan()["id"]), {})
 
     def test_finish_trip_keeps_items_if_the_list_cant_be_made(self):
         class Down:

@@ -25,7 +25,27 @@ CREATE TABLE IF NOT EXISTS recipe_grocery_extras (
     text TEXT NOT NULL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS recipe_grocery_links (
+    list_id INTEGER NOT NULL REFERENCES recipe_grocery_lists(id) ON DELETE CASCADE,
+    source_app TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    source_label TEXT DEFAULT '',
+    item_key TEXT NOT NULL,
+    text TEXT NOT NULL,
+    amount TEXT DEFAULT '',
+    aisle TEXT DEFAULT '',
+    for_json TEXT DEFAULT '[]',
+    moved_to INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (list_id, source_app, source_key)
+);
 """
+
+
+def linked_item_key(app, source_key):
+    """The checkmark key a linked item has on a Kitchen list. Ingredient keys are shared ("item-milk"), so the
+    same ingredient from a recipe and from a planner is one line; anything else stays apart per app."""
+    return source_key if source_key.startswith("item-") else f"{app}-{source_key}"
 
 LIVE_FORMAT = 2
 
@@ -122,6 +142,7 @@ class ShoppingStore:
         conn = self._conn()
         conn.execute("DELETE FROM recipe_grocery_checks WHERE list_id = ?", (list_id,))
         conn.execute("DELETE FROM recipe_grocery_extras WHERE list_id = ?", (list_id,))
+        conn.execute("DELETE FROM recipe_grocery_links WHERE list_id = ?", (list_id,))
         conn.execute("DELETE FROM recipe_grocery_lists WHERE id = ?", (list_id,))
         self._commit()
 
@@ -158,6 +179,62 @@ class ShoppingStore:
         conn.execute("DELETE FROM recipe_grocery_checks WHERE list_id = ? AND item_key = ?",
                      (list_id, f"extra-{int(extra_id)}"))
         self._commit()
+
+    # ---------------------------------------------------------------- linked items (core/portable_list.py)
+
+    @staticmethod
+    def _link(row):
+        data = dict(row)
+        try:
+            data["for"] = [str(f) for f in json.loads(data.get("for_json") or "[]")]
+        except (json.JSONDecodeError, TypeError):
+            data["for"] = []
+        return data
+
+    def add_link(self, list_id, source, item):
+        """Put a portable item from another app on this list (replacing that app's earlier copy of it)."""
+        self._conn().execute(
+            """INSERT OR REPLACE INTO recipe_grocery_links
+               (list_id, source_app, source_key, source_label, item_key, text, amount, aisle, for_json, moved_to)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
+            (list_id, source["app"], item["key"], source["label"], linked_item_key(source["app"], item["key"]),
+             item["text"], item["amount"], item["aisle"], json.dumps(item["for"])))
+        self._commit()
+
+    def get_links(self, list_id, include_moved=False):
+        """Linked items on a list. With include_moved, also those carried on to a newer list (moved_to set)."""
+        rows = self._conn().execute(
+            "SELECT * FROM recipe_grocery_links WHERE list_id = ?" + ("" if include_moved else " AND moved_to IS NULL")
+            + " ORDER BY created_at, source_key", (list_id,)).fetchall()
+        return [self._link(r) for r in rows]
+
+    def get_link(self, list_id, app, source_key):
+        row = self._conn().execute(
+            "SELECT * FROM recipe_grocery_links WHERE list_id = ? AND source_app = ? AND source_key = ?",
+            (list_id, app, source_key)).fetchone()
+        return self._link(row) if row else None
+
+    def move_link(self, list_id, app, source_key, new_list_id):
+        """Carry a linked item on to a newer list. The old row remembers where it went, so the app that sent it
+        can still follow it."""
+        link = self.get_link(list_id, app, source_key)
+        if not link:
+            return False
+        self.add_link(new_list_id, {"app": app, "label": link.get("source_label") or ""},
+                      {"key": source_key, "text": link["text"], "amount": link.get("amount") or "",
+                       "aisle": link.get("aisle") or "", "for": link["for"]})
+        self._conn().execute(
+            "UPDATE recipe_grocery_links SET moved_to = ? WHERE list_id = ? AND source_app = ? AND source_key = ?",
+            (new_list_id, list_id, app, source_key))
+        self._commit()
+        return True
+
+    def remove_link(self, list_id, app, source_key):
+        cur = self._conn().execute(
+            "DELETE FROM recipe_grocery_links WHERE list_id = ? AND source_app = ? AND source_key = ?",
+            (list_id, app, source_key))
+        self._commit()
+        return cur.rowcount > 0
 
     # ---------------------------------------------------------------- old snapshot lists
 
