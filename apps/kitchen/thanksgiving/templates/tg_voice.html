@@ -17,6 +17,10 @@
 .voice-fab:hover { border: 0; transform: rotate(-3deg) scale(1.04); }
 .voice-fab:hover .voice-fab-bubble .fill { fill: #9a3412; }
 .voice-fab:active { transform: scale(.96); }
+/* Dieter pinned to the top (tab bar, cook mode's top bar) on every device except the kitchen PC, which keeps the bubble. */
+.voice-top { display: none; position: relative; }
+body.dieter-on-top .voice-top { display: inline-flex; align-items: center; }
+body.dieter-on-top .voice-fab { display: none; }
 /* Phones without the tab bar's Dieter button (cook mode): a small round button instead of the big bubble. */
 @media (max-width: 899px) {
   body:not(.has-top-dieter) .voice-fab { width: 56px; height: 56px; padding: 0; border-radius: 50%;
@@ -428,10 +432,14 @@
   });
   $("voice-form").addEventListener("submit", (event) => { event.preventDefault(); send(text.value); });
   $("voice-open").addEventListener("click", open);
-  // Phones: the small Dieter button in the tab bar (tg_page.html) opens the same chat.
+  // Every device except the kitchen PC: the small Dieter button pinned to the top (the planner's tab bar, cook mode's
+  // top bar) opens the chat, and the corner bubble is hidden. The kitchen PC (cook mode found its helper there,
+  // tg_fullscreen.html) keeps the bubble.
   const topButton = document.getElementById("voice-open-top");
-  if (topButton) {
-    document.body.classList.add("has-top-dieter");
+  let kitchenPc = false;
+  try { kitchenPc = localStorage.getItem("dieter-kitchen-screen") === "1"; } catch (e) {}
+  if (topButton && !kitchenPc) {
+    document.body.classList.add("has-top-dieter", "dieter-on-top");
     topButton.addEventListener("click", open);
   }
   $("voice-close").addEventListener("click", close);

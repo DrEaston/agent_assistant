@@ -10,6 +10,14 @@ body { overflow-x: hidden; }
 .bar-top .spacer { flex: 1; }
 .bar-top a, .bar-top button { color: #fff; background: transparent; border-color: rgba(255,255,255,.25); min-height: 40px; }
 .bar-top button[aria-pressed=true] { background: #fff; color: #2a2118; }
+.bar-top .voice-top { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is still at the bottom of the page */
+@media (max-width: 600px) {  /* phones: one row */
+  .bar-top { gap: .4rem; }
+  .bar-top .sub, .bar-top .long { display: none; }
+  .bar-top .clock { font-size: 1.15rem; }
+  .bar-top a, .bar-top button { padding: .3rem .6rem; }
+}
 .offline { background: #7f1d1d; color: #fff; padding: .4rem 1rem; text-align: center; font-weight: 600; }
 #alerts { position: sticky; top: 64px; z-index: 15; display: flex; flex-direction: column; gap: .5rem; padding: 0 1rem; }
 .alert { background: #fff7ed; border: 2px solid var(--accent); border-radius: 14px; padding: .75rem 1rem;
@@ -77,9 +85,10 @@ body { overflow-x: hidden; }
   <span class="clock" id="clock">--:--</span>
   <span class="sub" id="dinner-label"></span>
   <span class="spacer"></span>
-  <button type="button" id="sleep-btn">🌙 Sleep</button>
-  <a class="button" id="exit-cook" href="/thanksgiving">✕ Exit cook mode</a>
-  <a class="button" href="#report">Report problem</a>
+  <button type="button" id="sleep-btn" aria-label="Sleep">🌙<span class="long"> Sleep</span></button>
+  <a class="button" id="exit-cook" href="/thanksgiving">✕ Exit<span class="long"> cook mode</span></a>
+  <a class="button report-top" href="#report">Report problem</a>
+  <button type="button" class="voice-top" id="voice-open-top" aria-haspopup="dialog" aria-label="Talk to Dieter">🎤 Dieter</button>
 </header>
 <div class="offline" id="offline" hidden>Can't reach Dieter. Retrying… (timers keep counting on this screen)</div>
 <div id="alerts" aria-live="assertive"></div>

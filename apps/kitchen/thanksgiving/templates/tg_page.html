@@ -14,10 +14,7 @@
 .voice-top { display: none; flex: none; align-self: center; min-height: 36px; padding: .3rem .75rem; margin: .4rem 0 .35rem;
   border-radius: 999px; background: var(--accent); border-color: var(--accent); color: #fff; font-size: .9rem;
   position: relative; }
-@media (max-width: 899px) {
-  .voice-top { display: inline-flex; }
-  body.has-top-dieter .voice-fab { display: none; }  /* phones: the small button in the tab bar instead */
-}
+/* Shown on every device except the kitchen PC (tg_voice.html adds body.dieter-on-top), instead of the corner bubble. */
 .tabs a { color: #e7dccd; text-decoration: none; padding: .6rem .9rem; border-radius: 10px 10px 0 0; font-weight: 600; white-space: nowrap; }
 .tabs a:hover { background: rgba(255,255,255,.08); color: #fff; }
 .wrap { padding: 1.25rem 1rem; }
@@ -162,8 +159,8 @@ section { scroll-margin-top: 4rem; margin-bottom: 2rem; }  /* clear of the stick
     </div>
   </div>
 </header>
-{# The tabs stay at the top while you scroll. On phones, Dieter lives here too (small, out of the way), instead of
-   the big bubble in the corner. #}
+{# The tabs stay at the top while you scroll. Dieter lives here too (small, out of the way) on every device except
+   the kitchen PC, which keeps the big bubble in the corner. #}
 <div class="tabs-bar">
   <div class="top-inner tabs-row">
     <nav class="tabs" aria-label="Sections">
