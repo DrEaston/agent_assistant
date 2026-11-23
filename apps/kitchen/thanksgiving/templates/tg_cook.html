@@ -201,6 +201,7 @@ body { overflow-x: hidden; }
         <div><div class="s-when">${esc(s.day)} · ${esc(s.clock)}${s.minutes ? ` · ${s.minutes} min` : ""}${s.temp ? ` · ${s.temp}°F` : ""} ${isDone(s) ? "" : `· <span class="${s.start_ms < t && !due ? "late" : ""}">${esc(rel(s.start_ms))}</span>`}</div>
           <div class="s-title">${esc(s.title)} ${s.cook && s.cook !== dish.cook ? pill(s.cook) : ""}</div>
           ${s.detail ? `<div class="small muted">${esc(s.detail)}</div>` : ""}
+          ${(s.series || []).length && !isDone(s) ? `<button type="button" class="series-btn" data-series="${esc(s.key)}">⏱ ${esc(s.series_button || "Start timers")}</button>` : ""}
           ${stepRecipe(dish, s)}
         </div></li>`;
     }).join("");
@@ -343,6 +344,17 @@ body { overflow-x: hidden; }
       filter = el.dataset.cook; safeSet("tg-cook", filter); renderFilter(); renderAll(true);
     } else if (el.dataset.dish) {
       selected = Number(el.dataset.dish); safeSet("tg-dish", selected); renderAll(true); window.scrollTo({ top: 0 });
+    } else if (el.dataset.series) {
+      // A step's run of timers (presets.with_timers), e.g. six stretch and folds: one tap, chimes on every screen.
+      const step = allSteps().find(s => s.key === el.dataset.series);
+      const dish = state.dishes.find(d => d.steps.some(s => s.key === el.dataset.series));
+      if (!step || !dish) return;
+      for (const [minutes, label] of step.series) {
+        state.timers.push({ id: -Date.now() - minutes, dish_id: dish.id, label, ends_ms: now() + minutes * 60000 });
+        act(() => post("/thanksgiving/api/timers", { dish_id: dish.id, label, minutes }));
+      }
+      el.disabled = true; el.textContent = "⏱ Timers running";
+      renderAll();
     } else if (el.dataset.goto) {
       selected = Number(el.dataset.goto); safeSet("tg-dish", selected); renderAll(true); window.scrollTo({ top: 0 });
     } else if (el.dataset.done) {

@@ -184,6 +184,8 @@ def build_timeline(plan, dishes, cooks=()):
                 "cook": (step.get("cook") or dish.get("cook") or "").strip(),
                 "anchor": step.get("anchor"),
                 "section": step.get("section") or "",
+                "series": step.get("series") or [],  # [[minutes after starting, label], ...]: a run of timers
+                "series_button": step.get("series_button") or "",  # e.g. "Start fold timers"
             })
     tasks.sort(key=lambda t: (t["start"], t["end"], t["dish_name"], t["title"]))
     return tasks

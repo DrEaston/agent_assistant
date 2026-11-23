@@ -68,6 +68,21 @@ class MenuTimelineTests(unittest.TestCase):
         bread_done = find(self.tasks, "Sourdough", "bake2")["end"]
         self.assertGreaterEqual(find(self.tasks, "pie", "blind1")["start"], bread_done)
 
+    def test_two_loaves_one_fold_step_with_timers(self):
+        plain = [t for t in self.tasks if t["dish_name"] == "Sourdough"]
+        self.assertFalse([t for t in plain if t["step_id"].startswith("fold") and t["step_id"] != "folds"])
+        folds = find(self.tasks, "Sourdough", "folds")
+        self.assertEqual([m for m, _ in folds["series"]], [15, 30, 45, 60, 90, 120])
+        self.assertEqual(folds["series_button"], "Start fold timers")
+        olive = preset_dish("olive_sourdough")
+        self.assertEqual(olive["category"], "bread")
+        self.assertIn("330 g water", olive["ingredients_text"])
+        self.assertIn("rosemary", olive["ingredients_text"])
+        self.assertIn("olives", olive["ingredients_text"])
+        # The olive loaf is out of the oven before the plain loaf's preheat
+        self.assertLessEqual(find(self.tasks, "Olive", "bake2")["end"], find(self.tasks, "Sourdough", "preheat")["start"])
+        self.assertEqual(find(self.tasks, "Olive", "folds")["series"], folds["series"])
+
     def test_our_menu_has_no_oven_clashes(self):
         self.assertEqual(planner.find_conflicts(self.tasks, ovens=1), [])
 
@@ -311,8 +326,12 @@ class RouteTests(unittest.TestCase):
         self.assertIn("Dinner at 4<", card)
         self.assertIn("Guests welcome at 3", card)
         courses = re.findall(r'class="course-name">([^<]+)<', card)
-        self.assertEqual(courses, ["Before dinner", "To begin", "The main course", "Alongside", "To finish"])
-        before = card.split('course-name">Before dinner')[1].split('course-name">To begin')[0]
+        self.assertEqual(courses, ["Before dinner", "The main course", "Alongside", "Bread", "To finish"])
+        bread = card.split('course-name">Bread')[1].split('course-name">To finish')[0]
+        self.assertIn("A naturally leavened loaf from our own starter", bread)  # the plain loaf
+        self.assertIn("Olive and rosemary sourdough", bread)
+        self.assertIn("Our sourdough with olives and fresh rosemary", bread)
+        before = card.split('course-name">Before dinner')[1].split('course-name">The main course')[0]
         for name in ("Charcuterie board", "Fresh veggies", "Pigs in a blanket"):
             self.assertIn(name, before)
         self.assertIn("Thinly sliced potatoes baked in cream", card)  # scalloped, not the whipped potatoes' blurb
@@ -622,6 +641,77 @@ class RouteTests(unittest.TestCase):
         tg_router.configure(self.db)  # a second restart adds nothing twice
         names = [d["name"] for d in tg_router.store().get_dishes(plan["id"])]
         self.assertEqual(names.count("Pigs in a blanket"), 1)
+
+    def test_saved_sourdough_gets_one_fold_step_and_the_olive_loaf_once(self):
+        from apps.kitchen.thanksgiving import presets
+        self.client.get("/thanksgiving")
+        plan = tg_router.store().get_plan()
+        conn = self.db.connect()
+        row = conn.execute("SELECT id, steps_json FROM tg_dishes WHERE name = 'Sourdough'").fetchone()
+        steps = [s for s in json.loads(row["steps_json"]) if s["id"] != "folds"]
+        old_folds = [presets._s(f"fold{i}", f"D-2 {t}", f"Stretch and fold ({i} of 6)", 3)
+                     for i, t in enumerate(("18:15", "18:30", "18:45", "19:00", "19:30", "20:00"), start=1)]
+        at = next(i for i, s in enumerate(steps) if s["id"] == "mix") + 1
+        steps[at:at] = old_folds
+        old_text = presets.SOURDOUGH_INSTRUCTIONS.replace(
+            "Stretch and folds, 6 sets over 2 hours: every 15 minutes for the first hour, then every 30 minutes. "
+            "In cook mode, Start fold timers chimes for each set.",
+            "Stretch and fold every 15 minutes for 1 hour (4 sets).\nTwo more stretch and folds over the next hour.")
+        conn.execute("UPDATE tg_dishes SET steps_json = ?, instructions_text = ? WHERE id = ?",
+                     (json.dumps(steps), old_text, row["id"]))
+        conn.execute("DELETE FROM tg_dishes WHERE name = 'Olive and rosemary sourdough'")
+        conn.execute("DELETE FROM tg_checks WHERE kind = 'migration' AND item_key IN "
+                     "('sourdough-fold-timers', 'add-olive-sourdough')")
+        conn.commit()
+        tg_router.configure(self.db)  # restart
+        dishes = {d["name"]: d for d in tg_router.store().get_dishes(plan["id"])}
+        sourdough = dishes["Sourdough"]
+        ids = [s["id"] for s in sourdough["steps"]]
+        self.assertNotIn("fold1", ids)
+        self.assertEqual(ids.count("folds"), 1)
+        folds = next(s for s in sourdough["steps"] if s["id"] == "folds")
+        self.assertEqual((folds["anchor"], len(folds["series"])), ("D-2 18:05", 6))
+        self.assertIn("Start fold timers chimes", sourdough["instructions_text"])
+        self.assertIn("Olive and rosemary sourdough", dishes)
+        tg_router.configure(self.db)  # a second restart changes nothing
+        names = [d["name"] for d in tg_router.store().get_dishes(plan["id"])]
+        self.assertEqual(names.count("Olive and rosemary sourdough"), 1)
+
+    def test_step_timers_survive_editing_and_start_from_cook_mode_or_dieter(self):
+        self.client.get("/thanksgiving")
+        plan = tg_router.store().get_plan()
+        sourdough = next(d for d in tg_router.store().get_dishes(plan["id"]) if d["name"] == "Sourdough")
+        state = self.client.get("/thanksgiving/api/state").json()
+        folds = next(s for d in state["dishes"] if d["id"] == sourdough["id"] for s in d["steps"] if s["key"].endswith(":folds"))
+        self.assertEqual((len(folds["series"]), folds["series_button"]), (6, "Start fold timers"))
+        cook = self.client.get("/thanksgiving/cook").text
+        self.assertIn("data-series=", cook)
+        # Saving the dish in the editor keeps the timers (they aren't on the form)
+        page = self.client.get(f"/thanksgiving/menu/{sourdough['id']}").text
+        form = {"name": "Sourdough", "category": "bread", "ingredients_text": sourdough["ingredients_text"],
+                "instructions_text": sourdough["instructions_text"], "notes": sourdough["notes"]}
+        fields = []
+        for step in sourdough["steps"]:
+            fields += [("step_id", step["id"]), ("step_title", step["title"]), ("step_day", "0"), ("step_time", "12:00"),
+                       ("step_minutes", str(step["minutes"])), ("step_kind", step["kind"]), ("step_temp", str(step["temp"])),
+                       ("step_detail", step["detail"])]
+        from urllib.parse import urlencode
+        self.client.post(f"/thanksgiving/dishes/{sourdough['id']}/save", content=urlencode(list(form.items()) + fields),
+                         headers={"Content-Type": "application/x-www-form-urlencoded"})
+        saved = next(s for s in tg_router.store().get_dish(plan["id"], sourdough["id"])["steps"] if s["id"] == "folds")
+        self.assertEqual(len(saved["series"]), 6)
+        self.assertEqual(saved["series_button"], "Start fold timers")
+        # Dieter can start them too
+        from apps.kitchen.thanksgiving import connector
+        tools = connector.tools()
+        started = tools.call("thanksgiving_start_step_timers", {"dish": "Sourdough"})
+        self.assertEqual([t["label"] for t in started["started"]][:2], ["Stretch and fold 1 of 6", "Stretch and fold 2 of 6"])
+        tools.call("thanksgiving_start_timer", {"label": "potatoes", "minutes": 20})
+        labels = [t["label"] for t in self.client.get("/thanksgiving/api/state").json()["timers"]]
+        self.assertEqual(len(labels), 7)
+        self.assertIn("potatoes", labels)
+        with self.assertRaisesRegex(Exception, "no step with timers"):
+            tools.call("thanksgiving_start_step_timers", {"dish": "Gravy"})
 
     def test_saved_mac_gets_goat_cheese_swap_on_restart(self):
         from apps.kitchen.thanksgiving import presets

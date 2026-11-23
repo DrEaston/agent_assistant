@@ -4,9 +4,9 @@
  "address": "4130 W Park Ave, Chandler AZ 85226",
  "courses": [
   {"key": "appetizer", "name": "Before dinner"},
-  {"key": "bread", "name": "To begin"},
   {"key": "turkey", "name": "The main course"},
   {"key": "side", "name": "Alongside"},
+  {"key": "bread", "name": "Bread"},
   {"key": "dessert", "name": "To finish"},
   {"key": "other", "name": "And also"}
  ],
@@ -23,6 +23,7 @@
   {"match": ["stuffing", "dressing"], "description": "Herbed bread with onion, celery and butter"},
   {"match": ["mac and cheese", "macaroni"], "description": "Sharp cheddar, Gruyère and goat cheese, Little Smokies, buttered panko"},
   {"match": ["green bean"], "description": "The classic, under crispy fried onions"},
+  {"match": ["olive"], "description": "Our sourdough with olives and fresh rosemary"},
   {"match": ["sourdough", "bread", "rolls", "loaf"], "description": "A naturally leavened loaf from our own starter"},
   {"match": ["pumpkin pie"], "description": "Spiced pumpkin custard in an all-butter crust, with softly whipped cream"}
  ]

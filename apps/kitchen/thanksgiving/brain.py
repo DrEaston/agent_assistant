@@ -44,7 +44,8 @@ How to think:{_THINKING}
 Your reply: 1-3 short sentences of plain text, no markdown or lists (it may be read aloud)."""
 
 LOCAL_TOOLS = ("thanksgiving_get_dish", "thanksgiving_get_shopping_list", "thanksgiving_check_items",
-               "thanksgiving_finish_trip", "thanksgiving_put_back")
+               "thanksgiving_finish_trip", "thanksgiving_put_back", "thanksgiving_start_timer",
+               "thanksgiving_start_step_timers")
 
 EXTRA_TOOLS = [
     {"name": "propose_changes", "description": "Change the Thanksgiving plan (actions as described in the system "

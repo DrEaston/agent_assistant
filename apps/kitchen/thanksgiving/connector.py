@@ -128,6 +128,35 @@ def finish_trip(args):
     return answer
 
 
+def _start(plan, dish_id, label, minutes):
+    import time as _time
+
+    minutes = max(1, min(int(minutes), 24 * 60))
+    _r().store().add_timer(plan["id"], dish_id, str(label)[:120], int(_time.time() * 1000) + minutes * 60_000)
+    return {"label": label, "minutes": minutes}
+
+
+def start_timer(args):
+    plan, _ = _plan()
+    try:
+        minutes = int(float(args.get("minutes")))
+    except (TypeError, ValueError):
+        raise ToolError("How many minutes?") from None
+    label = " ".join(str(args.get("label") or "Timer").split())[:80] or "Timer"
+    return {"started": [_start(plan, None, label, minutes)], "note": "It shows and chimes in cook mode on every screen."}
+
+
+def start_step_timers(args):
+    plan, ctx = _plan()
+    dish = get_dish({"dish": args.get("dish")})
+    task = next((t for t in ctx["tasks"] if t["dish_id"] == dish["id"] and t.get("series")
+                 and (not args.get("step_id") or t["step_id"] == args.get("step_id"))), None)
+    if not task:
+        raise ToolError(f"{dish['name']} has no step with timers to start. Use thanksgiving_start_timer instead.")
+    started = [_start(plan, dish["id"], label, minutes) for minutes, label in task["series"]]
+    return {"step": task["title"], "started": started, "note": "They show and chime in cook mode on every screen."}
+
+
 def put_back(args):
     plan, ctx = _plan()
     for key in _keys(args, ctx):
@@ -208,6 +237,14 @@ def tools():
              {"got": STRINGS, "dont_need": STRINGS, "next_trip": STRINGS}),
         Tool("thanksgiving_put_back", "Put items back on the Thanksgiving list",
              "Undo next-trip or don't-need for these items (next-trip items come off the Kitchen list).", put_back, keys, ("keys",)),
+        Tool("thanksgiving_start_timer", "Start a timer",
+             "Start one kitchen timer, e.g. {\"label\": \"potatoes\", \"minutes\": 20}. It shows and chimes in cook "
+             "mode on every screen.", start_timer,
+             {"label": {"type": "string"}, "minutes": {"type": "number"}}, ("minutes",)),
+        Tool("thanksgiving_start_step_timers", "Start a step's timers",
+             "Start the run of timers a step comes with (e.g. the sourdough's six stretch and folds). Give the dish, "
+             "and step_id if the dish has more than one such step.", start_step_timers,
+             {"dish": {"type": "string"}, "step_id": {"type": "string"}}, ("dish",)),
         Tool("thanksgiving_change_plan", "Change the Thanksgiving plan", CHANGE_HELP, change_plan,
              {"actions": {"type": "array", "items": {"type": "object"}}, "preview": {"type": "boolean"}},
              ("actions",)),

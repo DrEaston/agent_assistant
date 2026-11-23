@@ -72,6 +72,16 @@ CREATE TABLE IF NOT EXISTS tg_alerts (
 );
 """
 
+def _minus_minutes(anchor, minutes):
+    """"D-2 18:15" minus 10 -> "D-2 18:05" (same day; the fold step starts right after mixing)."""
+    import re as _re
+    match = _re.fullmatch(r"(D-\d+) (\d\d):(\d\d)", anchor or "")
+    if not match:
+        return anchor
+    total = max(int(match.group(2)) * 60 + int(match.group(3)) - minutes, 0)
+    return f"{match.group(1)} {total // 60:02d}:{total % 60:02d}"
+
+
 CATEGORY_ORDER = ("prep", "appetizer", "turkey", "side", "bread", "dessert", "other")
 
 
@@ -158,7 +168,7 @@ class ThanksgivingStore:
 
     def _update_saved_dishes(self, conn):
         """One-time changes to dishes already in a plan (each runs once per plan; your later edits stay)."""
-        from .presets import WHIPPED_CREAM_INGREDIENTS, WHIPPED_CREAM_INSTRUCTIONS, whipped_cream_step
+        from .presets import WHIPPED_CREAM_INGREDIENTS, WHIPPED_CREAM_INSTRUCTIONS, fold_step, whipped_cream_step
 
         def once(plan_id, marker):
             done = conn.execute("SELECT 1 FROM tg_checks WHERE plan_id = ? AND kind = 'migration' AND item_key = ?",
@@ -228,6 +238,28 @@ class ThanksgivingStore:
                     conn.execute("UPDATE tg_dishes SET ingredients_text = ? WHERE id = ?", (text, row["id"]))
                 conn.execute("UPDATE tg_dishes SET scale = 2.0 WHERE plan_id = ? AND name = 'Pumpkin pie' AND scale = 1",
                              (plan_id,))
+            if once(plan_id, "sourdough-fold-timers"):
+                # Six "Stretch and fold (n of 6)" rows become one step whose Start fold timers sets them all.
+                changed = True
+                for row in conn.execute("SELECT * FROM tg_dishes WHERE plan_id = ? AND name = 'Sourdough'",
+                                        (plan_id,)).fetchall():
+                    try:
+                        steps = json.loads(row["steps_json"] or "[]")
+                    except json.JSONDecodeError:
+                        continue
+                    folds = [s for s in steps if str(s.get("id", "")).startswith("fold")]
+                    if not folds or any(s.get("id") == "folds" for s in steps):
+                        continue
+                    first = steps.index(folds[0])
+                    kept = [s for s in steps if s not in folds]
+                    kept.insert(first, fold_step(anchor=folds[0].get("anchor") or "D-2 18:15"))
+                    kept[first]["anchor"] = _minus_minutes(folds[0].get("anchor") or "D-2 18:15", 10)
+                    instructions = (row["instructions_text"] or "").replace(
+                        "Stretch and fold every 15 minutes for 1 hour (4 sets).\nTwo more stretch and folds over the next hour.",
+                        "Stretch and folds, 6 sets over 2 hours: every 15 minutes for the first hour, then every 30 minutes. "
+                        "In cook mode, Start fold timers chimes for each set.")
+                    conn.execute("UPDATE tg_dishes SET steps_json = ?, instructions_text = ? WHERE id = ?",
+                                 (json.dumps(kept), instructions, row["id"]))
         return changed
 
     def _commit(self):

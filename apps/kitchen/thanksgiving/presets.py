@@ -92,8 +92,7 @@ SOURDOUGH_INGREDIENTS = """440 g flour
 rice flour for dusting"""
 
 SOURDOUGH_INSTRUCTIONS = """Mix flour, starter, water, and salt in the mixer.
-Stretch and fold every 15 minutes for 1 hour (4 sets).
-Two more stretch and folds over the next hour.
+Stretch and folds, 6 sets over 2 hours: every 15 minutes for the first hour, then every 30 minutes. In cook mode, Start fold timers chimes for each set.
 Cold shape: turn onto the counter, fold into a round with the bench scraper, drag toward you to tighten the surface. Place seam-side up in a towel-lined bowl dusted with rice flour. Cover and refrigerate overnight.
 Next morning: preheat the Dutch oven at 500°F for 45 to 60 minutes.
 Poke test: a floured fingertip dent should spring back slowly. If it springs back right away, give it 30 to 45 minutes on the counter.
@@ -212,18 +211,34 @@ Reduce to 350°F and bake 40 to 50 minutes, until the edges are set and the cent
 Cool on a rack about 2 hours, then refrigerate loosely covered. Serve with whipped cream."""
 
 
+def with_timers(step, button, timers):
+    """Give a step a run of timers that start with one tap (cook mode's button, or asking Dieter):
+    timers = [(minutes after starting, label), ...]. Any recipe can use it: folds, basting, checking a roast."""
+    step["series"] = [[int(minutes), str(label)] for minutes, label in timers]
+    step["series_button"] = button
+    return step
+
+
+# Stretch and folds: one step instead of six, with a chiming timer for each set.
+FOLD_TIMERS = [(15, "Stretch and fold 1 of 6"), (30, "Stretch and fold 2 of 6"), (45, "Stretch and fold 3 of 6"),
+               (60, "Stretch and fold 4 of 6"), (90, "Stretch and fold 5 of 6"), (120, "Stretch and fold 6 of 6")]
+
+
+def fold_step(step_id="folds", anchor="D-2 18:00", detail=""):
+    step = _s(step_id, anchor, "Stretch and folds: 6 sets over 2 hours", 120, "passive",
+              detail=detail or "Every 15 minutes for the first hour, then every 30. Tap Start fold timers after mixing.")
+    return with_timers(step, "Start fold timers", FOLD_TIMERS)
+
+
 def _sourdough_steps():
     steps = [
         _s("feed1", "D-3 21:00", "Starter out of the fridge: discard and feed", 5,
            detail="Leave it on the counter overnight."),
         _s("feed2", "D-2 09:00", "Feed the starter again", 5, detail="It should peak around 6 PM."),
         _s("mix", "D-2 18:00", "Mix the sourdough in the mixer", 15),
+        fold_step(anchor="D-2 18:05"),
     ]
-    for i, time in enumerate(("18:15", "18:30", "18:45", "19:00"), start=1):
-        steps.append(_s(f"fold{i}", f"D-2 {time}", f"Stretch and fold ({i} of 6)", 3))
     steps += [
-        _s("fold5", "D-2 19:30", "Stretch and fold (5 of 6)", 3),
-        _s("fold6", "D-2 20:00", "Stretch and fold (6 of 6)", 3),
         _s("shape", "D-2 20:05", "Cold shape and refrigerate overnight", 10,
            detail="Seam-side up in a rice-floured, towel-lined bowl. Cover."),
         _s("preheat", "D-1 09:00", "Dutch oven in, preheat to 500°F", 55, "oven", 500),
@@ -380,17 +395,18 @@ SIMPLE_SIDES = {
 }
 
 OUR_MENU = ("house", "charcuterie", "veggies", "pigs", "turkey", "potatoes", "gravy", "stuffing", "mac",
-            "green_beans_janice", "scalloped_janice", "onions_janice", "cranberry", "sourdough", "pie")
+            "green_beans_janice", "scalloped_janice", "onions_janice", "cranberry", "sourdough", "olive_sourdough", "pie")
 
 # Dishes added to the menu after plans already existed: (migration key, preset key).
 LATER_ADDITIONS = (("add-mac", "mac"), ("add-green-beans-janice", "green_beans_janice"), ("add-cranberry", "cranberry"),
                    ("add-charcuterie", "charcuterie"), ("add-veggies", "veggies"), ("add-pigs", "pigs"),
-                   ("add-scalloped-janice", "scalloped_janice"), ("add-onions-janice", "onions_janice"))
+                   ("add-scalloped-janice", "scalloped_janice"), ("add-onions-janice", "onions_janice"),
+                   ("add-olive-sourdough", "olive_sourdough"))
 
 PRESET_BUTTONS = (
     ("turkey", "Turkey"), ("potatoes", "Mashed potatoes"), ("gravy", "Gravy"), ("stuffing", "Stuffing"),
     ("mac", "Mac and cheese"), ("pigs", "Pigs in a blanket"),
-    ("sourdough", "Sourdough"), ("pie", "Pumpkin pie"), ("green_beans", "Green beans"),
+    ("sourdough", "Sourdough"), ("olive_sourdough", "Olive sourdough"), ("pie", "Pumpkin pie"), ("green_beans", "Green beans"),
     ("cranberry", "Cranberry sauce"), ("rolls", "Rolls"), ("brussels", "Brussels sprouts"),
     ("salad", "Salad"), ("house", "House prep"),
 )
@@ -514,11 +530,57 @@ def janice_onions_dish():
     ])
 
 
+OLIVE_INGREDIENTS = """440 g flour
+90 g active starter
+330 g water
+9 g salt
+120 g pitted Kalamata or Castelvetrano olives, roughly chopped
+2 tbsp fresh rosemary, finely chopped
+rice flour for dusting"""
+
+OLIVE_INSTRUCTIONS = """Pat the chopped olives very dry with paper towels; wet olives make a slack dough.
+Mix flour, starter, water, salt, and rosemary in the mixer. 330 g water, not 350: the olives add moisture.
+Stretch and folds, 6 sets over 2 hours, with the plain loaf. On the first set, scatter the olives over the dough and fold them in.
+Cold shape: turn onto the counter, fold into a round with the bench scraper, drag toward you to tighten the surface. Tuck any olives poking out underneath so they don't burn. Seam-side up in a rice-floured, towel-lined bowl. Cover and refrigerate overnight.
+Next morning: preheat the Dutch oven at 500°F for 45 to 60 minutes.
+Poke test: a floured fingertip dent should spring back slowly.
+Flip straight from the fridge onto parchment, dust, score, and lower in with the parchment sling.
+Bake 25 minutes at 500°F with the lid on.
+Lid off, 450°F, 15 minutes (205 to 210°F inside).
+Cool at least 1 hour before slicing."""
+
+
+def _olive_steps():
+    # Mixed with the plain loaf Tuesday evening; baked first Wednesday, done before the plain loaf's 9:00 preheat.
+    return [
+        _s("starter", "D-2 09:00", "Feed enough starter for both loaves", 2, "check",
+           detail="Two loaves need 180 g active starter at 6 PM. Feed a bit more than usual."),
+        _s("mix", "D-2 18:10", "Mix the olive loaf (rosemary in, olives patted dry)", 10),
+        fold_step(anchor="D-2 18:15", detail="Fold the olives in on the first set, then fold this dough with the "
+                                              "plain loaf each time the fold timers chime."),
+        _s("shape", "D-2 20:15", "Cold shape the olive loaf and refrigerate overnight", 10,
+           detail="Tuck stray olives underneath. Seam-side up in a rice-floured, towel-lined bowl."),
+        _s("preheat", "D-1 07:00", "Dutch oven in, preheat to 500°F", 55, "oven", 500),
+        _s("poke", "D-1 07:55", "Poke test the olive loaf", 5, "check"),
+        _s("bake1", "D-1 08:00", "Score and bake the olive loaf, lid ON", 25, "oven", 500),
+        _s("bake2", "D-1 08:25", "Lid OFF, oven to 450°F", 15, "oven", 450),
+        _s("cool", "D-1 08:40", "Cool the olive loaf", 60, "passive", detail="At least 1 hour before slicing."),
+        # After the mac and cheese and green beans come out (3:50), so the oven never holds more than three.
+        _s("recrisp", "T-10", "Re-crisp the olive loaf", 10, "oven", 400),
+    ]
+
+
+def olive_dish():
+    return _dish("Olive and rosemary sourdough", "bread", OLIVE_INGREDIENTS, OLIVE_INSTRUCTIONS, _olive_steps(),
+                 notes="The plain sourdough plus olives and rosemary, with a little less water.")
+
+
 LATER_DISHES = {
     "charcuterie": lambda: _parrisa_dish("Charcuterie board", "Set out the charcuterie board", 15,
                                          "Parrisa is putting it together."),
     "veggies": lambda: _parrisa_dish("Fresh veggies", "Set out the fresh veggies", 10, "Parrisa is putting it together."),
     "pigs": pigs_dish,
+    "olive_sourdough": olive_dish,
     "scalloped_janice": janice_scalloped_dish,
     "onions_janice": janice_onions_dish,
 }
