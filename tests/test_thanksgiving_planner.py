@@ -923,7 +923,7 @@ class RouteTests(unittest.TestCase):
         self.claude_with()
         self.assertEqual(tg_router._brain_for({"brain": "claude"}), "claude")
         self.assertEqual(tg_router._brain_for({"brain": "classic"}), "classic")
-        self.assertEqual(tg_router._brain_for({}), "classic")
+        self.assertEqual(tg_router._brain_for({}), "claude")  # Claude is the default once there is a key
 
     def test_voice_moves_dinner_and_undo_restores_it(self):
         self.client.get("/thanksgiving")

@@ -842,9 +842,9 @@ async def _answer_request(data, spoken=""):
 
 
 def _brain_for(data):
-    """"claude" or "classic" (OpenAI): the device's choice (This device → Brain), else DIETER_BRAIN, else classic.
+    """"claude" or "classic" (OpenAI): the device's choice (This device → Brain), else DIETER_BRAIN, else claude.
     Claude needs ANTHROPIC_API_KEY; without it every device stays on classic."""
-    choice = data.get("brain") if data.get("brain") in ("claude", "classic") else os.getenv("DIETER_BRAIN", "classic")
+    choice = data.get("brain") if data.get("brain") in ("claude", "classic") else os.getenv("DIETER_BRAIN", "claude")
     if choice == "claude" and not (_state.get("claude_call") or agent.available()):
         return "classic"
     return choice if choice in ("claude", "classic") else "classic"

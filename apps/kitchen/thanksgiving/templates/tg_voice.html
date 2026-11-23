@@ -197,7 +197,7 @@
       <button type="submit">Send</button>
     </form>
     <details class="voice-device">
-      <summary>This device: <span id="voice-device-label">unnamed</span> · Sass: <span id="voice-sass-label">Normal</span> · Brain: <span id="voice-brain-label">Classic</span></summary>
+      <summary>This device: <span id="voice-device-label">unnamed</span> · Sass: <span id="voice-sass-label">Normal</span> · Brain: <span id="voice-brain-label">Claude</span></summary>
       <div class="voice-device-form">
         <label>Name <input type="text" id="voice-device-name" maxlength="40" placeholder="Kitchen tablet"></label>
         <label>Sass
@@ -209,8 +209,8 @@
         </label>
         <label>Brain
           <select id="voice-brain">
-            <option value="classic">Classic</option>
-            <option value="claude">Claude (new)</option>
+            <option value="claude">Claude</option>
+            <option value="classic">Classic (old)</option>
           </select>
         </label>
         <button type="button" id="voice-device-save">Save on this device</button>
@@ -228,7 +228,7 @@
 
   // "This device": a name and sass level saved only on this device and sent with every command.
   const SASS_NAMES = { normal: "Normal", extra: "Extra", super: "Super" };
-  const BRAIN_NAMES = { classic: "Classic", claude: "Claude (new)" };
+  const BRAIN_NAMES = { claude: "Claude", classic: "Classic (old)" };
   function loadDevice() {
     try { return JSON.parse(localStorage.getItem("tg-voice-device") || "{}"); } catch (e) { return {}; }
   }
@@ -238,8 +238,8 @@
     $("voice-sass-label").textContent = SASS_NAMES[d.sass] || "Normal";
     $("voice-device-name").value = d.name || "";
     $("voice-sass").value = SASS_NAMES[d.sass] ? d.sass : "normal";
-    $("voice-brain-label").textContent = BRAIN_NAMES[d.brain] || "Classic";
-    $("voice-brain").value = BRAIN_NAMES[d.brain] ? d.brain : "classic";
+    $("voice-brain-label").textContent = BRAIN_NAMES[d.brain] || "Claude";
+    $("voice-brain").value = BRAIN_NAMES[d.brain] ? d.brain : "claude";
   }
   $("voice-device-save").addEventListener("click", () => {
     const d = { name: $("voice-device-name").value.trim().slice(0, 40), sass: $("voice-sass").value,
