@@ -86,6 +86,13 @@ class MainDatabaseReadyTests(unittest.TestCase):
         storage.fail = False
         self.assertEqual(self.client.get("/login").status_code, 200)  # the next request tries again
 
+    def test_stopping_the_app_uploads_a_final_backup(self):
+        storage = self.cloud(FakeStorage())
+        with TestClient(self.api.app) as client:  # leaving the block stops the app, as Cloud Run does
+            self.assertEqual(client.get("/login").status_code, 200)
+            self.assertNotIn("flush", storage.events)
+        self.assertIn("flush", storage.events)
+
 
 if __name__ == "__main__":
     unittest.main()
