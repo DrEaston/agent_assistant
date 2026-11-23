@@ -19,7 +19,7 @@ class MusicModuleTests(unittest.TestCase):
         self.assertIn("/apps/music/playlists/spotify/callback", paths)
         served = {getattr(r, "path", "") for r in api.app.routes}
         self.assertEqual(paths - served, set(), f"not served: {sorted(paths - served)}; served types: "
-                         f"{sorted({type(r).__name__ for r in api.app.routes})}")
+                         f"{[(type(r).__mro__, {k: repr(v)[:200] for k, v in vars(r).items()}) for r in api.app.routes if type(r).__name__ == '_IncludedRouter'][:1]}")
 
     def test_api_py_no_longer_defines_music_code(self):
         tree = ast.parse((ROOT / "api.py").read_text(encoding="utf-8"))
