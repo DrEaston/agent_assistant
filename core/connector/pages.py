@@ -48,6 +48,15 @@ class Page:
                 return url + "#" + fragment.format(**values)
         return url
 
+    def match(self, path):
+        """The params if `path` is this page (e.g. {"recipe_id": "12"}), else None."""
+        names = re.findall(r"{(\w+)}", self.path)
+        pattern = re.escape(self.path)
+        for name in names:
+            pattern = pattern.replace(re.escape("{" + name + "}"), f"(?P<{name}>[^/]+)")
+        found = re.fullmatch(pattern, (path or "").rstrip("/") or "/")
+        return dict(found.groupdict()) if found else None
+
     def line(self):
         params = ", ".join(f"{n} ({KINDS[k][1]})" for n, k in self.params.items())
         return f"- {self.name}: {self.description}" + (f" Params: {params}." if params else "")

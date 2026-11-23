@@ -108,7 +108,8 @@ def steps(instructions_text):
     return out
 
 
-def recipe_page(*, meal, sections, plan_item=None, cooked=False, is_guest=False):
+def recipe_page(*, meal, sections, plan_item=None, cooked=False, is_guest=False, history=(), pending_cards=(),
+                restored=False):
     """sections: [(heading or None, [ingredient lines])]."""
     groups, pantry, has_servings = [], [], False
     for heading, lines in sections:
@@ -129,6 +130,9 @@ def recipe_page(*, meal, sections, plan_item=None, cooked=False, is_guest=False)
         plan_item=plan_item,
         cooked=cooked,
         is_guest=is_guest,
+        history=list(history),
+        pending_cards=list(pending_cards),
+        restored=restored,
         page_url=f"/apps/recipes/meals/{meal['id']}",
         current="/apps/recipes/library",
     )

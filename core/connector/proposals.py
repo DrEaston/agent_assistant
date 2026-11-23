@@ -21,6 +21,11 @@ SAVE_WORDS = re.compile(r"\b(save|apply|keep|make)\b[^.?!]{0,40}?\b(recipe|chang
 NOT_WORDS = re.compile(r"\b(don'?t|do not|not|no|cancel|discard|never|undo|wait|hold)\b", re.I)
 
 
+def is_card(value):
+    """True for a proposal card a tool returned (it should be shown to the person for review)."""
+    return isinstance(value, dict) and value.get("status") == "pending" and bool(value.get("save_url"))         and bool(value.get("id")) and "diffs" in value
+
+
 def said_save(text):
     """True when the person plainly asked to save the change ("save the recipe change", "yes, save it")."""
     text = str(text or "")

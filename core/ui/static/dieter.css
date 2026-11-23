@@ -451,3 +451,14 @@ a.link-row:hover { background: var(--hover); }
 .cook-step p { font-size: clamp(1.3rem, 4.5vw, 2rem); line-height: 1.45; }
 .cook-nav { display: flex; gap: var(--s3); max-width: 46rem; margin: 0 auto; width: 100%; }
 .cook-nav button { flex: 1; min-height: 56px; font-size: var(--text-md); }
+
+/* Recipe history (a recipe's saved changes, with Restore) */
+.history-row { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--s3); padding: var(--s3) 0; border-top: 1px solid var(--line); }
+.history-row:first-of-type { border-top: 0; }
+.history-what { flex: 1; min-width: 0; }
+.diff-label { font-weight: 700; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-top: var(--s2); }
+.diff-line { font-family: ui-monospace, Consolas, monospace; font-size: var(--text-sm); white-space: pre-wrap; padding: 0 .3rem; }
+.diff-removed { color: var(--warn-ink); background: var(--warn-soft); text-decoration: line-through; }
+.diff-added { color: var(--ok-ink); background: var(--ok-soft); }
+.diff-gap { color: var(--muted); font-style: italic; }
+.ask-msg.card-msg { max-width: 100%; width: 100%; padding: 0; background: none; white-space: normal; }
