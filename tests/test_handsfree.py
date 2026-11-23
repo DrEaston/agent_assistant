@@ -39,6 +39,17 @@ class QuickCommandTests(unittest.TestCase):
         self.assertIsNone(command("is the next step the gravy or the rolls"))
         self.assertIsNone(command("can the crust sit overnight"))
 
+    def test_lets_go_hands_free_while_already_on(self):
+        # "Dieter, let's go hands-free" turns it on from standby (in the page); once on, Dieter says it already is.
+        self.assertEqual({"type": "handsfree"}, command("let's go hands-free"))
+        self.assertEqual({"type": "handsfree"}, command("hands free"))
+        self.assertEqual({"type": "sleep"}, command("hands-free off"))
+
+    def test_close_the_chat_by_voice(self):
+        for phrase in ("close", "close the chat", "close the window", "bye", "thanks that's all", "we're done"):
+            self.assertEqual({"type": "close"}, command(phrase), phrase)
+        self.assertEqual({"type": "done"}, command("done"))  # still checks off a step
+
     def test_amounts_and_dishes(self):
         self.assertEqual({"type": "amount", "item": "butter"}, command("how much butter do I need"))
         self.assertEqual({"type": "amount", "item": "eggs"}, command("how many eggs"))

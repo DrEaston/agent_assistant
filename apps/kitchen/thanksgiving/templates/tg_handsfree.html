@@ -51,6 +51,15 @@
   let active = false, paused = false, speaking = false, rec = null, restartTimer = null, lastError = "";
   let followUntil = 0, awaiting = false, history = [], lastSpoken = "", lastStep = null, localUndo = null, serverUndo = false;
   let tone = null, restarts = [], lastHeard = { text: "", at: 0 }, thinking = false;
+  // Standby (kitchen PC only): while hands-free is off, the mic listens for just one thing, "Dieter, let's go
+  // hands-free", and turns hands-free on. Nothing it hears in standby is sent to Dieter's server.
+  let voiceOpen = false, standbyBlocked = false;
+  const kitchenPc = () => { try { return localStorage.getItem("dieter-kitchen-screen") === "1"; } catch (e) { return false; } };
+  const standby = () => !active && !voiceOpen && !standbyBlocked && !!Recognition && kitchenPc();
+  const listening = () => (active && !paused) || standby();
+  const CUE = /hands?[\s-]*free/i;
+  const CUE_LEAD = /\b(d[a-z]*t[eo]rs?|peter|pieter|detour|the tour|teeter|let'?s|lets|go|turn on|start)\b/i;
+  const isCue = (t) => CUE.test(t) && CUE_LEAD.test(t) && !/\boff\b/i.test(t);
   const queue = [];
 
   const cook = () => window.tgCook;
@@ -169,7 +178,8 @@
     if (rec) { rec.onend = null; try { rec.abort(); } catch (e) {} rec = null; }
   }
   function startRecognition() {
-    if (!active || paused || speaking || rec || document.hidden) return;
+    showCue();
+    if (!listening() || speaking || rec || document.hidden) return;
     // Chrome ends recognition every so often; restart it, but back off if it keeps ending instantly.
     const t = Date.now();
     restarts = restarts.filter((x) => t - x < 60000); restarts.push(t);
@@ -190,6 +200,7 @@
       lastError = event.error;
       if (event.error === "not-allowed" || event.error === "service-not-allowed") {
         report("mic-blocked", event.error);
+        if (!active) { standbyBlocked = true; showCue(); return; }  // standby quietly gives up; the button still works
         turnOff("I need microphone permission. Allow it in Chrome's site settings, then tap Hands-free again.");
       } else if (event.error !== "no-speech" && event.error !== "aborted") {
         report("recognition-error", event.error);
@@ -197,7 +208,7 @@
     };
     rec.onend = () => {
       rec = null;
-      if (!active || paused || speaking) return;
+      if (!listening() || speaking) return;
       restartTimer = setTimeout(startRecognition, lastError === "network" ? 3000 : 200);
       lastError = "";
     };
@@ -208,6 +219,10 @@
   async function heard(text) {
     text = (text || "").trim();
     if (!text) return;
+    if (!active) {  // standby: only the cue counts, and it stays on this PC
+      if (isCue(text)) { report("cue", text.slice(0, 60)); stopRecognition(); turnOn(); }
+      return;
+    }
     const key = text.toLowerCase();
     if (key === lastHeard.text && Date.now() - lastHeard.at < 3000) return;  // Android sometimes repeats a result
     lastHeard = { text: key, at: Date.now() };
@@ -399,7 +414,9 @@
             .catch((e) => out(e.message));
         } else out("Nothing to undo.");
         break;
-      case "sleep": out("Hands-free off."); setTimeout(() => turnOff(), 1200); break;
+      case "sleep":
+      case "close": out("Hands-free off."); setTimeout(() => turnOff(), 1200); break;
+      case "handsfree": out("Hands-free is already on."); break;
       default: out("I didn't catch that.");
     }
   }
@@ -439,6 +456,12 @@
     toggle.setAttribute("aria-pressed", "false");
     if (message) { alertBox(message); } else { bar.hidden = true; }
     render();
+    startRecognition();  // back to standby on the kitchen PC
+  }
+  // The hint next to the button: shown while standby is listening for the cue.
+  function showCue() {
+    const cue = document.getElementById("hf-cue");
+    if (cue) cue.hidden = !standby();
   }
   function alertBox(message) {
     bar.hidden = false; bar.dataset.mode = "off";
@@ -467,8 +490,19 @@
     hush(); beep(); followUntil = Date.now() + FOLLOW_MS; render(); startRecognition();
   });
   document.addEventListener("tg:alert", (event) => { if (active) speak(event.detail.text, { queue: true, quiet: true }); });
-  document.addEventListener("tg:voice-opened", () => { if (active) { paused = true; hush(); stopRecognition(); render(); } });
-  document.addEventListener("tg:voice-closed", () => { if (active) { paused = false; render(); startRecognition(); } });
-  document.addEventListener("visibilitychange", () => { if (active && !document.hidden) startRecognition(); });
+  document.addEventListener("tg:voice-opened", () => {
+    voiceOpen = true;
+    if (active) { paused = true; hush(); render(); }
+    stopRecognition(); showCue();
+  });
+  document.addEventListener("tg:voice-closed", () => {
+    voiceOpen = false;
+    if (active) { paused = false; render(); }
+    startRecognition();
+  });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) startRecognition(); });
+  // Standby starts once cook mode knows it's on the kitchen PC (it finds the helper a moment after loading).
+  startRecognition();
+  setInterval(() => { if (!rec) startRecognition(); }, 10000);
 })();
 </script>

@@ -839,6 +839,15 @@ class RouteTests(unittest.TestCase):
         self.assertIn('id="hf-toggle"', page)
         self.assertIn("/thanksgiving/api/handsfree/heard", page)
         self.assertNotIn('id="hf-toggle"', self.client.get("/thanksgiving").text)
+        # The kitchen PC can also be asked out loud, and says so next to the button.
+        self.assertIn("let's go hands-free", page)
+
+    def test_tell_dieter_listens_first_closes_by_voice_and_flags_unsaved_changes(self):
+        self.client.get("/thanksgiving")
+        page = self.client.get("/thanksgiving/cook").text
+        self.assertIn("mic.click()", page)  # talking is the default; typing is the backup
+        self.assertIn('case "close"', page)  # "close", "bye", "thanks, that's all" close the panel
+        self.assertIn("Not saved yet. Tap Apply", page)
 
     def test_full_screen_button_on_every_page_always_shown_in_cook_mode(self):
         self.setup_plan()

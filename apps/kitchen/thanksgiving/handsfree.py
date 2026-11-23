@@ -125,6 +125,10 @@ _PATTERNS = [
     ("no", r"no|nope|cancel|never ?mind|don't|do not|forget it|no thanks|no thank you"),
     ("undo", r"undo(?: that| it)?|take that back|put it back"),
     ("sleep", r"stop listening|go to sleep|hands free off|turn off hands free|that's all|goodnight|good night"),
+    ("close", r"close(?: it| this| that)?(?: the)?(?: chat| window| panel)?|bye|bye bye|goodbye|bye dieter|see you|"
+              r"we're done|were done|all done|done talking|that's it|thats it|exit|go away|"
+              r"thanks that's all|thank you that's all|thanks that's it|thank you that's it"),
+    ("handsfree", r"(?:let's |lets )?(?:go |turn on |start )?hands free(?: on| mode)?"),
 ]
 _COMPILED = [(name, re.compile(rf"^(?:{pattern})(?: please)?$")) for name, pattern in _PATTERNS]
 _AMOUNT = re.compile(r"^how (?:much|many) (?P<item>.+?)(?: do i (?:need|use|add|put in))?(?: in (?:it|this|there))?$")

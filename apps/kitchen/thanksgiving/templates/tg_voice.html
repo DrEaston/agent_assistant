@@ -48,6 +48,9 @@
 .voice-changes li { padding: .1rem 0; }
 .voice-problem { color: var(--warn); }
 .voice-warning { color: #92400e; margin-top: .3rem; font-size: .92rem; }
+.voice-pending { margin-top: .45rem; padding: .35rem .6rem; border-radius: 8px; background: var(--accent-soft);
+  color: var(--accent); font-weight: 700; font-size: .92rem; }
+.voice-talk-label { align-self: center; margin-left: .6rem; font-size: .85rem; color: var(--muted); }
 .voice-input { display: flex; gap: .5rem; }
 .voice-input input { flex: 1; min-width: 0; }
 .voice-talk { display: flex; justify-content: center; padding: .25rem 0; }
@@ -187,7 +190,8 @@
     <div class="voice-actions" id="voice-undo-row" hidden>
       <button type="button" id="voice-undo">Undo that</button>
     </div>
-    <div class="voice-talk"><button type="button" class="voice-mic" id="voice-mic" aria-label="Start talking">🎤</button></div>
+    <div class="voice-talk"><button type="button" class="voice-mic" id="voice-mic" aria-label="Start talking">🎤</button>
+      <span class="voice-talk-label" id="voice-talk-label">Tap to talk</span></div>
     <form class="voice-input" id="voice-form">
       <input type="text" id="voice-text" placeholder="Or type it here" aria-label="What should change?" autocomplete="off">
       <button type="submit">Send</button>
@@ -262,8 +266,9 @@
     open();
   });
   function open() {
-    // Start listening straight away (this tap counts as permission to use the mic). Don't focus the text box:
-    // that pops up the keyboard, whose own voice-typing button fills the box but never sends.
+    // Talking is the main way in: start listening straight away (this tap counts as permission to use the mic).
+    // Typing is the backup. Don't focus the text box: that pops up the keyboard, whose own voice-typing button
+    // fills the box but never sends.
     document.dispatchEvent(new CustomEvent("tg:voice-opened"));  // hands-free pauses so the mics don't fight
     fetch("/thanksgiving/api/warm", { method: "POST" }).catch(() => {});  // open the AI connection while you talk
     sheet.hidden = false;
@@ -289,6 +294,10 @@
     if (data.problems.length) html += data.problems.map((p) => `<div class="voice-problem">${esc(p)}</div>`).join("");
     if ((data.warnings || []).length) html += data.warnings.map((w) => `<div class="voice-warning">Heads up: ${esc(w)}</div>`).join("");
     say("dieter", html || "I'm not sure what to change. Try saying it another way.");
+    if (data.can_apply) {
+      // Make it unmistakable that nothing is saved yet (the reply alone can sound like it's already done).
+      log.lastChild.insertAdjacentHTML("beforeend", `<div class="voice-pending">Not saved yet. Tap Apply to make this change${convo ? ", or say yes" : ""}.</div>`);
+    }
     $("voice-decide").hidden = !data.can_apply;
     if (data.applied) {
       // Check-offs are saved right away; Undo is there if Dieter checked the wrong box.
@@ -431,7 +440,7 @@
 
   function startConversation() {
     convo = { until: Date.now() + CONVO_MS, ignored: 0, thinking: false, timer: setInterval(tick, 500) };
-    mic.classList.add("recording"); mic.textContent = "■"; mic.setAttribute("aria-label", "End the conversation");
+    mic.classList.add("recording"); mic.textContent = "■"; mic.setAttribute("aria-label", "End the conversation"); $("voice-talk-label").textContent = "Listening · tap ■ to stop";
     text.placeholder = "Listening… just talk";
     $("voice-live").hidden = false;
     $("voice-hint").hidden = true;
@@ -447,7 +456,7 @@
     clearInterval(convo.timer);
     convo = null;
     stopRecognition(); hushOut();
-    mic.classList.remove("recording"); mic.textContent = "🎤"; mic.setAttribute("aria-label", "Start talking");
+    mic.classList.remove("recording"); mic.textContent = "🎤"; mic.setAttribute("aria-label", "Start talking"); $("voice-talk-label").textContent = "Tap to talk";
     text.placeholder = "Or type it here"; text.value = "";
     $("voice-live").hidden = true;
     if (message) say("dieter", `<span class="muted">${esc(message)}</span>`);
@@ -541,7 +550,8 @@
         else reply("Nothing to undo.");
         break;
       case "quiet": hushOut(); break;
-      case "sleep": endConversation("Mic off. Tap 🎤 to talk again."); break;
+      case "sleep":
+      case "close": say("dieter", "Bye for now."); setTimeout(close, 700); break;  // "close", "bye", "that's all"
       case "wake": reply("Yes?"); break;
       default:
         // Cook-mode commands (next step, timers, how much…) run on the cook page; elsewhere the AI answers.
@@ -593,7 +603,8 @@
     history.push({ role: "assistant", content: [data.question || data.reply, ...data.changes].join("\n") });
     history = history.slice(-12);
     const spoken = (data.question || data.reply || "") + (data.can_apply ? " Should I do it?" : "");
-    speakOut(spoken, () => { if (data.end) endConversation("Mic off. Tap 🎤 to talk again."); });
+    // The AI decided the conversation is over ("thanks, that's all"): close the panel once they've seen the reply.
+    speakOut(spoken, () => { if (data.end) setTimeout(close, 1500); });
   }
 
   mic.addEventListener("click", () => {
