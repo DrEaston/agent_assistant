@@ -154,7 +154,8 @@ def list_items(grocery_list):
         live_keys = {item["key"] for section in live for item in section["items"]}
         s.convert_legacy(grocery_list, live_keys, shopping_list.item_key)
     extras = s.get_extras(grocery_list["id"])
-    sections = shopping_list.build_shopping_list(sources, extras)
+    linked = s.get_links(grocery_list["id"])  # items another app put here (core/portable_list.py)
+    sections = shopping_list.build_shopping_list(sources, extras, linked)
     checked = s.get_checked(grocery_list["id"])
     buy_keys = [item["key"] for section in sections if section["name"] != shopping_list.PANTRY_CHECK
                 for item in section["items"]]
@@ -294,6 +295,16 @@ def add_extra(list_id: int, text: str = Form(...)):
 def delete_extra(list_id: int, extra_id: int):
     require_list(list_id)
     store().delete_extra(list_id, extra_id)
+    return to_list(list_id, "list")
+
+
+@router.post(BASE + "/{list_id}/linked/remove")
+def remove_linked(list_id: int, key: str = Form(...)):
+    """Take an item another app put here off this list; it goes back on that app's own list."""
+    require_list(list_id)
+    for link in store().get_links(list_id):
+        if link["item_key"] == key:
+            store().remove_link(list_id, link["source_app"], link["source_key"])
     return to_list(list_id, "list")
 
 

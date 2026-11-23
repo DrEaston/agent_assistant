@@ -316,6 +316,24 @@ class ConnectorFlowTests(unittest.TestCase):
         self.assertEqual((states[cream["key"]], states[others[0]], states[others[1]]),
                          ("on a next-trip list", "in the cart", "don't need"))
         self.assertEqual(after["next_trip_list"]["items"], 1)
+        # The cream is on the Kitchen list as Thanksgiving's item; buying it there puts it in the cart here.
+        cream_after = {i["key"]: i for a in after["aisles"] for i in a["items"]}[cream["key"]]
+        self.assertTrue(cream_after["kitchen_list_url"].endswith(f"/apps/recipes/grocery-lists/{after['next_trip_list']['id']}"))
+        kitchen = self.tool(token, "kitchen_get_shopping_list", list_id=after["next_trip_list"]["id"])
+        on_kitchen = [i for a in kitchen["aisles"] for i in a["items"]]
+        self.assertEqual([(i["text"], i["from_app"]) for i in on_kitchen],
+                         [("1 pint heavy whipping cream", ["Thanksgiving"])])
+        self.tool(token, "kitchen_check_items", list_id=after["next_trip_list"]["id"], keys=[on_kitchen[0]["key"]])
+        states = {i["key"]: i["state"] for a in self.tool(token, "thanksgiving_get_shopping_list")["aisles"]
+                  for i in a["items"]}
+        self.assertEqual(states[cream["key"]], "in the cart")
+        # Sent back from the Kitchen list: to buy here again.
+        self.tool(token, "kitchen_check_items", list_id=after["next_trip_list"]["id"], keys=[on_kitchen[0]["key"]],
+                  checked=False)
+        self.tool(token, "kitchen_remove_items", list_id=after["next_trip_list"]["id"], keys=[on_kitchen[0]["key"]])
+        states = {i["key"]: i["state"] for a in self.tool(token, "thanksgiving_get_shopping_list")["aisles"]
+                  for i in a["items"]}
+        self.assertEqual(states[cream["key"]], "to buy")
         back = self.tool(token, "thanksgiving_put_back", keys=[others[1]])
         self.assertEqual({i["key"]: i["state"] for a in back["aisles"] for i in a["items"]}[others[1]], "to buy")
         preview = self.tool(token, "thanksgiving_change_plan", preview=True,

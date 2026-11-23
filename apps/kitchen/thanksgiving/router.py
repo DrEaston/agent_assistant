@@ -146,6 +146,7 @@ def plan_context(plan, now=None):
         "groceries": planner.build_grocery_list(dishes, s.get_extra_groceries(plan["id"])),
         "grocery_checked": s.get_checked(plan["id"], "grocery"),
         "grocery_aside": grocery_aside(s, plan["id"]),
+        "grocery_links": {},  # filled in by follow_linked() on the shopping pages
         "days_until": (dinner.date() - now.date()).days,
     }
 
@@ -162,16 +163,85 @@ def grocery_aside(s, plan_id):
     return aside
 
 
-def local_new_list(db, title, lines):
-    """Make a Kitchen shopping list of typed-in lines for the current user. Returns {"id", "url"}."""
-    from apps.kitchen.shopping.store import ShoppingStore
+# Items moved to a Kitchen list go as portable items (core/portable_list.py), so this list can still follow them:
+# bought on that list shows here as in the cart; that list deleted puts them back here.
+LIST_SOURCE = {"app": "thanksgiving", "label": "Thanksgiving"}
 
-    shopping = ShoppingStore(db)
-    list_id = shopping.create_list(title, [])
-    for line in lines:
-        if str(line).strip():
-            shopping.add_extra(list_id, str(line))
-    return {"id": list_id, "url": f"/apps/recipes/grocery-lists/{list_id}"}
+
+def kitchen_list_url(list_id):
+    return f"/apps/recipes/grocery-lists/{int(list_id)}"
+
+
+def local_new_list(db, title, lines=(), items=(), source=None):
+    """Make a Kitchen shopping list for the current user. Returns {"id", "url"}."""
+    from apps.kitchen.shopping import portable
+
+    made = portable.create_list(db, title, lines, items, source)
+    return {"id": made["id"], "url": made["url"]}
+
+
+def portable_items(items):
+    """Thanksgiving shopping items in the portable format."""
+    return [{"key": i["key"], "text": i["text"], "amount": i.get("amount") or "", "aisle": i.get("section") or "",
+             "for": i.get("dishes") or []} for i in items]
+
+
+def follow_linked(plan, context):
+    """What happened to items moved to a Kitchen list: bought there -> in the cart here; that list deleted or the
+    item taken off it -> back on this list. Returns updated grocery_checked, grocery_aside and grocery_links
+    ({key: {"url", "checked"}}). If Kitchen can't be reached, items stay as they were."""
+    s = store()
+    links = s.get_list_links(plan["id"])
+    checked, aside, linked = set(context["grocery_checked"]), dict(context["grocery_aside"]), {}
+    by_list = {}
+    for key, list_id in links.items():
+        by_list.setdefault(list_id, []).append(key)
+    for list_id, keys in by_list.items():
+        try:
+            state = _state["platform"].linked_state(list_id) or {}
+        except Exception as exc:
+            print(f"Warning: couldn't read Kitchen list {list_id}: {exc}")
+            linked.update({key: {"url": kitchen_list_url(list_id), "checked": False} for key in keys})
+            continue
+        items = state.get("items") or {}
+        for key in keys:
+            info = items.get(key)
+            if not info:  # that list is gone, or the item was taken off it
+                s.delete_list_link(plan["id"], key)
+                s.set_checked(plan["id"], ASIDE_KINDS["next"], key, False)
+                if aside.get(key) == "next":
+                    aside.pop(key)
+                continue
+            linked[key] = {"url": info.get("url") or kitchen_list_url(info.get("list_id") or list_id),
+                           "checked": bool(info.get("checked"))}
+            if info.get("checked"):  # bought on the next trip
+                aside.pop(key, None)
+                checked.add(key)
+    return {"grocery_checked": checked, "grocery_aside": aside, "grocery_links": linked}
+
+
+def set_grocery_checked(plan_id, key, done):
+    """Check an item off here, and on the Kitchen list too if it was moved there."""
+    store().set_checked(plan_id, "grocery", key, bool(done))
+    list_id = store().get_list_links(plan_id).get(key)
+    if list_id:
+        try:
+            _state["platform"].check_linked(list_id, key, bool(done))
+        except Exception as exc:
+            print(f"Warning: couldn't update Kitchen list {list_id}: {exc}")
+
+
+def put_back(plan_id, key):
+    """Back onto this list: an item set aside at the end of a trip (and off the Kitchen list it went to)."""
+    list_id = store().get_list_links(plan_id).get(key)
+    if list_id:
+        try:
+            _state["platform"].remove_linked(list_id, key)
+        except Exception as exc:
+            print(f"Warning: couldn't take {key} off Kitchen list {list_id}: {exc}")
+        store().delete_list_link(plan_id, key)
+    for kind in ASIDE_KINDS.values():
+        store().set_checked(plan_id, kind, key, False)
 
 
 class LocalPlatform:
@@ -180,8 +250,20 @@ class LocalPlatform:
     def __init__(self, db):
         self.db = db
 
-    def new_list(self, title, lines):
-        return local_new_list(self.db, title, lines)
+    def new_list(self, title, lines=(), items=(), source=None):
+        return local_new_list(self.db, title, lines, items, source)
+
+    def linked_state(self, list_id):
+        from apps.kitchen.shopping import portable
+        return portable.linked_state(self.db, list_id, LIST_SOURCE["app"])
+
+    def check_linked(self, list_id, key, done):
+        from apps.kitchen.shopping import portable
+        return portable.check(self.db, list_id, LIST_SOURCE["app"], key, done)
+
+    def remove_linked(self, list_id, key):
+        from apps.kitchen.shopping import portable
+        return portable.remove(self.db, list_id, LIST_SOURCE["app"], key)
 
     def kitchen_tools(self):
         from apps.kitchen import connector as kitchen_connector
@@ -196,6 +278,16 @@ class LocalPlatform:
 
     def report(self, fields):
         self.db.add_app_feedback_report(**fields)
+
+
+class NoKitchenLists(LocalPlatform):
+    """Thanksgiving as its own service without PLATFORM_URL: there's no Kitchen to put lists in. Making one here
+    would save it in Thanksgiving's own database, where Kitchen never sees it, so say so instead."""
+
+    def _no_kitchen(self, *args, **kwargs):
+        raise RuntimeError("Kitchen lists aren't reachable: PLATFORM_URL isn't set for the Thanksgiving service")
+
+    new_list = linked_state = check_linked = remove_linked = _no_kitchen
 
 
 class RemotePlatform:
@@ -214,9 +306,22 @@ class RemotePlatform:
     def report(self, fields):
         internal.call(self.base_url, "POST", "/internal/studio/reports", internal.current_user.get(), fields)
 
-    def new_list(self, title, lines):
+    def new_list(self, title, lines=(), items=(), source=None):
         return internal.call(self.base_url, "POST", "/internal/kitchen/lists", internal.current_user.get(),
-                             {"title": title, "lines": list(lines)})
+                             {"title": title, "lines": list(lines), "items": list(items), "source": source})
+
+    def linked_state(self, list_id):
+        return internal.call(self.base_url, "GET",
+                             f"/internal/kitchen/lists/{int(list_id)}/linked?app={LIST_SOURCE['app']}",
+                             internal.current_user.get())
+
+    def check_linked(self, list_id, key, done):
+        return internal.call(self.base_url, "POST", f"/internal/kitchen/lists/{int(list_id)}/linked/check",
+                             internal.current_user.get(), {"app": LIST_SOURCE["app"], "key": key, "done": done})
+
+    def remove_linked(self, list_id, key):
+        return internal.call(self.base_url, "POST", f"/internal/kitchen/lists/{int(list_id)}/linked/remove",
+                             internal.current_user.get(), {"app": LIST_SOURCE["app"], "key": key})
 
     def kitchen_tools(self):
         from core.connector.tools import RemoteToolSet
@@ -399,12 +504,14 @@ def shopping_page(request: Request, trip: str = "", n: int = 0):
         notice = {"ok": True, "url": "", "count": 0}
     elif trip == "failed":
         notice = {"ok": False}
-    return render_page(request, "tg_shopping.html", "shopping", trip_notice=notice)
+    return render_page(request, "tg_shopping.html", "shopping", extend=lambda ctx: follow_linked(ctx["plan"], ctx),
+                       trip_notice=notice)
 
 
 @router.get("/thanksgiving/shopping/finish", response_class=HTMLResponse)
 def finish_trip_page(request: Request):
-    return render_page(request, "tg_shopping_finish.html", "shopping")
+    return render_page(request, "tg_shopping_finish.html", "shopping",
+                       extend=lambda ctx: follow_linked(ctx["plan"], ctx))
 
 
 @router.post("/thanksgiving/shopping/finish")
@@ -432,8 +539,8 @@ def finish_trip_picks(plan, picks):
     later = [items[key] for key, pick in picks.items() if pick == "next" and key in items]
     made = None
     if later:
-        lines = [f"{i['text']} ({i['amount']})" if i.get("amount") else i["text"] for i in later]
-        made = dict(_state["platform"].new_list(f"Next trip · {planner.short_date(context['now'])}", lines),
+        made = dict(_state["platform"].new_list(f"Next trip · {planner.short_date(context['now'])}", [],
+                                                items=portable_items(later), source=LIST_SOURCE),
                     count=len(later))
     for key, pick in picks.items():
         if key not in items:
@@ -442,6 +549,8 @@ def finish_trip_picks(plan, picks):
             store().set_checked(plan["id"], "grocery", key, True)
         elif pick in ASIDE_KINDS:
             store().set_checked(plan["id"], ASIDE_KINDS[pick], key, True)
+            if pick == "next" and made:
+                store().set_list_link(plan["id"], key, made["id"])
     return made
 
 
@@ -923,7 +1032,7 @@ def toggle_step(request: Request, key: str = Form(...), done: str = Form(""), an
 @router.post("/thanksgiving/groceries/toggle")
 def toggle_grocery(key: str = Form(...), done: str = Form(""), row: str = Form("")):
     plan = require_plan()
-    store().set_checked(plan["id"], "grocery", key, bool(done))
+    set_grocery_checked(plan["id"], key, bool(done))
     # Without JavaScript the page reloads; land back on the item, not the top of the list.
     return back("/thanksgiving/shopping", row if re.fullmatch(r"[a-z0-9-]{1,80}", row) else "")
 
@@ -932,8 +1041,7 @@ def toggle_grocery(key: str = Form(...), done: str = Form(""), row: str = Form("
 def put_back_grocery(key: str = Form(...)):
     """Back onto the list: an item set aside at the end of a trip."""
     plan = require_plan()
-    for kind in ASIDE_KINDS.values():
-        store().set_checked(plan["id"], kind, key, False)
+    put_back(plan["id"], key)
     return back("/thanksgiving/shopping")
 
 

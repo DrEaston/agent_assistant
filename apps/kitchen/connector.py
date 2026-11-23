@@ -28,7 +28,8 @@ def _view(grocery_list):
     view["aisles"] = [{"aisle": section["name"], "items": [
         {"key": item["key"], "text": item["text"], "amount": item.get("amount") or "",
          "for": item.get("dishes") or [], "checked": item["key"] in items["checked"],
-         "typed_in": bool(item.get("extra_id"))} for item in section["items"]]} for section in items["sections"]]
+         "typed_in": bool(item.get("extra_id")), "from_app": item.get("linked") or []}
+        for item in section["items"]]} for section in items["sections"]]
     return view
 
 
@@ -79,12 +80,16 @@ def remove_items(args):
     grocery_list = _list(args.get("list_id"))
     keys = text_list(args.get("keys"), "keys")
     by_key = _known_keys(grocery_list, keys)
-    fixed = [by_key[k]["text"] for k in keys if not by_key[k].get("extra_id")]
+    links = {link["item_key"]: link for link in shopping.store().get_links(grocery_list["id"])}
+    fixed = [by_key[k]["text"] for k in keys if not by_key[k].get("extra_id") and k not in links]
     if fixed:
         raise ToolError(f"{', '.join(fixed)} come from the list's recipes, so they can't be removed one by one. "
                         "Check them off instead, or ask the person to take the meal off the list.")
     for key in keys:
-        shopping.store().delete_extra(grocery_list["id"], by_key[key]["extra_id"])
+        if key in links:  # another app's item: it goes back to that app's own list (e.g. Thanksgiving's)
+            shopping.store().remove_link(grocery_list["id"], links[key]["source_app"], links[key]["source_key"])
+        else:
+            shopping.store().delete_extra(grocery_list["id"], by_key[key]["extra_id"])
     return _view(grocery_list)
 
 
@@ -106,8 +111,13 @@ def finish_list(args):
         title = (" ".join(str(args.get("new_title") or "").split())[:120]
                  or "Next trip · " + shopping.friendly_date(datetime.now().isoformat()))
         new_id = shopping.store().create_list(title, [])
+        links = {link["item_key"]: link for link in shopping.store().get_links(grocery_list["id"])}
         for key in carry:
             item = by_key[key]
+            if key in links:  # another app's item (e.g. Thanksgiving): carry it on, still linked to that app
+                link = links[key]
+                shopping.store().move_link(grocery_list["id"], link["source_app"], link["source_key"], new_id)
+                continue
             shopping.store().add_extra(new_id, f"{item['text']} ({item['amount']})" if item.get("amount") else item["text"])
         answer["next_trip"] = _view(shopping.store().get_list(new_id))
     shopping.store().set_status(grocery_list["id"], "done")
@@ -154,7 +164,8 @@ def tools():
              "Mark items bought (checked true, the default) or not bought (false).", check_items,
              dict(LIST_ID, keys=STRINGS, checked={"type": "boolean"}), ("list_id", "keys")),
         Tool("kitchen_remove_items", "Remove typed-in items",
-             "Delete typed-in items from a list. Items that come from a meal's recipe can't be removed, only checked.",
+             "Delete typed-in items from a list, or send items another app put here (from_app) back to that app's list. "
+             "Items that come from a meal's recipe can't be removed, only checked.",
              remove_items, dict(LIST_ID, keys=STRINGS), ("list_id", "keys"), destructive=True),
         Tool("kitchen_create_shopping_list", "New shopping list",
              "Start a new list, optionally with typed-in items.", create_list,

@@ -54,6 +54,10 @@
           {% call ui.check_row(item.key, item.text, base ~ "/check", done=item.key in checked, amount=item.amount, note=note, counts=not pantry) %}
             {{ ui.remove_button(base ~ "/extras/" ~ item.extra_id ~ "/delete", "Remove " ~ item.text) }}
           {% endcall %}
+        {% elif item.linked_only %}
+          {% call ui.check_row(item.key, item.text, base ~ "/check", done=item.key in checked, amount=item.amount, note=note, counts=not pantry) %}
+            {{ ui.remove_button(base ~ "/linked/remove", "Send " ~ item.text ~ " back to " ~ item.linked[0], {"key": item.key}) }}
+          {% endcall %}
         {% else %}
           {{ ui.check_row(item.key, item.text, base ~ "/check", done=item.key in checked, amount=item.amount, note=note, counts=not pantry) }}
         {% endif %}

@@ -67,7 +67,7 @@
       {% for item in cart.aside %}
       <div class="grocery">
         <div style="flex:1"><span class="g-text">{{ item.text }}</span>{% if item.amount %} <strong class="g-amount">{{ item.amount }}</strong>{% endif %}
-          <div class="g-from">{% if grocery_aside[item.key] == "next" %}On a next-trip list{% else %}Don't need{% endif %}</div></div>
+          <div class="g-from">{% if grocery_aside[item.key] == "next" %}{% if grocery_links.get(item.key) %}<a href="{{ grocery_links[item.key].url }}">On your next-trip list</a>{% else %}On a next-trip list{% endif %}{% else %}Don't need{% endif %}</div></div>
         <form method="post" action="/thanksgiving/groceries/put-back"><input type="hidden" name="key" value="{{ item.key }}">
           <button class="quiet" type="submit">Put back</button></form>
       </div>

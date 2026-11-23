@@ -62,15 +62,19 @@ STATES = {"next": "on a next-trip list", "skip": "don't need"}
 
 
 def get_shopping_list(args):
-    _, ctx = _plan()
+    plan, ctx = _plan()
+    ctx.update(_r().follow_linked(plan, ctx))  # items moved to a Kitchen list: bought there, or back here
     aisles = []
     for section in ctx["groceries"]:
         items = []
         for item in section["items"]:
             state = STATES.get(ctx["grocery_aside"].get(item["key"])) or (
                 "in the cart" if item["key"] in ctx["grocery_checked"] else "to buy")
-            items.append({"key": item["key"], "text": item["text"], "amount": item.get("amount") or "",
-                          "for": item.get("dishes") or [], "state": state, "typed_in": bool(item.get("extra_id"))})
+            row = {"key": item["key"], "text": item["text"], "amount": item.get("amount") or "",
+                   "for": item.get("dishes") or [], "state": state, "typed_in": bool(item.get("extra_id"))}
+            if item["key"] in ctx["grocery_links"]:
+                row["kitchen_list_url"] = site_url(ctx["grocery_links"][item["key"]]["url"])
+            items.append(row)
         aisles.append({"aisle": section["name"], "items": items})
     left = sum(1 for a in aisles for i in a["items"] if i["state"] == "to buy")
     return {"url": site_url("/thanksgiving/shopping"), "to_buy": left, "aisles": aisles}
@@ -99,7 +103,7 @@ def check_items(args):
     plan, ctx = _plan()
     checked = args.get("checked", True) is not False
     for key in _keys(args, ctx):
-        _r().store().set_checked(plan["id"], "grocery", key, checked)
+        _r().set_grocery_checked(plan["id"], key, checked)  # and on the Kitchen list, if it moved there
     return get_shopping_list({})
 
 
@@ -127,8 +131,7 @@ def finish_trip(args):
 def put_back(args):
     plan, ctx = _plan()
     for key in _keys(args, ctx):
-        for kind in _r().ASIDE_KINDS.values():
-            _r().store().set_checked(plan["id"], kind, key, False)
+        _r().put_back(plan["id"], key)  # also takes it off the Kitchen list it went to
     return get_shopping_list({})
 
 
@@ -191,7 +194,8 @@ def tools():
              ("dish",), read_only=True),
         Tool("thanksgiving_get_shopping_list", "Thanksgiving shopping list",
              "The Thanksgiving list by aisle, added up across dishes. Each item has a key and a state: to buy, in "
-             "the cart, on a next-trip list, or don't need.", get_shopping_list, read_only=True),
+             "the cart, on a next-trip list, or don't need. Next-trip items stay linked: kitchen_list_url says "
+             "where, and checking one off there or here does both.", get_shopping_list, read_only=True),
         Tool("thanksgiving_add_to_shopping_list", "Add to the Thanksgiving list",
              "Add typed-in items, e.g. [\"1 pint heavy whipping cream\"].", add_items, {"items": STRINGS},
              ("items",)),
@@ -200,10 +204,10 @@ def tools():
              dict(keys, checked={"type": "boolean"}), ("keys",)),
         Tool("thanksgiving_finish_trip", "Finish the Thanksgiving shopping trip",
              "Sort out what's left after a trip: got (into the cart), dont_need (set aside), next_trip (moved to a "
-             "new Kitchen shopping list, whose link is returned).", finish_trip,
+             "new Kitchen shopping list, whose link is returned; they stay linked to this list).", finish_trip,
              {"got": STRINGS, "dont_need": STRINGS, "next_trip": STRINGS}),
         Tool("thanksgiving_put_back", "Put items back on the Thanksgiving list",
-             "Undo next-trip or don't-need for these items.", put_back, keys, ("keys",)),
+             "Undo next-trip or don't-need for these items (next-trip items come off the Kitchen list).", put_back, keys, ("keys",)),
         Tool("thanksgiving_change_plan", "Change the Thanksgiving plan", CHANGE_HELP, change_plan,
              {"actions": {"type": "array", "items": {"type": "object"}}, "preview": {"type": "boolean"}},
              ("actions",)),

@@ -38,7 +38,10 @@ if persistence.enabled:
     db.after_commit = persistence.schedule_backup
 
 platform_url = os.getenv("PLATFORM_URL", "")
-tg_router.configure(db, platform=tg_router.RemotePlatform(platform_url) if platform_url else None)
+if not platform_url:
+    print("Warning: PLATFORM_URL isn't set, so Finish trip can't make Kitchen next-trip lists")
+tg_router.configure(db, platform=tg_router.RemotePlatform(platform_url) if platform_url
+                    else tg_router.NoKitchenLists(db))
 
 app = FastAPI(title="Dieter Thanksgiving")
 app.include_router(tg_router.router)

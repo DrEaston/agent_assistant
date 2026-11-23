@@ -24,6 +24,9 @@ reading diffs. Write for him in plain English: what he will see differently, and
 - `core/ui/` - the design system: `static/dieter.css` (tokens, light and dark) and `components.html` macros.
   `core/shell/layout.html` is the page frame for new-style pages.
 - `core/internal.py`, `core/proxy.py` - signed calls between Dieter services.
+- `core/portable_list.py` - the one format for putting one app's shopping items on a Kitchen list (Thanksgiving's
+  "Next trip" uses it). Items stay linked: both apps see and check off the same item. A new planner that needs a
+  shopping list should use it rather than sending plain text.
 - `api.py` - the older shared app; still holds Assistant, Kitchen and Trainer routes. Move code out of it into
   the app's folder when you touch it; don't add new app code to it.
 - `database.py` - the older shared data layer. New tables belong in the app's own `store.py`.

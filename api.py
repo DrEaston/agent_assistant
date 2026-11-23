@@ -461,12 +461,37 @@ def internal_kitchen_recipe(meal_id: int):
 
 @app.post("/internal/kitchen/lists")
 async def internal_kitchen_new_list(request: Request):
-    """A new Kitchen shopping list of typed-in lines (Thanksgiving's "Finish trip" → next-trip list)."""
-    from apps.kitchen.thanksgiving.router import local_new_list
+    """A new Kitchen list from another app: portable items (core/portable_list.py, followed and checked from both
+    apps) and/or typed-in lines (the older Thanksgiving "Finish trip" sends lines). Logic: apps/kitchen/shopping/portable.py."""
+    from apps.kitchen.shopping import portable
     data = await request.json()
-    title = str(data.get("title") or "Shopping list").strip()[:120] or "Shopping list"
     lines = [str(line)[:200] for line in (data.get("lines") or [])[:200] if str(line).strip()]
-    return local_new_list(db, title, lines)
+    try:
+        made = portable.create_list(db, data.get("title") or "Shopping list", lines, data.get("items") or [],
+                                    data.get("source"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    return {"id": made["id"], "url": made["url"]}
+
+
+@app.get("/internal/kitchen/lists/{list_id}/linked")
+def internal_kitchen_linked(list_id: int, app: str = ""):
+    from apps.kitchen.shopping import portable
+    return portable.linked_state(db, list_id, app)
+
+
+@app.post("/internal/kitchen/lists/{list_id}/linked/check")
+async def internal_kitchen_linked_check(request: Request, list_id: int):
+    from apps.kitchen.shopping import portable
+    data = await request.json()
+    return {"ok": portable.check(db, list_id, data.get("app"), data.get("key"), data.get("done"))}
+
+
+@app.post("/internal/kitchen/lists/{list_id}/linked/remove")
+async def internal_kitchen_linked_remove(request: Request, list_id: int):
+    from apps.kitchen.shopping import portable
+    data = await request.json()
+    return {"ok": portable.remove(db, list_id, data.get("app"), data.get("key"))}
 
 
 @app.post("/internal/studio/reports")

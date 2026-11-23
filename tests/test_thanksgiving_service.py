@@ -1,6 +1,7 @@
 """Thanksgiving as its own service: signed user header, the forwarder, and the main app's internal endpoints."""
 
 import importlib
+import json
 import os
 import tempfile
 import time
@@ -74,6 +75,17 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("Pumpkin pie", plan.json()["result"])
         nope = client.post("/thanksgiving/api/connector/tools/thanksgiving_fly", headers=self.signed(52), json={})
         self.assertEqual(nope.status_code, 422)
+
+    def test_without_platform_url_next_trip_lists_are_refused_not_lost(self):
+        client = TestClient(self.service.app)
+        client.get("/thanksgiving", headers=self.signed(53))
+        tool = "/thanksgiving/api/connector/tools/"
+        listing = client.post(tool + "thanksgiving_get_shopping_list", headers=self.signed(53), json={}).json()
+        key = listing["result"]["aisles"][0]["items"][0]["key"]
+        made = client.post(tool + "thanksgiving_finish_trip", headers=self.signed(53), json={"arguments": {"next_trip": [key]}}).json()
+        self.assertIn("Couldn't make the next-trip list", json.dumps(made))
+        listing = client.post(tool + "thanksgiving_get_shopping_list", headers=self.signed(53), json={}).json()
+        self.assertEqual(listing["result"]["aisles"][0]["items"][0]["state"], "to buy")
 
     def test_refuses_requests_without_a_signed_user(self):
         client = TestClient(self.service.app)
@@ -210,6 +222,41 @@ class PlatformEndpointTests(unittest.TestCase):
         extras = self.api.db.connect().execute("SELECT text FROM recipe_grocery_extras WHERE list_id = ?",
                                                (made["id"],)).fetchall()
         self.assertEqual([e["text"] for e in extras], ["Whole milk (1 quart)"])
+
+    def test_portable_items_can_be_followed_checked_and_taken_back(self):
+        headers = {internal.HEADER: internal.sign({"id": self.user_id})}
+        source = {"app": "thanksgiving", "label": "Thanksgiving"}
+        items = [{"key": "item-milk", "text": "Whole milk", "amount": "1 quart (4 cups)", "aisle": "Dairy & eggs",
+                  "for": ["Mac and cheese"]},
+                 {"key": "extra-4", "text": "Paper plates"}]
+        self.assertEqual(self.client.post("/internal/kitchen/lists", headers=headers,
+                                          json={"title": "Next trip", "items": items}).status_code, 400)  # no source
+        made = self.client.post("/internal/kitchen/lists", headers=headers,
+                                json={"title": "Next trip", "items": items, "source": source}).json()
+        base = f"/internal/kitchen/lists/{made['id']}/linked"
+        self.assertEqual(self.client.get(base + "?app=thanksgiving").status_code, 401)
+        state = self.client.get(base + "?app=thanksgiving", headers=headers).json()
+        self.assertTrue(state["found"])
+        self.assertEqual(set(state["items"]), {"item-milk", "extra-4"})
+        self.assertFalse(state["items"]["item-milk"]["checked"])
+        ok = self.client.post(base + "/check", headers=headers, json={"app": "thanksgiving", "key": "item-milk",
+                                                                      "done": True}).json()
+        self.assertTrue(ok["ok"])
+        checks = self.api.db.connect().execute("SELECT item_key FROM recipe_grocery_checks WHERE list_id = ?",
+                                               (made["id"],)).fetchall()
+        self.assertEqual([c["item_key"] for c in checks], ["item-milk"])  # Kitchen's key for it is the same
+        self.assertTrue(self.client.get(base + "?app=thanksgiving", headers=headers).json()["items"]["item-milk"]["checked"])
+        self.client.post(base + "/remove", headers=headers, json={"app": "thanksgiving", "key": "extra-4"})
+        self.assertEqual(set(self.client.get(base + "?app=thanksgiving", headers=headers).json()["items"]),
+                         {"item-milk"})
+        email = "tg-someone-else@example.com"
+        row = self.api.db.get_user_by_email(email)
+        other = row["id"] if row else self.api.db.create_user(email, "Someone Else", "x", "member")
+        self.api.db.connect().execute("UPDATE users SET status = 'active' WHERE id = ?", (other,))
+        self.api.db.connect().commit()
+        someone_else = {internal.HEADER: internal.sign({"id": other})}
+        self.assertEqual(self.client.get(base + "?app=thanksgiving", headers=someone_else).json(),
+                         {"found": False, "items": {}})
 
     def test_problem_reports_reach_studio(self):
         headers = {internal.HEADER: internal.sign({"id": self.user_id})}
