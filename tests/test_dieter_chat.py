@@ -1,6 +1,7 @@
 """Dieter's chat on the main site (core/connector/chat.py) and Kitchen recipe changes through it
 (apps/kitchen/recipe_changes.py): propose, review card, save, history, restore."""
 
+import os
 import secrets
 import tempfile
 import unittest
@@ -238,8 +239,10 @@ class MainSiteChatTests(unittest.TestCase):
         self.assertEqual(claude.seen, [])
 
     def test_thanksgiving_chat_does_not_get_the_review_card_tools(self):
-        names = [t["name"] for t in self.client.get("/internal/connector/kitchen/tools",
-                                                    headers=self.internal_headers()).json()["tools"]]
+        # Signed calls need the services' shared key; CI has none set, so the test brings its own.
+        with mock.patch.dict(os.environ, {"DIETER_INTERNAL_KEY": "test-internal-key"}):
+            names = [t["name"] for t in self.client.get("/internal/connector/kitchen/tools",
+                                                        headers=self.internal_headers()).json()["tools"]]
         self.assertIn("kitchen_get_recipe", names)
         self.assertNotIn("kitchen_propose_recipe_change", names)
 
