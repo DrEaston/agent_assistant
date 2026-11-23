@@ -232,7 +232,7 @@
             <option value="classic">Classic (old)</option>
           </select>
         </label>
-        <label class="voice-wake-choice"><span><input type="checkbox" id="voice-wake"> Listen for “Hey Dieter”</span>
+        <label class="voice-wake-choice"><span><input type="checkbox" id="voice-wake"> Listen for “Hey Dieter” in cook mode</span>
           <span class="muted small">While this page is open, saying “Hey Dieter” opens this chat with the mic on.</span></label>
         <button type="button" id="voice-device-save">Save on this device</button>
       </div>
@@ -271,7 +271,7 @@
     try { localStorage.setItem("tg-voice-device", JSON.stringify(d)); } catch (e) {}
     showDevice();
     say("dieter", d.sass === "super" ? "Super sass unlocked. You asked for this." : `Saved. Sass: ${esc(SASS_NAMES[d.sass])}.`
-      + (d.wake ? " I'll listen for “Hey Dieter” whenever this chat is closed." : ""));
+      + (d.wake ? " In cook mode I'll listen for “Hey Dieter” whenever the mic is off." : ""));
     $("voice-device-save").closest("details").open = false;
   });
   showDevice();
@@ -810,7 +810,18 @@
 
   let wakeRec = null, wakeTimer = null, wakeBlocked = false, wakeStarts = [], wakeReported = new Set();
   const micBusy = () => !!convo || !!recognition || !!(recorder && recorder.state === "recording");
-  const wakeWanted = () => !!loadDevice().wake && !!Recognition && !micBusy() && !document.hidden && !wakeBlocked;
+  // Cook mode only: that's where hands are busy, and one page listening at a time is what Chrome handles well.
+  const WAKE_PAGE = location.pathname.startsWith("/thanksgiving/cook");
+  const wakeWanted = () => WAKE_PAGE && !!loadDevice().wake && !!Recognition && !micBusy() && !document.hidden && !wakeBlocked;
+  // What the listener gets from Chrome (counts only, never words), sent to the server log every 30 seconds when it
+  // changes: whether sound arrives at all, how often Chrome restarts it, errors.
+  const wakeStats = { sessions: 0, audio: 0, speech: 0, results: 0, matched: 0, noaudio: 0, errors: {} };
+  let statsSent = "", statsReports = 0;
+  setInterval(() => {
+    const now = JSON.stringify(wakeStats);
+    if (!WAKE_PAGE || now === statsSent || statsReports >= 20) return;
+    statsSent = now; statsReports++; report("wake-stats", now);
+  }, 30000);
   function reportOnce(event, detail) {  // to the server log, once per page, so a silent listener can be diagnosed
     if (wakeReported.has(event + detail)) return;
     wakeReported.add(event + detail); report(event, detail);
@@ -840,7 +851,19 @@
     // Chrome may never decide a sentence has ended, so "Hey Dieter" was never heard. Once the phrase shows up, wait
     // for a short pause (or the end of the sentence) to catch whatever follows it ("hey dieter, what's next").
     rec.lang = "en-US"; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
-    let lastError = "", heardAt = null, latest = "";
+    let lastError = "", heardAt = null, latest = "", gotAudio = false;
+    wakeStats.sessions++;
+    rec.onaudiostart = () => { gotAudio = true; wakeStats.audio++; };
+    rec.onspeechstart = () => { wakeStats.speech++; };
+    // Chrome sometimes starts a session that never gets any sound (e.g. right after another page let go of the
+    // mic): no error, no words. If no sound arrives within a few seconds, start over.
+    setTimeout(() => {
+      if (!gotAudio && wakeRec === rec) {
+        wakeStats.noaudio++;
+        rec.onend = null; try { rec.abort(); } catch (e) {}
+        wakeRec = null; showEar(); wakeTimer = setTimeout(startWake, 1000);
+      }
+    }, 4000);
     const wakeNow = () => {
       clearTimeout(heardAt); heardAt = null;
       const rest = wakeRest(latest) || "";
@@ -852,9 +875,11 @@
       if (rest) setTimeout(() => { if (convo) heardPhrase(rest); }, 400);
     };
     rec.onresult = (event) => {
+      wakeStats.results++;
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
         if (wakeRest(transcript) === null) continue;
+        wakeStats.matched++;
         latest = transcript;
         if (event.results[i].isFinal) { wakeNow(); return; }
         clearTimeout(heardAt);
@@ -864,6 +889,7 @@
     };
     rec.onerror = (event) => {
       lastError = event.error;
+      wakeStats.errors[event.error] = (wakeStats.errors[event.error] || 0) + 1;
       if (event.error === "not-allowed" || event.error === "service-not-allowed") { wakeBlocked = true; report("wake-blocked", event.error); }
       else if (event.error !== "no-speech" && event.error !== "aborted") reportOnce("wake-error", event.error);
     };
@@ -888,7 +914,8 @@
     report("wake-setting", d.wake ? "on" : "off");
   });
   // Once per page: whether the listener should be running here, for the server log.
-  report("wake-check", JSON.stringify({ on: !!loadDevice().wake, recognition: !!Recognition, page: location.pathname }));
-  startWake();
+  if (WAKE_PAGE) report("wake-check", JSON.stringify({ on: !!loadDevice().wake, recognition: !!Recognition }));
+  // A moment after the page loads, so the page before has let go of the microphone.
+  wakeTimer = setTimeout(startWake, 1500);
 })();
 </script>
