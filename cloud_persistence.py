@@ -71,6 +71,20 @@ class CloudStoragePersistence:
                 "uploads_restored": uploads_restored,
             }
 
+    def restore_database(self):
+        """Just the database (the main app loads it on the first request; see prepare_database in api.py)."""
+        if not self.enabled:
+            return False
+        with self._lock:
+            return self._restore_database(self._get_bucket())
+
+    def restore_uploads(self):
+        """Just the uploaded files (recipe photos). Safe at startup: they aren't overwritten by a new version."""
+        if not self.enabled:
+            return 0
+        with self._lock:
+            return self._restore_uploads(self._get_bucket())
+
     def _restore_database(self, bucket):
         blob = bucket.blob(self.db_blob_name)
         if not blob.exists():

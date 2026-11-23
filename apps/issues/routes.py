@@ -33,8 +33,12 @@ def configure(db, require_admin, summarize=None, areas=()):
     summarize(text, page_url, page_title) -> {"title", "area"} drafts a title (falls back to the first line)."""
     store = StudioStore(db)
     _state.update(store=store, db=db, require_admin=require_admin, summarize=summarize, areas=tuple(areas))
+
+
+def startup():
+    """Tidy-ups that write to the database, run once it's loaded (api.py prepare_database)."""
     try:
-        filled = store.archive_codex_runs()
+        filled = store().archive_codex_runs()
         if filled:
             print(f"Studio: archived old Codex runs onto {filled} reports")
     except Exception as exc:

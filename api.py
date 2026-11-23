@@ -14,6 +14,7 @@ load_dotenv()
 from fastapi import FastAPI, Request, Form, HTTPException, File, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from database import Database, set_current_user_id, reset_current_user_id, get_current_user_id
 from pathlib import Path
@@ -91,16 +92,12 @@ recipe_uploads_dir = uploads_dir / "recipe_images"
 recipe_thumbnails_dir = uploads_dir / "recipe_thumbnails"
 cloud_persistence = CloudStoragePersistence.from_env(db_path, uploads_dir)
 
+# Recipe photos now; the database itself loads on the first request (prepare_database below).
 try:
-    restore_result = cloud_persistence.restore()
-    if restore_result.get("enabled"):
-        print(f"Cloud persistence restore: {restore_result}")
+    if cloud_persistence.enabled:
+        print(f"Cloud persistence: restored {cloud_persistence.restore_uploads()} uploads")
 except Exception as exc:
-    print(f"Warning: Cloud persistence restore failed - {exc}")
-
-if db_path != bundled_db_path and not db_path.exists() and bundled_db_path.exists():
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(bundled_db_path, db_path)
+    print(f"Warning: Cloud persistence uploads restore failed - {exc}")
 
 if uploads_dir != bundled_uploads_dir and bundled_uploads_dir.exists() and not any(uploads_dir.rglob("*")):
     cloud_persistence.copy_bundled_uploads_if_needed(bundled_uploads_dir)
@@ -112,17 +109,43 @@ app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 app.mount(core_ui.STATIC_URL, StaticFiles(directory=str(core_ui.STATIC_DIR)), name="ui-static")
 recipe_ocr_service = RecipeOCRService(uploads_dir)
 
-# Initialize database
+# The database. On Cloud Run it's loaded on the first request, not at startup: during a deploy the new version starts
+# minutes before it takes over, while the old one keeps serving and saving. Loading (and the startup steps that
+# write) at the first request means the new version starts from the old one's last save, and never uploads a stale
+# copy over it. Locally and in tests (no Cloud Storage) it's prepared right away, at the end of this file.
 db = Database(str(db_path))
-db.init()
-if db.get_project_count() == 0:
-    db.populate_sample_data()
-if cloud_persistence.enabled:
-    db.after_commit = cloud_persistence.schedule_backup
-    try:
-        cloud_persistence.seed_if_empty()
-    except Exception as exc:
-        print(f"Warning: Cloud persistence seed failed - {exc}")
+_db_ready = {"done": False}
+_db_ready_lock = threading.Lock()
+_after_db_ready = []  # startup steps that write (Studio tidy-up, the CCT merge), run once the database is loaded
+
+
+def prepare_database():
+    if _db_ready["done"]:
+        return
+    with _db_ready_lock:
+        if _db_ready["done"]:
+            return
+        if cloud_persistence.enabled:
+            # If this fails, raise: starting from an empty database would overwrite the real one on its first save.
+            print(f"Cloud persistence: database restored = {cloud_persistence.restore_database()}")
+        if db_path != bundled_db_path and not db_path.exists() and bundled_db_path.exists():
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(bundled_db_path, db_path)
+        db.init()
+        if db.get_project_count() == 0:
+            db.populate_sample_data()
+        if cloud_persistence.enabled:
+            db.after_commit = cloud_persistence.schedule_backup
+            try:
+                cloud_persistence.seed_if_empty()
+            except Exception as exc:
+                print(f"Warning: Cloud persistence seed failed - {exc}")
+        for step in _after_db_ready:
+            try:
+                step()
+            except Exception as exc:
+                print(f"Warning: startup step {getattr(step, '__name__', step)} failed - {exc}")
+        _db_ready["done"] = True
 
 # Thanksgiving planner: a self-contained Kitchen slice. When THANKSGIVING_SERVICE_URL is set it runs as its own
 # Cloud Run service with its own database (apps/kitchen/thanksgiving/service.py): this app keeps the address and
@@ -5055,15 +5078,19 @@ def merge_existing_cct_projects():
 @app.on_event("shutdown")
 def flush_cloud_backup_on_shutdown():
     """Cloud Run sends SIGTERM before stopping an instance; upload any pending database backup."""
+    if not _db_ready["done"]:
+        return  # never loaded, so never upload it
     try:
         cloud_persistence.flush()
     except Exception as exc:
         print(f"Warning: final database backup failed: {exc}")
 
-@app.on_event("startup")
 def merge_legacy_cct_projects_on_startup():
-    """Apply the approved CCT project merge when each app revision starts."""
+    """Apply the approved CCT project merge when each app revision starts (once its database is loaded)."""
     merge_existing_cct_projects()
+
+
+_after_db_ready.append(merge_legacy_cct_projects_on_startup)
 
 def safe_redirect_path(path, fallback="/"):
     """Keep form redirects inside this app."""
@@ -8276,12 +8303,33 @@ def delete_blocker_form(project_id: int, blocker_id: int):
 # ============================================================================
 
 studio_routes.configure(db, require_admin, summarize=model_app_feedback_summary, areas=studio_area_options())
+_after_db_ready.append(studio_routes.startup)
 app.include_router(studio_routes.router)
 
 
 # ============================================================================
 # SERVER STARTUP
 # ============================================================================
+
+# Outermost (added last): the database is loaded before anything else, and each request's changes are uploaded before
+# its answer goes back, so the next request can safely land on another instance or a newer version.
+@app.middleware("http")
+async def database_ready_and_saved(request: Request, call_next):
+    try:
+        await run_in_threadpool(prepare_database)
+    except Exception as exc:
+        print(f"Warning: database not ready - {exc}")
+        return JSONResponse({"detail": "Dieter is starting up. Try again in a moment."}, status_code=503)
+    try:
+        return await call_next(request)
+    finally:
+        if cloud_persistence.enabled:
+            await run_in_threadpool(cloud_persistence.save_pending)
+
+
+if not cloud_persistence.enabled:
+    prepare_database()  # locally and in tests: right away, as before
+
 
 if __name__ == "__main__":
     import uvicorn
