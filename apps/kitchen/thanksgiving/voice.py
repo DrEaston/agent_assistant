@@ -64,7 +64,13 @@ How to think:
   Never mark a step done unless the cook said so. If the cook corrects you ("no, I only did the fridge"),
   send "done": false for the steps they didn't do so those boxes get unchecked; saying so isn't enough.
 - If it's unclear which steps "that" means, check off only what they clearly did and ask about the rest.
-- Never invent dishes, steps or sizes that aren't in the plan. There is no assigning dishes to people."""
+- Never invent dishes, steps or sizes that aren't in the plan. There is no assigning dishes to people.
+- Something the cook can't find is often a part of another dish (see "recipe parts"), e.g. whipped cream is
+  part of Pumpkin pie. Say which dish's tab it's in and when its step is. Don't add steps for it.
+- Ingredients are on the Shopping list already, added up across dishes (one cream line covers the potatoes and
+  the pie). Never add "buy ..." steps for something on it; say it's on the list and how much.
+- You can't add a new dish or recipe. If they ask for one, say so plainly and tell them where: Menu, then
+  "Add a dish". Don't offer a step on another dish instead."""
 
 
 SASS_LEVELS = {
@@ -111,12 +117,23 @@ def plan_summary(plan, dishes, tasks, cooks, now):
             options = ", ".join(f"{o['value']} = {o['label']}" for o in dish["size_options"])
             size = f" | size {dish.get('size_value')} (options: {options})"
         lines.append(f"Dish {dish['id']}: {dish['name']}{size}")
+        parts = [sec["heading"] for sec in planner.recipe_sections(dish.get("ingredients_text")) if sec["heading"]]
+        if len(parts) > 1:
+            # e.g. the whipped cream is part of the pumpkin pie, not a dish of its own.
+            lines.append(f"  recipe parts (all in this dish's tab and recipe): {', '.join(parts)}")
         for task in sorted(by_dish.get(dish["id"], []), key=lambda t: t["start"]):
             section = f" [section {task['section']}]" if task.get("section") else ""
             done = " (done)" if task.get("done") else ""
             kind = f" {task['kind']}" + (f" {task['temp']}F" if task.get("temp") else "")
             lines.append(f"  step {task['step_id']}: {task['title']}{section} | "
                          f"{task['start']:%a %Y-%m-%d %H:%M}, {task['minutes']} min,{kind}{done}")
+    lines.append("")
+    lines.append("Shopping list (one line per ingredient, already added up across dishes at their chosen sizes):")
+    for group in planner.build_grocery_list(dishes):
+        for item in group["items"]:
+            amount = f" {item['amount']}" if item.get("amount") else ""
+            used = f" (for {', '.join(item['dishes'])})" if item.get("dishes") else ""
+            lines.append(f"  {item['text']}{amount}{used}")
     return "\n".join(lines)
 
 
@@ -236,6 +253,10 @@ anything you can't answer confidently from the plan.
 Use "ignore" only when the instructions below say the phrase may not be meant for you and it clearly isn't
 (they mention {"ignore": true}; use route "ignore" instead).
 If they also say to end a wrapped-up conversation, set "end": true with a short sign-off as the reply.
+
+Where things are: a dish's "recipe parts" are inside that dish (e.g. whipped cream is part of Pumpkin pie):
+say which dish's tab it's in and when its step is. Ingredients are on the Shopping list in the plan, already
+added up across dishes: answer "do we have / is X on the list" from it.
 
 Personality: warm, quick, a little sassy (a sass level below overrides this). Never invent times or steps
 that aren't in the plan."""

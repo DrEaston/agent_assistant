@@ -13,7 +13,7 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     from fastapi.testclient import TestClient
 
-from apps.kitchen.thanksgiving import planner, presets, router as tg_router
+from apps.kitchen.thanksgiving import planner, presets, router as tg_router, voice
 from apps.kitchen.thanksgiving.presets import OUR_MENU, preset_dish
 from database import Database, reset_current_user_id, set_current_user_id
 
@@ -839,6 +839,32 @@ class RouteTests(unittest.TestCase):
         self.assertIn('id="hf-toggle"', page)
         self.assertIn("/thanksgiving/api/handsfree/heard", page)
         self.assertNotIn('id="hf-toggle"', self.client.get("/thanksgiving").text)
+
+    def test_full_screen_button_on_every_page_always_shown_in_cook_mode(self):
+        self.setup_plan()
+        cook = self.client.get("/thanksgiving/cook").text
+        self.assertEqual(cook.count('id="fullscreen-btn"'), 1)
+        self.assertIn('data-always="yes"', cook)
+        for url in ("/thanksgiving", "/thanksgiving/timeline", "/thanksgiving/menu", "/thanksgiving/recipes",
+                    "/thanksgiving/shopping"):
+            page = self.client.get(url).text
+            self.assertIn('id="fullscreen-btn"', page, url)
+            self.assertIn('data-always=""', page, url)  # only on the kitchen PC (or when already full screen)
+
+    def test_dieter_knows_recipe_parts_and_the_combined_shopping_list(self):
+        # "Whipped cream isn't on the list": it's part of the pumpkin pie, and its cream is on the shopping list.
+        plan = self.setup_plan()
+        context = tg_router.plan_context(plan)
+        summary = voice.plan_summary(plan, context["dishes"], context["tasks"], context["cooks"], context["now"])
+        pie = re.split(r"Dish \d+: Pumpkin pie", summary, maxsplit=1)[1].splitlines()[1]
+        self.assertIn("recipe parts", pie)
+        self.assertIn("Whipped cream", pie)
+        shopping = summary.split("Shopping list", 1)[1].splitlines()
+        cream = [line for line in shopping if re.match(r"\s*Cream \d", line)]
+        self.assertEqual(len(cream), 1, shopping)
+        self.assertIn("Pumpkin pie", cream[0])
+        self.assertIn("mashed potatoes", cream[0].lower())
+        self.assertIn('"Add a dish"', voice.SYSTEM_PROMPT)
 
     def test_timers_stand_alone_with_a_label(self):
         self.client.get("/thanksgiving")

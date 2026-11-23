@@ -1,0 +1,41 @@
+{# Full screen on/off: a small, faint button in the lower-left corner (Talk to Dieter is lower right).
+   Cook mode always shows it. The other Thanksgiving pages show it only on the kitchen PC (cook mode found the
+   helper there before) or when already full screen, so phones don't get a button they don't need.
+   On the kitchen PC the helper presses F11: that also undoes the full screen the kitchen window starts in,
+   which a page can't leave by itself. Elsewhere it's the browser's own full screen. #}
+<style>
+.fullscreen-btn { position: fixed; z-index: 30; left: calc(.75rem + env(safe-area-inset-left, 0px));
+  bottom: calc(.75rem + env(safe-area-inset-bottom, 0px)); width: 40px; height: 40px; min-height: 40px; padding: 0;
+  border-radius: 50%; font-size: 1.15rem; line-height: 1; opacity: .4; transition: opacity .2s ease; }
+.fullscreen-btn:hover, .fullscreen-btn:focus-visible { opacity: 1; }
+</style>
+<button type="button" class="fullscreen-btn" id="fullscreen-btn" title="Full screen on/off"
+  aria-label="Full screen on or off" data-always="{{ 'yes' if fullscreen_always else '' }}" hidden>⛶</button>
+<script>
+(() => {
+  const HELPER = "http://127.0.0.1:47613";
+  const KITCHEN_KEY = "dieter-kitchen-screen";  // set by cook mode when it finds the helper on this PC
+  const button = document.getElementById("fullscreen-btn");
+  const kitchenPc = () => { try { return localStorage.getItem(KITCHEN_KEY) === "1"; } catch (e) { return false; } };
+  const fullNow = () => !!document.fullscreenElement || matchMedia("(display-mode: fullscreen)").matches;
+  const update = () => { button.hidden = !(button.dataset.always || kitchenPc() || fullNow()); };
+  update();
+  addEventListener("resize", update);
+  document.addEventListener("fullscreenchange", update);
+
+  async function helperF11() {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 2500);
+    try {
+      const r = await fetch(HELPER + "/fullscreen", { method: "POST", signal: ctl.signal, cache: "no-store" });
+      return r.ok && !!(await r.json()).ok;
+    } catch (e) { return false; } finally { clearTimeout(timer); }
+  }
+  button.addEventListener("click", async () => {
+    // Ask the helper at click time, not only if it was found earlier: a click right after the page loads works too.
+    if (!document.fullscreenElement && kitchenPc() && await helperF11()) return;
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+  });
+})();
+</script>

@@ -16,11 +16,6 @@ body { overflow-x: hidden; }
   box-shadow: 0 6px 24px rgba(194,65,12,.25); display: flex; flex-wrap: wrap; gap: .5rem .9rem; align-items: center; animation: pulse 1.6s ease-in-out infinite; }
 .alert.timer { border-color: #4338ca; background: #eef2ff; }
 .alert .what { flex: 1 1 16rem; }
-/* Full screen on/off: small and faint in the lower-left corner, out of the way (Talk to Dieter is lower right). */
-.fullscreen-btn { position: fixed; z-index: 30; left: calc(.75rem + env(safe-area-inset-left, 0px));
-  bottom: calc(.75rem + env(safe-area-inset-bottom, 0px)); width: 40px; height: 40px; min-height: 40px; padding: 0;
-  border-radius: 50%; font-size: 1.15rem; line-height: 1; opacity: .4; transition: opacity .2s ease; }
-.fullscreen-btn:hover, .fullscreen-btn:focus-visible { opacity: 1; }
 .alert .snooze { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .3rem; }
 .alert .what strong { font-size: 1.1rem; }
 @keyframes pulse { 50% { box-shadow: 0 6px 30px rgba(194,65,12,.5); } }
@@ -89,7 +84,6 @@ body { overflow-x: hidden; }
 </header>
 <div class="offline" id="offline" hidden>Can't reach Dieter. Retrying… (timers keep counting on this screen)</div>
 <div id="alerts" aria-live="assertive"></div>
-<button type="button" class="fullscreen-btn" id="fullscreen-btn" title="Full screen on/off" aria-label="Full screen on or off">⛶</button>
 
 <div class="layout">
   <nav class="tabs" id="tabs" role="tablist" aria-label="Recipes"></nav>
@@ -108,6 +102,7 @@ body { overflow-x: hidden; }
 </div>
 {% include "tg_voice.html" %}
 {% include "tg_sleep.html" %}
+{% with fullscreen_always = true %}{% include "tg_fullscreen.html" %}{% endwith %}
 {% include "tg_handsfree.html" %}
 {% endblock %}
 {% block feedback %}
