@@ -16,8 +16,9 @@
     {% if section.name == "Check the pantry" %}<p class="g-from" style="margin:0 0 .3rem">Staples most kitchens have. Check before you go; add any you're out of.</p>{% endif %}
     {% for item in section["items"] %}
       {% set got = item.key in grocery_checked %}
-      <div class="grocery{% if got %} done{% endif %}">
-        <form method="post" action="/thanksgiving/groceries/toggle">
+      <div class="grocery{% if got %} done{% endif %}" id="g-{{ loop.index }}-{{ section.name|lower|replace(' ', '-')|replace('&', '') }}">
+        <form method="post" action="/thanksgiving/groceries/toggle" data-grocery-toggle>
+          <input type="hidden" name="row" value="g-{{ loop.index }}-{{ section.name|lower|replace(' ', '-')|replace('&', '') }}">
           <input type="hidden" name="key" value="{{ item.key }}">{% if not got %}<input type="hidden" name="done" value="1">{% endif %}
           <button class="check" type="submit" aria-label="{% if got %}Not bought{% else %}Got it{% endif %}: {{ item.text }}">{% if got %}✓{% endif %}</button>
         </form>

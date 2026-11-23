@@ -308,7 +308,8 @@ class RouteTests(unittest.TestCase):
         page = self.client.get("/thanksgiving/menu").text
         card = page.split('<article class="feast"')[1].split("</article>")[0]
         self.assertNotIn("<img", card)
-        self.assertIn("Four o&#39;clock", card)
+        self.assertIn("Dinner at four o&#39;clock", card)
+        self.assertIn("Guests are welcome from three o&#39;clock", card)
         courses = re.findall(r'class="course-name">([^<]+)<', card)
         self.assertEqual(courses, ["Before dinner", "To begin", "The main course", "Alongside", "To finish"])
         before = card.split('course-name">Before dinner')[1].split('course-name">To begin')[0]
@@ -339,7 +340,9 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("The Menu", r.text)
         self.assertEqual(client.get("/thanksgiving", follow_redirects=False).status_code, 303)
-        self.assertEqual(client.get("/thanksgiving/menu/1", follow_redirects=False).status_code, 303)
+        self.assertNotEqual(client.get("/thanksgiving/menu/1", follow_redirects=False).status_code, 303)  # shared recipes
+        self.assertEqual(client.post("/thanksgiving/menu/1", follow_redirects=False).status_code, 303)
+        self.assertEqual(client.get("/thanksgiving/menu/1/edit", follow_redirects=False).status_code, 303)
 
     def test_janice_brings_green_beans_and_cranberry_is_made_tuesday(self):
         self.client.get("/thanksgiving")

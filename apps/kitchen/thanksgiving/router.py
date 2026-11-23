@@ -278,6 +278,27 @@ def timeline_page(request: Request):
 
 
 PUBLIC_PATHS = {"/thanksgiving/menu"}  # open without signing in (the main app and service.py both allow it)
+PUBLIC_RECIPE = re.compile(r"/thanksgiving/menu/(\d+)")  # a dish's recipe, linked from the shared menu card
+
+
+def is_public_path(path):
+    return path in PUBLIC_PATHS or bool(PUBLIC_RECIPE.fullmatch(path))
+
+
+def has_recipe(dish):
+    return bool((dish.get("ingredients_text") or "").strip() or (dish.get("instructions_text") or "").strip())
+
+
+def public_recipe(request, dish_id):
+    """Signed out: one dish's recipe as written. Only dishes on the shared menu; no cook, notes or timeline."""
+    plan = store().household_plan()
+    dish = next((d for d in store().get_dishes(plan["id"]) if d["id"] == dish_id), None) if plan else None
+    if not dish or dish.get("category") == "prep" or not has_recipe(dish):
+        raise HTTPException(status_code=404, detail="That recipe isn't on the menu.")
+    return render("tg_recipe_public.html", dish=dish, blurb=menu.entry_for(dish).get("description") or menu.blurb(dish),
+                  ingredient_sections=planner.recipe_sections(dish["ingredients_text"] or ""),
+                  instruction_sections=planner.recipe_sections(dish["instructions_text"] or ""),
+                  page_url=str(request.url.path))
 
 
 def public_menu(request):
@@ -289,6 +310,7 @@ def public_menu(request):
     dinner = planner.parse_dt(plan["dinner_at"])
     courses = menu.courses(store().get_dishes(plan["id"]))
     return render("tg_menu_public.html", menu_courses=courses, dinner=dinner, menu_time=menu.time_in_words(dinner),
+                  menu_arrival=menu.arrival(),
                   page_url=str(request.url.path))
 
 
@@ -298,7 +320,7 @@ def menu_page(request: Request):
         return public_menu(request)
     def courses(context):
         found = menu.courses(context["dishes"])
-        return {"menu_courses": found, "menu_time": menu.time_in_words(context["dinner"]),
+        return {"menu_courses": found, "menu_time": menu.time_in_words(context["dinner"]), "menu_arrival": menu.arrival(),
                 "dishes": [d for d in context["dishes"] if d.get("category") != "prep"],
                 "prep_dishes": [d for d in context["dishes"] if d.get("category") == "prep"]}
     return render_page(request, "tg_menu.html", "menu", extend=courses, library=library_recipes())
@@ -308,6 +330,8 @@ def menu_page(request: Request):
 
 @router.get("/thanksgiving/menu/{dish_id}", response_class=HTMLResponse)
 def dish_page(request: Request, dish_id: int):
+    if not get_current_user_id():
+        return public_recipe(request, dish_id)
     def pick(context):
         dish = context["dishes_by_id"].get(dish_id)
         if not dish:
@@ -772,10 +796,11 @@ def toggle_step(request: Request, key: str = Form(...), done: str = Form(""), an
 
 
 @router.post("/thanksgiving/groceries/toggle")
-def toggle_grocery(key: str = Form(...), done: str = Form("")):
+def toggle_grocery(key: str = Form(...), done: str = Form(""), row: str = Form("")):
     plan = require_plan()
     store().set_checked(plan["id"], "grocery", key, bool(done))
-    return back("/thanksgiving/shopping")
+    # Without JavaScript the page reloads; land back on the item, not the top of the list.
+    return back("/thanksgiving/shopping", row if re.fullmatch(r"[a-z0-9-]{1,80}", row) else "")
 
 
 @router.post("/thanksgiving/groceries/add")

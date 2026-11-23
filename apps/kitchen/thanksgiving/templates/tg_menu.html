@@ -8,7 +8,7 @@
 {% endblock %}
 {% block page %}
 <section id="menu">
-  {{ menu_card(menu_courses, dinner, menu_time) }}
+  {{ menu_card(menu_courses, dinner, menu_time, arrival=menu_arrival) }}
 
   <p class="small muted menu-extras">{% for d in prep_dishes %}<a href="/thanksgiving/menu/{{ d.id }}">{{ d.name }} tasks</a> · {% endfor %}<a href="#add-dish" data-open-add>Add a dish</a></p>
 
