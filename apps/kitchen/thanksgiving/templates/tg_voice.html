@@ -788,7 +788,7 @@
   // nothing heard while waiting is sent to Dieter. (Chrome's speech recognition itself runs on Google's servers.)
   const WAKE_WORDS = new Set(["dieter", "deiter", "dieder", "dietor", "deeter", "deter", "dieta", "dietr", "diter",
     "dita", "deda", "dida", "peter", "pieter", "dieter's", "detour", "deader", "teeter", "dieters", "ditor"]);
-  const WAKE_LEADS = new Set(["hey", "hi", "ok", "okay", "yo", "hay", "high"]);
+  const WAKE_LEADS = new Set(["hey", "hi", "ok", "okay", "yo", "hay", "high", "a", "eh", "ay", "hei", "hate"]);
   function similar(a, b) {  // 0..1, from edit distance
     const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
     for (let j = 1; j <= b.length; j++) d[0][j] = j;
@@ -797,14 +797,22 @@
     return 1 - d[a.length][b.length] / Math.max(a.length, b.length, 1);
   }
   const isDieter = (w) => !!w && (WAKE_WORDS.has(w) || similar(w, "dieter") >= 0.8);
-  // "hey dieter what's next" -> "what's next"; "hey dieter" -> ""; anything else -> null.
+  // "hey dieter what's next" -> "what's next"; "hey dieter" -> ""; anything else -> null. The phrase can be anywhere:
+  // a listener that has been running a while gets everything said in the kitchen as one long stretch of text, so
+  // "...and then the gravy hey dieter what's next" has to count too (the words after the last "hey dieter").
   function wakeRest(text) {
     const words = String(text || "").toLowerCase().replace(/[’]/g, "'").replace(/[^a-z0-9' ]+/g, " ").trim().split(/\s+/);
-    for (let i = 0; i < Math.min(words.length - 1, 3); i++) {
+    for (let i = words.length - 2; i >= 0; i--) {
       if (WAKE_LEADS.has(words[i]) && isDieter(words[i + 1])) return words.slice(i + 2).join(" ");
       if (WAKE_LEADS.has(words[i]) && words[i + 1] === "the" && words[i + 2] === "tour") return words.slice(i + 3).join(" ");
     }
     return null;
+  }
+  // Short phrases (up to 5 words) that weren't taken as "Hey Dieter", a few per page, so the log shows what Chrome
+  // heard when it missed the name. Cook mode only, for tuning the match.
+  function nearMisses(text) {
+    const phrase = String(text || "").toLowerCase().replace(/[^a-z0-9' ]+/g, " ").trim();
+    return phrase && phrase.split(/\s+/).length <= 5 ? [phrase] : [];
   }
   window.dieterWakeRest = wakeRest;  // for tests
 
@@ -815,7 +823,7 @@
   const wakeWanted = () => WAKE_PAGE && !!loadDevice().wake && !!Recognition && !micBusy() && !document.hidden && !wakeBlocked;
   // What the listener gets from Chrome (counts only, never words), sent to the server log every 30 seconds when it
   // changes: whether sound arrives at all, how often Chrome restarts it, errors.
-  const wakeStats = { sessions: 0, audio: 0, speech: 0, results: 0, matched: 0, noaudio: 0, errors: {} };
+  const wakeStats = { sessions: 0, audio: 0, speech: 0, results: 0, matched: 0, noaudio: 0, errors: {}, misses: [] };
   let statsSent = "", statsReports = 0;
   setInterval(() => {
     const now = JSON.stringify(wakeStats);
@@ -878,7 +886,10 @@
       wakeStats.results++;
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
-        if (wakeRest(transcript) === null) continue;
+        if (wakeRest(transcript) === null) {
+          if (event.results[i].isFinal) for (const m of nearMisses(transcript)) if (wakeStats.misses.length < 8 && !wakeStats.misses.includes(m)) wakeStats.misses.push(m);
+          continue;
+        }
         wakeStats.matched++;
         latest = transcript;
         if (event.results[i].isFinal) { wakeNow(); return; }
