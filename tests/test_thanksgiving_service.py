@@ -181,6 +181,89 @@ class ServiceTests(unittest.TestCase):
             proxy._client = saved
 
 
+class SaveBeforeReplyTests(unittest.TestCase):
+    """A deploy must not lose changes: load on the first request (after the new version takes over) and save each
+    change before answering."""
+
+    class FakeStorage:
+        def __init__(self, fail_restore=False):
+            self.enabled, self.events, self.fail_restore, self.pending = True, [], fail_restore, False
+
+        def restore(self):
+            self.events.append("restore")
+            if self.fail_restore:
+                raise RuntimeError("storage unreachable")
+            return {"enabled": True, "database_restored": False, "uploads_restored": 0}
+
+        def schedule_backup(self):
+            self.pending = True
+
+        def save_pending(self):
+            if self.pending:
+                self.pending = False
+                self.events.append("save")
+
+        def flush(self):
+            self.events.append("flush")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        env = {"DB_PATH": str(Path(self.tmp.name) / "tg.db"), "GCS_BUCKET": "", "DIETER_GCS_BUCKET": "",
+               "DIETER_INTERNAL_KEY": KEY, "PLATFORM_URL": ""}
+        self.saved = {k: os.environ.get(k) for k in env}
+        os.environ.update(env)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            from apps.kitchen.thanksgiving import service
+            self.service = importlib.reload(service)
+
+    def tearDown(self):
+        for k, v in self.saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        if self.service.db.conn:
+            self.service.db.conn.close()
+        self.tmp.cleanup()
+
+    def use(self, storage):
+        self.service.persistence = storage
+        self.service.db.after_commit = storage.schedule_backup
+        return storage
+
+    def signed(self):
+        return {internal.HEADER: internal.sign({"id": 61, "email": "cook@example.com", "name": "Curtis"})}
+
+    def test_loads_on_the_first_request_and_saves_before_answering(self):
+        storage = self.use(self.FakeStorage())
+        self.assertIsNone(self.service.db.conn)  # starting up opens nothing
+        client = TestClient(self.service.app)
+        self.assertEqual(client.get("/healthz").status_code, 200)
+        self.assertEqual(storage.events, [])  # the health check doesn't load anything either
+        client.get("/thanksgiving", headers=self.signed())
+        self.assertEqual(storage.events[0], "restore")
+        self.assertEqual(storage.events.count("restore"), 1)
+        page = client.get("/thanksgiving/shopping", headers=self.signed()).text
+        key = page.split('name="key" value="')[1].split('"')[0]
+        storage.events.clear()
+        client.post("/thanksgiving/groceries/toggle", headers=self.signed(), data={"key": key, "done": "1"},
+                    follow_redirects=False)
+        self.assertEqual(storage.events, ["save"])  # saved before the reply came back
+        self.assertNotIn("restore", storage.events)
+
+    def test_a_failed_load_answers_try_again_and_never_saves(self):
+        storage = self.use(self.FakeStorage(fail_restore=True))
+        client = TestClient(self.service.app)
+        r = client.get("/thanksgiving", headers=self.signed())
+        self.assertEqual(r.status_code, 503)
+        self.assertIsNone(self.service.db.conn)
+        self.service.flush_backup()
+        self.assertNotIn("flush", storage.events)  # an unloaded database is never uploaded
+        storage.fail_restore = False
+        self.assertEqual(client.get("/thanksgiving", headers=self.signed()).status_code, 200)  # next try loads
+
+
 class PlatformEndpointTests(unittest.TestCase):
     def setUp(self):
         self.saved_key = os.environ.get("DIETER_INTERNAL_KEY")

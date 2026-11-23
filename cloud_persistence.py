@@ -171,6 +171,17 @@ class CloudStoragePersistence:
             return True
         return False
 
+    def save_pending(self):
+        """Upload now if anything changed since the last upload. Called as each request finishes, so a change is in
+        Cloud Storage before the cook sees it saved (a later request may go to a different instance or version)."""
+        try:
+            if self._take_pending():
+                self._backup_now()
+                return True
+        except Exception as exc:
+            print(f"Warning: database backup failed: {exc}")
+        return False
+
     def flush(self):
         """Run any pending backup now (used at shutdown)."""
         if self._take_pending():

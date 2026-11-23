@@ -299,6 +299,26 @@ class BatchedBackupTests(unittest.TestCase):
         self.assertFalse(persistence.run_if_due(delay=0))  # nothing left pending
         self.assertIsNone(persistence._timer)
 
+    def test_save_pending_uploads_a_burst_before_the_request_ends(self):
+        persistence = CloudStoragePersistence("bucket", "x.db", ".")
+        uploads = []
+        persistence.backup_database = lambda: uploads.append(1)
+        self.assertFalse(persistence.save_pending())  # nothing changed
+        persistence.schedule_backup(delay=60)  # first change: uploads now
+        persistence.schedule_backup(delay=60)  # the rest of the burst waits...
+        persistence.schedule_backup(delay=60)
+        self.assertTrue(persistence.save_pending())  # ...until the request finishes, then uploads once
+        self.assertEqual(uploads, [1, 1])
+        self.assertIsNone(persistence._timer)
+
+        def broken():
+            raise RuntimeError("storage down")
+        persistence.backup_database = broken
+        persistence.schedule_backup(delay=60)
+        persistence.schedule_backup(delay=60)
+        persistence.save_pending()  # a storage error is logged, never raised into the request
+        self.assertEqual(uploads, [1, 1])
+
     def test_flush_runs_a_pending_backup_now(self):
         persistence = CloudStoragePersistence("bucket", "x.db", ".")
         uploads = []
