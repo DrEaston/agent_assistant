@@ -787,7 +787,8 @@
   // wake phrase, then open the chat with the mic on. Turned on per device (This device → Listen for “Hey Dieter”). The phrase is matched here in the page;
   // nothing heard while waiting is sent to Dieter. (Chrome's speech recognition itself runs on Google's servers.)
   const WAKE_WORDS = new Set(["dieter", "deiter", "dieder", "dietor", "deeter", "deter", "dieta", "dietr", "diter",
-    "dita", "deda", "dida", "peter", "pieter", "dieter's", "detour", "deader", "teeter", "dieters", "ditor"]);
+    "dita", "deda", "dida", "peter", "pieter", "dieter's", "detour", "deader", "teeter", "dieters", "ditor",
+    "heater"]);  // heard in the kitchen 11/23
   const WAKE_LEADS = new Set(["hey", "hi", "ok", "okay", "yo", "hay", "high", "a", "eh", "ay", "hei", "hate"]);
   function similar(a, b) {  // 0..1, from edit distance
     const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
