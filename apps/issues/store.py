@@ -9,6 +9,7 @@ shows on the report page without any Codex code.
 """
 
 import json
+from datetime import datetime
 
 STATUSES = ("open", "in_progress", "ready_for_review", "done")
 STATUS_LABELS = {
@@ -20,6 +21,15 @@ STATUS_LABELS = {
     "done": "Done",
 }
 ACTIVE = ("open", "triaged", "sent", "in_progress", "ready_for_review")
+STALE_DAYS = 7  # an open report nobody has touched for this long gets flagged
+
+
+def _days_since(stamp, now=None):
+    try:
+        when = datetime.fromisoformat(str(stamp or "")[:19].replace("T", " "))
+    except ValueError:
+        return 0
+    return max(0, ((now or datetime.utcnow()) - when).days)
 
 
 def _loads(text, default):
@@ -50,7 +60,8 @@ class StudioStore:
             params = ACTIVE
         elif which == "done":
             sql += " WHERE status = 'done'"
-        sql += " ORDER BY created_at DESC, id DESC LIMIT 200"
+        # Fixes waiting for him to check come first.
+        sql += " ORDER BY CASE status WHEN 'ready_for_review' THEN 0 ELSE 1 END, created_at DESC, id DESC LIMIT 200"
         return [self._shape(row) for row in self._conn().execute(sql, params).fetchall()]
 
     def report(self, report_id):
@@ -64,6 +75,15 @@ class StudioStore:
             counts["done" if row["status"] == "done" else "active"] += row["n"]
         return counts
 
+    def summary(self):
+        """For the Today page: fixes waiting to be checked, open reports, the oldest one's age, and stale ones."""
+        active = self.reports("active")
+        to_check = [r for r in active if r["status"] == "ready_for_review"]
+        waiting = [r for r in active if r["status"] != "ready_for_review"]
+        return {"to_check": len(to_check), "open": len(waiting),
+                "oldest_days": max((r["age_days"] for r in waiting), default=0),
+                "stale": sum(1 for r in waiting if r["stale"])}
+
     def _shape(self, row):
         report = dict(row)
         status = report.get("status") or "open"
@@ -73,6 +93,8 @@ class StudioStore:
         report["codex_history"] = _loads(report.get("codex_history_json"), [])
         report["old_plan"] = report.get("audit_plan") or ""
         report["created"] = str(report.get("created_at") or "")[:10]
+        report["age_days"] = _days_since(report.get("created_at"))
+        report["stale"] = status in ACTIVE and status != "ready_for_review" and             _days_since(report.get("updated_at") or report.get("created_at")) >= STALE_DAYS
         return report
 
     # ------------------------------------------------------------ changes

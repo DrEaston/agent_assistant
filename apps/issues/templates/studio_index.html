@@ -17,7 +17,8 @@
           <a class="title" href="/apps/issues/{{ r.id }}">{{ r.title }}</a>
           <div class="muted small">{{ r.area or "Dieter" }} · {{ r.created }}{% if r.reporter_name %} · {{ r.reporter_name }}{% endif %}</div>
         </div>
-        {{ ui.tag(r.status_label, "ok" if r.status == "done" else None) }}
+        {% if r.stale %}{{ ui.tag("Untouched " ~ r.age_days ~ " days", "warn") }}{% endif %}
+        {{ ui.tag(r.status_label, "ok" if r.status == "done" else "info" if r.status == "ready_for_review" else None) }}
       </div>
       {% else %}
       {{ ui.empty("Nothing here." if show == "done" else "No open requests. Use Report a problem on any page, or New request.") }}

@@ -116,6 +116,40 @@ class StudioTests(unittest.TestCase):
         finally:
             reset_current_user_id(token)
 
+    def test_fixes_wait_to_be_checked_and_old_reports_are_flagged(self):
+        fixed, old, fresh = self.add_report(), self.add_report(title="Old"), self.add_report(title="Fresh")
+        conn = self.db.connect()
+        conn.execute("UPDATE app_feedback_reports SET created_at = '2026-11-01 10:00:00', updated_at = '2026-11-01 10:00:00' "
+                     "WHERE id = ?", (old,))
+        conn.commit()
+        store = StudioStore(self.db)
+        store.set_status(fixed, "ready_for_review", "The timer chimes now. Start one in cook mode to check.")
+        summary = store.summary()
+        self.assertEqual((summary["to_check"], summary["open"], summary["stale"]), (1, 2, 1))
+        self.assertGreaterEqual(summary["oldest_days"], 7)
+        self.assertEqual(store.reports("active")[0]["id"], fixed)  # waiting on him: first
+        listing = self.client.get("/apps/issues").text
+        self.assertIn("Untouched", listing)
+        page = self.client.get(f"/apps/issues/{fixed}").text
+        self.assertIn("Does it work now?", page)
+        self.assertIn("The timer chimes now.", page)
+        self.client.post(f"/apps/issues/{fixed}/status", data={"status": "done", "note": "Checked: it works."})
+        self.assertEqual(store.report(fixed)["status"], "done")
+        self.assertNotIn("Does it work now?", self.client.get(f"/apps/issues/{fresh}").text)
+
+    def test_today_card_shows_reports(self):
+        from apps.launcher import today
+        from datetime import datetime
+        html = today.render(user_name="Curtis", now=datetime(2026, 11, 23, 9),
+                            studio={"to_check": 1, "open": 2, "oldest_days": 9, "stale": 1}).body.decode()
+        self.assertIn("1 ready for you to check", html)
+        self.assertIn("2 reports waiting · 1 untouched a week", html)
+        self.assertIn("oldest 9 days", html)
+        quiet = today.render(user_name="Curtis", now=datetime(2026, 11, 23, 9),
+                             studio={"to_check": 0, "open": 0, "oldest_days": 0, "stale": 0}).body.decode()
+        self.assertNotIn("Studio reports", quiet)
+        self.assertNotIn("Studio reports", today.render(user_name="Curtis", now=datetime(2026, 11, 23, 9)).body.decode())
+
     def test_old_addresses_redirect(self):
         for old, new in (("/apps/assistant/feedback", "/apps/issues"), ("/apps/assistant/feedback/7", "/apps/issues/7"),
                          ("/apps/issues/workers", "/apps/issues")):

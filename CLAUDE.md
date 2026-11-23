@@ -5,8 +5,9 @@ Thanksgiving planner), Assistant (projects, scheduler), Trainer (workouts, Strav
 and Studio (problem reports and change requests). FastAPI, Jinja2 and SQLite, on Google Cloud Run.
 
 Curtis usually asks for changes from his phone, in a Claude chat. He also jots problems down inside Dieter with
-"Report a problem" (Studio); read those with the connector's studio_list_reports / studio_get_report, and mark one
-done with studio_set_status once the fix is live. He is not reading diffs. Write for him in plain English: what he
+"Report a problem" (Studio); read those with the connector's studio_list_reports / studio_get_report. Once the fix
+is live, mark the report ready_for_review with studio_set_status and a note on how to check it; it waits on his Today
+page until he confirms it works (or says so in chat, then mark it done). He is not reading diffs. Write for him in plain English: what he
 will see differently, and how to try it.
 
 ## How a change works

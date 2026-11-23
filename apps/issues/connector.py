@@ -47,7 +47,7 @@ def get_report(args):
 def set_status(args):
     _admin()
     report = _report(args.get("report_id"))
-    status = args.get("status") or "done"
+    status = args.get("status") or "ready_for_review"
     if status not in STATUSES:
         raise ToolError(f"status is one of: {', '.join(STATUSES)}.")
     routes.store().set_status(report["id"], status, (args.get("note") or "").strip()[:500])
@@ -68,8 +68,9 @@ def tools():
              "One report in full: what he wrote, the page he was on, and its history.", get_report, REPORT_ID,
              ("report_id",), read_only=True),
         Tool("studio_set_status", "Update a Studio report",
-             "Mark a report done once the fix is live (or in_progress, ready_for_review, open), with a short note on "
-             "what changed.", set_status,
+             "Once the fix is live, mark the report ready_for_review with a short note: what changed and how to check "
+             "it. Curtis confirms it works on the report page (it waits on his Today page until then). Use done only "
+             "when he has said it works; in_progress while working on it; open to put it back.", set_status,
              dict(REPORT_ID, status={"type": "string", "enum": list(STATUSES)}, note={"type": "string"}),
              ("report_id",)),
     ])

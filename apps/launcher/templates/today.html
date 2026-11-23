@@ -100,6 +100,35 @@
         </div>
       </section>
 
+      {% if studio %}
+      <section aria-label="Studio reports">
+        <div class="section-head">
+          <h2 class="section-title">Reports</h2>
+          <a href="/apps/issues">Studio</a>
+        </div>
+        <div class="card flush">
+          {% if studio.to_check %}
+          <a class="link-row" href="/apps/issues">
+            <span class="label-stack">
+              <span class="small muted">Fixed: does it work?</span>
+              <span class="title">{{ studio.to_check }} ready for you to check</span>
+            </span>
+            <span class="chev" aria-hidden="true">›</span>
+          </a>
+          {% endif %}
+          {% if studio.open %}
+          <a class="link-row" href="/apps/issues">
+            <span class="label-stack">
+              <span class="small muted">Open{% if studio.oldest_days %} · oldest {{ studio.oldest_days }} day{{ "s" if studio.oldest_days != 1 }}{% endif %}</span>
+              <span class="title">{{ studio.open }} report{{ "s" if studio.open != 1 }} waiting{% if studio.stale %} · {{ studio.stale }} untouched a week{% endif %}</span>
+            </span>
+            <span class="chev" aria-hidden="true">›</span>
+          </a>
+          {% endif %}
+        </div>
+      </section>
+      {% endif %}
+
       <div class="tiles">
         <a class="tile accent-trainer" href="/apps/trainer">
           <span class="kicker">Trainer</span>

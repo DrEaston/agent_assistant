@@ -5429,6 +5429,7 @@ def render_today_page(request: Request):
         last_workout=last[0] if last else None,
         playlist_drafts=_quietly("playlists", lambda: len(db.get_playlist_drafts()), 0),
         is_guest=current_user_is_guest_session(),
+        studio=_quietly("Studio", lambda: studio_routes.store().summary()) if current_user_is_admin(request) else None,
     )
 
 

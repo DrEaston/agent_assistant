@@ -23,10 +23,30 @@
   </div>
   {% endcall %}
 
+  {% if report.status == "ready_for_review" %}
+  {% call ui.section("Does it work now?") %}
+  <div class="card stack">
+    {% set fixed = report.history|selectattr("action", "equalto", "status")|list|last %}
+    {% if fixed and fixed.summary %}<p>{{ fixed.summary }}</p>{% endif %}
+    <div class="row">
+      <form method="post" action="/apps/issues/{{ report.id }}/status">
+        <input type="hidden" name="status" value="done"><input type="hidden" name="note" value="Checked: it works.">
+        <button type="submit" class="primary">Works ✓</button>
+      </form>
+      <form method="post" action="/apps/issues/{{ report.id }}/status">
+        <input type="hidden" name="status" value="open"><input type="hidden" name="note" value="Checked: still not right.">
+        <button type="submit">Still not right</button>
+      </form>
+    </div>
+  </div>
+  {% endcall %}
+  {% endif %}
+
   {% call ui.section("Claude") %}
   <div class="card stack">
     <p class="muted">Claude can read this from any chat with Dieter connected. Ask "look at my Studio reports" or name
-      this one (report {{ report.id }}). It marks the report done once the fix is live.</p>
+      this one (report {{ report.id }}). Once the fix is live it marks the report "Ready to check", and it shows on
+      Today until you confirm it works.</p>
     {% if report.github_issue_url %}
       <div class="row"><a class="button quiet" href="{{ report.github_issue_url }}">Old GitHub issue</a></div>
     {% endif %}

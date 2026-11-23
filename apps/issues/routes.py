@@ -135,11 +135,11 @@ def studio_report(request: Request, report_id: int):
 
 
 @router.post(BASE + "/{report_id}/status")
-def studio_status(request: Request, report_id: int, status: str = Form(...)):
+def studio_status(request: Request, report_id: int, status: str = Form(...), note: str = Form("")):
     admin(request)
     require_report(report_id)
     try:
-        store().set_status(report_id, status)
+        store().set_status(report_id, status, note.strip()[:500])
     except ValueError:
         raise HTTPException(status_code=400, detail="Unknown status")
     return RedirectResponse(url=f"{BASE}/{report_id}", status_code=303)
