@@ -17,8 +17,13 @@ def model_name():
     return os.getenv("DIETER_CLAUDE_MODEL") or "claude-opus-5-5"
 
 
+def _key():
+    # A key pasted through PowerShell can pick up an invisible byte-order mark; Anthropic would reject it.
+    return (os.getenv("ANTHROPIC_API_KEY") or "").strip().lstrip("\ufeff").strip()
+
+
 def available():
-    return bool((os.getenv("ANTHROPIC_API_KEY") or "").strip())
+    return bool(_key())
 
 
 def _anthropic():
@@ -27,7 +32,7 @@ def _anthropic():
         import anthropic
 
         # One client, reused: a fresh connection costs a noticeable moment on every request.
-        _client = anthropic.Anthropic(api_key=(os.getenv("ANTHROPIC_API_KEY") or "").strip(), timeout=60,
+        _client = anthropic.Anthropic(api_key=_key(), timeout=60,
                                       max_retries=1)
     return _client
 
