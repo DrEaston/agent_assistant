@@ -2,7 +2,7 @@ fastapi==0.104.1
 uvicorn==0.24.0
 jinja2==3.1.2
 openai>=1.3.0
-anthropic>=2.12,<3  # Claude as Dieter's brain (core/connector/agent.py)
+anthropic==1.5.0  # Claude as Dieter's brain. Newest that allows anyio 3, which fastapi 0.104 needs; 1.6+ need anyio 4
 python-dotenv>=1.0.0
 python-multipart>=0.0.9
 Pillow>=12.2.0
