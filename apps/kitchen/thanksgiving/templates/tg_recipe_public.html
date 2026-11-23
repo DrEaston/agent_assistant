@@ -1,0 +1,35 @@
+{% extends "tg_base.html" %}
+{% from "tg_menu_card.html" import menu_style %}
+{% from "tg_macros.html" import render_sections %}
+{#- A recipe from the shareable menu, for anyone with the link: the recipe as written, no names, notes or timeline. -#}
+{% block title %}{{ dish.name }}{% endblock %}
+{% block head %}
+<meta property="og:title" content="{{ dish.name }} · Thanksgiving">
+{% if blurb %}<meta property="og:description" content="{{ blurb }}">{% endif %}
+{{ menu_style() }}
+<style>
+.public-recipe { max-width: 48rem; margin: 0 auto; padding: clamp(1rem, 4vw, 2.5rem) 1rem 3rem; }
+.public-recipe .back { display: inline-block; margin-bottom: 1rem; font-weight: 600; }
+.recipe-head { text-align: center; font-family: "Cormorant Garamond", Georgia, "Times New Roman", serif; margin-bottom: 1.25rem; }
+.recipe-head .feast-title { font-size: clamp(2.2rem, 7vw, 3rem); }
+.recipe-view { display: grid; grid-template-columns: minmax(12rem, 1fr) 2fr; gap: .5rem 1.5rem; padding: 1rem 1.25rem;
+  background: #fffdf8; border: 1px solid #e7dcc8; border-radius: 12px; font-size: 1rem; }
+.recipe-view h4 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 .3rem; }
+.recipe-view h5 { font-size: 1rem; margin: .7rem 0 .2rem; }
+.recipe-view ul, .recipe-view ol { margin: 0; padding-left: 1.2rem; }
+.recipe-view li { padding: .2rem 0; }
+@media (max-width: 720px) { .recipe-view { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+{% block body %}
+<main class="public-recipe">
+  <a class="back" href="/thanksgiving/menu">← The menu</a>
+  <header class="recipe-head">
+    <span class="feast-eyebrow">Thanksgiving</span>
+    <h1 class="feast-title">{{ dish.name }}</h1>
+    {% if blurb %}<span class="dish-desc">{{ blurb }}</span>{% endif %}
+  </header>
+  {{ render_sections(ingredient_sections, instruction_sections) }}
+</main>
+{% endblock %}
+{% block feedback %}{% endblock %}

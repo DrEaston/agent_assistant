@@ -9,6 +9,7 @@ Step kinds: hands (active work), oven, stove, passive (wait/hold/cool), check, s
 from .planner import generic_steps, turkey_steps
 
 CATEGORIES = (
+    ("appetizer", "Before dinner"),
     ("turkey", "Turkey"),
     ("side", "Side"),
     ("bread", "Bread"),
@@ -355,6 +356,8 @@ def preset_dish(key, dinner=None):
         return cranberry_dish()
     if key == "green_beans_janice":
         return janice_green_bean_dish()
+    if key in LATER_DISHES:
+        return LATER_DISHES[key]()
     if key == "pie":
         return _dish("Pumpkin pie", "dessert", PIE_INGREDIENTS, PIE_INSTRUCTIONS, _pie_steps())
     if key == "house":
@@ -376,15 +379,17 @@ SIMPLE_SIDES = {
     "salad": ("Green salad", "2 heads lettuce\n1 cucumber\ncherry tomatoes\nvinaigrette", 15, "none", 0, 0),
 }
 
-OUR_MENU = ("house", "turkey", "potatoes", "gravy", "stuffing", "mac", "green_beans_janice", "cranberry", "sourdough",
-            "pie")
+OUR_MENU = ("house", "charcuterie", "veggies", "pigs", "turkey", "potatoes", "gravy", "stuffing", "mac",
+            "green_beans_janice", "scalloped_janice", "onions_janice", "cranberry", "sourdough", "pie")
 
 # Dishes added to the menu after plans already existed: (migration key, preset key).
-LATER_ADDITIONS = (("add-mac", "mac"), ("add-green-beans-janice", "green_beans_janice"), ("add-cranberry", "cranberry"))
+LATER_ADDITIONS = (("add-mac", "mac"), ("add-green-beans-janice", "green_beans_janice"), ("add-cranberry", "cranberry"),
+                   ("add-charcuterie", "charcuterie"), ("add-veggies", "veggies"), ("add-pigs", "pigs"),
+                   ("add-scalloped-janice", "scalloped_janice"), ("add-onions-janice", "onions_janice"))
 
 PRESET_BUTTONS = (
     ("turkey", "Turkey"), ("potatoes", "Mashed potatoes"), ("gravy", "Gravy"), ("stuffing", "Stuffing"),
-    ("mac", "Mac and cheese"),
+    ("mac", "Mac and cheese"), ("pigs", "Pigs in a blanket"),
     ("sourdough", "Sourdough"), ("pie", "Pumpkin pie"), ("green_beans", "Green beans"),
     ("cranberry", "Cranberry sauce"), ("rolls", "Rolls"), ("brussels", "Brussels sprouts"),
     ("salad", "Salad"), ("house", "House prep"),
@@ -447,3 +452,73 @@ def janice_green_bean_dish():
     dish = _dish("Green bean casserole", "side", steps=_janice_green_bean_steps(), notes="Janice is bringing it.")
     dish["cook"] = "Janice"
     return dish
+
+
+# ---------------------------------------------------------------- added 11/22: before dinner, Janice's other dishes
+
+PIGS_INGREDIENTS = """1 sheet puff pastry, kept cold
+1 package (12 to 14 oz) Little Smokies (you'll use 24 to 30)
+1 egg
+1 tbsp water
+mustard, for dipping
+everything bagel seasoning (optional)"""
+
+PIGS_INSTRUCTIONS = """Keep the pastry cold and work quickly. If it softens or cracks, put it back in the fridge for 10 minutes.
+Pat the sausages dry. Cut the pastry into strips about 1 inch wide and 2 1/2 inches long, long enough to wrap each sausage once with a little overlap.
+Roll each sausage in a strip and set it seam side down on a parchment-lined sheet pan, 1 inch apart. Cover and refrigerate until baking (up to a day).
+Beat the egg with the water and brush the tops. Sprinkle with everything seasoning if you like.
+Bake at 325°F next to the turkey until puffed and the bottoms are golden, 30 to 35 minutes. (On their own at 400°F it's 15 to 20 minutes.) Lift one: a pale bottom means it's still doughy inside.
+Cool 5 minutes. Serve warm with mustard."""
+
+
+def _pigs_steps():
+    return [
+        _s("thaw", "D-1 20:00", "Puff pastry from the freezer to the fridge", 2,
+           detail="Skip if yours is sold refrigerated."),
+        _s("wrap", "T-135", "Wrap the pigs in a blanket and refrigerate", 20),
+        _s("bake", "T-105", "Egg wash and bake the pigs in a blanket next to the turkey", 35, "oven", 325,
+           detail="Until the bottoms are golden, 30 to 35 minutes."),
+        _s("serve", "T-70", "Pigs in a blanket out, with mustard", 5),
+    ]
+
+
+def pigs_dish():
+    return _dish("Pigs in a blanket", "appetizer", PIGS_INGREDIENTS, PIGS_INSTRUCTIONS, _pigs_steps())
+
+
+def _parrisa_dish(name, step_title, minutes, notes):
+    dish = _dish(name, "appetizer", steps=[_s("out", "T-75", step_title, minutes)], notes=notes)
+    dish["cook"] = "Parrisa"
+    return dish
+
+
+def _janice_dish(name, steps):
+    dish = _dish(name, "side", steps=steps, notes="Janice is bringing it.")
+    dish["cook"] = "Janice"
+    return dish
+
+
+def janice_scalloped_dish():
+    return _janice_dish("Scalloped potatoes", [
+        _s("confirm", "D-2 12:00", "Check with Janice: do the scalloped potatoes and braised onions need warming?", 5,
+           "check", detail="If they arrive hot, skip the warm-up steps."),
+        _s("warm", "T-45", "Warm Janice's scalloped potatoes, covered, at 400°F", 20, "oven", 400,
+           detail="Shares the oven with the stuffing and mac and cheese."),
+    ])
+
+
+def janice_onions_dish():
+    return _janice_dish("Braised onions", [
+        _s("warm", "T-20", "Warm Janice's braised onions in a covered pan over low heat", 10, "stove",
+           detail="The stovetop keeps them out of a full oven."),
+    ])
+
+
+LATER_DISHES = {
+    "charcuterie": lambda: _parrisa_dish("Charcuterie board", "Set out the charcuterie board", 15,
+                                         "Parrisa is putting it together."),
+    "veggies": lambda: _parrisa_dish("Fresh veggies", "Set out the fresh veggies", 10, "Parrisa is putting it together."),
+    "pigs": pigs_dish,
+    "scalloped_janice": janice_scalloped_dish,
+    "onions_janice": janice_onions_dish,
+}

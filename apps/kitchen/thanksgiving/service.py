@@ -59,7 +59,7 @@ async def signed_user(request: Request, call_next):
     if request.url.path == "/healthz":
         return await call_next(request)
     user = internal.verify(request.headers.get(internal.HEADER), allow_signed_out=True)
-    signed_out_ok = request.method in ("GET", "HEAD") and request.url.path in tg_router.PUBLIC_PATHS
+    signed_out_ok = request.method in ("GET", "HEAD") and tg_router.is_public_path(request.url.path)
     if not user or (not user.get("id") and not signed_out_ok):
         return JSONResponse({"detail": "Open Thanksgiving from askdieter.ai."}, status_code=401)
     request.state.current_user = user

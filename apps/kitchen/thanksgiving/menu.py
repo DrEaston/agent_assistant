@@ -30,6 +30,11 @@ def content():
         return {}
 
 
+def arrival():
+    """The line under the dinner time on the menu card, e.g. "Guests are welcome from three o'clock"."""
+    return (content().get("arrival") or "").strip()
+
+
 def course_list():
     found = [(c["key"], c["name"]) for c in content().get("courses", []) if c.get("key") and c.get("name")]
     return tuple(found) or DEFAULT_COURSES

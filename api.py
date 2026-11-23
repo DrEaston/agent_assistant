@@ -382,7 +382,8 @@ async def load_authenticated_user(request: Request, call_next):
     request.state.current_user = dict(user) if user else None
     user_token = set_current_user_id(user["id"] if user else None)
     try:
-        if not user and path not in public_exact_paths and not path.startswith(public_prefixes):
+        shared_recipe = re.fullmatch(r"/thanksgiving/menu/\d+", path) and request.method in ("GET", "HEAD")
+        if not user and path not in public_exact_paths and not path.startswith(public_prefixes) and not shared_recipe:
             if db.get_user_count() == 0:
                 return RedirectResponse(url="/register", status_code=303)
             return redirect_or_unauthorized(request)
