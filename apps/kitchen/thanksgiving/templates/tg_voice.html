@@ -17,6 +17,13 @@
 .voice-fab:hover { border: 0; transform: rotate(-3deg) scale(1.04); }
 .voice-fab:hover .voice-fab-bubble .fill { fill: #9a3412; }
 .voice-fab:active { transform: scale(.96); }
+/* Phones without the tab bar's Dieter button (cook mode): a small round button instead of the big bubble. */
+@media (max-width: 899px) {
+  body:not(.has-top-dieter) .voice-fab { width: 56px; height: 56px; padding: 0; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 4px 14px rgba(0,0,0,.25); font-size: 1.5rem; }
+  body:not(.has-top-dieter) .voice-fab > svg, body:not(.has-top-dieter) .voice-fab > span:not(.voice-ear) { display: none; }
+  body:not(.has-top-dieter) .voice-fab::before { content: "🎤"; }
+}
 /* Dieter comes alive: big eyes fill the bubble for a little performance when the kitchen screen wakes. */
 .voice-fab .voice-fab-face { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; display: none; }
 .voice-fab.alive { z-index: 1001; animation: fab-pop .35s cubic-bezier(.3, 1.6, .5, 1); }
@@ -73,6 +80,8 @@
 .voice-device-form { display: flex; flex-wrap: wrap; gap: .5rem; align-items: end; margin-top: .5rem; }
 .voice-device-form label { display: flex; flex-direction: column; gap: .2rem; font-weight: 600; }
 .voice-device-form .voice-wake-choice { flex-basis: 100%; }
+.voice-top .voice-ear { position: absolute; top: -.45rem; right: -.35rem; font-size: .9rem; line-height: 1;
+  background: var(--panel); border-radius: 999px; padding: .1rem; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
 .voice-fab .voice-ear { position: absolute; top: -.35rem; left: -.35rem; font-size: 1.1rem; line-height: 1;
   background: var(--panel); border-radius: 999px; padding: .15rem; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
 </style>
@@ -416,6 +425,12 @@
   });
   $("voice-form").addEventListener("submit", (event) => { event.preventDefault(); send(text.value); });
   $("voice-open").addEventListener("click", open);
+  // Phones: the small Dieter button in the tab bar (tg_page.html) opens the same chat.
+  const topButton = document.getElementById("voice-open-top");
+  if (topButton) {
+    document.body.classList.add("has-top-dieter");
+    topButton.addEventListener("click", open);
+  }
   $("voice-close").addEventListener("click", close);
 
   const SILENCE_MS = 1500, MAX_MS = 30000, NO_SPEECH_MS = 8000, LOUD = 0.02;
@@ -787,10 +802,13 @@
   let wakeRec = null, wakeTimer = null, wakeBlocked = false, wakeStarts = [];
   const wakeWanted = () => !!loadDevice().wake && !!Recognition && sheet.hidden && !document.hidden && !wakeBlocked;
   function showEar() {
-    let ear = $("voice-open").querySelector(".voice-ear");
     const on = !!wakeRec;
-    if (on && !ear) $("voice-open").insertAdjacentHTML("beforeend", '<span class="voice-ear" title="Listening for “Hey Dieter”">👂</span>');
-    if (!on && ear) ear.remove();
+    for (const button of [$("voice-open"), document.getElementById("voice-open-top")]) {
+      if (!button) continue;
+      const ear = button.querySelector(".voice-ear");
+      if (on && !ear) button.insertAdjacentHTML("beforeend", '<span class="voice-ear" title="Listening for “Hey Dieter”">👂</span>');
+      if (!on && ear) ear.remove();
+    }
   }
   function stopWake() {
     clearTimeout(wakeTimer);

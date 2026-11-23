@@ -8,11 +8,20 @@
 .top .sub { color: #e7dccd; margin-top: .2rem; }
 .top .row { justify-content: space-between; }
 .cook-link { background: var(--accent); border-color: var(--accent); color: #fff; font-size: 1.05rem; }
-.tabs { display: flex; gap: .25rem; margin-top: .9rem; overflow-x: auto; }
+.tabs-bar { position: sticky; top: 0; z-index: 35; background: #2a2118; padding: 0 1rem; }
+.tabs-row { display: flex; align-items: flex-end; gap: .5rem; }
+.tabs { display: flex; gap: .25rem; padding-top: .6rem; overflow-x: auto; flex: 1; min-width: 0; scrollbar-width: none; }
+.voice-top { display: none; flex: none; align-self: center; min-height: 36px; padding: .3rem .75rem; margin: .4rem 0 .35rem;
+  border-radius: 999px; background: var(--accent); border-color: var(--accent); color: #fff; font-size: .9rem;
+  position: relative; }
+@media (max-width: 899px) {
+  .voice-top { display: inline-flex; }
+  body.has-top-dieter .voice-fab { display: none; }  /* phones: the small button in the tab bar instead */
+}
 .tabs a { color: #e7dccd; text-decoration: none; padding: .6rem .9rem; border-radius: 10px 10px 0 0; font-weight: 600; white-space: nowrap; }
 .tabs a:hover { background: rgba(255,255,255,.08); color: #fff; }
 .wrap { padding: 1.25rem 1rem; }
-section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
+section { scroll-margin-top: 4rem; margin-bottom: 2rem; }  /* clear of the sticky tab bar */
 .section-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: .6rem; margin-bottom: .75rem; }
 .now-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .75rem; }
 .now-grid h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: .4rem; }
@@ -151,6 +160,12 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
       </div>
       <a class="button cook-link" href="/thanksgiving/cook">Open cook mode →</a>
     </div>
+  </div>
+</header>
+{# The tabs stay at the top while you scroll. On phones, Dieter lives here too (small, out of the way), instead of
+   the big bubble in the corner. #}
+<div class="tabs-bar">
+  <div class="top-inner tabs-row">
     <nav class="tabs" aria-label="Sections">
       {%- for key, label, href in [("now", "Now", "/thanksgiving"), ("timeline", "Timeline", "/thanksgiving/timeline"),
             ("menu", "Menu", "/thanksgiving/menu"), ("recipes", "Recipes", "/thanksgiving/recipes"),
@@ -158,8 +173,14 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
       <a href="{{ href }}"{% if tab == key %} aria-current="page"{% endif %}>{{ label }}</a>
       {%- endfor %}
     </nav>
+    <button type="button" class="voice-top" id="voice-open-top" aria-haspopup="dialog" aria-label="Talk to Dieter">🎤 Dieter</button>
   </div>
-</header>
+</div>
+<script>
+  // Narrow screens scroll the tabs sideways: start with the current one in view.
+  (() => { const tab = document.querySelector(".tabs [aria-current=page]"), nav = tab && tab.parentElement;
+    if (tab && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, tab.offsetLeft - nav.offsetLeft - nav.clientWidth / 2 + tab.offsetWidth / 2); })();
+</script>
 
 <main class="wrap" id="page">
 {% block page %}{% endblock %}
