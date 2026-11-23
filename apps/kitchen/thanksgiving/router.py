@@ -326,7 +326,9 @@ class RemotePlatform:
     def kitchen_tools(self):
         from core.connector.tools import RemoteToolSet
 
-        return RemoteToolSet("kitchen", self.base_url, "/internal/connector/kitchen/tools")
+        if getattr(self, "_kitchen", None) is None:  # one per service, so its tool list is remembered
+            self._kitchen = RemoteToolSet("kitchen", self.base_url, "/internal/connector/kitchen/tools")
+        return self._kitchen
 
 
 def library_recipes():
@@ -740,7 +742,8 @@ def _answer(text, history, device, sass, spoken="", which="classic"):
         # One model does it all: say a quick line while Claude works, then show its answer.
         ticket = _start_deep(plan, text, history, summary, sass, prompt, forced, device, spoken, "claude", context)
         _log_tier(device, text, "claude", forced, 0)
-        return _empty_answer(escalate=True, ticket=ticket, say_now="One sec.")
+        # Hands-free speaks a quick line while Claude works; on screen "Thinking…" is enough.
+        return _empty_answer(escalate=True, ticket=ticket, say_now="One sec." if spoken in ("name", "follow-up") else "")
     started = time.perf_counter()
     ticket = None
     if forced or CHANGE_WORDS.search(lowered):
@@ -813,12 +816,22 @@ def _model_label(job):
 
 
 def warm_up():
-    """Open the OpenAI connections before the cook's first phrase (a cold one adds ~3 s to that phrase)."""
+    """Open the AI connections before the cook's first phrase (a cold one adds a few seconds to that phrase)."""
     if _state.get("fast_model") is not None or _state.get("warmed", 0) > time.time() - 240:
         return
     _state["warmed"] = time.time()
+    if agent.available() and _state.get("claude_call") is None:
+        _thinkers.submit(contextvars.copy_context().run, _warm_claude)
     for name, timeout in ((voice.fast_model_name(), 6), (voice.model_name(), 60)):
         _thinkers.submit(_ping, name, timeout)
+
+
+def _warm_claude():
+    agent.warm()
+    try:
+        _state["platform"].kitchen_tools().list()  # also fetches and remembers Kitchen's tool list
+    except Exception as exc:
+        print(f"Warning: Kitchen tools warm-up failed: {exc}")
 
 
 def _ping(name, timeout):

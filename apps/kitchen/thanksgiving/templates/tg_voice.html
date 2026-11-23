@@ -180,7 +180,7 @@
       <h2 id="voice-title">Tell Dieter</h2>
       <button type="button" class="quiet" id="voice-close" aria-label="Close">✕</button>
     </div>
-    <p class="voice-hint" id="voice-hint">Try “the pie's getting pushed to the weekend”, “add a step to toast the pecans Wednesday morning”, “move dinner to 5”, or “can I make the crust four days ahead?”. You'll see the changes before anything is saved.</p>
+    <p class="voice-hint" id="voice-hint">Try “what should I do tomorrow?”, “they're out of Libby's pumpkin”, “push the pie to the weekend” or “put foil on the list”. Bigger changes wait for you to tap Apply.</p>
     <div class="voice-log" id="voice-log" aria-live="polite"></div>
     <div class="voice-live" id="voice-live" aria-live="polite" hidden></div>
     <div class="voice-actions" id="voice-decide" hidden>
@@ -252,6 +252,9 @@
   showDevice();
   let recorder = null, chunks = [];
 
+  function thinkingLine(sayNow) {
+    return sayNow ? `${esc(sayNow)} <span class="muted">Thinking…</span>` : `<span class="muted">Thinking…</span>`;
+  }
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
   function say(who, html) {
     const div = document.createElement("div");
@@ -334,8 +337,8 @@
       let data = await call("/thanksgiving/api/command", { text: said, history, device: device.name || "",
                                                            sass: device.sass || "normal", brain: device.brain || "", two_step: true });
       if (data.escalate) {
-        // The quick pass handed this to the careful model: say so right away, then wait for its answer.
-        thinking.innerHTML = `${esc(data.say_now)} <span class="muted">Thinking it through…</span>`;
+        // Still working on it: show that right away (with its quick line, if it has one), then wait for the answer.
+        thinking.innerHTML = thinkingLine(data.say_now);
         data = await call("/thanksgiving/api/think", { ticket: data.ticket });
       }
       thinking.remove();
@@ -396,10 +399,10 @@
   }
 
   // ---------- Conversation: one tap on 🎤 keeps the mic open. Each sentence is sent when you pause, Dieter
-  // answers in the panel (not out loud), and the mic stays open until 10 seconds pass with nothing said to Dieter. It turns itself
+  // answers in the panel (not out loud), and the mic stays open until 30 seconds pass with nothing said to Dieter. It turns itself
   // off when two phrases in a row clearly aren't for it, or when you wrap up ("thanks, that's all").
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const CONVO_MS = 10000, MAX_IGNORED = 2, SETTLE_MS = 1300, TRAILING_MS = 2600;
+  const CONVO_MS = 30000, MAX_IGNORED = 2, SETTLE_MS = 1300, TRAILING_MS = 2600;
   // A sentence that ends on one of these words isn't finished ("no actually I only…"): wait longer.
   const TRAILING = /(?:^|\s)(i|i'm|only|and|but|or|so|the|a|an|to|of|for|with|actually|um|uh|like|just|then|because|if|my|it's|is|was|did|didn't|not|also|maybe|well)$/i;
   const SPEAK_REPLIES = false;  // replies are text only; flip to true to have Dieter read them aloud
@@ -443,14 +446,12 @@
     if (!convo) return;
     const left = Math.max(0, convo.until - Date.now());
     if (!left && !speaking && !convo.thinking) { endConversation("Mic off. Tap 🎤 to talk again."); return; }
-    $("voice-live").textContent = speaking ? "🔊 Talking… tap ■ to stop"
-      : convo.thinking ? "Thinking…"
-      : `🎙 Listening · ${Math.ceil(left / 1000)}s · tap ■ to end`;
+    $("voice-live").textContent = speaking ? "🔊 Talking…" : convo.thinking ? "Thinking…" : "🎙 Listening…";
   }
 
   function startConversation() {
     convo = { until: Date.now() + CONVO_MS, ignored: 0, thinking: false, timer: setInterval(tick, 500) };
-    mic.classList.add("recording"); mic.textContent = "■"; mic.setAttribute("aria-label", "End the conversation"); $("voice-talk-label").textContent = "Listening · tap ■ to stop";
+    mic.classList.add("recording"); mic.textContent = "■"; mic.setAttribute("aria-label", "End the conversation"); $("voice-talk-label").textContent = "Tap ■ to stop";
     text.placeholder = "Listening… just talk";
     $("voice-live").hidden = false;
     $("voice-hint").hidden = true;
@@ -582,9 +583,9 @@
                                                             device: device.name || "", sass: device.sass || "normal", brain: device.brain || "",
                                                             two_step: true });
       if (data.escalate) {
-        // Say the quick "one moment" line out loud while the careful model works, then wait for both.
-        thinking.innerHTML = `${esc(data.say_now)} <span class="muted">Thinking it through…</span>`;
-        if (convo) speakOut(data.say_now);
+        // Say the quick "one moment" line (if there is one) while it works, then wait for both.
+        thinking.innerHTML = thinkingLine(data.say_now);
+        if (convo && data.say_now) speakOut(data.say_now);
         data = await call("/thanksgiving/api/think", { ticket: data.ticket });
         await speechFinished();
       }

@@ -87,17 +87,27 @@ class ToolSet:
 class RemoteToolSet:
     """The ToolSet of an app that runs as its own service, reached with signed calls (core/internal.py)."""
 
+    LIST_SECONDS = 600  # tool lists change only when the other service is deployed
+
     def __init__(self, prefix, base_url, path, call=None):
         self.prefix, self.base_url, self.path = prefix, base_url, path
         self._call = call or internal.call
+        self._listed = (0, None)
 
     def owns(self, name):
         return name.startswith(self.prefix + "_")
 
     def list(self, user=None):
+        import time
+
+        listed_at, tools = self._listed
+        if tools is not None and time.time() - listed_at < self.LIST_SECONDS:
+            return tools
         user = user or internal.current_user.get()
         try:
-            return self._call(self.base_url, "GET", self.path, user, timeout=10)["tools"]
+            tools = self._call(self.base_url, "GET", self.path, user, timeout=10)["tools"]
+            self._listed = (time.time(), tools)
+            return tools
         except Exception as exc:
             print(f"Warning: {self.prefix} tools unavailable: {exc}")
             return []

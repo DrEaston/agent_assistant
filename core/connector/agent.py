@@ -37,6 +37,14 @@ def _anthropic():
     return _client
 
 
+def warm():
+    """Open the connection to Anthropic before the first real question (a free token count, nothing generated)."""
+    try:
+        _anthropic().messages.count_tokens(model=model_name(), messages=[{"role": "user", "content": "hi"}])
+    except Exception as exc:
+        print(f"Warning: Claude warm-up failed: {exc}")
+
+
 def create(system, messages, tools, effort="low"):
     """One Messages API call. If a safety check declines, Anthropic re-runs it on its recommended fallback model."""
     return _anthropic().beta.messages.create(
