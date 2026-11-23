@@ -16,6 +16,7 @@
 .feast-title { font-style: italic; font-weight: 500; font-size: clamp(2.8rem, 9vw, 3.8rem); line-height: 1.05;
   margin: .5rem 0 .4rem; color: #2b2118; font-family: var(--serif); }
 .feast-when { display: block; font-size: 1.05rem; letter-spacing: .04em; color: #6b5a48; }
+.feast-address { display: block; font-size: .95rem; color: #6b5a48; margin-top: .2rem; text-decoration: underline; text-underline-offset: 2px; }
 .feast-arrive { display: block; font-style: italic; font-size: 1rem; color: #6b5a48; margin-top: .2rem; }
 .fleuron { display: block; color: var(--gold); font-size: 1.35rem; line-height: 1; margin: 1.4rem 0 .4rem; }
 .course { margin-top: 2.1rem; }
@@ -37,14 +38,15 @@
 #add-dish:not([open]) { display: none; }
 </style>
 {% endmacro %}
-{% macro menu_card(menu_courses, dinner, menu_time, links=True, arrival="") %}
+{% macro menu_card(menu_courses, dinner, menu_time, links=True, arrival="", address="") %}
   <article class="feast" aria-label="Thanksgiving menu">
     <header>
       <span class="feast-eyebrow">Thanksgiving</span>
       <h2 class="feast-title">The Menu</h2>
       <span class="feast-when">{{ dinner.strftime('%A, %B') }} {{ dinner.day }}</span>
-      {% if menu_time %}<span class="feast-when">Dinner at {{ menu_time[:1]|lower }}{{ menu_time[1:] }}</span>{% endif %}
+      {% if menu_time %}<span class="feast-when">Dinner at {{ menu_time }}</span>{% endif %}
       {% if arrival %}<span class="feast-arrive">{{ arrival }}</span>{% endif %}
+      {% if address %}<a class="feast-address" href="https://www.google.com/maps/search/?api=1&amp;query={{ address|urlencode }}" target="_blank" rel="noopener">{{ address }}</a>{% endif %}
       <span class="fleuron" aria-hidden="true">❦</span>
     </header>
     {% for course in menu_courses %}

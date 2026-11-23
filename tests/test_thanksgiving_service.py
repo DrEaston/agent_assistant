@@ -116,8 +116,10 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("Pumpkin pie", menu.text)
         for private in ("Parrisa", "Janice", "Add a dish", "Report a problem", 'id="voice-'):
             self.assertNotIn(private, menu.text)
-        self.assertIn("Dinner at four o&#39;clock", menu.text)
-        self.assertIn("Guests are welcome from three o&#39;clock", menu.text)
+        self.assertIn("Dinner at 4<", menu.text)
+        self.assertIn("Guests welcome at 3", menu.text)
+        self.assertIn("4130 W Park Ave, Chandler AZ 85226", menu.text)
+        self.assertIn("maps/search/?api=1&amp;query=4130%20W%20Park%20Ave", menu.text)
         # Dishes with a recipe or a named cook link to their page; house prep doesn't.
         from apps.kitchen.thanksgiving import router as tg_router
         household = tg_router.store().household_plan()  # the shared menu is the first plan made

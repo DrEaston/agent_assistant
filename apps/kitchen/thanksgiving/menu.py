@@ -87,6 +87,16 @@ def courses(dishes):
     return out
 
 
+def address():
+    """Where dinner is, shown on the menu card with a map link."""
+    return (content().get("address") or "").strip()
+
+
+def short_time(when):
+    """4:00 PM -> "4"; 4:30 PM -> "4:30" (the menu card: "Dinner at 4")."""
+    return str(when.hour % 12 or 12) + (f":{when.minute:02d}" if when.minute else "")
+
+
 def time_in_words(when):
     """4:00 PM -> "Four o'clock"; 4:30 PM -> "Half past four"; other times stay as 4:15 PM."""
     hour = HOURS[when.hour % 12]

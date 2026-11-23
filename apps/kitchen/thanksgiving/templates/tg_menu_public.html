@@ -3,8 +3,8 @@
 {% block title %}The Menu{% endblock %}
 {% block head %}
 <meta property="og:title" content="Thanksgiving · The Menu">
-<meta property="og:description" content="{{ dinner.strftime('%A, %B') }} {{ dinner.day }} · Dinner at {{ menu_time|lower }}{% if menu_arrival %} · {{ menu_arrival }}{% endif %}">
-<meta name="description" content="Thanksgiving dinner, {{ dinner.strftime('%A, %B') }} {{ dinner.day }} · {{ menu_time }}">
+<meta property="og:description" content="{{ dinner.strftime('%A, %B') }} {{ dinner.day }} · Dinner at {{ menu_time }}{% if menu_arrival %} · {{ menu_arrival }}{% endif %}">
+<meta name="description" content="Thanksgiving dinner, {{ dinner.strftime('%A, %B') }} {{ dinner.day }} · Dinner at {{ menu_time }}">
 {{ menu_style() }}
 <style>
 .public-menu { padding: clamp(1rem, 4vw, 2.5rem) 1rem; }
@@ -12,7 +12,7 @@
 {% endblock %}
 {% block body %}
 <main class="public-menu">
-  {% if menu_courses %}{{ menu_card(menu_courses, dinner, menu_time, links="recipes", arrival=menu_arrival) }}
+  {% if menu_courses %}{{ menu_card(menu_courses, dinner, menu_time, links="recipes", arrival=menu_arrival, address=menu_address) }}
   {% else %}<p class="muted" style="text-align:center">The menu isn't ready yet.</p>{% endif %}
 </main>
 {% endblock %}

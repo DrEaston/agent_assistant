@@ -462,8 +462,8 @@ def public_menu(request):
                       menu_time="", page_url=str(request.url.path))
     dinner = planner.parse_dt(plan["dinner_at"])
     courses = menu.courses(store().get_dishes(plan["id"]))
-    return render("tg_menu_public.html", menu_courses=courses, dinner=dinner, menu_time=menu.time_in_words(dinner),
-                  menu_arrival=menu.arrival(),
+    return render("tg_menu_public.html", menu_courses=courses, dinner=dinner, menu_time=menu.short_time(dinner),
+                  menu_arrival=menu.arrival(), menu_address=menu.address(),
                   page_url=str(request.url.path))
 
 
@@ -473,7 +473,7 @@ def menu_page(request: Request):
         return public_menu(request)
     def courses(context):
         found = menu.courses(context["dishes"])
-        return {"menu_courses": found, "menu_time": menu.time_in_words(context["dinner"]), "menu_arrival": menu.arrival(),
+        return {"menu_courses": found, "menu_time": menu.short_time(context["dinner"]), "menu_arrival": menu.arrival(), "menu_address": menu.address(),
                 "dishes": [d for d in context["dishes"] if d.get("category") != "prep"],
                 "prep_dishes": [d for d in context["dishes"] if d.get("category") == "prep"]}
     return render_page(request, "tg_menu.html", "menu", extend=courses, library=library_recipes())

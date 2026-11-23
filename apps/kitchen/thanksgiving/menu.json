@@ -1,6 +1,7 @@
 {
  "_about": "The shareable menu card. Courses are served in this order; a dish joins the course for its type unless its entry below names another. A dish uses the first entry whose 'match' words appear in its name. Edit this file to reword anything; no code change needed. Who makes a dish never appears here.",
- "arrival": "Guests are welcome from three o'clock",
+ "arrival": "Guests welcome at 3",
+ "address": "4130 W Park Ave, Chandler AZ 85226",
  "courses": [
   {"key": "appetizer", "name": "Before dinner"},
   {"key": "bread", "name": "To begin"},
