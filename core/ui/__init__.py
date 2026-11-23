@@ -31,6 +31,7 @@ def templates(*app_template_dirs):
         autoescape=select_autoescape(["html"]),
     )
     env.globals["css_url"] = _css_url()
+    env.globals["asset_url"] = asset_url
     env.globals["preview_label"] = os.getenv("PREVIEW_LABEL", "")
     env.globals["nav_apps"] = NAV_APPS
     return env

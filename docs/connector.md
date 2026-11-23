@@ -36,3 +36,14 @@ next trip." Each conversation in that project starts with that focus.
 2. Add it to `CONNECTOR_TOOLSETS` in `api.py`. If the app runs as its own service, call
    `serve_tools(router, "/<app>/api/connector/tools", connector.tools())` there and add a `RemoteToolSet` instead.
 3. Test through `/mcp` like `tests/test_connector.py` does.
+
+## Dieter's chat on the site (core/connector/chat.py)
+
+The same tools also power **Ask Dieter** on the main site's pages (Kitchen so far; the Thanksgiving planner keeps its
+own chat until it moves over after the holiday). `api.py` builds one `ChatSetup` from:
+- each app's ToolSet and its `CHAT_NOTES` (a few lines on how Dieter should use them);
+- each app's pages (`nav.py`): Dieter opens them, and knows which one the person is on;
+- proposal savers and `pending()` for changes that wait for an OK (review cards, `core/connector/proposals.py`).
+
+To bring an app's Ask Dieter over: add those to `DIETER_CHAT` and its path to `DIETER_CHAT_PATHS` in `api.py` and to
+`KEEP_CHAT_ON` in `core/shell/dock.html`. Pages not listed still use the older handlers in `api_dieter_action`.

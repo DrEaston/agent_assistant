@@ -9,6 +9,13 @@
   <div class="gap-above"></div>
   {% endif %}
 
+  {% if restored %}
+  {% call ui.banner("ok") %}Recipe restored. That's in the history too, so you can undo it.{% endcall %}
+  {% endif %}
+  {% for card in pending_cards %}
+  <div class="proposal-slot" data-proposal-card='{{ card|tojson }}'></div>
+  {% endfor %}
+
   <div class="row gap-above">
     {% if steps %}<button type="button" class="primary" id="cook-start">Start cooking</button>{% endif %}
     {% if not is_guest %}
@@ -62,6 +69,32 @@
       {% endif %}
     </section>
   </div>
+
+  {% if history %}
+  <section class="card gap-above" id="history" aria-labelledby="history-title">
+    <h2 id="history-title">Recipe history</h2>
+    {% for v in history %}
+    <div class="history-row">
+      <div class="history-what">
+        <strong>{{ v.summary }}</strong>
+        <div class="small muted">{{ v.when }}{% if v.request %} · you asked: “{{ v.request }}”{% endif %}</div>
+        <details class="small"><summary>What changed</summary>
+          {% for d in v.diffs %}<div class="diff-label">{{ d.label }}</div>
+          {% for l in d.lines %}<div class="diff-line diff-{{ l.op }}">{% if l.op == "removed" %}− {% elif l.op == "added" %}+ {% endif %}{{ l.text }}</div>{% endfor %}{% endfor %}
+        </details>
+      </div>
+      {% if not is_guest %}
+      {% call ui.confirm("Restore") %}
+      <form method="post" action="/apps/recipes/meals/{{ meal.id }}/history/{{ v.id }}/restore" class="row">
+        <span class="small muted">Put the recipe back to how it was before this change?</span>
+        <button type="submit">Restore</button>
+      </form>
+      {% endcall %}
+      {% endif %}
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
 </main>
 
 {% if steps %}

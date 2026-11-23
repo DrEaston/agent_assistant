@@ -1,5 +1,8 @@
 {#- The app switcher and Ask Dieter. Phones: a bar along the bottom. Wide screens: a bar along the top.
-    Ask Dieter sends to /api/dieter/action with this page's address, so it knows what you're looking at. -#}
+    Ask Dieter sends to /api/dieter/action with this page's address, so it knows what you're looking at. On pages
+    Dieter's chat handles (core/connector/chat.py; Kitchen so far) answers can carry "do" actions: open a page, show a
+    review card, reload. core/ui/static/dieter-actions.js carries them out, and the conversation follows to the next
+    page. -#}
 {% set here = app.id if app else "today" %}
 <div class="dock">
   <a class="dock-brand" href="/">Dieter</a>
@@ -41,20 +44,36 @@
   </form>
 </dialog>
 
+<script src="{{ asset_url('dieter-actions.js') }}"></script>
 <script>
 (function () {
   const $ = (id) => document.getElementById(id);
   const sheet = $("ask-sheet"), log = $("ask-log"), input = $("ask-input"), form = $("ask-form");
   const confirmBox = $("ask-confirm"), mic = $("ask-mic"), micLabel = $("ask-mic-label");
+  const KEEP_CHAT_ON = ["/apps/recipes"];  // pages with Dieter's chat: the conversation follows you there
   const history = [];
+  const shown = [];        // what's in the log, to bring back on the next page: {role, text} or {card}
   let pending = null;      // {content, token, plan} while Dieter waits for a yes
   let recorder = null, chunks = [], stream = null;
 
   function open(startListening) {
     if (!sheet.open) sheet.showModal();
     if (startListening) toggleMic(); else input.focus();
+    follow();
   }
+  function follow() { log.scrollTop = log.scrollHeight; }
+  function showCard(card) {
+    $("ask-hint").hidden = true;
+    const box = document.createElement("div");
+    box.className = "ask-msg card-msg";
+    box.innerHTML = DieterActions.proposalCard(card);
+    log.appendChild(box);
+    shown.push({ card });
+    follow();
+  }
+  function state() { return { shown, history, open: sheet.open }; }
   function say(role, text, link) {
+    if (!link) shown.push({ role, text });
     $("ask-hint").hidden = true;
     const p = document.createElement("div");
     p.className = "ask-msg " + role;
@@ -65,7 +84,7 @@
       p.appendChild(document.createElement("br")); p.appendChild(a);
     }
     log.appendChild(p);
-    log.scrollTop = log.scrollHeight;
+    follow();
   }
 
   async function send(content, confirming) {
@@ -99,6 +118,14 @@
       } else {
         pending = null;
       }
+      const actions = data.do || [];
+      for (const action of actions) {
+        if (action.type === "proposal" && action.card) showCard(action.card);
+        if (action.type === "decided") {  // saved by saying so: the card shows it after the reload
+          for (const item of shown) if (item.card && item.card.id === action.id) item.card.status = action.status;
+        }
+      }
+      DieterActions.run(actions, { state: state(), keepChatOn: KEEP_CHAT_ON, delay: 900 });
       if (data.reload_page || (data.changed_fields && data.changed_fields.length && !link)) {
         setTimeout(() => location.reload(), 1200);
       }
@@ -148,6 +175,25 @@
   $("ask-yes").addEventListener("click", () => send("yes", true));
   $("ask-no").addEventListener("click", () => { pending = null; confirmBox.hidden = true; say("dieter", "Okay, I won't."); });
   mic.addEventListener("click", toggleMic);
+
+  // A review card saved (here or on the page): show the recipe as it is now, keeping the conversation.
+  document.addEventListener("dieter:proposal", (e) => {
+    const card = e.detail.card || {};
+    for (const item of shown) if (item.card && item.card.id === card.id) item.card.status = e.detail.status;
+    const path = (card.open_url || "").split("#")[0];
+    if (e.detail.status === "saved" && (!path || path === location.pathname)) {
+      DieterActions.run([{ type: "reload" }], { state: shown.length ? state() : null, delay: 600 });
+    }
+  });
+
+  // Coming from another page in the middle of a conversation: bring it back.
+  const resumed = DieterActions.resume();
+  if (resumed && Array.isArray(resumed.shown)) {
+    for (const item of resumed.shown) item.card ? showCard(item.card) : say(item.role, item.text);
+    history.push(...(resumed.history || []).slice(-8));
+    if (resumed.open) open(false);
+  }
+
   window.dieterAsk = { open, send: (text) => { open(false); send(text, false); } };
 })();
 </script>

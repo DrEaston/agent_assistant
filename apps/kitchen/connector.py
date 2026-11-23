@@ -4,6 +4,7 @@ from datetime import datetime
 
 from core.connector.tools import STRINGS, Tool, ToolError, ToolSet, site_url, text_list, whole_number
 
+from . import recipe_changes
 from .shopping import router as shopping
 
 
@@ -143,6 +144,41 @@ def get_recipe(args):
             "instructions": recipe["instructions_text"], "make_ahead": recipe.get("notes") or ""}
 
 
+def propose_recipe_change(args):
+    from core.connector.chat import REQUEST
+
+    changes = {"title": args.get("title"), "ingredients_text": args.get("ingredients"),
+               "instructions_text": args.get("instructions")}
+    card = recipe_changes.propose(shopping._state["db"], args.get("recipe_id"), changes, args.get("reason") or "",
+                                  request=REQUEST.get())
+    return dict(card, review_link=site_url(card["open_url"]))
+
+
+def recipe_history(args):
+    changes = recipe_changes.history(shopping._state["db"], whole_number(args.get("recipe_id"), "recipe_id"))
+    return {"changes": [{k: c[k] for k in ("id", "when", "summary", "request", "before", "after")} for c in changes[:10]]}
+
+
+# How Dieter's chat (core/connector/chat.py) should use these tools.
+CHAT_NOTES = """Kitchen: the person's recipe library, meal plan and everyday shopping lists (kitchen_ tools). Recipe ids
+are in recipe page addresses (/apps/recipes/meals/<id>). To change a library recipe, read it (kitchen_get_recipe), then
+call kitchen_propose_recipe_change with the full new text of each part you change (edited from the current text) and a
+short reason; it shows a review card. To undo a saved change, read kitchen_recipe_history and propose the old text.
+The Thanksgiving planner has its own chat on its pages; for Thanksgiving recipe changes, open the dish there."""
+
+# Proposal tools only Dieter's own chat offers (they show a review card); other chats don't get them.
+PROPOSAL_TOOLS = ("kitchen_propose_recipe_change", "kitchen_recipe_history")
+
+
+def savers():
+    db = shopping._state["db"]
+    return {recipe_changes.KIND: lambda proposal_id: recipe_changes.save(db, proposal_id)}
+
+
+def pending():
+    return recipe_changes.pending_cards(shopping._state["db"])
+
+
 LIST_ID = {"list_id": {"type": "integer", "description": "From kitchen_list_shopping_lists."}}
 
 
@@ -179,5 +215,16 @@ def tools():
              {"query": {"type": "string"}}, read_only=True),
         Tool("kitchen_get_recipe", "Read a recipe",
              "A library recipe's ingredients, instructions and make-ahead notes.", get_recipe,
+             {"recipe_id": {"type": "integer"}}, ("recipe_id",), read_only=True),
+        Tool("kitchen_propose_recipe_change", "Propose a recipe change",
+             "Suggest a change to a library recipe. Nothing is saved: the person gets a review card (old and new "
+             "lines) and saves it themselves. Give the full new text of each part you change.", propose_recipe_change,
+             {"recipe_id": {"type": "integer"}, "title": {"type": "string"},
+              "ingredients": {"type": "string", "description": "The full new ingredient list, one per line."},
+              "instructions": {"type": "string", "description": "The full new steps, one per line."},
+              "reason": {"type": "string", "description": "One short sentence: what changes and why."}},
+             ("recipe_id", "reason")),
+        Tool("kitchen_recipe_history", "Recipe history",
+             "Saved changes to a library recipe, newest first, with the text before and after each.", recipe_history,
              {"recipe_id": {"type": "integer"}}, ("recipe_id",), read_only=True),
     ])

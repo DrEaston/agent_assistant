@@ -1,5 +1,6 @@
 // Dieter's chat actions: an answer can carry "do": [{type: "navigate", url, title}, {type: "proposal", card},
-// {type: "reload"}]. Shared by every app's chat.
+// {type: "decided", id, status}, {type: "reload"}]. Shared by every app's chat. (The chat itself shows proposal
+// cards and records decided ones; run() carries out navigate and reload.)
 //
 //   DieterActions.run(actions, {state, keepChatOn: ["/thanksgiving"], delay: 700})
 //     Carries out the actions. Before leaving the page it saves `state` (the chat's conversation) for the next page,

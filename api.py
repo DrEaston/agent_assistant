@@ -215,7 +215,30 @@ def connector_run_as(user, fn):
 # The Thanksgiving service's Claude brain uses Kitchen's tools too (signed calls, checked by the /internal/ middleware).
 from core.connector.tools import serve_tools  # noqa: E402
 
-serve_tools(app, "/internal/connector/kitchen/tools", CONNECTOR_TOOLSETS[0])
+serve_tools(app, "/internal/connector/kitchen/tools",  # without the review-card tools: only Dieter's own chat shows cards
+            ToolSet("kitchen", [t for t in CONNECTOR_TOOLSETS[0].tools.values()
+                                if t.name not in kitchen_connector.PROPOSAL_TOOLS]))
+
+# Dieter's chat on the main site's pages (core/connector/chat.py, behind Ask Dieter in core/shell/dock.html). Kitchen
+# first; other apps join by adding their ToolSet, CHAT_NOTES, pages and proposal savers here. Thanksgiving has its own
+# chat on its pages, so here its tools are read-only.
+from core.connector import agent as claude_agent, chat as dieter_chat  # noqa: E402
+from core.connector.pages import Page  # noqa: E402
+from core.connector.tools import ToolError  # noqa: E402
+from apps.kitchen import recipe_changes as kitchen_recipe_changes  # noqa: E402
+
+SITE_PAGES = [Page("today.home", "Today", "Dieter's home page: today across every app.", "/")]
+DIETER_CHAT = dieter_chat.ChatSetup(
+    toolsets=CONNECTOR_TOOLSETS[:2],
+    page_lists=[SITE_PAGES, kitchen_nav.PAGES, thanksgiving_nav.PAGES],
+    notes=[kitchen_connector.CHAT_NOTES],
+    savers=kitchen_connector.savers(),
+    pending=kitchen_connector.pending,
+    offer=lambda schema: not schema["name"].startswith("thanksgiving_")
+    or schema.get("annotations", {}).get("readOnlyHint", False),
+)
+# Pages whose Ask Dieter goes to Dieter's chat (the rest still use the older handlers in api_dieter_action).
+DIETER_CHAT_PATHS = ("/apps/recipes",)
 app.include_router(connector_auth.router())
 app.include_router(connector_server.make_router(CONNECTOR_TOOLSETS, connector_auth.authenticate, connector_run_as,
                                                 signer=core_proxy.signer_user))
@@ -4387,6 +4410,55 @@ def guest_repository_chat_response(content, page_url=""):
         return f"{studio}\n\nSample reports show the issue-to-Codex pipeline without exposing real repo access."
     return GUEST_APP_OVERVIEW
 
+def dieter_chat_handles(message):
+    """Dieter's chat (Claude) answers on Kitchen pages, and on Today unless it's a planner request (which still goes
+    through the older planner preview and confirm)."""
+    if not claude_agent.available() or (message.previous_action_plan or "").strip() or message.confirmation_token:
+        return False
+    path = (message.page_url or "").split("#")[0].split("?")[0]
+    if path.startswith(DIETER_CHAT_PATHS):
+        return True
+    return path in ("", "/") and not message_requests_planner_action(message.content)
+
+
+def dieter_chat_reply(message):
+    user = dict_from_row(db.get_user_by_id(get_current_user_id())) or {}
+    try:
+        result = connector_run_as(user, lambda: dieter_chat.answer(
+            DIETER_CHAT, message.content, message.conversation_history or [], message.page_url, message.page_title))
+    except Exception as exc:
+        print(f"Warning: Dieter's chat failed: {exc!r}")
+        return {"assistant_message": "Sorry, I lost my train of thought. Try that again?", "changed_fields": [],
+                "do": [], "model": "claude"}
+    return {"assistant_message": result["reply"], "do": result["do"], "changed_fields": [], "model": "claude"}
+
+
+# A Kitchen recipe change's review card (apps/kitchen/recipe_changes.py): Save / Discard, and Restore from history.
+@app.post("/apps/recipes/api/proposals/{proposal_id}/save")
+def kitchen_proposal_save(proposal_id: str):
+    try:
+        return {"card": kitchen_recipe_changes.save(db, proposal_id)}
+    except ToolError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/apps/recipes/api/proposals/{proposal_id}/discard")
+def kitchen_proposal_discard(proposal_id: str):
+    try:
+        return {"card": kitchen_recipe_changes.discard(db, proposal_id)}
+    except ToolError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/apps/recipes/meals/{meal_id}/history/{change_id}/restore")
+def kitchen_recipe_restore(meal_id: int, change_id: int):
+    try:
+        kitchen_recipe_changes.restore(db, meal_id, change_id)
+    except ToolError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return RedirectResponse(url=f"/apps/recipes/meals/{meal_id}?restored=1#history", status_code=303)
+
+
 @app.post("/api/dieter/action")
 def api_dieter_action(message: DieterActionMessage):
     """Route Ask Dieter requests to recipe edits, planner edits, or contextual chat."""
@@ -4402,6 +4474,9 @@ def api_dieter_action(message: DieterActionMessage):
 
     if music_routes.message_requests_playlist_action(message.content, page_url):
         return music_routes.handle_playlist_action_request(message, page_url)
+
+    if dieter_chat_handles(message):
+        return dieter_chat_reply(message)
 
     if message_requests_trainer_shoe_log(message.content, page_url):
         return handle_trainer_shoe_log_request(message, page_url)
@@ -7463,9 +7538,12 @@ def kitchen_recipe_page(request: Request, meal_id: int):
     else:
         sections = [(None, meal["display_ingredients_text"].splitlines())]
     plan_item = next((row for row in planned_meal_rows() if row["source_id"] == meal_id), None)
+    is_guest = current_user_is_guest_session()
     return kitchen_pages.recipe_page(meal=meal, sections=sections, plan_item=plan_item,
-                                     cooked=request.query_params.get("cooked") == "1",
-                                     is_guest=current_user_is_guest_session())
+                                     cooked=request.query_params.get("cooked") == "1", is_guest=is_guest,
+                                     history=[] if is_guest else kitchen_recipe_changes.history(db, meal_id),
+                                     pending_cards=[] if is_guest else kitchen_recipe_changes.pending_cards(db, meal_id),
+                                     restored=request.query_params.get("restored") == "1")
 
 
 @app.get("/apps/recipes/meals/{meal_id}/details")
