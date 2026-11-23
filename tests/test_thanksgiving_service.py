@@ -64,6 +64,17 @@ class ServiceTests(unittest.TestCase):
     def signed(self, user_id=1):
         return {internal.HEADER: internal.sign({"id": user_id, "email": "cook@example.com", "name": "Curtis"})}
 
+    def test_serves_claude_tools_to_the_main_app(self):
+        client = TestClient(self.service.app)
+        self.assertEqual(client.get("/thanksgiving/api/connector/tools").status_code, 401)
+        names = [t["name"] for t in client.get("/thanksgiving/api/connector/tools", headers=self.signed(52)).json()["tools"]]
+        self.assertIn("thanksgiving_finish_trip", names)
+        client.get("/thanksgiving", headers=self.signed(52))
+        plan = client.post("/thanksgiving/api/connector/tools/thanksgiving_get_plan", headers=self.signed(52), json={})
+        self.assertIn("Pumpkin pie", plan.json()["result"])
+        nope = client.post("/thanksgiving/api/connector/tools/thanksgiving_fly", headers=self.signed(52), json={})
+        self.assertEqual(nope.status_code, 422)
+
     def test_refuses_requests_without_a_signed_user(self):
         client = TestClient(self.service.app)
         self.assertEqual(client.get("/thanksgiving").status_code, 401)

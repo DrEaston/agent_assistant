@@ -143,8 +143,8 @@ def dish_sources(dish_parts):
 
 # ---------------------------------------------------------------- building a list
 
-def list_context(grocery_list):
-    """Everything a list page needs: meals, aisle sections, checkmarks, counts."""
+def list_items(grocery_list):
+    """A list's meals, dishes, aisle sections and checkmarks, with counts (no page extras)."""
     s = store()
     meals = _state["meal_sources"](grocery_list["meal_ids"])
     dishes = dish_sources(grocery_list.get("dish_parts") or [])
@@ -156,9 +156,17 @@ def list_context(grocery_list):
     extras = s.get_extras(grocery_list["id"])
     sections = shopping_list.build_shopping_list(sources, extras)
     checked = s.get_checked(grocery_list["id"])
-    keys = [item["key"] for section in sections for item in section["items"]]
     buy_keys = [item["key"] for section in sections if section["name"] != shopping_list.PANTRY_CHECK
                 for item in section["items"]]
+    return {"meals": meals, "dishes": dishes, "sections": sections, "checked": checked,
+            "left": sum(1 for k in buy_keys if k not in checked), "total": len(buy_keys)}
+
+
+def list_context(grocery_list):
+    """Everything a list page needs: meals, aisle sections, checkmarks, counts."""
+    items = list_items(grocery_list)
+    meals, dishes, sections, checked = items["meals"], items["dishes"], items["sections"], items["checked"]
+    keys = [item["key"] for section in sections for item in section["items"]]
     on_list = set(grocery_list["meal_ids"])
     addable = [m for m in _state["pending_meals"]() if m["id"] not in on_list]
     dish_keys = {d["key"] for d in dishes}
@@ -177,8 +185,8 @@ def list_context(grocery_list):
         "addable_dishes": addable_dishes,
         "sections": sections,
         "checked": checked,
-        "left": sum(1 for k in buy_keys if k not in checked),
-        "total": len(buy_keys),
+        "left": items["left"],
+        "total": items["total"],
         "signature": signature(keys),
         "pantry_name": shopping_list.PANTRY_CHECK,
     }

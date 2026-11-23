@@ -360,7 +360,7 @@ def check(actions, plan, dishes, tasks, cooks=()):
                 if not text:
                     raise Rejected("What should go on the shopping list?")
                 amount = " ".join(str(action.get("amount") or "").split())[:40]
-                line = f"{amount} {text}" if amount else text  # amount first, so it adds up with matching lines
+                line = f"{amount} {text}" if amount else text
                 normalized.append({"type": "grocery", "text": line})
                 lines.append(f"Shopping list: add “{line}”")
                 continue

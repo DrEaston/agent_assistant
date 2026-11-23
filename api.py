@@ -158,6 +158,36 @@ shopping.configure(
 )
 app.include_router(shopping.router)
 
+# Claude's connector (core/connector): /mcp for the tools, /oauth/* and /.well-known/* for signing in. Each app
+# adds its ToolSet here; an app running as its own service is reached through RemoteToolSet.
+from apps.kitchen import connector as kitchen_connector  # noqa: E402
+from apps.kitchen.thanksgiving import connector as thanksgiving_connector  # noqa: E402
+from core.connector import oauth as connector_oauth, server as connector_server  # noqa: E402
+from core.connector.tools import RemoteToolSet  # noqa: E402
+
+connector_auth = connector_oauth.OAuth(db, lambda user_id: dict(db.get_user_by_id(user_id) or {}) or None)
+CONNECTOR_TOOLSETS = [
+    kitchen_connector.tools(),
+    RemoteToolSet("thanksgiving", THANKSGIVING_SERVICE_URL, "/thanksgiving/api/connector/tools")
+    if THANKSGIVING_SERVICE_URL else thanksgiving_connector.tools(),
+]
+
+
+def connector_run_as(user, fn):
+    """Run a tool as the person Claude's token belongs to (fn runs in a worker thread)."""
+    user_token = set_current_user_id(user["id"])
+    signed = core_internal.current_user.set(core_proxy.signer_user(user))
+    try:
+        return fn()
+    finally:
+        core_internal.current_user.reset(signed)
+        reset_current_user_id(user_token)
+
+
+app.include_router(connector_auth.router())
+app.include_router(connector_server.make_router(CONNECTOR_TOOLSETS, connector_auth.authenticate, connector_run_as,
+                                                signer=core_proxy.signer_user))
+
 # Initialize LLM service
 try:
     llm_service = LLMService()
@@ -358,6 +388,9 @@ async def load_authenticated_user(request: Request, call_next):
         "/apps/planner",
         "/dashboard",
         "/api/cct-roadmap",
+        "/mcp",  # Claude's connector: checks its own bearer token
+        "/oauth/",  # its sign-in; /oauth/authorize sends people to /login itself
+        "/.well-known/oauth-",
     )
     if path.startswith("/internal/"):
         # Another Dieter service (e.g. Thanksgiving) calling back as a user: signed header instead of a cookie.

@@ -1,0 +1,15 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Connect Claude{% endblock %}
+{% block dock %}{% endblock %}
+{% block content %}
+<main class="wrap">
+  {% call ui.section("Couldn't connect Claude") %}
+  <div class="card stack">
+    <p>{{ problem }}</p>
+    <p><a href="/">Back to Dieter</a></p>
+  </div>
+  {% endcall %}
+</main>
+{% endblock %}
+{% block report %}{% endblock %}

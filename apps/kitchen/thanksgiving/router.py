@@ -400,28 +400,36 @@ async def finish_trip(request: Request):
     (moved to a new Kitchen list for the next trip). Items with no choice stay on the list."""
     plan = require_plan()
     form = await request.form()
-    context = plan_context(plan)
-    later = []
-    for section in context["groceries"]:
-        for item in section["items"]:
-            choice = form.get("pick-" + item["key"])
-            if choice == "got":
-                store().set_checked(plan["id"], "grocery", item["key"], True)
-            elif choice == "skip":
-                store().set_checked(plan["id"], ASIDE_KINDS["skip"], item["key"], True)
-            elif choice == "next":
-                later.append(item)
-    if not later:
-        return RedirectResponse(url="/thanksgiving/shopping?trip=done", status_code=303)
-    lines = [f"{i['text']} ({i['amount']})" if i.get("amount") else i["text"] for i in later]
+    picks = {key[5:]: str(value) for key, value in form.items() if key.startswith("pick-")}
     try:
-        made = _state["platform"].new_list(f"Next trip · {planner.short_date(context['now'])}", lines)
+        made = finish_trip_picks(plan, picks)
     except Exception as exc:
         print(f"Warning: couldn't make the next-trip list: {exc}")
         return RedirectResponse(url="/thanksgiving/shopping?trip=failed", status_code=303)
-    for item in later:
-        store().set_checked(plan["id"], ASIDE_KINDS["next"], item["key"], True)
-    return RedirectResponse(url=f"/thanksgiving/shopping?trip={int(made['id'])}&n={len(later)}", status_code=303)
+    if not made:
+        return RedirectResponse(url="/thanksgiving/shopping?trip=done", status_code=303)
+    return RedirectResponse(url=f"/thanksgiving/shopping?trip={int(made['id'])}&n={made['count']}", status_code=303)
+
+
+def finish_trip_picks(plan, picks):
+    """picks: {item key: "got" | "skip" | "next"}. "next" items go to a new Kitchen list (made first, so nothing is
+    set aside if that fails; the error is raised). Returns {"id", "url", "count"} for that list, or None."""
+    context = plan_context(plan)
+    items = {item["key"]: item for section in context["groceries"] for item in section["items"]}
+    later = [items[key] for key, pick in picks.items() if pick == "next" and key in items]
+    made = None
+    if later:
+        lines = [f"{i['text']} ({i['amount']})" if i.get("amount") else i["text"] for i in later]
+        made = dict(_state["platform"].new_list(f"Next trip · {planner.short_date(context['now'])}", lines),
+                    count=len(later))
+    for key, pick in picks.items():
+        if key not in items:
+            continue
+        if pick == "got":
+            store().set_checked(plan["id"], "grocery", key, True)
+        elif pick in ASIDE_KINDS:
+            store().set_checked(plan["id"], ASIDE_KINDS[pick], key, True)
+    return made
 
 
 @router.get("/thanksgiving/settings", response_class=HTMLResponse)
@@ -1039,3 +1047,12 @@ async def api_feedback(request: Request):
     data = await _json(request)
     save_feedback(request, str(data.get("text") or ""), str(data.get("page") or "/thanksgiving/cook"))
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- tools for Claude (core/connector)
+# The main app's /mcp reaches these with a signed user when Thanksgiving runs as its own service.
+from core.connector.tools import serve_tools  # noqa: E402
+
+from . import connector  # noqa: E402
+
+serve_tools(router, "/thanksgiving/api/connector/tools", connector.tools())
