@@ -519,6 +519,50 @@ class RouteTests(unittest.TestCase):
         self.client.post("/thanksgiving/groceries/toggle", data={"key": key, "row": "<script>"})
         self.assertNotIn('id="in-the-cart"', self.client.get("/thanksgiving/shopping").text)
 
+    def test_finish_trip_moves_what_we_didnt_get_to_a_new_list(self):
+        from apps.kitchen.shopping.store import ShoppingStore
+        self.client.get("/thanksgiving")
+        page = self.client.get("/thanksgiving/shopping").text
+        self.assertIn('href="/thanksgiving/shopping/finish"', page)
+        keys = re.findall(r'name="key" value="([^"]+)"', page)
+        got, later, skip, untouched = keys[0], keys[1], keys[2], keys[3:]
+        self.client.post("/thanksgiving/groceries/toggle", data={"key": got, "done": "1"})
+        finish = self.client.get("/thanksgiving/shopping/finish").text
+        self.assertNotIn(f'name="pick-{got}"', finish)  # already in the cart
+        self.assertIn(f'name="pick-{later}" value="next" checked', finish)  # "Next trip" is the default
+        form = {f"pick-{later}": "next", f"pick-{skip}": "skip"}
+        form.update({f"pick-{k}": "got" for k in untouched})
+        r = self.client.post("/thanksgiving/shopping/finish", data=form, follow_redirects=False)
+        list_id = int(re.search(r"trip=(\d+)&n=1", r.headers["location"]).group(1))
+        made = ShoppingStore(self.db).get_list(list_id)
+        self.assertTrue(made["title"].startswith("Next trip"))
+        self.assertEqual(len(ShoppingStore(self.db).get_extras(list_id)), 1)
+        page = self.client.get(r.headers["location"]).text
+        self.assertIn("1 item moved to", page)
+        self.assertIn(f'href="/apps/recipes/grocery-lists/{list_id}"', page)
+        aside = page.split('id="set-aside"')[1]
+        self.assertIn("Not buying now (2)", aside)
+        self.assertIn("On a next-trip list", aside)
+        self.assertIn("Don't need", aside)
+        self.assertNotIn('href="/thanksgiving/shopping/finish"', page)  # nothing left to decide
+        self.client.post("/thanksgiving/groceries/put-back", data={"key": skip})
+        page = self.client.get("/thanksgiving/shopping").text
+        self.assertIn("Not buying now (1)", page)
+        self.assertIn(f'name="key" value="{skip}"', page)
+
+    def test_finish_trip_keeps_items_if_the_list_cant_be_made(self):
+        class Down:
+            def new_list(self, title, lines):
+                raise RuntimeError("platform down")
+        self.client.get("/thanksgiving")
+        tg_router.configure(self.db, platform=Down())
+        key = re.search(r'name="key" value="([^"]+)"', self.client.get("/thanksgiving/shopping").text).group(1)
+        r = self.client.post("/thanksgiving/shopping/finish", data={f"pick-{key}": "next"}, follow_redirects=False)
+        self.assertEqual(r.headers["location"], "/thanksgiving/shopping?trip=failed")
+        page = self.client.get(r.headers["location"]).text
+        self.assertIn("Couldn't make the next-trip list", page)
+        self.assertNotIn('id="set-aside"', page)
+
     def test_plan_made_before_the_appetizers_gets_them_once(self):
         self.client.get("/thanksgiving")
         plan = tg_router.store().get_plan()
@@ -745,6 +789,23 @@ class RouteTests(unittest.TestCase):
         self.assertEqual((added["anchor"], added["temp"], added["kind"]), ("D-1 09:00", 350, "oven"))
         self.client.post("/thanksgiving/api/command/undo")
         self.assertEqual(self.pie()[1]["steps"], before)
+
+    def test_voice_puts_things_on_the_shopping_list_right_away(self):
+        self.client.get("/thanksgiving")
+        plan = tg_router.store().get_plan()
+        seen = self.voice_with({"reply": "On the list.", "question": "", "actions": [
+            {"type": "grocery", "text": "heavy whipping cream", "amount": "1 pint"},
+            {"type": "grocery", "text": "  "}]})
+        r = self.client.post("/thanksgiving/api/command", json={"text": "put whipping cream on the list"}).json()
+        self.assertIn('"grocery"', seen["messages"][0]["content"])
+        self.assertTrue(r["applied"])
+        self.assertEqual(r["changes"], ["Shopping list: add “1 pint heavy whipping cream”"])
+        self.assertEqual(len(r["problems"]), 1)
+        self.assertEqual([e["text"] for e in tg_router.store().get_extra_groceries(plan["id"])],
+                         ["1 pint heavy whipping cream"])
+        self.assertIn("heavy whipping cream", self.client.get("/thanksgiving/shopping").text)
+        self.client.post("/thanksgiving/api/command/undo")
+        self.assertEqual(tg_router.store().get_extra_groceries(plan["id"]), [])
 
     def test_voice_moves_dinner_and_undo_restores_it(self):
         self.client.get("/thanksgiving")

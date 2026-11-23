@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 
 from . import planner, sizes
 
-ACTION_TYPES = ("move", "shift", "size", "done", "add", "remove", "edit", "dinner")
+ACTION_TYPES = ("move", "shift", "size", "done", "add", "remove", "edit", "dinner", "grocery")
 
 SYSTEM_PROMPT = """You are Dieter, the kitchen sidekick for a Thanksgiving cook. You turn their spoken or typed
 request into changes to their plan, or just answer their cooking question.
@@ -42,6 +42,8 @@ Allowed actions (dish ids and step ids exactly as listed in the plan):
 - {"type": "edit", "dish_id": 7, "step_id": "cool", "title": "...", "minutes": 90, "detail": "...", "kind": "...", "temp": 0}
   (include only the fields that change)
 - {"type": "dinner", "date": "YYYY-MM-DD", "time": "HH:MM"}   Moves dinner; steps planned relative to dinner move with it.
+- {"type": "grocery", "text": "heavy whipping cream", "amount": "1 pint"}   Adds a line to the Shopping list
+  (amount optional). Saved right away (Undo is shown), so the reply says it's on the list.
 
 How to think:
 - Be improvisational. When a request is vague ("the weekend", "later", "earlier in the day"), pick the most
@@ -59,7 +61,7 @@ How to think:
   earlier first (by dish and step, with their day), then what's next. Never say "nothing to do" if Status lists
   anything unchecked.
 - When the cook says they already did something, or tells you to check it off / mark it done, use "done"
-  actions for exactly those steps. Done-only changes are saved right away (no confirmation, Undo is shown), so
+  actions for exactly those steps. Done and grocery changes are saved right away (no confirmation, Undo is shown), so
   for those the reply says it's checked off, e.g. "Checked off clearing the fridge and moving the turkey."
   Never mark a step done unless the cook said so. If the cook corrects you ("no, I only did the fridge"),
   send "done": false for the steps they didn't do so those boxes get unchecked; saying so isn't enough.
@@ -68,7 +70,8 @@ How to think:
 - Something the cook can't find is often a part of another dish (see "recipe parts"), e.g. whipped cream is
   part of Pumpkin pie. Say which dish's tab it's in and when its step is. Don't add steps for it.
 - Ingredients are on the Shopping list already, added up across dishes (one cream line covers the potatoes and
-  the pie). Never add "buy ..." steps for something on it; say it's on the list and how much.
+  the pie). If it's there, say so and how much. If the cook wants something on the list that isn't there, use
+  a "grocery" action. Never add "buy ..." steps to the timeline.
 - You can't add a new dish or recipe. If they ask for one, say so plainly and tell them where: Menu, then
   "Add a dish". Don't offer a step on another dish instead."""
 
@@ -247,7 +250,8 @@ Use "answer" for: questions you can answer straight from the plan below (what's 
 which dish), general cooking questions, greetings and small talk about the cooking.
 For "what should I do / what's left / what's not done", read the Status block: name the unchecked earlier
 steps first, then what's next, briefly. Never say there's nothing to do if Status lists anything.
-Use "deep" for: ANY request to change the plan (move, push, add, remove, resize, mark done, change dinner time),
+Use "deep" for: ANY request to change the plan (move, push, add, remove, resize, mark done, change dinner time,
+put something on the shopping list),
 "what if" or "could we" timing questions, anything about knock-on effects on other dishes or the oven, and
 anything you can't answer confidently from the plan.
 Use "ignore" only when the instructions below say the phrase may not be meant for you and it clearly isn't
@@ -351,6 +355,15 @@ def check(actions, plan, dishes, tasks, cooks=()):
             kind = action.get("type")
             if kind not in ACTION_TYPES:
                 raise Rejected(f"I can't do '{kind}' yet.")
+            if kind == "grocery":
+                text = " ".join(str(action.get("text") or "").split())[:120]
+                if not text:
+                    raise Rejected("What should go on the shopping list?")
+                amount = " ".join(str(action.get("amount") or "").split())[:40]
+                line = f"{amount} {text}" if amount else text  # amount first, so it adds up with matching lines
+                normalized.append({"type": "grocery", "text": line})
+                lines.append(f"Shopping list: add “{line}”")
+                continue
             if kind == "dinner":
                 new_dinner = _when(action)
                 normalized.append({"type": "dinner", "dinner_at": f"{new_dinner:%Y-%m-%dT%H:%M}"})
@@ -467,7 +480,7 @@ def knock_on(plan, dishes, normalized, ovens=1):
     for action in normalized:
         if action["type"] == "dinner":
             trial_plan["dinner_at"] = action["dinner_at"]
-        elif action["dish_id"] in trial:
+        elif action.get("dish_id") in trial:
             trial[action["dish_id"]]["steps"] = _change_steps(trial[action["dish_id"]]["steps"], action)
     after = planner.find_conflicts(planner.build_timeline(trial_plan, list(trial.values())), ovens)
     return [f"{_fmt(w['when'])}: {w['text']}" for w in after if w["text"] not in before][:3]
@@ -475,8 +488,11 @@ def knock_on(plan, dishes, normalized, ovens=1):
 
 def apply(store, plan, normalized):
     """Save checked actions. Returns an undo record (previous steps, sizes, checkmarks and dinner time)."""
-    undo = {"dishes": {}, "checks": {}, "plan": None}
+    undo = {"dishes": {}, "checks": {}, "plan": None, "groceries": []}
     for action in normalized:
+        if action["type"] == "grocery":
+            undo["groceries"].append(store.add_extra_grocery(plan["id"], action["text"]))
+            continue
         if action["type"] == "dinner":
             if undo["plan"] is None:
                 undo["plan"] = {"dinner_at": plan["dinner_at"]}
@@ -512,3 +528,5 @@ def undo(store, plan, record):
         store.set_scale(plan["id"], dish["id"], float(before.get("scale") or 1))
     for step_key, was_done in (record.get("checks") or {}).items():
         store.set_checked(plan["id"], "step", str(step_key), bool(was_done))
+    for item_id in record.get("groceries") or []:
+        store.delete_extra_grocery(plan["id"], _int(item_id))

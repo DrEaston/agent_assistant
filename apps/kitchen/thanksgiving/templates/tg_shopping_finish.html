@@ -1,0 +1,31 @@
+{% extends "tg_page.html" %}
+{% block title %}Finish trip{% endblock %}
+{% block page %}
+<section id="finish-trip">
+  <div class="section-head"><div><h2>Finish trip</h2>
+    <p class="muted small" style="margin:.2rem 0 0">What about the things you didn't get? "Next trip" puts them on a new
+      shopping list and takes them off this one.</p></div></div>
+  {% set left = [] %}
+  {% for section in groceries %}{% for item in section["items"] %}
+    {% if item.key not in grocery_checked and item.key not in grocery_aside %}{% set _ = left.append(item) %}{% endif %}
+  {% endfor %}{% endfor %}
+  <form method="post" action="/thanksgiving/shopping/finish" class="card">
+    {% for item in left %}
+    <fieldset class="trip-item" style="border:0;margin:0;padding-left:0;padding-right:0">
+      <legend style="padding:0"><span class="g-text">{{ item.text }}</span>{% if item.amount %} <strong>{{ item.amount }}</strong>{% endif %}</legend>
+      <div class="trip-pick">
+        {% for value, label in (("next", "Next trip"), ("skip", "Don't need"), ("got", "Got it")) %}
+        <label><input type="radio" name="pick-{{ item.key }}" value="{{ value }}"{% if loop.first %} checked{% endif %}><span>{{ label }}</span></label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    {% else %}
+    <p class="muted">Everything's in the cart. Nothing to carry over.</p>
+    {% endfor %}
+    <div class="row" style="margin-top:1rem">
+      <button class="primary" type="submit">Finish trip</button>
+      <a class="button quiet" href="/thanksgiving/shopping">Back to the list</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

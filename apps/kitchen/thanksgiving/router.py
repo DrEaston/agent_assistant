@@ -142,8 +142,33 @@ def plan_context(plan, now=None):
         "dinner_day_chart": planner.oven_chart(tasks, dinner),
         "groceries": planner.build_grocery_list(dishes, s.get_extra_groceries(plan["id"])),
         "grocery_checked": s.get_checked(plan["id"], "grocery"),
+        "grocery_aside": grocery_aside(s, plan["id"]),
         "days_until": (dinner.date() - now.date()).days,
     }
+
+
+# Items set aside at the end of a shopping trip: moved to a Kitchen list for the next trip, or not needed.
+ASIDE_KINDS = {"next": "grocery-next", "skip": "grocery-skip"}
+
+
+def grocery_aside(s, plan_id):
+    """{item key: "next" | "skip"} for shopping items that left the list without being bought."""
+    aside = {}
+    for name, kind in ASIDE_KINDS.items():
+        aside.update(dict.fromkeys(s.get_checked(plan_id, kind), name))
+    return aside
+
+
+def local_new_list(db, title, lines):
+    """Make a Kitchen shopping list of typed-in lines for the current user. Returns {"id", "url"}."""
+    from apps.kitchen.shopping.store import ShoppingStore
+
+    shopping = ShoppingStore(db)
+    list_id = shopping.create_list(title, [])
+    for line in lines:
+        if str(line).strip():
+            shopping.add_extra(list_id, str(line))
+    return {"id": list_id, "url": f"/apps/recipes/grocery-lists/{list_id}"}
 
 
 class LocalPlatform:
@@ -151,6 +176,9 @@ class LocalPlatform:
 
     def __init__(self, db):
         self.db = db
+
+    def new_list(self, title, lines):
+        return local_new_list(self.db, title, lines)
 
     def library(self):
         return local_library(self.db)
@@ -177,6 +205,10 @@ class RemotePlatform:
 
     def report(self, fields):
         internal.call(self.base_url, "POST", "/internal/studio/reports", internal.current_user.get(), fields)
+
+    def new_list(self, title, lines):
+        return internal.call(self.base_url, "POST", "/internal/kitchen/lists", internal.current_user.get(),
+                             {"title": title, "lines": list(lines)})
 
 
 def library_recipes():
@@ -346,8 +378,50 @@ def recipes_page(request: Request):
 
 
 @router.get("/thanksgiving/shopping", response_class=HTMLResponse)
-def shopping_page(request: Request):
-    return render_page(request, "tg_shopping.html", "shopping")
+def shopping_page(request: Request, trip: str = "", n: int = 0):
+    notice = None
+    if trip.isdigit():
+        notice = {"ok": True, "url": f"/apps/recipes/grocery-lists/{int(trip)}", "count": max(n, 0)}
+    elif trip == "done":
+        notice = {"ok": True, "url": "", "count": 0}
+    elif trip == "failed":
+        notice = {"ok": False}
+    return render_page(request, "tg_shopping.html", "shopping", trip_notice=notice)
+
+
+@router.get("/thanksgiving/shopping/finish", response_class=HTMLResponse)
+def finish_trip_page(request: Request):
+    return render_page(request, "tg_shopping_finish.html", "shopping")
+
+
+@router.post("/thanksgiving/shopping/finish")
+async def finish_trip(request: Request):
+    """End a shopping trip. Each item still on the list is "got" (checked), "skip" (don't need it) or "next"
+    (moved to a new Kitchen list for the next trip). Items with no choice stay on the list."""
+    plan = require_plan()
+    form = await request.form()
+    context = plan_context(plan)
+    later = []
+    for section in context["groceries"]:
+        for item in section["items"]:
+            choice = form.get("pick-" + item["key"])
+            if choice == "got":
+                store().set_checked(plan["id"], "grocery", item["key"], True)
+            elif choice == "skip":
+                store().set_checked(plan["id"], ASIDE_KINDS["skip"], item["key"], True)
+            elif choice == "next":
+                later.append(item)
+    if not later:
+        return RedirectResponse(url="/thanksgiving/shopping?trip=done", status_code=303)
+    lines = [f"{i['text']} ({i['amount']})" if i.get("amount") else i["text"] for i in later]
+    try:
+        made = _state["platform"].new_list(f"Next trip · {planner.short_date(context['now'])}", lines)
+    except Exception as exc:
+        print(f"Warning: couldn't make the next-trip list: {exc}")
+        return RedirectResponse(url="/thanksgiving/shopping?trip=failed", status_code=303)
+    for item in later:
+        store().set_checked(plan["id"], ASIDE_KINDS["next"], item["key"], True)
+    return RedirectResponse(url=f"/thanksgiving/shopping?trip={int(made['id'])}&n={len(later)}", status_code=303)
 
 
 @router.get("/thanksgiving/settings", response_class=HTMLResponse)
@@ -568,9 +642,9 @@ def _finish(ticket):
     actions, changes, problems = voice.check(result["actions"], plan, context["dishes"], context["tasks"],
                                              context["cooks"])
     warnings = voice.knock_on(plan, context["dishes"], actions, plan["ovens"])
-    applied = bool(actions) and all(a["type"] == "done" for a in actions)
+    applied = bool(actions) and all(a["type"] in ("done", "grocery") for a in actions)
     if applied:
-        # Checking off boxes the cook asked to check is saved right away; Undo is shown instead of Apply/Cancel.
+        # Checking off boxes, or adding to the shopping list, is saved right away; Undo is shown instead of Apply.
         _state["voice_pending"].pop(plan["id"], None)
         _state["voice_undo"][plan["id"]] = voice.apply(store(), plan, actions)
     else:
@@ -801,6 +875,15 @@ def toggle_grocery(key: str = Form(...), done: str = Form(""), row: str = Form("
     store().set_checked(plan["id"], "grocery", key, bool(done))
     # Without JavaScript the page reloads; land back on the item, not the top of the list.
     return back("/thanksgiving/shopping", row if re.fullmatch(r"[a-z0-9-]{1,80}", row) else "")
+
+
+@router.post("/thanksgiving/groceries/put-back")
+def put_back_grocery(key: str = Form(...)):
+    """Back onto the list: an item set aside at the end of a trip."""
+    plan = require_plan()
+    for kind in ASIDE_KINDS.values():
+        store().set_checked(plan["id"], kind, key, False)
+    return back("/thanksgiving/shopping")
 
 
 @router.post("/thanksgiving/groceries/add")

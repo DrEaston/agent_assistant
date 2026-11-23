@@ -320,8 +320,10 @@ class ThanksgivingStore:
             "SELECT * FROM tg_extra_groceries WHERE plan_id = ? ORDER BY id", (plan_id,)).fetchall()]
 
     def add_extra_grocery(self, plan_id, text):
-        self._conn().execute("INSERT INTO tg_extra_groceries (plan_id, text) VALUES (?, ?)", (plan_id, text[:200]))
+        cur = self._conn().execute("INSERT INTO tg_extra_groceries (plan_id, text) VALUES (?, ?)",
+                                   (plan_id, text[:200]))
         self._commit()
+        return cur.lastrowid
 
     def delete_extra_grocery(self, plan_id, item_id):
         conn = self._conn()

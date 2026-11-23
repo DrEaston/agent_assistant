@@ -187,6 +187,19 @@ class PlatformEndpointTests(unittest.TestCase):
         self.assertIsInstance(library.json(), list)
         self.assertEqual(self.client.get("/internal/kitchen/library/999999", headers=headers).status_code, 404)
 
+    def test_next_trip_lists_are_made_for_the_signed_user(self):
+        lines = {"title": "Next trip · Sun Nov 22", "lines": ["Whole milk (1 quart)", " "]}
+        self.assertEqual(self.client.post("/internal/kitchen/lists", json=lines).status_code, 401)
+        headers = {internal.HEADER: internal.sign({"id": self.user_id})}
+        made = self.client.post("/internal/kitchen/lists", headers=headers, json=lines).json()
+        self.assertEqual(made["url"], f"/apps/recipes/grocery-lists/{made['id']}")
+        row = self.api.db.connect().execute("SELECT title, user_id FROM recipe_grocery_lists WHERE id = ?",
+                                            (made["id"],)).fetchone()
+        self.assertEqual((row["title"], row["user_id"]), ("Next trip · Sun Nov 22", self.user_id))
+        extras = self.api.db.connect().execute("SELECT text FROM recipe_grocery_extras WHERE list_id = ?",
+                                               (made["id"],)).fetchall()
+        self.assertEqual([e["text"] for e in extras], ["Whole milk (1 quart)"])
+
     def test_problem_reports_reach_studio(self):
         headers = {internal.HEADER: internal.sign({"id": self.user_id})}
         before = len(self.api.db.get_app_feedback_reports() if hasattr(self.api.db, "get_app_feedback_reports") else [])
