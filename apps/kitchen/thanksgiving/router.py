@@ -873,10 +873,12 @@ def warm_up():
     if _state.get("fast_model") is not None or _state.get("warmed", 0) > time.time() - 50 * 60:
         return
     _state["warmed"] = time.time()
-    if agent.available() and _state.get("claude_call") is None:
-        _thinkers.submit(contextvars.copy_context().run, _warm_claude)
     for name, timeout in ((voice.fast_model_name(), 6), (voice.model_name(), 60)):
         _thinkers.submit(_ping, name, timeout)
+    if agent.available() and _state.get("claude_call") is None:
+        # In this request, not a background thread: once a request is answered, Cloud Run gives the instance almost
+        # no CPU, and a background warm-up took 23 seconds (finishing after the cook's first question).
+        _warm_claude()
 
 
 def _warm_claude():
@@ -1011,7 +1013,8 @@ def api_speak(text: str = ""):
 
 @router.post("/thanksgiving/api/warm")
 def api_warm():
-    """The voice panel calls this when it opens, so the first phrase doesn't wait on a cold connection."""
+    """The voice panel calls this when it opens, so the first phrase doesn't wait on a cold start. It answers once
+    Claude is ready (a few seconds); the page doesn't wait for it."""
     warm_up()
     return {"ok": True}
 

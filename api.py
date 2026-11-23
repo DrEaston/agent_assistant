@@ -29,7 +29,6 @@ import base64
 import re
 import html
 import sqlite3
-import contextvars
 import threading
 import mimetypes
 import time
@@ -4438,9 +4437,8 @@ def dieter_chat_warm():
         return {"ok": True}
     _dieter_chat_primed["at"] = time.time()
     user = dict_from_row(db.get_user_by_id(get_current_user_id())) or {}
-    context = contextvars.copy_context()
-    threading.Thread(target=context.run, args=(connector_run_as, user, lambda: dieter_chat.prime(DIETER_CHAT)),
-                     daemon=True).start()
+    # In this request, not a background thread: Cloud Run gives an instance almost no CPU between requests.
+    connector_run_as(user, lambda: dieter_chat.prime(DIETER_CHAT))
     return {"ok": True}
 
 

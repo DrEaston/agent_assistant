@@ -869,6 +869,15 @@
   document.addEventListener("tg:voice-closed", () => { wakeTimer = setTimeout(startWake, 600); });
   document.addEventListener("visibilitychange", () => (document.hidden ? stopWake() : startWake()));
   $("voice-device-save").addEventListener("click", () => { wakeBlocked = false; stopWake(); startWake(); });
+  // Ticking "Listen for Hey Dieter" takes effect right away (it used to need Save, which was easy to miss).
+  $("voice-wake").addEventListener("change", () => {
+    const d = loadDevice(); d.wake = $("voice-wake").checked;
+    try { localStorage.setItem("tg-voice-device", JSON.stringify(d)); } catch (e) {}
+    showDevice(); wakeBlocked = false; stopWake(); startWake();
+    report("wake-setting", d.wake ? "on" : "off");
+  });
+  // Once per page: whether the listener should be running here, for the server log.
+  report("wake-check", JSON.stringify({ on: !!loadDevice().wake, recognition: !!Recognition, page: location.pathname }));
   startWake();
 })();
 </script>
