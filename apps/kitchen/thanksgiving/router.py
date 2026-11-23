@@ -23,9 +23,10 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from core import internal, ui
 from core.connector import agent
+from core.connector.tools import ToolError
 from database import get_current_user_id
 
-from . import brain, handsfree, menu, planner, sizes, voice
+from . import brain, handsfree, menu, planner, recipe_changes, sizes, voice
 from .presets import CATEGORIES, OUR_MENU, PRESET_BUTTONS, preset_dish
 from .store import ThanksgivingStore
 
@@ -489,8 +490,54 @@ def dish_page(request: Request, dish_id: int):
         dish = context["dishes_by_id"].get(dish_id)
         if not dish:
             raise HTTPException(status_code=404, detail="That dish isn't on the menu.")
-        return {"dish": dish, "dish_tasks": [t for t in context["tasks"] if t["dish_id"] == dish_id]}
+        return {"dish": dish, "dish_tasks": [t for t in context["tasks"] if t["dish_id"] == dish_id],
+                "recipe_versions": recipe_history(context["plan"], dish_id),
+                "pending_cards": recipe_changes.pending_cards(_state["db"], context["plan"], dish_id)}
     return render_page(request, "tg_dish.html", "menu", extend=pick)
+
+
+def recipe_history(plan, dish_id):
+    """Saved recipe changes, newest first, each with what changed (for the dish page's Recipe history)."""
+    from core.connector.proposals import line_diff
+    labels = dict(recipe_changes.FIELDS)
+    versions = []
+    for v in store().get_recipe_versions(plan["id"], dish_id):
+        diffs = [{"label": labels.get(field, field), "lines": line_diff(v["before"].get(field, ""), text)}
+                 for field, text in v["after"].items()]
+        versions.append(dict(v, diffs=diffs, when=planner.short_date(planner.parse_dt(v["created_at"].replace(" ", "T")))))
+    return versions
+
+
+@router.post("/thanksgiving/api/proposals/{proposal_id}/save")
+def api_save_proposal(proposal_id: str):
+    """The review card's Save: apply a proposed recipe change (only if the recipe hasn't changed since)."""
+    plan = require_plan()
+    try:
+        card = recipe_changes.save(store(), _state["db"], plan, proposal_id)
+    except ToolError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=409)
+    print("Recipe change saved: " + json.dumps({"dish_id": card.get("dish_id"), "title": card["title"]}))
+    return {"ok": True, "card": card}
+
+
+@router.post("/thanksgiving/api/proposals/{proposal_id}/discard")
+def api_discard_proposal(proposal_id: str):
+    plan = require_plan()
+    try:
+        card = recipe_changes.discard(_state["db"], plan, proposal_id)
+    except ToolError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=409)
+    return {"ok": True, "card": card}
+
+
+@router.post("/thanksgiving/dishes/{dish_id}/versions/{version_id}/restore")
+def restore_recipe_version(dish_id: int, version_id: int):
+    plan = require_plan()
+    try:
+        recipe_changes.restore(store(), plan, dish_id, version_id)
+    except ToolError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return RedirectResponse(url=f"/thanksgiving/menu/{dish_id}#history", status_code=303)
 
 
 @router.get("/thanksgiving/recipes", response_class=HTMLResponse)

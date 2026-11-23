@@ -8,6 +8,9 @@
     <h2>{{ dish.name }}</h2>
     <a class="small" href="#edit" data-open-editor>Edit dish</a>
   </div>
+  {% for card in pending_cards %}
+  <div class="proposal-slot" data-proposal-card='{{ card|tojson }}'></div>
+  {% endfor %}
   {% if dish.cook or dish.notes %}<p class="muted">{% if dish.cook %}<strong>{{ dish.cook }}'s</strong>{% if dish.notes %} · {% endif %}{% endif %}{{ dish.notes }}</p>{% endif %}
   <div class="card">
     <h3 class="card-title">Recipe{% if dish.size_label %} <span data-size-label-for="{{ dish.id }}">· {{ dish.size_label }}</span>{% endif %}</h3>
@@ -24,6 +27,26 @@
   <div class="card">
   {% for t in dish_tasks %}{{ task_row(t, show_dish=False) }}{% else %}<p class="muted">No steps yet.</p>{% endfor %}
   </div>
+  {% if recipe_versions %}
+  <h3 class="block-title" id="history">Recipe history</h3>
+  <div class="card">
+    {% for v in recipe_versions %}
+    <div class="history-row">
+      <div class="history-what">
+        <strong>{{ v.summary }}</strong>
+        <div class="small muted">{{ v.when }}{% if v.request %} · you asked: “{{ v.request }}”{% endif %}</div>
+        <details class="small"><summary>What changed</summary>
+          {% for d in v.diffs %}<div class="diff-label">{{ d.label }}</div>
+          {% for l in d.lines %}<div class="diff-line diff-{{ l.op }}">{% if l.op == "removed" %}− {% elif l.op == "added" %}+ {% endif %}{{ l.text }}</div>{% endfor %}{% endfor %}
+        </details>
+      </div>
+      <form method="post" action="/thanksgiving/dishes/{{ dish.id }}/versions/{{ v.id }}/restore">
+        <button class="quiet" type="submit" data-confirm="Put the recipe back to how it was before this change? Any later changes are undone too.">Restore</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
   <div class="card" id="edit" style="margin-top:1rem">
       <details class="editor">
         <summary>Edit dish, recipe, and steps</summary>

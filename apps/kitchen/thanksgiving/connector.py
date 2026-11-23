@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from core.connector.tools import STRINGS, Tool, ToolError, ToolSet, site_url, text_list
 
-from . import voice
+from . import recipe_changes, voice
 
 
 def _r():
@@ -55,6 +55,9 @@ def get_dish(args):
     return {"id": dish["id"], "name": dish["name"], "cook": dish.get("cook") or "", "batch_size": size,
             "notes": dish.get("notes") or "", "ingredients": dish.get("ingredients_text") or "",
             "instructions": dish.get("instructions_text") or "", "steps": steps,
+            # What a recipe change edits (the batch size scales these into the two above):
+            "ingredients_as_written": dish.get("base_ingredients_text", dish.get("ingredients_text")) or "",
+            "instructions_as_written": dish.get("base_instructions_text", dish.get("instructions_text")) or "",
             "url": site_url(f"/thanksgiving/menu/{dish['id']}")}
 
 
@@ -157,6 +160,25 @@ def start_step_timers(args):
     return {"step": task["title"], "started": started, "note": "They show and chime in cook mode on every screen."}
 
 
+def propose_recipe_change(args, request=""):
+    plan, _ = _plan()
+    dish = get_dish({"dish": args.get("dish")})
+    changes = {"ingredients_text": args.get("ingredients"), "instructions_text": args.get("instructions"),
+               "notes": args.get("notes")}
+    card = recipe_changes.propose(_r().store(), _r()._state["db"], plan, dish, changes, args.get("reason") or "",
+                                  request)
+    return dict(card, review_link=site_url(card["open_url"]),
+                next="Nothing is saved yet. The cook reviews the card and taps Save (or plainly says to save it).")
+
+
+def recipe_history(args):
+    plan, _ = _plan()
+    dish = get_dish({"dish": args.get("dish")})
+    return {"dish": dish["name"], "versions": [
+        {"id": v["id"], "when": v["created_at"], "summary": v["summary"], "you_asked": v["request"],
+         "before": v["before"], "after": v["after"]} for v in _r().store().get_recipe_versions(plan["id"], dish["id"])]}
+
+
 def put_back(args):
     plan, ctx = _plan()
     for key in _keys(args, ctx):
@@ -245,6 +267,17 @@ def tools():
              "Start the run of timers a step comes with (e.g. the sourdough's six stretch and folds). Give the dish, "
              "and step_id if the dish has more than one such step.", start_step_timers,
              {"dish": {"type": "string"}, "step_id": {"type": "string"}}, ("dish",)),
+        Tool("thanksgiving_propose_recipe_change", "Propose a recipe change",
+             "Suggest a change to one dish's recipe. Nothing is saved: the cook reviews a card (old and new lines, "
+             "and what it does to the shopping list) and taps Save. Read the dish first and send the FULL new text of "
+             "each part you change, edited from ingredients_as_written / instructions_as_written (the recipe as "
+             "written, before batch scaling). Leave parts you don't change out. Give one short reason.",
+             propose_recipe_change,
+             {"dish": {"type": "string"}, "ingredients": {"type": "string"}, "instructions": {"type": "string"},
+              "notes": {"type": "string"}, "reason": {"type": "string"}}, ("dish", "reason")),
+        Tool("thanksgiving_recipe_history", "Recipe history",
+             "Saved changes to a dish's recipe, newest first: what was asked, and the text before and after.",
+             recipe_history, {"dish": {"type": "string"}}, ("dish",), read_only=True),
         Tool("thanksgiving_change_plan", "Change the Thanksgiving plan", CHANGE_HELP, change_plan,
              {"actions": {"type": "array", "items": {"type": "object"}}, "preview": {"type": "boolean"}},
              ("actions",)),

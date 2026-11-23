@@ -1012,6 +1012,68 @@ class RouteTests(unittest.TestCase):
         self.assertIn('id="day-2026-11-26"', page)
         self.assertIn("DieterActions.resume()", page)
 
+    def test_recipe_changes_wait_for_save_and_keep_history(self):
+        self.client.get("/thanksgiving")
+        plan, pie = self.pie()
+        old = pie["ingredients_text"]
+        new = old.replace("3/4 cup sugar", "2/3 cup sugar")
+        seen = self.claude_with(
+            [("tool", "thanksgiving_propose_recipe_change", {"dish": "Pumpkin pie", "ingredients": new,
+                                                             "reason": "A little less sweet"})],
+            [("text", "Here's a less sweet pie. Look it over and tap Save.")])
+        r = self.client.post("/thanksgiving/api/command", json={"text": "make the pie less sweet", "brain": "claude"}).json()
+        card = next(a["card"] for a in r["do"] if a["type"] == "proposal")
+        self.assertIn({"type": "navigate", "url": f"/thanksgiving/menu/{pie['id']}", "title": "Dish"}, r["do"])
+        self.assertEqual(card["title"], "Change the recipe: Pumpkin pie")
+        self.assertIn({"op": "removed", "text": "3/4 cup sugar"}, card["diffs"][0]["lines"])
+        self.assertIn({"op": "added", "text": "2/3 cup sugar"}, card["diffs"][0]["lines"])
+        self.assertTrue(any("Sugar" in e or "sugar" in e for e in card["effects"]), card["effects"])
+        self.assertEqual(self.pie()[1]["ingredients_text"], old)  # nothing saved yet
+        page = self.client.get(f"/thanksgiving/menu/{pie['id']}").text
+        self.assertIn("data-proposal-card=", page)  # the card waits on the dish page too
+        saved = self.client.post(card["save_url"]).json()
+        self.assertEqual(saved["card"]["status"], "saved")
+        self.assertIn("2/3 cup sugar", self.pie()[1]["ingredients_text"])
+        self.assertEqual(self.client.post(card["save_url"]).status_code, 409)  # only once
+        page = self.client.get(f"/thanksgiving/menu/{pie['id']}").text
+        self.assertIn("Recipe history", page)
+        self.assertIn("A little less sweet", page)
+        self.assertIn("make the pie less sweet", page)
+        self.assertNotIn("data-proposal-card=", page)
+        version = tg_router.store().get_recipe_versions(plan["id"], pie["id"])[0]
+        self.client.post(f"/thanksgiving/dishes/{pie['id']}/versions/{version['id']}/restore")
+        self.assertEqual(self.pie()[1]["ingredients_text"], old)
+        self.assertEqual(len(tg_router.store().get_recipe_versions(plan["id"], pie["id"])), 2)  # the restore is history too
+
+    def test_saying_yeah_does_not_save_a_recipe_but_save_it_does(self):
+        self.client.get("/thanksgiving")
+        plan, pie = self.pie()
+        from apps.kitchen.thanksgiving import connector
+        card = connector.propose_recipe_change({"dish": "Pumpkin pie", "notes": "Bake the day before.", "reason": "Note"})
+        self.claude_with([("tool", "save_recipe_change", {"proposal_id": card["id"]})], [("text", "Say save it.")])
+        r = self.client.post("/thanksgiving/api/command", json={"text": "yeah", "brain": "claude"}).json()
+        self.assertNotEqual(self.pie()[1]["notes"], "Bake the day before.")
+        self.claude_with([("tool", "save_recipe_change", {"proposal_id": card["id"]})], [("text", "Saved.")])
+        r = self.client.post("/thanksgiving/api/command", json={"text": "yes, save it", "brain": "claude"}).json()
+        self.assertEqual(self.pie()[1]["notes"], "Bake the day before.")
+        self.assertIn({"type": "reload"}, r["do"])
+
+    def test_a_card_goes_stale_if_the_recipe_was_edited_since(self):
+        self.client.get("/thanksgiving")
+        plan, pie = self.pie()
+        from apps.kitchen.thanksgiving import connector
+        card = connector.propose_recipe_change({"dish": "Pumpkin pie", "notes": "One", "reason": "Note"})
+        tg_router.store().update_dish(plan["id"], pie["id"], dict(self.pie()[1], notes="Changed by hand"))
+        r = self.client.post(card["save_url"])
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("changed since", r.json()["detail"])
+        self.assertEqual(self.pie()[1]["notes"], "Changed by hand")
+        with self.assertRaisesRegex(Exception, "nothing would change"):
+            connector.propose_recipe_change({"dish": "Pumpkin pie", "notes": "Changed by hand", "reason": "x"})
+        discard = self.client.post(connector.propose_recipe_change(
+            {"dish": "Pumpkin pie", "notes": "Two", "reason": "x"})["discard_url"]).json()
+        self.assertEqual(discard["card"]["status"], "discarded")
+
     def test_claude_brain_plan_changes_wait_for_apply(self):
         self.client.get("/thanksgiving")
         self.claude_with(

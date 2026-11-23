@@ -315,11 +315,15 @@
     document.dispatchEvent(new CustomEvent("tg:voice-closed"));
   }
 
+  // Saved a recipe change for the dish on screen: reload to show it (the conversation comes along).
+  document.addEventListener("dieter:proposal", (event) => {
+    if (event.detail.status === "saved" && event.detail.box.dataset.openUrl === location.pathname) follow({ do: [{ type: "reload" }] });
+  });
   // An answer can move the screen ("pull up the pie recipe"). The conversation comes along to the next page.
   function follow(data) {
     if (!window.DieterActions || !(data.do || []).length) return;
     DieterActions.run(data.do, { keepChatOn: ["/thanksgiving"], state: {
-      open: true, history, log: log.innerHTML, convo: !!convo, about,
+      open: !sheet.hidden, history, log: log.innerHTML, convo: !!convo, about,
       decide: !$("voice-decide").hidden, undo: !$("voice-undo-row").hidden } });
   }
 
@@ -329,6 +333,12 @@
     if (data.problems.length) html += data.problems.map((p) => `<div class="voice-problem">${esc(p)}</div>`).join("");
     if ((data.warnings || []).length) html += data.warnings.map((w) => `<div class="voice-warning">Heads up: ${esc(w)}</div>`).join("");
     say("dieter", html || "I'm not sure what to change. Try saying it another way.");
+    // A proposed recipe change: the review card, with its own Save and Discard (dieter-actions.js).
+    const cards = (data.do || []).filter((a) => a.type === "proposal" && a.card);
+    if (cards.length && window.DieterActions) {
+      log.lastChild.insertAdjacentHTML("beforeend", cards.map((a) => DieterActions.proposalCard(a.card)).join(""));
+      toLatest();
+    }
     if (data.can_apply) {
       // Make it unmistakable that nothing is saved yet (the reply alone can sound like it's already done).
       log.lastChild.insertAdjacentHTML("beforeend", `<div class="voice-pending">Not saved yet. Tap Apply to make this change${convo ? ", or say yes" : ""}.</div>`);

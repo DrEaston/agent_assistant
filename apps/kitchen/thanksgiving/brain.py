@@ -11,7 +11,7 @@ from core.connector import agent
 from core.connector.pages import open_page_tool
 from core.connector.tools import ToolError
 
-from . import connector, nav, voice
+from . import connector, nav, recipe_changes, voice
 from .. import nav as kitchen_nav
 
 _ACTIONS = voice.SYSTEM_PROMPT.split("Allowed actions", 1)[1].split("How to think:", 1)[0]
@@ -35,6 +35,13 @@ directly. When they couldn't get something at the store, suggest a swap that sto
 it to a next-trip list (thanksgiving_finish_trip with next_trip). Kitchen shopping lists (everyday lists, not
 Thanksgiving) use the kitchen_ tools.
 
+Changing a recipe: never change one silently. Read the dish (thanksgiving_get_dish), then call
+thanksgiving_propose_recipe_change with the full new text of each part you change, edited from the "as written"
+text, and one short reason. A review card shows the cook exactly what changes; say in a sentence what you're
+proposing and ask them to look it over. Call save_recipe_change only when their latest message plainly says to save
+it ("save the recipe change", "yes, save it"). A bare "yes", "ok" or "sure" is not enough: ask them to tap Save or say
+"save it". To undo a saved change, read thanksgiving_recipe_history and propose the old text.
+
 Showing things: when they ask to see, open, show or pull up something ("pull up the pie recipe", "show me Wednesday",
 "open my next-trip list"), call dieter_open_page; their screen changes right away and this chat stays open. Say in a
 few words what you opened. Don't open pages they didn't ask for.
@@ -45,7 +52,12 @@ Your reply: 1-3 short sentences of plain text, no markdown or lists (it may be r
 
 LOCAL_TOOLS = ("thanksgiving_get_dish", "thanksgiving_get_shopping_list", "thanksgiving_check_items",
                "thanksgiving_finish_trip", "thanksgiving_put_back", "thanksgiving_start_timer",
-               "thanksgiving_start_step_timers")
+               "thanksgiving_start_step_timers", "thanksgiving_propose_recipe_change", "thanksgiving_recipe_history")
+
+SAVE_TOOL = {"name": "save_recipe_change",
+             "description": "Save a proposed recipe change. Only when the cook's latest message plainly says to save it.",
+             "input_schema": {"type": "object", "properties": {"proposal_id": {"type": "string"}},
+                              "required": ["proposal_id"]}}
 
 EXTRA_TOOLS = [
     {"name": "propose_changes", "description": "Change the Thanksgiving plan (actions as described in the system "
@@ -59,6 +71,16 @@ SPOKEN_TOOLS = [
     {"name": "end_conversation", "description": "The cook is wrapping up. Call this, then give a short sign-off.",
      "input_schema": {"type": "object", "properties": {}}},
 ]
+
+
+def _store():
+    from . import router
+    return router.store()
+
+
+def _db():
+    from . import router
+    return router._state["db"]
 
 
 def _spoken(prompt):
@@ -79,7 +101,7 @@ def understand(text, summary, history=(), sass="normal", spoken_prompt="", hando
         except Exception as exc:
             print(f"Warning: Kitchen tools unavailable: {exc}")
     schemas = [s for s in local.list() if s["name"] in LOCAL_TOOLS] + kitchen_schemas
-    tools = agent.api_tools(schemas) + EXTRA_TOOLS + (SPOKEN_TOOLS if spoken_prompt else [])
+    tools = agent.api_tools(schemas) + EXTRA_TOOLS + [SAVE_TOOL] + (SPOKEN_TOOLS if spoken_prompt else [])
     state = {"actions": [], "ignore": False, "end": False, "do": []}
 
     def opened(url, page):
@@ -99,6 +121,20 @@ def understand(text, summary, history=(), sass="normal", spoken_prompt="", hando
             return {"changes": changes, "problems": problems}
         if name == open_page.name:
             return open_page.handler(args)
+        if name == "thanksgiving_propose_recipe_change":
+            card = connector.propose_recipe_change(args, request=text)
+            state["do"] = [a for a in state["do"] if a.get("type") != "proposal"] + [{"type": "proposal", "card": card}]
+            if not any(a.get("type") == "navigate" for a in state["do"]):
+                state["do"].append({"type": "navigate", "url": card["open_url"], "title": "Dish"})
+            return card
+        if name == "save_recipe_change":
+            from core.connector.proposals import said_save
+            if not said_save(text):
+                raise ToolError("Not saved: the cook hasn't plainly said to save it. Ask them to tap Save on the card "
+                                "or say \"save it\".")
+            card = recipe_changes.save(_store(), _db(), plan, str(args.get("proposal_id") or ""))
+            state["do"] = [a for a in state["do"] if a.get("type") != "reload"] + [{"type": "reload"}]
+            return {"saved": True, "title": card["title"]}
         if name == "stay_quiet":
             state["ignore"] = True
             return "OK. Say nothing."

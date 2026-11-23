@@ -84,6 +84,14 @@ section { scroll-margin-top: 1rem; margin-bottom: 2rem; }
 .grocery.done .g-amount { color: var(--muted); }
 .grocery.done .check { background: var(--ok-soft); border-color: #bcd9a0; color: var(--ok); }
 .in-cart { margin-top: 1.2rem; }
+.history-row { display: flex; justify-content: space-between; gap: .75rem; align-items: flex-start; padding: .6rem 0; border-bottom: 1px solid var(--line); }
+.history-row:last-child { border-bottom: 0; }
+.history-what { flex: 1; min-width: 0; }
+.diff-label { font-weight: 700; margin-top: .4rem; }
+.diff-line { font-family: ui-monospace, Consolas, monospace; font-size: .85rem; white-space: pre-wrap; padding: 0 .3rem; }
+.diff-removed { color: #991b1b; background: #fef2f2; text-decoration: line-through; }
+.diff-added { color: #166534; background: #f0fdf4; }
+.diff-gap { color: var(--muted); font-style: italic; }
 .trip-item { padding: .6rem 0; border-bottom: 1px solid var(--line); }
 .trip-pick { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; }
 .trip-pick label { display: inline-flex; align-items: center; min-height: 40px; padding: .3rem .8rem; border: 1px solid var(--line);

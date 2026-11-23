@@ -102,6 +102,35 @@ class PageTests(unittest.TestCase):
         self.assertIn("thanksgiving.timeline", tool.schema()["description"])
 
 
+class ProposalTests(unittest.TestCase):
+    def test_diff_and_plain_save(self):
+        from core.connector.proposals import line_diff, said_save
+        lines = line_diff("a\nb\nc\nd\ne\nf", "a\nb\nc\nD\ne\nf")
+        self.assertEqual([(l["op"], l["text"]) for l in lines],
+                         [("gap", "2 unchanged lines"), ("same", "c"), ("removed", "d"), ("added", "D"), ("same", "e")])
+        for yes in ("save the recipe change", "yes, save it", "make the change", "Save that please"):
+            self.assertTrue(said_save(yes), yes)
+        for no in ("yes", "ok", "sure", "yeah do it", "don't save it", "save", "wait, don't make that change"):
+            self.assertFalse(said_save(no), no)
+
+    def test_proposals_expire_and_belong_to_their_owner(self):
+        import tempfile, time as _time
+        from pathlib import Path as _P
+        from core.connector import proposals
+        from database import Database
+        db = Database(str(_P(tempfile.mkdtemp()) / "p.db"))
+        book = proposals.ProposalStore(db, "test_proposals")
+        card = book.create("plan:1", "recipe", {"title": "T", "save_url": "/x/{id}/save"}, {"a": 1})
+        self.assertEqual(card["save_url"], f"/x/{card['id']}/save")
+        self.assertEqual(book.get("plan:2", card["id"]), (None, None))
+        self.assertEqual(book.get("plan:1", card["id"])[0]["status"], "pending")
+        self.assertEqual(len(book.pending("plan:1", "recipe")), 1)
+        db.connect().execute("UPDATE test_proposals SET created_at = ?", (_time.time() - proposals.EXPIRES_SECONDS - 5,))
+        self.assertEqual(book.get("plan:1", card["id"])[0]["status"], "expired")
+        self.assertEqual(book.pending("plan:1"), [])
+        db.conn.close()
+
+
 class AgentLoopTests(unittest.TestCase):
     def test_tool_errors_go_back_to_claude_and_the_loop_ends(self):
         from types import SimpleNamespace as NS
@@ -284,6 +313,10 @@ class ConnectorFlowTests(unittest.TestCase):
         names = {t["name"] for t in self.rpc(token, "tools/list").json()["result"]["tools"]}
         self.assertTrue({"kitchen_get_shopping_list", "kitchen_finish_shopping_list", "thanksgiving_get_plan",
                          "thanksgiving_finish_trip", "thanksgiving_change_plan", "dieter_open_page"} <= names)
+        proposal = self.tool(token, "thanksgiving_propose_recipe_change", dish="Gravy", reason="Richer",
+                             notes="Make it the day before.")
+        # This user has no Thanksgiving plan yet (test_thanksgiving_tools covers one that does)
+        self.assertIn("no Thanksgiving plan", proposal.get("error", ""))
         link = self.tool(token, "dieter_open_page", page="thanksgiving.shopping")
         self.assertTrue(link["link"].endswith("/thanksgiving/shopping"))
         self.assertEqual(self.rpc(token, "tools/call", {"name": "music_play"}).json()["error"]["code"], -32602)
@@ -378,6 +411,11 @@ class ConnectorFlowTests(unittest.TestCase):
         self.assertEqual(self.tool(token, "thanksgiving_undo_last_change"), {"undone": True})
         self.assertIn("Dinner: Thursday 2026-11-26 16:00", self.tool(token, "thanksgiving_get_plan"))
         self.assertIn("no recent change", self.tool(token, "thanksgiving_undo_last_change")["error"])
+        proposal = self.tool(token, "thanksgiving_propose_recipe_change", dish="Gravy", notes="Make it the day before.",
+                             reason="Less to do on the day")
+        self.assertTrue(proposal["review_link"].endswith(f"/thanksgiving/menu/{proposal['dish_id']}"))
+        self.assertEqual(proposal["status"], "pending")
+        self.assertNotEqual(self.tool(token, "thanksgiving_get_dish", dish="Gravy")["notes"], "Make it the day before.")
         self.assertTrue(re.search(r"Not on the Thanksgiving list", self.tool(token, "thanksgiving_check_items",
                                                                             keys=["item-nope"])["error"]))
 

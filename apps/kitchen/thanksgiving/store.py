@@ -55,6 +55,16 @@ CREATE TABLE IF NOT EXISTS tg_list_links (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (plan_id, item_key)
 );
+CREATE TABLE IF NOT EXISTS tg_recipe_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL REFERENCES tg_plans(id) ON DELETE CASCADE,
+    dish_id INTEGER NOT NULL,
+    request TEXT DEFAULT '',
+    summary TEXT DEFAULT '',
+    before_json TEXT NOT NULL,
+    after_json TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS tg_timers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     plan_id INTEGER NOT NULL REFERENCES tg_plans(id) ON DELETE CASCADE,
@@ -342,6 +352,27 @@ class ThanksgivingStore:
              json.dumps(dish.get("steps") or []), dish_id, plan_id),
         )
         self._commit()
+
+    # ---------------------------------------------------------------- recipe history (recipe_changes.py)
+
+    def add_recipe_version(self, plan_id, dish_id, request, summary, before, after):
+        self._conn().execute(
+            "INSERT INTO tg_recipe_versions (plan_id, dish_id, request, summary, before_json, after_json) VALUES (?, ?, ?, ?, ?, ?)",
+            (plan_id, dish_id, str(request or "")[:500], str(summary or "")[:300], json.dumps(before), json.dumps(after)))
+        self._commit()
+
+    def _version(self, row):
+        return dict(row, before=json.loads(row["before_json"]), after=json.loads(row["after_json"]))
+
+    def get_recipe_versions(self, plan_id, dish_id):
+        rows = self._conn().execute("SELECT * FROM tg_recipe_versions WHERE plan_id = ? AND dish_id = ? ORDER BY id DESC",
+                                    (plan_id, dish_id)).fetchall()
+        return [self._version(r) for r in rows]
+
+    def get_recipe_version(self, plan_id, version_id):
+        row = self._conn().execute("SELECT * FROM tg_recipe_versions WHERE plan_id = ? AND id = ?",
+                                   (plan_id, version_id)).fetchone()
+        return self._version(row) if row else None
 
     def delete_dish(self, plan_id, dish_id):
         conn = self._conn()
