@@ -445,6 +445,12 @@ class ThanksgivingStore:
             "SELECT item_key FROM tg_checks WHERE plan_id = ? AND kind = ?", (plan_id, kind)).fetchall()
         return {row["item_key"] for row in rows}
 
+    def clear_checked(self, plan_id, kind, prefix):
+        """Uncheck every key of this kind that starts with prefix (e.g. one dish's ingredients: "12:")."""
+        self._conn().execute("DELETE FROM tg_checks WHERE plan_id = ? AND kind = ? AND substr(item_key, 1, ?) = ?",
+                             (plan_id, kind, len(prefix), prefix))
+        self._commit()
+
     def set_checked(self, plan_id, kind, key, checked):
         conn = self._conn()
         if checked:

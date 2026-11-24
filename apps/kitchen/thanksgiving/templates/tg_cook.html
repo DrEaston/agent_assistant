@@ -14,6 +14,19 @@ body { overflow-x: hidden; }
 .s-how li { margin: .15rem 0; }
 .alert .s-how { font-size: .9rem; margin-top: .35rem; }
 #recipe .spacer { flex: 1; }
+.checklist { list-style: none; padding: 0; margin: .3rem 0; display: grid; gap: .3rem; }
+.checklist .ing { display: flex; gap: .6rem; align-items: center; padding: .55rem .7rem; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--panel); cursor: pointer; min-height: 44px; transition: opacity .3s; }
+.checklist .ing.got { color: var(--muted); text-decoration: line-through; }
+.ing-box { flex: none; width: 1.4rem; height: 1.4rem; border: 2px solid var(--line); border-radius: 6px; display: grid;
+  place-items: center; font-weight: 800; color: var(--ok); }
+.ing.got .ing-box { background: var(--ok-soft); border-color: var(--ok); }
+details.added { margin: .2rem 0 .6rem; }
+details.added > summary { cursor: pointer; color: var(--ok); font-weight: 700; font-size: .9rem; padding: .2rem 0; }
+.ing-group { scroll-margin-top: 5rem; }
+.ing-group:target { background: #fff4d6; border-radius: 8px; }
+.ing-hint { margin: 0; }
+.s-ing { display: inline-block; margin: .1rem 0 .2rem; }
 .s-ref { display: inline-block; margin: .1rem 0 .2rem; }
 .instructions li, .step { scroll-margin-top: 5rem; }
 .instructions li:target, .step:target { background: #fff4d6; border-radius: 6px; }
@@ -212,7 +225,7 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
   function renderRecipe(force) {
     const dish = state.dishes.find(d => d.id === selected);
     if (!dish) { $("recipe").innerHTML = '<p class="muted">No dishes yet. Add them in the plan.</p>'; return; }
-    const sig = JSON.stringify([dish, [...pendingDone], Math.floor(now() / 30000)]);
+    const sig = JSON.stringify([dish, [...pendingDone], [...ingLocal], Math.floor(now() / 30000)]);
     if (!force && sig === lastRecipeSig) return;
     lastRecipeSig = sig;
     const t = now();
@@ -223,12 +236,13 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
         <div><div class="s-when">${esc(s.day)} · ${esc(s.clock)}${s.minutes ? ` · ${s.minutes} min` : ""}${s.temp ? ` · ${s.temp}°F` : ""} ${isDone(s) ? "" : `· <span class="${s.start_ms < t && !due ? "late" : ""}">${esc(rel(s.start_ms))}</span>`}</div>
           <div class="s-title">${esc(s.title)} ${s.cook && s.cook !== dish.cook ? pill(s.cook) : ""}</div>
           ${howHTML(s, true)}
+          ${usesHTML(dish, s)}
           ${s.detail ? `<div class="small muted">${esc(s.detail)}</div>` : ""}
           ${(s.series || []).length && !isDone(s) ? `<button type="button" class="series-btn" data-series="${esc(s.key)}">⏱ ${esc(s.series_button || "Start timers")}</button>` : ""}
           ${(s.how || []).length ? "" : stepRecipe(dish, s)}
         </div></li>`;
     }).join("");
-    const ingredients = ingredientsHTML(dish, dish.ingredient_sections);
+    const ingredients = checklistHTML(dish);
     const instructions = methodHTML(dish);
     $("recipe").innerHTML = `<div class="stack">
       <div class="row"><h2>${esc(dish.name)}</h2>${pill(dish.cook)}<span class="spacer"></span>
@@ -238,7 +252,7 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
           `<option value="${esc(o.value)}"${o.value === dish.size_value ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>` : ""}
       ${dish.notes ? `<p class="muted">${esc(dish.notes)}</p>` : ""}
       <h3>Steps</h3><ol class="steps">${steps || '<li class="muted">No timed steps.</li>'}</ol>
-      ${ingredients ? `<h3>Ingredients <span class="small muted">(tap to cross off)</span></h3>${ingredients}` : ""}
+      ${ingredients}
       ${instructions ? `<h3>Method</h3>${instructions}` : ""}</div>`;
   }
   // The recipe lines this step covers, right under it (and in its alert), so a step that pops up says what to do.
@@ -249,6 +263,68 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
     return `<ol class="s-how">${s.how.map(line => `<li>${esc(line.text)}</li>`).join("")}</ol>`
       + (withRef ? `<a class="s-ref small" href="#cook-line-${esc(dishId)}-${s.how[0].index}">${esc(s.how_ref)} in the recipe ↓</a>` : "");
   }
+  // ---------- Ingredient checklist: tap an ingredient as it goes in. It's checked at once, and a moment later moves
+  // to its group's "Added" list (tap it there to put it back). Shared by every device (the server keeps it; other
+  // screens see it on their next poll, within a few seconds), and kept until "Start over".
+  const ingLocal = new Map();  // key -> {added, at}: taps not yet confirmed by the server
+  const SETTLE_MS = 1500;
+  function isAdded(line) {
+    const local = ingLocal.get(line.key);
+    if (local && (local.added === line.added || now() - local.at > 15000)) { ingLocal.delete(line.key); return line.added; }
+    return local ? local.added : line.added;
+  }
+  function settling(line) {  // just tapped: stays in place, checked, for a moment
+    const local = ingLocal.get(line.key);
+    return !!local && local.added && now() - local.at < SETTLE_MS;
+  }
+  const groupId = (dish, heading) => `cook-ing-${dish.id}-${(heading || "all").toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+  function checklistHTML(dish) {
+    const groups = dish.checklist || [];
+    const all = groups.flatMap(g => g.lines);
+    if (!all.length) return "";
+    const count = all.filter(isAdded).length;
+    const done = dish.steps.length && dish.steps.every(isDone);
+    const status = done ? "Dish done ✓" : count === all.length ? "All added ✓" : `${count} of ${all.length} added`;
+    const row = (l) => `<li class="ing${isAdded(l) ? " got" : ""}" data-ing="${esc(l.key)}" role="checkbox" aria-checked="${isAdded(l)}" tabindex="0">
+      <span class="ing-box" aria-hidden="true">${isAdded(l) ? "✓" : ""}</span><span>${esc(l.text)}</span></li>`;
+    return `<div class="row"><h3>Ingredients</h3><span class="small muted">${status}</span><span class="spacer"></span>
+        ${count ? `<button type="button" class="quiet small" data-ing-reset="${dish.id}">Start over</button>` : ""}</div>
+      <p class="small muted ing-hint">Tap each one as it goes in.</p>
+      ${groups.map(g => {
+        const id = groupId(dish, g.heading);
+        const left = g.lines.filter(l => !isAdded(l) || settling(l)), went = g.lines.filter(l => isAdded(l) && !settling(l));
+        return `<div class="ing-group" id="${id}">${g.heading ? `<h4>${esc(g.heading)}</h4>` : ""}
+          ${left.length ? `<ul class="checklist">${left.map(row).join("")}</ul>` : `<p class="small muted">All added ✓</p>`}
+          ${went.length ? `<details class="added" data-open-key="added:${id}"${openRecipes.has("added:" + id) ? " open" : ""}>
+            <summary>✓ Added (${went.length})</summary><ul class="checklist">${went.map(row).join("")}</ul></details>` : ""}</div>`;
+      }).join("")}`;
+  }
+  // On a step that adds ingredients: "Crust ingredients: 2 of 5 added ↓", jumping to them in the checklist.
+  function usesHTML(dish, s) {
+    const uses = (s.uses || []).map(u => u.toLowerCase());
+    if (!uses.length) return "";
+    const groups = (dish.checklist || []).filter(g => uses.includes("*") || uses.includes(g.heading.toLowerCase()));
+    const lines = groups.flatMap(g => g.lines);
+    if (!lines.length) return "";
+    const named = uses.includes("*") ? "Ingredients" : `${groups.map(g => g.heading).join(" and ")} ingredients`;
+    return `<a class="s-ing small" href="#${groupId(dish, groups[0].heading)}">${esc(named)}: ${lines.filter(isAdded).length} of ${lines.length} added ↓</a>`;
+  }
+  function findIngredient(key) {
+    for (const d of state.dishes) for (const g of d.checklist || []) for (const l of g.lines) if (l.key === key) return l;
+    return null;
+  }
+  function toggleIngredient(key) {
+    const line = findIngredient(key);
+    if (!line) return;
+    const added = !isAdded(line);
+    ingLocal.set(key, { added, at: now() });
+    renderAll(true);
+    if (added) setTimeout(() => renderAll(true), SETTLE_MS + 50);  // then it moves to "Added"
+    post("/thanksgiving/api/ingredients/added", { key, added }).catch(() => {
+      ingLocal.delete(key); $("offline").hidden = false; renderAll(true);
+    });
+  }
+
   // The method, numbered within each section, each line with the step(s) that cover it (tap to jump to the step).
   function methodHTML(dish) {
     const byLine = {};
@@ -380,8 +456,16 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
     act(() => post(`/thanksgiving/api/dishes/${select.dataset.sizeDish}/size`, { scale: select.value }));
   });
   document.addEventListener("click", (ev) => {
-    const el = ev.target.closest("button, li[data-got], .up[data-goto]");
+    const el = ev.target.closest("button, li[data-got], li[data-ing], .up[data-goto]");
     if (!el || !state) return;
+    if (el.dataset.ing) { toggleIngredient(el.dataset.ing); return; }
+    if (el.dataset.ingReset) {
+      const dish = state.dishes.find(d => d.id === Number(el.dataset.ingReset));
+      for (const g of (dish && dish.checklist) || []) for (const l of g.lines) ingLocal.set(l.key, { added: false, at: now() });
+      renderAll(true);
+      act(() => post("/thanksgiving/api/ingredients/reset", { dish_id: Number(el.dataset.ingReset) }));
+      return;
+    }
     if (el.dataset.cook !== undefined && el.closest("#filter")) {
       filter = el.dataset.cook; safeSet("tg-cook", filter); renderFilter(); renderAll(true);
     } else if (el.dataset.dish) {
@@ -425,6 +509,10 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
       const k = el.dataset.got; got.has(k) ? got.delete(k) : got.add(k); safeSet("tg-got", JSON.stringify([...got]));
       el.classList.toggle("got");
     }
+  });
+  document.addEventListener("keydown", (ev) => {  // the checklist works from a keyboard too
+    const li = ev.target.closest && ev.target.closest("li[data-ing]");
+    if (li && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); toggleIngredient(li.dataset.ing); }
   });
   // "potatoes 20 min" / "rolls 1h 15m" / "pie 1 1/2 hours" / "half an hour" / "gravy 10" -> {minutes, label}
   const WORD_NUM = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,

@@ -294,6 +294,30 @@ class RouteTests(unittest.TestCase):
         self.assertIn("Shopping list", pages)
         self.assertIn("Yukon Gold", pages)
 
+    def test_ingredient_checklist_is_shared_and_starts_over(self):
+        self.client.get("/thanksgiving")
+        state = self.client.get("/thanksgiving/api/state").json()
+        pie = next(d for d in state["dishes"] if d["name"] == "Pumpkin pie")
+        crust = pie["checklist"][0]
+        self.assertEqual(crust["heading"], "Crust")
+        flour = crust["lines"][0]
+        self.assertIn("flour", flour["text"])
+        self.assertFalse(flour["added"])
+        dough = next(s for s in pie["steps"] if s["key"].endswith(":dough"))
+        self.assertEqual(dough["uses"], ["Crust"])
+        self.assertEqual(self.client.post("/thanksgiving/api/ingredients/added", json={"key": "nope"}).status_code, 400)
+        self.client.post("/thanksgiving/api/ingredients/added", json={"key": flour["key"], "added": True})
+        # Another device asks for the state: the flour is added there too.
+        again = next(d for d in self.client.get("/thanksgiving/api/state").json()["dishes"] if d["id"] == pie["id"])
+        self.assertTrue(again["checklist"][0]["lines"][0]["added"])
+        # A batch-size change rescales the text but keeps what's been added.
+        self.client.post(f"/thanksgiving/api/dishes/{pie['id']}/size", json={"scale": "1"})
+        resized = next(d for d in self.client.get("/thanksgiving/api/state").json()["dishes"] if d["id"] == pie["id"])
+        self.assertTrue(resized["checklist"][0]["lines"][0]["added"])
+        self.client.post("/thanksgiving/api/ingredients/reset", json={"dish_id": pie["id"]})
+        cleared = next(d for d in self.client.get("/thanksgiving/api/state").json()["dishes"] if d["id"] == pie["id"])
+        self.assertFalse(any(l["added"] for g in cleared["checklist"] for l in g["lines"]))
+
     def test_steps_and_recipe_link_both_ways(self):
         self.client.get("/thanksgiving")
         state = self.client.get("/thanksgiving/api/state").json()
@@ -1535,6 +1559,11 @@ class StepGuideTests(unittest.TestCase):
             for step_id in step_guide.GUIDE.get(dish["name"], {}):
                 if step_id not in {s["id"] for s in dish["steps"]}:
                     problems.append(f"{dish['name']}: the guide has no step {step_id}")
+            groups = {g["heading"].lower() for g in planner.ingredient_checklist(dish)}
+            for t in tasks:
+                for use in t["uses"]:
+                    if use != "*" and use.lower() not in groups:
+                        problems.append(f"{dish['name']} [{t['step_id']}] uses ingredients {use!r}, not in the recipe")
         self.assertEqual(problems, [])
 
     def test_new_pie_steps_show_their_instructions(self):

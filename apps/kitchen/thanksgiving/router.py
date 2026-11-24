@@ -700,6 +700,7 @@ async def save_dish(dish_id: int, request: Request):
             "series": existing_steps.get(step_id, {}).get("series") or [],
             "series_button": existing_steps.get(step_id, {}).get("series_button") or "",
             "how": existing_steps.get(step_id, {}).get("how") or [],  # the recipe lines it covers (planner.step_how)
+            "uses": existing_steps.get(step_id, {}).get("uses") or [],  # ingredient groups it adds
         })
     if (form.get("new_step_title") or "").strip():
         steps.append({
@@ -1195,6 +1196,7 @@ def cook_state():
     dishes = [sizes.with_size(d) for d in s.get_dishes(plan["id"])]
     tasks = planner.build_timeline(plan, dishes)
     done = s.get_checked(plan["id"], "step")
+    added = s.get_checked(plan["id"], "ingredient")
     by_dish = {}
     for task in tasks:
         by_dish.setdefault(task["dish_id"], []).append({
@@ -1205,7 +1207,7 @@ def cook_state():
             "done": task["key"] in done, "section": task["section"], "series": task.get("series") or [],
             "series_button": task.get("series_button") or "",
             "how": [{"index": l["index"], "ref": l["ref"], "text": l["text"]} for l in task.get("how") or []],
-            "how_ref": task.get("how_ref") or "",
+            "how_ref": task.get("how_ref") or "", "uses": task.get("uses") or [],
         })
     return JSONResponse({
         "now_ms": int(time.time() * 1000),
@@ -1220,6 +1222,7 @@ def cook_state():
             "ingredient_sections": planner.recipe_sections(d["ingredients_text"]),
             "instruction_sections": planner.recipe_sections(d["instructions_text"], with_timers=True),
             "method": method_sections(d),
+            "checklist": planner.ingredient_checklist(d, added),  # "Added" as you cook, shared by every device
             "steps": by_dish.get(d["id"], []),
         } for d in dishes],
         "timers": [{"id": t["id"], "dish_id": t["dish_id"], "label": t["label"], "ends_ms": t["ends_at_ms"]}
@@ -1236,6 +1239,31 @@ async def _json(request):
     except Exception:
         data = {}
     return data if isinstance(data, dict) else {}
+
+
+@router.post("/thanksgiving/api/ingredients/added")
+async def api_ingredient_added(request: Request):
+    """Cook mode's ingredient checklist: an ingredient went in (or, added false, back out)."""
+    plan = require_plan()
+    data = await _json(request)
+    key = str(data.get("key") or "")[:200]
+    if not re.fullmatch(r"\d+:.+", key):
+        raise HTTPException(status_code=400, detail="Missing ingredient")
+    store().set_checked(plan["id"], "ingredient", key, bool(data.get("added", True)))
+    return {"ok": True}
+
+
+@router.post("/thanksgiving/api/ingredients/reset")
+async def api_ingredients_reset(request: Request):
+    """Start over: every ingredient of one dish back on the checklist."""
+    plan = require_plan()
+    data = await _json(request)
+    try:
+        dish_id = int(data.get("dish_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Missing dish") from None
+    store().clear_checked(plan["id"], "ingredient", f"{dish_id}:")
+    return {"ok": True}
 
 
 @router.post("/thanksgiving/api/steps/done")

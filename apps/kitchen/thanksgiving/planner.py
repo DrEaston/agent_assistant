@@ -188,6 +188,7 @@ def build_timeline(plan, dishes, cooks=()):
                 "series_button": step.get("series_button") or "",  # e.g. "Start fold timers"
                 "how": step_how(dish.get("instructions_text"), step.get("how")),
                 "missing_how": missing_how(dish.get("instructions_text"), step.get("how")),
+                "uses": step.get("uses") or [],  # ingredient groups this step adds ("*" = all)
             })
             tasks[-1]["how_ref"] = ref_range(tasks[-1]["how"])
     tasks.sort(key=lambda t: (t["start"], t["end"], t["dish_name"], t["title"]))
@@ -403,6 +404,29 @@ def step_how(instructions_text, how, lines=None):
         if found and found not in out:
             out.append(found)
     return out
+
+
+def ingredient_checklist(dish, added=()):
+    """The dish's ingredients for cook mode's checklist: [{heading, lines: [{text, key, added}]}]. text is scaled to
+    the batch; key comes from the line as written (so it survives a batch-size change): "<dish id>:<line>"."""
+    base = (dish.get("base_ingredients_text") if dish.get("base_ingredients_text") is not None
+            else dish.get("ingredients_text")) or ""
+    shown = (dish.get("ingredients_text") or "").splitlines()
+    base_lines = base.splitlines()
+    sections = []
+    for i, raw in enumerate(base_lines):
+        line = raw.strip()
+        if not line:
+            continue
+        if is_heading(line):
+            sections.append({"heading": line[:-1].strip(), "lines": []})
+            continue
+        if not sections:
+            sections.append({"heading": "", "lines": []})
+        key = f"{dish['id']}:{_norm(line)}"[:200]
+        text = (shown[i].strip() if i < len(shown) else "") or line
+        sections[-1]["lines"].append({"text": text, "key": key, "added": key in added})
+    return [s for s in sections if s["lines"]]
 
 
 def missing_how(instructions_text, how):
