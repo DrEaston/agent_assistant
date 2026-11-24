@@ -3,7 +3,9 @@
 How Claude connects (https://claude.com/docs/connectors/building/authentication):
 1. It calls /mcp, gets a 401 pointing at /.well-known/oauth-protected-resource, and from there finds this
    authorization server's metadata (/.well-known/oauth-authorization-server).
-2. It registers itself at /oauth/register (only Claude's callback and loopback addresses are accepted).
+2. It registers itself at /oauth/register (only Claude's and ChatGPT's callbacks and loopback addresses are
+   accepted). ChatGPT connects the same way (https://developers.openai.com/apps-sdk/build/auth); because Dieter
+   returns iss (RFC 9207) it uses its stable callback, and older ChatGPT setups use a per-connector one.
 3. It sends the person to /oauth/authorize. They sign in to Dieter as usual if needed, then see "Allow Claude
    to use your Dieter?". Allow sends a one-time code back to Claude.
 4. Claude swaps the code (plus its PKCE verifier) at /oauth/token for an access token (1 hour) and a refresh
@@ -32,6 +34,9 @@ ACCESS_SECONDS = 60 * 60
 REFRESH_SECONDS = 180 * 24 * 60 * 60
 CODE_SECONDS = 10 * 60
 CLAUDE_CALLBACKS = ("https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback")
+CHATGPT_CALLBACK = "https://chatgpt.com/connector_platform_oauth_redirect"
+CHATGPT_CONNECTOR_CALLBACK = re.compile(r"https://chatgpt\.com/connector/oauth/[A-Za-z0-9_-]{1,100}")
+OFFLINE = "offline_access"  # ChatGPT asks for it to stay signed in; Dieter always issues refresh tokens
 LOOPBACK = re.compile(r"http://(localhost|127\.0\.0\.1)(:\d{1,5})?(/[^?#]*)?")
 
 SCHEMA = """
@@ -79,7 +84,13 @@ def pkce_ok(verifier, challenge):
 
 
 def redirect_allowed(uri):
-    return uri in CLAUDE_CALLBACKS or bool(LOOPBACK.fullmatch(uri or ""))
+    return (uri in CLAUDE_CALLBACKS or uri == CHATGPT_CALLBACK or bool(CHATGPT_CONNECTOR_CALLBACK.fullmatch(uri or ""))
+            or bool(LOOPBACK.fullmatch(uri or "")))
+
+
+def app_name(redirect_uri):
+    """Who's asking, for the Allow page: the redirect says where the code goes."""
+    return "ChatGPT" if (urlsplit(redirect_uri or "").hostname or "") == "chatgpt.com" else "Claude"
 
 
 def redirect_matches(registered, given):
@@ -182,7 +193,7 @@ class OAuth:
         @router.get("/.well-known/oauth-protected-resource/mcp")
         def protected_resource(request: Request):
             base = public_base(request)
-            return {"resource": base + "/mcp", "authorization_servers": [base], "scopes_supported": [SCOPE],
+            return {"resource": base + "/mcp", "authorization_servers": [base], "scopes_supported": [SCOPE, OFFLINE],
                     "bearer_methods_supported": ["header"], "resource_name": "Dieter"}
 
         @router.get("/.well-known/oauth-authorization-server")
@@ -192,7 +203,7 @@ class OAuth:
                     "authorization_endpoint": base + "/oauth/authorize",
                     "token_endpoint": base + "/oauth/token",
                     "registration_endpoint": base + "/oauth/register",
-                    "scopes_supported": [SCOPE],
+                    "scopes_supported": [SCOPE, OFFLINE],
                     "response_types_supported": ["code"],
                     "grant_types_supported": ["authorization_code", "refresh_token"],
                     "code_challenge_methods_supported": ["S256"],
@@ -211,8 +222,8 @@ class OAuth:
             if not isinstance(uris, list) or not uris or not all(isinstance(u, str) for u in uris):
                 return _oauth_error("invalid_redirect_uri", "redirect_uris is required.")
             if not all(redirect_allowed(u) for u in uris):
-                return _oauth_error("invalid_redirect_uri", "Dieter only connects to Claude.")
-            name = str(data.get("client_name") or "Claude")
+                return _oauth_error("invalid_redirect_uri", "Dieter only connects to Claude and ChatGPT.")
+            name = str(data.get("client_name") or app_name(uris[0]))
             client_id = self.register_client(name, uris)
             return JSONResponse({"client_id": client_id, "client_id_issued_at": int(time.time()),
                                  "client_name": name[:100], "redirect_uris": uris,
@@ -231,6 +242,7 @@ class OAuth:
                 here = request.url.path + "?" + request.url.query
                 return RedirectResponse(url="/login?next=" + quote(here, safe=""), status_code=303)
             return _page("oauth_allow.html", params=params, user=user, client=client,
+                         app=app_name(params["redirect_uri"]),
                          destination=urlsplit(params["redirect_uri"]).hostname or params["redirect_uri"])
 
         @router.post("/oauth/authorize")
@@ -269,9 +281,10 @@ class OAuth:
         """(problem shown to the person, client). Nothing is sent back to an unknown or mismatched redirect."""
         client = self.client(params.get("client_id"))
         if not client:
-            return "Claude's connection request wasn't recognized. Remove the Dieter connector in Claude and add it again.", None
+            return ("That connection request wasn't recognized. Remove the Dieter connector (in Claude or ChatGPT) "
+                    "and add it again."), None
         if not redirect_matches(client["redirect_uris"], params.get("redirect_uri") or ""):
-            return "That connection request doesn't match what Claude registered.", None
+            return "That connection request doesn't match what was registered.", None
         if params.get("response_type") != "code" or not params.get("code_challenge") \
                 or params.get("code_challenge_method") != "S256":
             return "That connection request is missing its security check (PKCE).", None
