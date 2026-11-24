@@ -371,7 +371,7 @@ class RouteTests(unittest.TestCase):
         self.assertEqual((beans["cook"], beans["ingredients_text"]), ("Janice", ""))  # nothing to buy
         warm = next(s for s in beans["steps"] if s["id"] == "warm")
         self.assertEqual((warm["anchor"], warm["temp"]), ("T-25", 400))  # same oven temperature as the mac
-        self.assertEqual(next(s for s in cran["steps"] if s["id"] == "make")["anchor"], "D-2 18:00")
+        self.assertEqual(next(s for s in cran["steps"] if s["id"] == "make")["anchor"], "D-2 16:00")  # before the sourdough mixing at 6
         self.assertIn("Janice's", self.dish_page(beans))
         grocery = self.client.get("/thanksgiving/shopping").text
         self.assertIn("cranberries", grocery)
