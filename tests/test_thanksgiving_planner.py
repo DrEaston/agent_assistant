@@ -941,16 +941,16 @@ class RouteTests(unittest.TestCase):
         self.voice_with({"reply": "Pecans, fancy.", "question": "", "actions": [
             {"type": "add", "dish_id": pie["id"], "title": "Toast pecans for the top", "date": "2026-11-25",
              "time": "09:00", "minutes": 12, "kind": "oven", "temp": 350},
-            {"type": "remove", "dish_id": pie["id"], "step_ids": ["chill"]},
+            {"type": "remove", "dish_id": pie["id"], "step_ids": ["cream"]},
             {"type": "edit", "dish_id": pie["id"], "step_id": "cool", "minutes": 150, "detail": "Away from the dog"}]})
         r = self.client.post("/thanksgiving/api/command", json={"text": "pecans, no chilling, cool longer"}).json()
         self.assertEqual(r["problems"], [])
         self.assertIn("add “Toast pecans for the top”", r["changes"][0])
-        self.assertIn("remove “Refrigerate the pie”", r["changes"][1])
+        self.assertIn("remove “Whip the cream for the pie and refrigerate”", r["changes"][1])
         self.assertIn("2h → 2h 30m", r["changes"][2])
         self.client.post("/thanksgiving/api/command/apply")
         steps = {s["id"]: s for s in self.pie()[1]["steps"]}
-        self.assertNotIn("chill", steps)
+        self.assertNotIn("cream", steps)
         self.assertEqual(steps["cool"]["minutes"], 150)
         added = next(s for s in steps.values() if s["title"] == "Toast pecans for the top")
         self.assertEqual((added["anchor"], added["temp"], added["kind"]), ("D-1 09:00", 350, "oven"))
@@ -1556,8 +1556,8 @@ class StepGuideTests(unittest.TestCase):
             for t in tasks:
                 if t["missing_how"]:
                     problems.append(f"{dish['name']} [{t['step_id']}] names lines not in the recipe: {t['missing_how']}")
-            for step_id in step_guide.GUIDE.get(dish["name"], {}):
-                if step_id not in {s["id"] for s in dish["steps"]}:
+            for step_id, entry in step_guide.GUIDE.get(dish["name"], {}).items():
+                if not entry.get("remove") and step_id not in {s["id"] for s in dish["steps"]}:
                     problems.append(f"{dish['name']}: the guide has no step {step_id}")
             groups = {g["heading"].lower() for g in planner.ingredient_checklist(dish)}
             for t in tasks:
