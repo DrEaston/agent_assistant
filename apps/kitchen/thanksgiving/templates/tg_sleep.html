@@ -8,6 +8,7 @@
 .sleep-screen { position: fixed; inset: 0; z-index: 1000; background: #000; opacity: 1; transition: opacity .9s ease;
   cursor: none; }
 .sleep-screen[hidden] { display: none; }
+html.tg-asleep, html.tg-asleep body { overflow: hidden; }  /* no scroll bar showing down the side while asleep */
 .sleep-screen.fading { opacity: 0; }
 .sleep-note { position: absolute; bottom: 1.5rem; left: 0; right: 0; text-align: center; color: #3f3f46; font-size: .85rem; }
 </style>
@@ -20,7 +21,7 @@
   const $ = (id) => document.getElementById(id);
   const screen = $("sleep-screen"), button = $("sleep-btn");
   const pause = (ms) => new Promise((r) => setTimeout(r, ms));
-  let helper = null;        // the helper's /status when it's running on this PC
+  let helper = null, reportedHelper = false;        // the helper's /status when it's running on this PC
   let asleep = false, waking = false, sleptAt = 0, lastEvent = 0;
 
   async function helperCall(path, method = "GET", timeoutMs = 2500) {
@@ -36,6 +37,12 @@
     if (helper) lastEvent = helper.last_event || 0;
     // Remember this is the kitchen PC, so every Thanksgiving page shows the full-screen button (tg_fullscreen.html).
     if (helper) try { localStorage.setItem("dieter-kitchen-screen", "1"); } catch (e) {}
+    if (helper && !reportedHelper) {  // once per page: which helper this PC has (for the server log)
+      reportedHelper = true;
+      fetch("/thanksgiving/api/voice-log", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event: "helper", detail: JSON.stringify({ version: helper.version, can_dim: helper.can_dim,
+          display_stays_on: !!helper.display_stays_on }), agent: navigator.userAgent }) }).catch(() => {});
+    }
     button.title = helper ? "Dim the screen; the webcam wakes it" : "Black out the screen (tap to wake)";
   }
 
@@ -43,6 +50,7 @@
   async function sleep(fromHelper = false) {
     if (asleep) return;
     asleep = true; waking = false; sleptAt = Date.now();
+    document.documentElement.classList.add("tg-asleep");
     screen.classList.remove("fading"); screen.hidden = false;
     if (fromHelper) return;
     if (!helper) await findHelper();
@@ -80,7 +88,10 @@
     const lasts = window.dieterBubble ? window.dieterBubble.perform(side) : 0;
     const fadeAt = Math.max(400, lasts - 1000);
     setTimeout(() => { screen.classList.add("fading"); }, fadeAt);
-    setTimeout(() => { screen.hidden = true; screen.classList.remove("fading"); asleep = false; waking = false; }, fadeAt + 950);
+    setTimeout(() => {
+      screen.hidden = true; screen.classList.remove("fading"); asleep = false; waking = false;
+      document.documentElement.classList.remove("tg-asleep");
+    }, fadeAt + 950);
   }
 
   button.addEventListener("click", () => sleep());

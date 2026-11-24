@@ -320,6 +320,7 @@ class Helper:
     def status(self):
         return {"ok": True, "version": VERSION, "asleep": self.asleep, "camera": self.watcher.camera_ok,
                 "display_stays_on": True,  # pages may ask this helper to watch (older ones switched the display off)
+                "can_dim": bool(getattr(self.monitor, "can_dim", False)),  # Sleep turns the brightness down
                 "sensitivity": self.settings.get("sensitivity"), "last_event": self.latest_id()}
 
     def set_sensitivity(self, level):
