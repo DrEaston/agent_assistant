@@ -752,6 +752,23 @@ class RouteTests(unittest.TestCase):
         self.assertIn("potatoes", labels)
         with self.assertRaisesRegex(Exception, "no step with timers"):
             tools.call("thanksgiving_start_step_timers", {"dish": "Gravy"})
+        # Starting them again replaces the running set, here offset so the first fold is in 10 minutes.
+        again = tools.call("thanksgiving_start_step_timers", {"dish": "Sourdough", "first_in_minutes": 10})
+        self.assertEqual(again["replaced_running"], 6)
+        self.assertEqual([t["minutes"] for t in again["started"]], [10, 25, 40, 55, 85, 115])
+        self.assertEqual(again["usual_pattern"], "first at 15 min, then every 15 min (x3), then every 30 min (x2)")
+        running = tools.call("thanksgiving_list_timers", {})["running"]
+        self.assertEqual(len(running), 7)  # six folds and the potatoes
+        # "Leave out the first timer": folds 2 to 6 at their usual times.
+        skipped = tools.call("thanksgiving_start_step_timers", {"dish": "Sourdough", "skip": [1]})
+        self.assertEqual([(t["minutes"], t["label"][-6:]) for t in skipped["started"]][:2], [(30, "2 of 6"), (45, "3 of 6")])
+        potatoes = next(t for t in tools.call("thanksgiving_list_timers", {})["running"] if t["label"] == "potatoes")
+        tools.call("thanksgiving_change_timer", {"timer_id": potatoes["id"], "minutes_from_now": 5})
+        moved = next(t for t in tools.call("thanksgiving_list_timers", {})["running"] if t["id"] == potatoes["id"])
+        self.assertIn(moved["minutes_left"], (4, 5))
+        gone = tools.call("thanksgiving_cancel_timers", {"label_words": "fold"})
+        self.assertEqual(len(gone["cancelled"]), 5)
+        self.assertEqual([t["label"] for t in tools.call("thanksgiving_list_timers", {})["running"]], ["potatoes"])
 
     def test_saved_mac_gets_goat_cheese_swap_on_restart(self):
         from apps.kitchen.thanksgiving import presets
