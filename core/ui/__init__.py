@@ -41,7 +41,7 @@ def templates(*app_template_dirs):
 NAV_APPS = (
     ("today", "Today", "/"),
     ("kitchen", "Kitchen", "/apps/recipes"),
-    ("assistant", "Assistant", "/apps/assistant/planner"),
+    ("assistant", "Assistant", "/apps/assistant"),
     ("trainer", "Trainer", "/apps/trainer"),
     ("music", "Music", "/apps/music/playlists"),
 )

@@ -1,0 +1,40 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}At the bookstore{% endblock %}
+{# Shelves are by author: one check per author shelf you've looked at on this trip (it doesn't mean you found the
+   book). Found one? Tap it to mark it found. Done clears the shelf checks for next time. #}
+{% block content %}
+{{ ui.page_header("At the bookstore", crumbs=(("Assistant", "/apps/assistant"), ("Reading", "/apps/assistant/reading")),
+    sub=checked ~ " of " ~ checklist|length ~ " shelves checked · ★ = high priority") }}
+<main class="wrap">
+  {% for g in checklist %}
+  <div class="card gap-above{% if g.checked %} muted{% endif %}">
+    <form method="post" action="/apps/assistant/reading/bookstore/shelf" class="row">
+      <input type="hidden" name="key" value="{{ g.key }}">
+      <input type="hidden" name="checked" value="{{ '' if g.checked else '1' }}">
+      <button type="submit" class="{{ 'quiet' if g.checked else '' }}" role="checkbox" aria-checked="{{ 'true' if g.checked else 'false' }}">
+        {{ "✓" if g.checked else "○" }} <strong>{{ g.author }}</strong></button>
+    </form>
+    <ul class="stack gap-above">
+      {% for b in g.books %}
+      <li class="row">
+        <span class="grow">{% if b.high_priority %}★ {% endif %}{{ b.title }}</span>
+        <form method="post" action="/apps/assistant/reading/{{ b.id }}/status">
+          <input type="hidden" name="status" value="found"><input type="hidden" name="next" value="/apps/assistant/reading/bookstore">
+          <button type="submit" class="quiet">Found it</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% else %}
+  {{ ui.empty("Nothing to look for. Add books to your reading list first.") }}
+  {% endfor %}
+  {% if checklist %}
+  <form method="post" action="/apps/assistant/reading/bookstore/done" class="gap-above">
+    <button type="submit" class="primary">Done at this store</button>
+    <span class="small muted">Clears the shelf checks for your next trip.</span>
+  </form>
+  {% endif %}
+</main>
+{% endblock %}

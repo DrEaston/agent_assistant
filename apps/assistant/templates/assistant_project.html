@@ -1,0 +1,113 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}{{ project.name }}{% endblock %}
+{% block content %}
+{{ ui.page_header(project.name, crumbs=(("Assistant", "/apps/assistant"), ("Projects", "/apps/assistant/projects"))) }}
+<main class="wrap">
+  {% if project.description %}
+  <div class="card stack">{% for line in project.description.splitlines() if line.strip() %}<p>{{ line }}</p>{% endfor %}</div>
+  {% endif %}
+
+  {% call ui.section("Next actions") %}
+  <div class="card flush">
+    {% for a in actions if not a.done %}
+    <div class="list-row">
+      <form method="post" action="/projects/{{ project.id }}/actions/{{ a.id }}/complete">
+        <button type="submit" class="quiet icon-button" aria-label="Done: {{ a.action }}">○</button>
+      </form>
+      <a class="grow" href="/projects/{{ project.id }}/actions/{{ a.id }}">{{ a.action }}
+        {% if a.steps_total %}<span class="small muted"> · {{ a.steps_done }} of {{ a.steps_total }} steps</span>{% endif %}</a>
+      {% if a.priority == "high" %}{{ ui.tag("High", "warn") }}{% endif %}
+    </div>
+    {% else %}
+    {{ ui.empty("No open actions.") }}
+    {% endfor %}
+  </div>
+  <form method="post" action="/projects/{{ project.id }}/actions/create" class="row gap-above">
+    <label class="visually-hidden" for="new-action">New action</label>
+    <input class="grow" type="text" id="new-action" name="action" required maxlength="300" placeholder="Add a next action">
+    <input type="hidden" name="priority" value="medium">
+    <button type="submit">Add</button>
+  </form>
+  {% set finished = actions|selectattr("done")|list %}
+  {% if finished %}
+  <details class="gap-above"><summary class="small muted">Done ({{ finished|length }})</summary>
+    <div class="card flush">{% for a in finished %}<div class="list-row"><span class="grow muted">✓ {{ a.action }}</span></div>{% endfor %}</div>
+  </details>
+  {% endif %}
+  {% endcall %}
+
+  {% if todos %}
+  {% call ui.section("To-dos for this project") %}
+  <div class="card flush">
+    {% for t in todos %}<div class="list-row"><span class="grow">{{ t.title }}</span>{% if t.when %}{{ ui.tag(t.when, t.tone) }}{% endif %}</div>{% endfor %}
+  </div>
+  {% endcall %}
+  {% endif %}
+
+  <div class="cols">
+    {% call ui.section("Goals") %}
+    <div class="card flush">
+      {% for g in goals %}
+      <div class="list-row">
+        {% if g.completed %}<span class="grow muted">✓ {{ g.goal }}</span>
+        {% else %}
+        <form method="post" action="/projects/{{ project.id }}/goals/{{ g.id }}/complete">
+          <button type="submit" class="quiet icon-button" aria-label="Done: {{ g.goal }}">○</button>
+        </form>
+        <span class="grow">{{ g.goal }}</span>
+        {% endif %}
+      </div>
+      {% else %}{{ ui.empty("No goals.") }}{% endfor %}
+    </div>
+    <form method="post" action="/projects/{{ project.id }}/goals/create" class="row gap-above">
+      <label class="visually-hidden" for="new-goal">New goal</label>
+      <input class="grow" type="text" id="new-goal" name="goal" required maxlength="300" placeholder="Add a goal">
+      <button type="submit">Add</button>
+    </form>
+    {% endcall %}
+
+    {% call ui.section("Blockers") %}
+    <div class="card flush">
+      {% for b in blockers %}
+      <div class="list-row"><span class="grow">{{ b.description }}</span>
+        {{ ui.remove_button("/projects/" ~ project.id ~ "/blockers/" ~ b.id ~ "/delete", "Remove blocker") }}</div>
+      {% else %}{{ ui.empty("Nothing in the way.") }}{% endfor %}
+    </div>
+    <form method="post" action="/projects/{{ project.id }}/blockers/create" class="row gap-above">
+      <label class="visually-hidden" for="new-blocker">New blocker</label>
+      <input class="grow" type="text" id="new-blocker" name="description" required maxlength="300" placeholder="What's in the way?">
+      <input type="hidden" name="severity" value="medium">
+      <button type="submit">Add</button>
+    </form>
+    {% endcall %}
+  </div>
+
+  {% call ui.section("Notes") %}
+  <form method="post" action="/projects/{{ project.id }}/notes/create" class="card stack">
+    <label class="visually-hidden" for="new-note">New note</label>
+    <textarea class="short" id="new-note" name="content" required placeholder="Add a note"></textarea>
+    <button type="submit">Add note</button>
+  </form>
+  <div class="card flush gap-above">
+    {% for n in notes %}
+    <div class="list-row"><div class="grow">{% for line in n.content.splitlines() if line.strip() %}<div>{{ line }}</div>{% endfor %}
+      <div class="small muted">{{ n.when }}</div></div></div>
+    {% else %}{{ ui.empty("No notes yet.") }}{% endfor %}
+  </div>
+  {% endcall %}
+
+  {% call ui.section("About this project") %}
+  <details class="card">
+    <summary>Edit name and description</summary>
+    <form method="post" action="/projects/{{ project.id }}/update" class="stack gap-above">
+      {{ ui.field("Name", "name", project.name, required=True, maxlength=120) }}
+      <div class="field"><label for="edit-description">Description</label>
+        <textarea id="edit-description" name="description">{{ project.description or "" }}</textarea></div>
+      <input type="hidden" name="priority_score" value="{{ project.priority_score or 3 }}">
+      <button type="submit" class="primary">Save</button>
+    </form>
+  </details>
+  {% endcall %}
+</main>
+{% endblock %}
