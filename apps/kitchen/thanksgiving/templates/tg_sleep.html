@@ -73,18 +73,70 @@ html.tg-asleep, html.tg-asleep body { overflow: hidden; }  /* no scroll bar show
     // Only a helper that keeps the display on gets asked to watch: older ones switched the monitor off, and on the
     // kitchen PC that put Windows into standby (it woke to the sign-in screen). The page itself is black either way.
     const watching = !!(helper && helper.display_stays_on);
-    $("sleep-note").textContent = watching ? "" : "Tap, move the mouse, press a key, or say “Hey Dieter” to wake";
-    if (watching) {
-      const asked = await helperCall("/sleep", "POST");
-      // A few seconds later: is the helper watching, and did the webcam open? (For the server log.)
-      setTimeout(async () => {
-        const s = await helperCall("/status", "GET", 2500);
-        fetch("/thanksgiving/api/voice-log", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ event: "helper-sleep", detail: JSON.stringify({ asked_ok: !!(asked && asked.ok),
-            asleep: s ? s.asleep : null, camera: s ? s.camera : null, can_dim: s ? s.can_dim : null }),
-            agent: navigator.userAgent }) }).catch(() => {});
-      }, 3000);
-    }
+    $("sleep-note").textContent = "";
+    if (!watching) { startBrowserWatch(); return; }  // no helper (or an old one): Chrome watches the webcam itself
+    const asked = await helperCall("/sleep", "POST");
+    // A few seconds later: is the helper watching, and did the webcam open? If it couldn't open the webcam (on the
+    // kitchen PC Windows stopped it, 11/24), Chrome watches instead; the helper still dims the screen.
+    setTimeout(async () => {
+      const s = await helperCall("/status", "GET", 2500);
+      log("helper-sleep", JSON.stringify({ asked_ok: !!(asked && asked.ok), asleep: s ? s.asleep : null,
+        camera: s ? s.camera : null, can_dim: s ? s.can_dim : null }));
+      if (asleep && !(s && s.camera === true)) startBrowserWatch();
+    }, 3000);
+  }
+
+  function log(event, detail) {
+    fetch("/thanksgiving/api/voice-log", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event, detail: String(detail).slice(0, 300), agent: navigator.userAgent }) }).catch(() => {});
+  }
+
+  // ---------- Motion wake from Chrome, when the helper can't use the webcam. Same idea as the helper's: a small grey
+  // picture a few times a second, compared with a slowly updating background; enough change wakes the screen. The
+  // pictures never leave this page, and the camera is on only while the screen is asleep.
+  const MOTION_NEEDED = 0.012;  // share of the picture that has to change (the helper's "medium")
+  let cam = null;
+  async function startBrowserWatch() {
+    if (cam || !asleep || !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) return;
+    cam = { starting: true };
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 160, height: 120 }, audio: false });
+    } catch (e) { cam = null; log("browser-camera", "not allowed: " + (e.name || e.message)); return; }
+    if (!asleep) { stream.getTracks().forEach((t) => t.stop()); cam = null; return; }
+    const video = document.createElement("video");
+    video.muted = true; video.playsInline = true; video.srcObject = stream;
+    try { await video.play(); } catch (e) {}
+    const W = 80, H = 60, canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    let background = null;
+    const started = Date.now();
+    cam = { stream, timer: setInterval(() => {
+      if (!asleep) { stopBrowserWatch(); return; }
+      ctx.drawImage(video, 0, 0, W, H);
+      const px = ctx.getImageData(0, 0, W, H).data, gray = new Float32Array(W * H);
+      for (let i = 0; i < W * H; i++) gray[i] = 0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2];
+      if (!background) { background = gray; return; }
+      let changed = 0, sumX = 0;
+      for (let i = 0; i < W * H; i++) {
+        if (Math.abs(gray[i] - background[i]) > 28) { changed++; sumX += i % W; }
+        background[i] = background[i] * 0.92 + gray[i] * 0.08;  // slow changes (light fading) blend in
+      }
+      if (Date.now() - started > 1500 && changed / (W * H) >= MOTION_NEEDED) {
+        const x = sumX / changed / W;  // the webcam faces the room, so its left is the viewer's right
+        stopBrowserWatch();
+        log("browser-camera", "motion");
+        wake(x < 0.4 ? "right" : x > 0.6 ? "left" : "center");
+      }
+    }, 160) };
+    log("browser-camera", "watching");
+  }
+  function stopBrowserWatch() {
+    if (!cam) return;
+    if (cam.timer) clearInterval(cam.timer);
+    if (cam.stream) cam.stream.getTracks().forEach((t) => t.stop());
+    cam = null;
   }
 
   // Listen to the helper for as long as the page is open (long poll; it answers within 25 s either way).
@@ -108,6 +160,7 @@ html.tg-asleep, html.tg-asleep body { overflow: hidden; }  /* no scroll bar show
   function wake(side = "center", tellHelper = true) {
     if (!asleep || waking) return;
     waking = true;
+    stopBrowserWatch();
     if (tellHelper && helper) helperCall("/wake", "POST");  // bring the screen back and turn the camera off
     $("sleep-note").textContent = "";
     // Dieter's bubble comes alive over the dark screen, then the page fades back in around it.
