@@ -7,7 +7,7 @@ is saved or sent anywhere.
 
 Endpoints (called by askdieter.ai pages in this PC's browser):
   GET  /status                -> {"ok", "version", "asleep", "camera"}
-  POST /sleep                 -> monitor off, start watching
+  POST /sleep                 -> start watching; the page goes black, the display stays on (see Monitor.off)
   POST /wake                  -> monitor on (e.g. a step alert or timer went off)
   GET  /events?after=N        -> waits up to 25 s for the next event: {"id", "type": "wake", "reason", "side"}
 Later the "hey Dieter" listener joins this same helper.
@@ -23,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"  # 0.2: Sleep never switches the display off (that put the PC in standby)
 PORT = 47613
 ALLOWED_ORIGINS = {"https://askdieter.ai", "https://www.askdieter.ai", "http://localhost:8000", "http://127.0.0.1:8000"}
 # Pull request previews (https://pr-12---dieter-preview-2hu6ba6ata-uc.a.run.app). The "2hu6ba6ata" part is unique
@@ -155,8 +155,10 @@ class Monitor:
                 save_settings(self.settings)
             self._set_brightness(0)
         else:
-            # WM_SYSCOMMAND, SC_MONITORPOWER, 2 = off. PostMessage so a busy window can't block us.
-            self.user32.PostMessageW(0xFFFF, 0x0112, 0xF170, 2)
+            # An external monitor can't be dimmed. Switching it off (SC_MONITORPOWER) put the whole PC into standby
+            # on this kind of machine, so it woke to the sign-in screen. Keep the display on instead (the page is
+            # black) and keep Windows awake while the camera watches.
+            self._hold_display(True)
 
     def on(self):
         if not self.win:
@@ -168,7 +170,7 @@ class Monitor:
             if level is not None:
                 self._set_brightness(level)
                 save_settings(self.settings)
-            self._hold_display(False)
+        self._hold_display(False)
         # ES_DISPLAY_REQUIRED without ES_CONTINUOUS: counts as activity once, doesn't pin the screen on.
         self.kernel32.SetThreadExecutionState(0x00000002)
         # A one-pixel mouse nudge (and back) is what reliably turns a sleeping monitor on in Windows 10/11.
@@ -317,6 +319,7 @@ class Helper:
 
     def status(self):
         return {"ok": True, "version": VERSION, "asleep": self.asleep, "camera": self.watcher.camera_ok,
+                "display_stays_on": True,  # pages may ask this helper to watch (older ones switched the display off)
                 "sensitivity": self.settings.get("sensitivity"), "last_event": self.latest_id()}
 
     def set_sensitivity(self, level):

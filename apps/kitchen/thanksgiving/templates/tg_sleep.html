@@ -44,10 +44,13 @@
     if (asleep) return;
     asleep = true; waking = false; sleptAt = Date.now();
     screen.classList.remove("fading"); screen.hidden = false;
-    $("sleep-note").textContent = helper ? "" : "Tap, move the mouse, or press a key to wake";
     if (fromHelper) return;
     if (!helper) await findHelper();
-    if (helper) helperCall("/sleep", "POST");
+    // Only a helper that keeps the display on gets asked to watch: older ones switched the monitor off, and on the
+    // kitchen PC that put Windows into standby (it woke to the sign-in screen). The page itself is black either way.
+    const watching = !!(helper && helper.display_stays_on);
+    $("sleep-note").textContent = watching ? "" : "Tap, move the mouse, press a key, or say “Hey Dieter” to wake";
+    if (watching) helperCall("/sleep", "POST");
   }
 
   // Listen to the helper for as long as the page is open (long poll; it answers within 25 s either way).
