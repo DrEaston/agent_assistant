@@ -418,10 +418,28 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
       g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22); o.start(t0); o.stop(t0 + 0.25);
     });
   }
-  let wakeLock = null;
-  async function keepAwake() {
-    try { if ("wakeLock" in navigator && document.visibilityState === "visible") wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+  // Keep the PC awake the whole time cook mode is open: without this lock, Windows puts the PC to sleep while the
+  // helper has the monitor off (Sleep), and it wakes to the sign-in screen. Taken as soon as the page opens (no tap
+  // needed), and taken again whenever the browser drops it (it can, e.g. after the screen goes off).
+  let wakeLock = null, wakeLockReported = "";
+  function reportLock(state) {
+    if (state === wakeLockReported) return;
+    wakeLockReported = state;
+    fetch("/thanksgiving/api/voice-log", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event: "keep-awake", detail: state, agent: navigator.userAgent }) }).catch(() => {});
   }
+  async function keepAwake() {
+    if (!("wakeLock" in navigator)) { reportLock("not supported"); return; }
+    if ((wakeLock && !wakeLock.released) || document.visibilityState !== "visible") return;
+    try {
+      wakeLock = await navigator.wakeLock.request("screen");
+      reportLock("held");
+      wakeLock.addEventListener("release", () => { reportLock("released"); setTimeout(keepAwake, 1000); });
+    } catch (e) { reportLock("refused: " + (e.name || e.message)); }
+  }
+  keepAwake();
+  setInterval(keepAwake, 30000);
+  for (const type of ["pointerdown", "keydown", "touchstart"]) document.addEventListener(type, keepAwake, { passive: true });
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { keepAwake(); poll(); } });
   $("start-btn").addEventListener("click", () => {
     try { audio = new (window.AudioContext || window.webkitAudioContext)(); chime(); } catch (e) {}
