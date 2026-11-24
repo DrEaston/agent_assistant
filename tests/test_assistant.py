@@ -93,6 +93,22 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(self.client.get(f"/projects/{project_id}/actions/{action['id']}").status_code, 200)
         self.assertIn("Garden shed", self.client.get("/apps/assistant/projects").text)
 
+    def test_projects_can_be_started_and_planned_through_tools(self):
+        name = f"Residency prep {uuid.uuid4().hex[:6]}"
+        made = connector.create_project({"name": name, "description": "Roadmap v1", "kind": "research"})
+        with self.assertRaises(ToolError):
+            connector.create_project({"name": name.upper()})  # one project per name
+        connector.update_project({"project_id": made["id"], "description": "Roadmap v2"})
+        action = connector.add_action({"project_id": made["id"], "action": "Let ChatGPT connect"})
+        connector.add_action_step({"action_id": action["id"], "step": "Allow ChatGPT's sign-in address"})
+        seen = connector.get_project({"project_id": made["id"]})
+        self.assertEqual(seen["description"], "Roadmap v2")
+        self.assertEqual(seen["actions"][0]["steps"][0]["step"], "Allow ChatGPT's sign-in address")
+        with self.assertRaises(ToolError):
+            connector.update_project({"project_id": made["id"]})
+        with self.assertRaises(ToolError):
+            connector.add_action_step({"action_id": 99999999, "step": "x"})
+
     def test_reading_and_the_bookstore(self):
         book = connector.add_book({"title": "Piranesi", "author": "Susanna Clarke", "high_priority": True})
         connector.add_book({"title": "Jonathan Strange", "author": "Clarke, Susanna"})
