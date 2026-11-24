@@ -2,7 +2,7 @@
 {% macro render_sections(ing, ins) -%}
 <div class="recipe-view">
   {% if ing %}<div><h4>Ingredients</h4>{% for s in ing %}{% if s.heading %}<h5>{{ s.heading }}</h5>{% endif %}<ul>{% for line in s.lines %}<li>{{ line }}</li>{% endfor %}</ul>{% endfor %}</div>{% endif %}
-  {% if ins %}<div><h4>How to</h4>{% for s in ins %}{% if s.heading %}<h5>{{ s.heading }}</h5>{% endif %}<ol>{% for line in s.lines %}<li>{{ line }}</li>{% endfor %}</ol>{% endfor %}</div>{% endif %}
+  {% if ins %}<div><h4>Method</h4>{% for s in ins %}{% if s.heading %}<h5>{{ s.heading }}</h5>{% endif %}<ol>{% for line in s.lines %}<li>{{ line }}</li>{% endfor %}</ol>{% endfor %}</div>{% endif %}
 </div>
 {%- endmacro %}
 {% macro size_picker(dish) -%}
@@ -29,12 +29,33 @@
   {%- endif -%}
   </div>
 {%- endmacro %}
+{#- A dish's recipe, one way everywhere: ingredients, then the method numbered within each section ("Crust 6").
+    Each method line says which step covers it and when (a chip linking to that step), or "not scheduled". The
+    line's id (line-<dish>-<index>) is where a step's "in the recipe" link lands. -#}
+{% macro recipe_numbered(dish) -%}
+<div class="recipe-view" data-recipe-for="{{ dish.id }}">
+  {% if dish.ingredient_sections %}<div><h4>Ingredients</h4>{% for s in dish.ingredient_sections %}{% if s.heading %}<h5>{{ s.heading }}</h5>{% endif %}<ul>{% for line in s.lines %}<li>{{ line }}</li>{% endfor %}</ul>{% endfor %}</div>{% endif %}
+  {% if dish.method %}<div><h4>Method</h4>{% for s in dish.method %}{% if s.heading %}<h5>{{ s.heading }}</h5>{% endif %}
+    <ol class="method">{% for line in s.lines %}
+      <li id="line-{{ dish.id }}-{{ line.index }}" value="{{ line.n }}">{{ line.text }}
+        <span class="line-steps">{% for t in dish.covered.get(line.index, []) %}<a class="step-chip{% if t.done %} done{% endif %}" href="/thanksgiving/menu/{{ dish.id }}#task-{{ t.key|replace(':', '-') }}" title="{{ t.title }}">{{ planner.short_date(t.start) }} {{ planner.format_clock(t.start) }}</a>{% else %}<span class="step-chip none">not scheduled</span>{% endfor %}</span>
+      </li>{% endfor %}</ol>{% endfor %}</div>{% endif %}
+</div>
+{%- endmacro %}
+{#- What a step says to do: its recipe lines, and where they are in the recipe ("Crust 6–8 in the recipe →"). -#}
+{% macro step_lines(t, show_lines=True) -%}
+  {%- if t.how -%}
+  {% if show_lines %}<ol class="t-how">{% for line in t.how %}<li>{{ line.text }}</li>{% endfor %}</ol>{% endif %}
+  <a class="t-ref small" href="/thanksgiving/menu/{{ t.dish_id }}#line-{{ t.dish_id }}-{{ t.how[0].index }}">{{ t.how_ref }} in the recipe {{ "→" if show_lines else "↑" }}</a>
+  {%- endif -%}
+{%- endmacro %}
 {% macro kind_pill(task) -%}
   {%- if task.kind in ('oven', 'stove', 'passive', 'check', 'shop') -%}
   <span class="pill kind-{{ task.kind }}">{{ step_kinds[task.kind] }}{% if task.temp %} {{ task.temp }}°F{% endif %}</span>
   {%- endif -%}
 {%- endmacro %}
-{% macro task_row(t, show_dish=True) -%}
+{#- show_lines: the step's recipe lines in full (off on the dish page, where the recipe is right above). -#}
+{% macro task_row(t, show_dish=True, show_lines=True) -%}
     {% set is_overdue = not t.done and t.end <= now and t.kind != 'passive' %}
     <div class="task{% if t.done %} done{% endif %}{% if is_overdue %} overdue{% endif %}" id="task-{{ t.key|replace(':', '-') }}">
       <form method="post" action="/thanksgiving/steps/toggle">
@@ -46,13 +67,12 @@
       <div class="t-time">{{ planner.format_clock(t.start) }}</div>
       {% set d = dishes_by_id.get(t.dish_id) %}
       <div class="t-body">
-        {% set has_recipe = d and (d.ingredient_sections or d.instruction_sections) %}
-        {% if has_recipe %}<details class="t-more"><summary>{% endif %}
-        <div class="t-title">{{ t.title }}{% if has_recipe %} <span class="t-open">Recipe</span>{% endif %}</div>
-        <div class="t-meta">{% if show_dish %}<span class="small muted">{{ t.dish_name }}</span>{% else %}<span class="small muted">{{ planner.short_date(t.start) }}</span>{% endif %}{{ kind_pill(t) }}
+        <div class="t-title">{{ t.title }}</div>
+        <div class="t-meta">{% if show_dish %}<a class="small muted" href="/thanksgiving/menu/{{ t.dish_id }}">{{ t.dish_name }}</a>{% else %}<span class="small muted">{{ planner.short_date(t.start) }}</span>{% endif %}{{ kind_pill(t) }}
           {% if t.minutes %}<span class="small muted">{{ planner.format_duration(t.minutes) }}</span>{% endif %}</div>
+        {{ step_lines(t, show_lines) }}
         {% if t.detail %}<div class="t-detail">{{ t.detail }}</div>{% endif %}
-        {% if has_recipe %}</summary>{{ recipe_block(d, t.section) }}<a class="small open-dish" href="/thanksgiving/menu/{{ d.id }}">Open the full recipe →</a></details>{% endif %}
+        {% if not t.how and d and d.method %}<a class="t-ref small" href="/thanksgiving/menu/{{ d.id }}">Recipe →</a>{% endif %}
       </div>
     </div>
 {%- endmacro %}

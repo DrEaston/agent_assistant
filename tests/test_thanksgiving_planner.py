@@ -294,16 +294,27 @@ class RouteTests(unittest.TestCase):
         self.assertIn("Shopping list", pages)
         self.assertIn("Yukon Gold", pages)
 
-    def test_steps_expand_to_their_recipe_section(self):
+    def test_steps_and_recipe_link_both_ways(self):
         self.client.get("/thanksgiving")
-        page = self.client.get("/thanksgiving/timeline").text
-        self.assertIn("Roll, crimp, and freeze the pie shell", page)
-        self.assertIn('class="t-open"', page)
-        self.assertIn("coin-size pieces", page)
         state = self.client.get("/thanksgiving/api/state").json()
         pie = next(d for d in state["dishes"] if d["name"] == "Pumpkin pie")
-        self.assertEqual([s["heading"] for s in pie["instruction_sections"]][0], "Crust")
-        self.assertEqual(next(s for s in pie["steps"] if s["key"].endswith(":dough"))["section"], "Crust")
+        shell = next(s for s in pie["steps"] if s["key"].endswith(":shell"))
+        self.assertEqual(shell["how_ref"], "Crust 6–8")
+        self.assertEqual(shell["how"][0]["index"], 5)
+        self.assertEqual(pie["method"][0]["heading"], "Crust")
+        self.assertEqual(pie["method"][0]["lines"][5]["n"], 6)
+        # Timeline: the step shows its own lines and where they are in the recipe.
+        page = self.client.get("/thanksgiving/timeline").text
+        self.assertIn("Roll, crimp, and freeze the pie shell", page)
+        self.assertIn('class="t-how"', page)
+        self.assertIn(f'href="/thanksgiving/menu/{pie["id"]}#line-{pie["id"]}-5">Crust 6–8 in the recipe →</a>', page)
+        # Dish page: each method line names the step that covers it, linking back to that step.
+        dish = self.client.get(f"/thanksgiving/menu/{pie['id']}").text
+        self.assertIn(f'id="line-{pie["id"]}-5"', dish)
+        self.assertIn(f'href="/thanksgiving/menu/{pie["id"]}#task-{pie["id"]}-shell"', dish)
+        self.assertIn(f'id="task-{pie["id"]}-shell"', dish)
+        self.assertIn(f'href="/thanksgiving/cook?dish={pie["id"]}"', dish)
+        self.assertNotIn("not scheduled", dish)  # every pie line is in a step
 
     def test_each_tab_is_its_own_page(self):
         self.client.get("/thanksgiving")
@@ -346,7 +357,7 @@ class RouteTests(unittest.TestCase):
         for who in ("Parrisa", "Janice"):
             self.assertNotIn(who, card)  # who makes what stays off the shareable card
         self.assertNotIn("In the kitchen", page)
-        self.assertIn("House prep tasks", page)
+        self.assertIn("House prep steps", page)
         self.assertIn('id="add-dish"', page)
         self.assertEqual(self.client.get("/thanksgiving/photos/turkey.jpg").status_code, 404)
 
@@ -419,8 +430,10 @@ class RouteTests(unittest.TestCase):
         self.assertIn("Ingredients", page)
         self.assertNotIn("Roast the turkey", page)  # only this dish's steps
         self.assertEqual(self.client.get("/thanksgiving/menu/99999").status_code, 404)
-        recipes = self.client.get("/thanksgiving/recipes").text
-        self.assertIn(f'href="#recipe-{mac["id"]}"', recipes)
+        recipes = self.client.get("/thanksgiving/recipes").text  # an index: each recipe lives on its dish page
+        self.assertIn(f'id="recipe-{mac["id"]}"', recipes)
+        self.assertIn(f'href="/thanksgiving/menu/{mac["id"]}"', recipes)
+        self.assertNotIn("Whisk in the flour", recipes)
 
     def test_saves_return_to_the_page_they_came_from(self):
         self.client.get("/thanksgiving")
@@ -506,12 +519,12 @@ class RouteTests(unittest.TestCase):
         self.client.get("/thanksgiving")
         plan, mac = self.mac()
         page = self.all_pages()
-        # The dish page, the Recipes page, and each timeline step's recipe all carry the picker.
-        self.assertGreaterEqual(page.count('aria-label="Batch size for Mac and cheese"'), 3)
+        # The recipe lives on the dish page, which carries the picker (cook mode has its own).
+        self.assertGreaterEqual(page.count('aria-label="Batch size for Mac and cheese"'), 1)
         self.assertIn(f'<span data-size-label-for="{mac["id"]}">· Full · 9x13 pan · about 8 servings</span>',
                       self.dish_page(mac))
         # The recipe text sits in blocks the page refreshes in place when the size changes.
-        self.assertGreaterEqual(page.count(f'data-recipe-for="{mac["id"]}"'), 2)
+        self.assertGreaterEqual(page.count(f'data-recipe-for="{mac["id"]}"'), 1)
         state = self.client.get("/thanksgiving/api/state").json()
         cook_mac = next(d for d in state["dishes"] if d["name"] == "Mac and cheese")
         self.assertEqual(cook_mac["size_value"], "1")
@@ -1479,8 +1492,12 @@ class StepGuideTests(unittest.TestCase):
         from apps.kitchen.thanksgiving import planner
         text = "\n".join(["Crust:", "Roll on a floured counter into a 12-inch circle.", "Ease it into a 9-inch plate.",
                           "Bake at 425°F for 15 minutes."])
-        self.assertEqual(planner.step_how(text, ["roll on a floured", "Bake at 425", "Gone line"]),
+        found = planner.step_how(text, ["roll on a floured", "Bake at 425", "Gone line"])
+        self.assertEqual([l["text"] for l in found],
                          ["Roll on a floured counter into a 12-inch circle.", "Bake at 425°F for 15 minutes."])
+        self.assertEqual([l["ref"] for l in found], ["Crust 1", "Crust 3"])
+        self.assertEqual(planner.ref_range(found), "Crust 1, Crust 3")
+        self.assertEqual(planner.missing_how(text, ["Roll on", "Gone line"]), ["Gone line"])
         self.assertEqual(planner.step_how(text, None), [])
 
     def test_guide_fills_in_steps_but_keeps_hand_edits(self):
@@ -1496,12 +1513,38 @@ class StepGuideTests(unittest.TestCase):
         self.assertNotIn("how", steps[2])
         self.assertFalse(step_guide.apply("Pumpkin pie", steps))  # nothing left to do
 
+    def test_every_menu_recipe_line_is_in_a_step(self):
+        """The check that would have caught the pie: every method line of every dish on our menu is covered by a
+        timed step, and every line a step names is really in its recipe."""
+        from apps.kitchen.thanksgiving import planner, presets, step_guide
+        plan = {"dinner_at": "2026-11-26T16:00"}
+        problems = []
+        for n, key in enumerate(presets.OUR_MENU):
+            dish = presets.preset_dish(key)
+            if not dish:
+                continue
+            dish = dict(dish, id=n + 1)
+            tasks = planner.build_timeline(plan, [dish])
+            covered = planner.coverage(dish, tasks)
+            for line in planner.recipe_lines(dish["instructions_text"]):
+                if line["index"] not in covered:
+                    problems.append(f"{dish['name']} {line['ref']} isn't in any step: {line['text'][:60]}")
+            for t in tasks:
+                if t["missing_how"]:
+                    problems.append(f"{dish['name']} [{t['step_id']}] names lines not in the recipe: {t['missing_how']}")
+            for step_id in step_guide.GUIDE.get(dish["name"], {}):
+                if step_id not in {s["id"] for s in dish["steps"]}:
+                    problems.append(f"{dish['name']}: the guide has no step {step_id}")
+        self.assertEqual(problems, [])
+
     def test_new_pie_steps_show_their_instructions(self):
         from apps.kitchen.thanksgiving import planner, presets
         pie = dict(presets.preset_dish("pie"), id=1)
         plan = {"dinner_at": "2026-11-26T16:00"}
         tasks = {t["step_id"]: t for t in planner.build_timeline(plan, [pie])}
-        self.assertTrue(tasks["shell"]["how"][0].startswith("Roll on a floured counter"))
+        self.assertTrue(tasks["shell"]["how"][0]["text"].startswith("Roll on a floured counter"))
+        self.assertEqual(tasks["shell"]["how_ref"], "Crust 6–8")
+        self.assertEqual(tasks["dough"]["how_ref"], "Crust 1–5")
         self.assertTrue(all(tasks[k]["how"] for k in ("dough", "blind1", "filling", "blind2", "bake1", "bake2", "cream")))
 
 

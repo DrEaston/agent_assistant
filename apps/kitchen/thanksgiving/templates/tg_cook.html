@@ -13,6 +13,15 @@ body { overflow-x: hidden; }
 .s-how { margin: .3rem 0 .2rem; padding-left: 1.2rem; font-size: .95rem; line-height: 1.4; }
 .s-how li { margin: .15rem 0; }
 .alert .s-how { font-size: .9rem; margin-top: .35rem; }
+#recipe .spacer { flex: 1; }
+.s-ref { display: inline-block; margin: .1rem 0 .2rem; }
+.instructions li, .step { scroll-margin-top: 5rem; }
+.instructions li:target, .step:target { background: #fff4d6; border-radius: 6px; }
+.line-steps { display: inline-flex; flex-wrap: wrap; gap: .25rem; margin-left: .3rem; vertical-align: middle; }
+.step-chip { font-size: .72rem; padding: .05rem .45rem; border-radius: 999px; background: var(--accent); color: #fff;
+  text-decoration: none; white-space: nowrap; }
+.step-chip.done { background: var(--ok-soft); color: var(--ok); }
+.step-chip.none { background: transparent; color: var(--muted); border: 1px dashed var(--line); }
 .bar-top .voice-top { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
 body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is still at the bottom of the page */
 @media (max-width: 600px) {  /* phones: one row */
@@ -136,7 +145,8 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
     const key = ev.target.dataset && ev.target.dataset.openKey;
     if (key) ev.target.open ? openRecipes.add(key) : openRecipes.delete(key);
   }, true);
-  selected = Number(safeGet("tg-dish")) || null;
+  // ?dish=<id> (the dish page's "Open in cook mode") picks the dish; otherwise the last one shown on this device.
+  selected = Number(new URLSearchParams(location.search).get("dish")) || Number(safeGet("tg-dish")) || null;
   filter = "";  // no per-cook views: each device shows every step
 
   function safeGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -208,31 +218,45 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
     const t = now();
     const steps = dish.steps.map(s => {
       const due = !isDone(s) && s.start_ms <= t && s.end_ms > t;
-      return `<li class="step${isDone(s) ? " done" : ""}${due ? " due" : ""}">
+      return `<li class="step${isDone(s) ? " done" : ""}${due ? " due" : ""}" id="cook-step-${esc(s.key.replace(":", "-"))}">
         <button class="check" data-done="${esc(s.key)}" aria-label="${isDone(s) ? "Mark not done" : "Mark done"}: ${esc(s.title)}">${isDone(s) ? "✓" : ""}</button>
         <div><div class="s-when">${esc(s.day)} · ${esc(s.clock)}${s.minutes ? ` · ${s.minutes} min` : ""}${s.temp ? ` · ${s.temp}°F` : ""} ${isDone(s) ? "" : `· <span class="${s.start_ms < t && !due ? "late" : ""}">${esc(rel(s.start_ms))}</span>`}</div>
           <div class="s-title">${esc(s.title)} ${s.cook && s.cook !== dish.cook ? pill(s.cook) : ""}</div>
-          ${howHTML(s)}
+          ${howHTML(s, true)}
           ${s.detail ? `<div class="small muted">${esc(s.detail)}</div>` : ""}
           ${(s.series || []).length && !isDone(s) ? `<button type="button" class="series-btn" data-series="${esc(s.key)}">⏱ ${esc(s.series_button || "Start timers")}</button>` : ""}
-          ${stepRecipe(dish, s)}
+          ${(s.how || []).length ? "" : stepRecipe(dish, s)}
         </div></li>`;
     }).join("");
     const ingredients = ingredientsHTML(dish, dish.ingredient_sections);
-    const instructions = instructionsHTML(dish, dish.instruction_sections);
+    const instructions = methodHTML(dish);
     $("recipe").innerHTML = `<div class="stack">
-      <div class="row"><h2>${esc(dish.name)}</h2>${pill(dish.cook)}</div>
+      <div class="row"><h2>${esc(dish.name)}</h2>${pill(dish.cook)}<span class="spacer"></span>
+        <a class="small" href="/thanksgiving/menu/${dish.id}">Recipe page →</a></div>
       ${(dish.size_options || []).length ? `<label class="row small">Batch size
         <select data-size-dish="${dish.id}" aria-label="Batch size for ${esc(dish.name)}">${dish.size_options.map(o =>
           `<option value="${esc(o.value)}"${o.value === dish.size_value ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>` : ""}
       ${dish.notes ? `<p class="muted">${esc(dish.notes)}</p>` : ""}
-      <h3>Schedule</h3><ol class="steps">${steps || '<li class="muted">No timed steps.</li>'}</ol>
+      <h3>Steps</h3><ol class="steps">${steps || '<li class="muted">No timed steps.</li>'}</ol>
       ${ingredients ? `<h3>Ingredients <span class="small muted">(tap to cross off)</span></h3>${ingredients}` : ""}
-      ${instructions ? `<h3>Recipe</h3>${instructions}` : ""}</div>`;
+      ${instructions ? `<h3>Method</h3>${instructions}` : ""}</div>`;
   }
   // The recipe lines this step covers, right under it (and in its alert), so a step that pops up says what to do.
-  function howHTML(s) {
-    return (s.how || []).length ? `<ol class="s-how">${s.how.map(line => `<li>${esc(line)}</li>`).join("")}</ol>` : "";
+  // withRef: "Crust 6–8 in the recipe ↓", jumping to those lines in the method below.
+  function howHTML(s, withRef) {
+    if (!(s.how || []).length) return "";
+    const dishId = s.key.split(":")[0];
+    return `<ol class="s-how">${s.how.map(line => `<li>${esc(line.text)}</li>`).join("")}</ol>`
+      + (withRef ? `<a class="s-ref small" href="#cook-line-${esc(dishId)}-${s.how[0].index}">${esc(s.how_ref)} in the recipe ↓</a>` : "");
+  }
+  // The method, numbered within each section, each line with the step(s) that cover it (tap to jump to the step).
+  function methodHTML(dish) {
+    const byLine = {};
+    for (const s of dish.steps) for (const line of s.how || []) (byLine[line.index] = byLine[line.index] || []).push(s);
+    return (dish.method || []).map(sec => `${sec.heading ? `<h4>${esc(sec.heading)}</h4>` : ""}<ol class="instructions">${sec.lines.map(line =>
+      `<li value="${line.n}" id="cook-line-${dish.id}-${line.index}">${esc(line.text)} <span class="line-steps">${(byLine[line.index] || []).map(s =>
+        `<a class="step-chip${isDone(s) ? " done" : ""}" href="#cook-step-${esc(s.key.replace(":", "-"))}">${esc(s.day)} ${esc(s.clock)}</a>`).join("")
+        || '<span class="step-chip none">not scheduled</span>'}</span></li>`).join("")}</ol>`).join("");
   }
   function sectionsFor(list, name) {
     name = (name || "").toLowerCase();

@@ -12,7 +12,7 @@ stays. New preset dishes get it (presets.py), and saved plans get
 it once per GUIDE_VERSION (store.py).
 """
 
-GUIDE_VERSION = "step-how-2"  # bump when GUIDE changes, so saved plans get it
+GUIDE_VERSION = "step-how-3"  # bump when GUIDE changes, so saved plans get it
 
 GUIDE = {
     "Pumpkin pie": {
@@ -86,6 +86,11 @@ GUIDE = {
         "recrisp": {"detail": "400°F, about 10 minutes, straight on the rack."},
     },
     "Mac and cheese": {
+        # The practice run makes it start to finish, baked fresh (that's the only step "Made fresh" is for).
+        "practice": {"how": ["Cut the smokies", "Boil the pasta", "Shred the cheese", "Warm the milk", "Roux",
+                             "Pour in the warm milk", "Take the pot off", "Stir in the cheddar", "Crumble in the goat",
+                             "Fold in the pasta", "Spread in a buttered", "Mix the panko", "Rack", "Made fresh",
+                             "Top not golden", "Rest 10 minutes"]},
         "make": {"how": ["Cut the smokies", "Boil the pasta", "Shred the cheese", "Warm the milk", "Roux",
                           "Pour in the warm milk", "Take the pot off", "Stir in the cheddar", "Crumble in the goat",
                           "Fold in the pasta", "Spread in a buttered", "To make ahead"],

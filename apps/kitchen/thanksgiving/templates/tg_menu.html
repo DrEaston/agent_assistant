@@ -10,7 +10,7 @@
 <section id="menu">
   {{ menu_card(menu_courses, dinner, menu_time, arrival=menu_arrival, address=menu_address) }}
 
-  <p class="small muted menu-extras">{% for d in prep_dishes %}<a href="/thanksgiving/menu/{{ d.id }}">{{ d.name }} tasks</a> · {% endfor %}<a href="#add-dish" data-open-add>Add a dish</a></p>
+  <p class="small muted menu-extras">{% for d in prep_dishes %}<a href="/thanksgiving/menu/{{ d.id }}">{{ d.name }} steps</a> · {% endfor %}<a href="#add-dish" data-open-add>Add a dish</a></p>
 
   <details class="card stack" id="add-dish">
     <summary><strong>Add a dish</strong></summary>

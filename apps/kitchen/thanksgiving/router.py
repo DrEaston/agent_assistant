@@ -118,6 +118,16 @@ def render(name, **context):
 
 # ---------------------------------------------------------------- context
 
+def method_sections(dish):
+    """The dish's method, numbered, grouped by section: [{heading, lines: [recipe_lines dicts]}]."""
+    sections = []
+    for line in planner.recipe_lines(dish.get("instructions_text")):
+        if not sections or sections[-1]["heading"] != line["section"]:
+            sections.append({"heading": line["section"], "lines": []})
+        sections[-1]["lines"].append(line)
+    return sections
+
+
 def plan_context(plan, now=None):
     now = now or local_now()
     s = store()
@@ -131,6 +141,11 @@ def plan_context(plan, now=None):
     for dish in dishes:
         dish["ingredient_sections"] = planner.recipe_sections(dish["ingredients_text"])
         dish["instruction_sections"] = planner.recipe_sections(dish["instructions_text"])
+        dish["method"] = method_sections(dish)
+        dish["covered"] = planner.coverage(dish, tasks)  # line index -> the steps that cover it
+        dish["stale_steps"] = [t for t in tasks if t["dish_id"] == dish["id"] and t.get("missing_how")]
+        if dish.get("source_meal_id"):
+            dish["library_url"] = f"/apps/recipes/meals/{int(dish['source_meal_id'])}"
     return {
         "dishes_by_id": {d["id"]: d for d in dishes},
         "plan": plan,
@@ -1188,7 +1203,9 @@ def cook_state():
             "start_ms": to_ms(task["start"]), "end_ms": to_ms(task["end"]),
             "clock": planner.format_clock(task["start"]), "day": planner.short_date(task["start"]),
             "done": task["key"] in done, "section": task["section"], "series": task.get("series") or [],
-            "series_button": task.get("series_button") or "", "how": task.get("how") or [],
+            "series_button": task.get("series_button") or "",
+            "how": [{"index": l["index"], "ref": l["ref"], "text": l["text"]} for l in task.get("how") or []],
+            "how_ref": task.get("how_ref") or "",
         })
     return JSONResponse({
         "now_ms": int(time.time() * 1000),
@@ -1202,6 +1219,7 @@ def cook_state():
             "size_options": d.get("size_options", []), "size_value": d.get("size_value", ""),
             "ingredient_sections": planner.recipe_sections(d["ingredients_text"]),
             "instruction_sections": planner.recipe_sections(d["instructions_text"], with_timers=True),
+            "method": method_sections(d),
             "steps": by_dish.get(d["id"], []),
         } for d in dishes],
         "timers": [{"id": t["id"], "dish_id": t["dish_id"], "label": t["label"], "ends_ms": t["ends_at_ms"]}

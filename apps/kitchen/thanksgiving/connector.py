@@ -50,7 +50,8 @@ def get_dish(args):
         raise ToolError(f"No dish matches {wanted!r}. Dishes: {', '.join(d['name'] for d in ctx['dishes'])}.")
     size = next((o["label"] for o in dish.get("size_options") or [] if float(o["value"]) == float(dish.get("size_value") or 1)), "")
     steps = [{"step_id": t["step_id"], "title": t["title"], "when": _when(t["start"]), "minutes": t["minutes"],
-              "kind": t["kind"], "oven_temp": t.get("temp") or None, "done": t["done"]}
+              "kind": t["kind"], "oven_temp": t.get("temp") or None, "done": t["done"],
+              "covers": t.get("how_ref") or "", "note": t.get("detail") or ""}  # covers: method lines, e.g. "Crust 6-8"
              for t in sorted(ctx["tasks"], key=lambda t: t["start"]) if t["dish_id"] == dish["id"]]
     return {"id": dish["id"], "name": dish["name"], "cook": dish.get("cook") or "", "batch_size": size,
             "notes": dish.get("notes") or "", "ingredients": dish.get("ingredients_text") or "",
