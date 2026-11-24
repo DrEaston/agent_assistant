@@ -242,7 +242,7 @@ class OAuth:
                 here = request.url.path + "?" + request.url.query
                 return RedirectResponse(url="/login?next=" + quote(here, safe=""), status_code=303)
             return _page("oauth_allow.html", params=params, user=user, client=client,
-                         app=app_name(params["redirect_uri"]),
+                         asker=app_name(params["redirect_uri"]),
                          destination=urlsplit(params["redirect_uri"]).hostname or params["redirect_uri"])
 
         @router.post("/oauth/authorize")
