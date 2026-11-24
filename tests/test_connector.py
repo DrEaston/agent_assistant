@@ -323,6 +323,23 @@ class ConnectorFlowTests(unittest.TestCase):
         self.assertEqual(self.rpc(token, "nope/nope").json()["error"]["code"], -32601)
         self.assertEqual(self.client.get("/mcp").status_code, 405)
 
+    def test_tools_added_after_connecting_are_still_reachable(self):
+        # Clients keep the tool list from when the person connected; these two always reach every tool there is now.
+        _, tokens = self.connect()
+        token = tokens["access_token"]
+        names = [t["name"] for t in self.rpc(token, "tools/list").json()["result"]["tools"]]
+        self.assertEqual(names[:2], ["dieter_find_tools", "dieter_use_tool"])
+        found = self.tool(token, "dieter_find_tools", query="shopping list create")["tools"]
+        self.assertIn("kitchen_create_shopping_list", [t["name"] for t in found])
+        self.assertIn("properties", found[0]["inputSchema"])
+        self.assertGreater(len(self.tool(token, "dieter_find_tools")["tools"]), 20)
+        made = self.tool(token, "dieter_use_tool", name="kitchen_create_shopping_list",
+                         arguments={"title": "Via the back door", "items": ["foil"]})
+        self.assertEqual(made["title"], "Via the back door")
+        self.assertIn("no tool", self.tool(token, "dieter_use_tool", name="music_play")["error"])
+        self.assertIn("no tool", self.tool(token, "dieter_use_tool", name="dieter_use_tool",
+                                           arguments={"name": "dieter_find_tools"})["error"])
+
     def test_kitchen_shopping_lists(self):
         _, tokens = self.connect()
         token = tokens["access_token"]
