@@ -1030,7 +1030,7 @@ def api_speak(text: str = ""):
 
 # The kitchen helper (helper/), for the kitchen PC to download and install: built with helper/build.ps1 and
 # uploaded to the app's Cloud Storage bucket. Signed-in only.
-HELPER_VERSION = "0.2.0"
+HELPER_VERSION = "0.2.1"
 HELPER_OBJECT = f"helper/DieterHelper-{HELPER_VERSION}.zip"
 
 

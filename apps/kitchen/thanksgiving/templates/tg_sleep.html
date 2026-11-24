@@ -81,7 +81,8 @@ html.tg-asleep, html.tg-asleep body { overflow: hidden; }  /* no scroll bar show
     setTimeout(async () => {
       const s = await helperCall("/status", "GET", 2500);
       log("helper-sleep", JSON.stringify({ asked_ok: !!(asked && asked.ok), asleep: s ? s.asleep : null,
-        camera: s ? s.camera : null, can_dim: s ? s.can_dim : null }));
+        camera: s ? s.camera : null, can_dim: s ? s.can_dim : null, version: s ? s.version : null,
+        dim_ms: s ? s.last_dim_ms : null }));
       if (asleep && !(s && s.camera === true)) startBrowserWatch();
     }, 3000);
   }
