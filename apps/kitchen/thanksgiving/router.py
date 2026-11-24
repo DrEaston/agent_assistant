@@ -1032,6 +1032,7 @@ def api_speak(text: str = ""):
 # uploaded to the app's Cloud Storage bucket. Signed-in only.
 HELPER_VERSION = "0.2.1"
 HELPER_OBJECT = f"helper/DieterHelper-{HELPER_VERSION}.zip"
+_templates.globals["helper_version"] = HELPER_VERSION  # Settings and cook mode offer it when this PC's is older
 
 
 @router.get("/thanksgiving/helper/DieterHelper.zip")
