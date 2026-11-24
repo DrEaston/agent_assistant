@@ -271,6 +271,30 @@ class ThanksgivingStore:
                         "In cook mode, Start fold timers chimes for each set.")
                     conn.execute("UPDATE tg_dishes SET steps_json = ?, instructions_text = ? WHERE id = ?",
                                  (json.dumps(kept), instructions, row["id"]))
+            if once(plan_id, "gravy-neck-stock"):
+                # Mom's tip: the neck and giblets simmer into stock for the gravy. Only if the gravy is still as
+                # written; recorded in its Recipe history (with Restore).
+                changed = True
+                from .presets import GRAVY_INGREDIENTS, GRAVY_INSTRUCTIONS, OLD_GRAVY_INGREDIENTS, OLD_GRAVY_INSTRUCTIONS, _gravy_steps
+                for row in conn.execute("SELECT * FROM tg_dishes WHERE plan_id = ? AND name = 'Gravy'", (plan_id,)).fetchall():
+                    if ((row["ingredients_text"] or "").strip() != OLD_GRAVY_INGREDIENTS
+                            or (row["instructions_text"] or "").strip() != OLD_GRAVY_INSTRUCTIONS):
+                        continue
+                    try:
+                        steps = json.loads(row["steps_json"] or "[]")
+                    except json.JSONDecodeError:
+                        continue
+                    if not any(s.get("id") == "stock" for s in steps):
+                        steps.insert(0, _gravy_steps()[0])
+                    conn.execute("UPDATE tg_dishes SET ingredients_text = ?, instructions_text = ?, steps_json = ? WHERE id = ?",
+                                 (GRAVY_INGREDIENTS, GRAVY_INSTRUCTIONS, json.dumps(steps), row["id"]))
+                    conn.execute(
+                        "INSERT INTO tg_recipe_versions (plan_id, dish_id, request, summary, before_json, after_json) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (plan_id, row["id"], "Mom: boil the turkey neck and giblets into broth for the gravy",
+                         "Added neck-and-giblet stock for the gravy",
+                         json.dumps({"ingredients_text": OLD_GRAVY_INGREDIENTS, "instructions_text": OLD_GRAVY_INSTRUCTIONS}),
+                         json.dumps({"ingredients_text": GRAVY_INGREDIENTS, "instructions_text": GRAVY_INSTRUCTIONS})))
             if once(plan_id, step_guide.GUIDE_VERSION):
                 # Each step says what to do: the recipe lines it covers (step_guide.py). Checkmarks are kept: they're
                 # stored by step id, which doesn't change.

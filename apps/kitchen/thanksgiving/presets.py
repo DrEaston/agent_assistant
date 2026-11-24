@@ -47,14 +47,36 @@ Add 1/2 cup broth if the pan gets dry. Tent the breast with foil once it is gold
 Start checking at 2 1/2 hours: 165°F in the thickest part of the breast and thigh, not touching bone.
 Rest, loosely tented, 30 to 40 minutes. The vegetables are soft and rich: use them for gravy or serve them."""
 
-GRAVY_INGREDIENTS = """turkey pan drippings
+OLD_GRAVY_INGREDIENTS = """turkey pan drippings
 4 tbsp unsalted butter (or skimmed turkey fat)
 1/4 cup flour
 low-sodium broth to make 3 to 4 cups liquid with the drippings"""
 
-GRAVY_INSTRUCTIONS = """Strain the pan juices and skim the fat.
+OLD_GRAVY_INSTRUCTIONS = """Strain the pan juices and skim the fat.
 Melt 4 tbsp butter or fat, whisk in 1/4 cup flour, and cook 1 minute.
 Whisk in 3 to 4 cups drippings topped up with broth. Simmer 5 to 10 minutes.
+Taste before adding any salt (the turkey is pre-brined)."""
+
+# Mom's tip (11/23): simmer the neck and giblets into stock while the turkey roasts, for a richer gravy.
+GRAVY_INGREDIENTS = """Neck stock:
+turkey neck, heart and gizzard, from the turkey (not the liver)
+onion ends and celery leaves, saved from the turkey vegetables
+1 bay leaf (optional)
+6 cups water
+Gravy:
+turkey pan drippings
+4 tbsp unsalted butter (or skimmed turkey fat)
+1/4 cup flour
+low-sodium broth, only if the stock and drippings come up short of 3 to 4 cups"""
+
+GRAVY_INSTRUCTIONS = """Neck stock:
+Put the neck, heart and gizzard in a pot with the onion ends, celery leaves, bay leaf and 6 cups water. Leave out the liver: it makes stock bitter. No salt: the turkey is pre-brined.
+Bring to a boil, skim off the foam, then simmer gently, partly covered, about 2 hours.
+Strain and keep warm on low. You should have 3 to 4 cups.
+Gravy:
+Strain the pan juices and skim the fat.
+Melt 4 tbsp butter or fat, whisk in 1/4 cup flour, and cook 1 minute.
+Whisk in 3 to 4 cups drippings topped up with the neck stock (low-sodium broth if you run short). Simmer 5 to 10 minutes.
 Taste before adding any salt (the turkey is pre-brined)."""
 
 POTATO_INGREDIENTS = """2 lb russet potatoes
@@ -332,7 +354,8 @@ def _mac_steps():
 
 
 def _gravy_steps():
-    return [_s("make", "T-35", "Make the gravy from the drippings", 15, "stove")]
+    return [_s("stock", "T-275", "Simmer the turkey neck and giblets into stock", 120, "stove"),
+            _s("make", "T-35", "Make the gravy from the drippings", 15, "stove")]
 
 
 def _house_steps():

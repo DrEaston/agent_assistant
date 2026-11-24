@@ -12,7 +12,7 @@ stays. New preset dishes get it (presets.py), and saved plans get
 it once per GUIDE_VERSION (store.py).
 """
 
-GUIDE_VERSION = "step-how-3"  # bump when GUIDE changes, so saved plans get it
+GUIDE_VERSION = "step-how-4"  # bump when GUIDE changes, so saved plans get it
 
 GUIDE = {
     "Pumpkin pie": {
@@ -35,7 +35,10 @@ GUIDE = {
     },
 
     "Roast turkey on vegetables": {
-        "out": {"how": ["Remove the neck"]},
+        "veg": {"old_detail": "Onions in wedges, carrots and celery in 2-inch pieces. Refrigerate.",
+                "detail": "Onions in wedges, carrots and celery in 2-inch pieces. Refrigerate. Save the onion ends and "
+                          "celery leaves in a bag for the gravy stock."},
+        "out": {"how": ["Remove the neck"], "detail": "Save the neck, heart and gizzard for the gravy stock (not the liver)."},
         "butter": {"how": ["Pre-brined", "Cut onions in wedges", "Mix the butter"]},
         "roast": {"how": ["Set the turkey on the vegetables", "Add 1/2 cup broth"]},
         "tent": {"how": ["Add 1/2 cup broth"]},
@@ -53,6 +56,7 @@ GUIDE = {
         "hold": {"how": ["Hold in a buttered"], "anchor": ("T-95", "T-80"), "minutes": (95, 80)},
     },
     "Gravy": {
+        "stock": {"how": ["Put the neck", "Bring to a boil", "Strain and keep warm"]},
         "make": {"how": ["Strain the pan juices", "Melt 4 tbsp", "Whisk in 3 to 4", "Taste before"]},
     },
     "Stuffing": {
