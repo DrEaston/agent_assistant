@@ -16,7 +16,7 @@ stays. New preset dishes get it (presets.py), and saved plans get
 it once per GUIDE_VERSION (store.py).
 """
 
-GUIDE_VERSION = "step-how-6"  # bump when GUIDE changes, so saved plans get it
+GUIDE_VERSION = "step-how-7"  # bump when GUIDE changes, so saved plans get it
 
 GUIDE = {
     "Pumpkin pie": {
@@ -82,12 +82,17 @@ GUIDE = {
         "mix": {"uses": ["*"], "how": ["Mix flour, starter"]},
         "folds": {"how": ["Stretch and folds"]},
         "shape": {"how": ["Cold shape"]},
-        "preheat": {"how": ["Next morning"]},
+        # Right after the olive loaf (out at 8:40), while the Dutch oven is still hot: a short reheat, not an hour.
+        "preheat": {"how": ["Next morning"], "anchor": ("D-1 09:00", "D-1 08:40"), "minutes": (55, 20),
+                    "title": ("Dutch oven in, preheat to 500°F", "Dutch oven back in, reheat to 500°F"),
+                    "detail": "Straight after the olive loaf: the pot is still hot, so 20 minutes is enough."},
         "poke": {"remove": "Poke test the dough"},  # folded into bake1: it's the check right before scoring
         "bake1": {"how": ["Poke test", "Flip straight", "Bake 25 minutes"], "replace_how": ["Flip straight", "Bake 25 minutes"],
-                  "title": ("Score and bake, lid ON", "Poke test, then score and bake, lid ON")},
+                  "title": ("Score and bake, lid ON", "Poke test, then score and bake, lid ON"),
+                  "anchor": ("D-1 10:00", "D-1 09:00")},
         "bake2": {"how": ["Lid off", "Cool at least"], "replace_how": ["Lid off"],
-                  "title": ("Lid OFF, oven to 450°F", "Lid OFF at 450°F, then cool at least an hour")},
+                  "title": ("Lid OFF, oven to 450°F", "Lid OFF at 450°F, then cool at least an hour"),
+                  "anchor": ("D-1 10:25", "D-1 09:25")},
         "cool": {"remove": "Cool the loaf"},  # folded into bake2
         "recrisp": {"detail": "400°F, about 10 minutes, straight on the rack."},
     },

@@ -64,7 +64,10 @@ class MenuTimelineTests(unittest.TestCase):
     def test_sourdough_and_pie_schedule(self):
         self.assertEqual(find(self.tasks, "Sourdough", "feed1")["start"], datetime(2026, 11, 23, 21, 0))
         self.assertEqual(find(self.tasks, "Sourdough", "mix")["start"], datetime(2026, 11, 24, 18, 0))
-        self.assertEqual(find(self.tasks, "Sourdough", "bake1")["start"], datetime(2026, 11, 25, 10, 0))
+        # Right after the olive loaf comes out at 8:40: a short reheat, then the plain loaf at 9.
+        self.assertEqual(find(self.tasks, "Sourdough", "bake1")["start"], datetime(2026, 11, 25, 9, 0))
+        self.assertEqual(find(self.tasks, "Sourdough", "preheat")["start"],
+                         find(self.tasks, "Olive and rosemary sourdough", "bake2")["end"])
         bread_done = find(self.tasks, "Sourdough", "bake2")["end"]
         self.assertGreaterEqual(find(self.tasks, "pie", "blind1")["start"], bread_done)
 
