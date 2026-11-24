@@ -344,8 +344,12 @@ def _house_steps():
 
 
 def _dish(name, category, ingredients="", instructions="", steps=None, notes=""):
+    from . import step_guide
+
+    steps = steps or []
+    step_guide.apply(name, steps)  # each step says what to do (the recipe lines it covers)
     return {"name": name, "category": category, "cook": "", "ingredients_text": ingredients,
-            "instructions_text": instructions, "notes": notes, "steps": steps or []}
+            "instructions_text": instructions, "notes": notes, "steps": steps}
 
 
 def preset_dish(key, dinner=None):

@@ -178,6 +178,7 @@ class ThanksgivingStore:
 
     def _update_saved_dishes(self, conn):
         """One-time changes to dishes already in a plan (each runs once per plan; your later edits stay)."""
+        from . import step_guide
         from .presets import WHIPPED_CREAM_INGREDIENTS, WHIPPED_CREAM_INSTRUCTIONS, fold_step, whipped_cream_step
 
         def once(plan_id, marker):
@@ -270,6 +271,17 @@ class ThanksgivingStore:
                         "In cook mode, Start fold timers chimes for each set.")
                     conn.execute("UPDATE tg_dishes SET steps_json = ?, instructions_text = ? WHERE id = ?",
                                  (json.dumps(kept), instructions, row["id"]))
+            if once(plan_id, step_guide.GUIDE_VERSION):
+                # Each step says what to do: the recipe lines it covers (step_guide.py). Checkmarks are kept: they're
+                # stored by step id, which doesn't change.
+                changed = True
+                for row in conn.execute("SELECT id, name, steps_json FROM tg_dishes WHERE plan_id = ?", (plan_id,)).fetchall():
+                    try:
+                        steps = json.loads(row["steps_json"] or "[]")
+                    except json.JSONDecodeError:
+                        continue
+                    if step_guide.apply(row["name"], steps):
+                        conn.execute("UPDATE tg_dishes SET steps_json = ? WHERE id = ?", (json.dumps(steps), row["id"]))
         return changed
 
     def _commit(self):

@@ -684,6 +684,7 @@ async def save_dish(dish_id: int, request: Request):
             # Timers the step can start (presets.with_timers); not on the form, so keep what was saved.
             "series": existing_steps.get(step_id, {}).get("series") or [],
             "series_button": existing_steps.get(step_id, {}).get("series_button") or "",
+            "how": existing_steps.get(step_id, {}).get("how") or [],  # the recipe lines it covers (planner.step_how)
         })
     if (form.get("new_step_title") or "").strip():
         steps.append({
@@ -1187,7 +1188,7 @@ def cook_state():
             "start_ms": to_ms(task["start"]), "end_ms": to_ms(task["end"]),
             "clock": planner.format_clock(task["start"]), "day": planner.short_date(task["start"]),
             "done": task["key"] in done, "section": task["section"], "series": task.get("series") or [],
-            "series_button": task.get("series_button") or "",
+            "series_button": task.get("series_button") or "", "how": task.get("how") or [],
         })
     return JSONResponse({
         "now_ms": int(time.time() * 1000),

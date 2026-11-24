@@ -10,6 +10,9 @@ body { overflow-x: hidden; }
 .bar-top .spacer { flex: 1; }
 .bar-top a, .bar-top button { color: #fff; background: transparent; border-color: rgba(255,255,255,.25); min-height: 40px; }
 .bar-top button[aria-pressed=true] { background: #fff; color: #2a2118; }
+.s-how { margin: .3rem 0 .2rem; padding-left: 1.2rem; font-size: .95rem; line-height: 1.4; }
+.s-how li { margin: .15rem 0; }
+.alert .s-how { font-size: .9rem; margin-top: .35rem; }
 .bar-top .voice-top { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
 body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is still at the bottom of the page */
 @media (max-width: 600px) {  /* phones: one row */
@@ -209,6 +212,7 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
         <button class="check" data-done="${esc(s.key)}" aria-label="${isDone(s) ? "Mark not done" : "Mark done"}: ${esc(s.title)}">${isDone(s) ? "✓" : ""}</button>
         <div><div class="s-when">${esc(s.day)} · ${esc(s.clock)}${s.minutes ? ` · ${s.minutes} min` : ""}${s.temp ? ` · ${s.temp}°F` : ""} ${isDone(s) ? "" : `· <span class="${s.start_ms < t && !due ? "late" : ""}">${esc(rel(s.start_ms))}</span>`}</div>
           <div class="s-title">${esc(s.title)} ${s.cook && s.cook !== dish.cook ? pill(s.cook) : ""}</div>
+          ${howHTML(s)}
           ${s.detail ? `<div class="small muted">${esc(s.detail)}</div>` : ""}
           ${(s.series || []).length && !isDone(s) ? `<button type="button" class="series-btn" data-series="${esc(s.key)}">⏱ ${esc(s.series_button || "Start timers")}</button>` : ""}
           ${stepRecipe(dish, s)}
@@ -225,6 +229,10 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
       <h3>Schedule</h3><ol class="steps">${steps || '<li class="muted">No timed steps.</li>'}</ol>
       ${ingredients ? `<h3>Ingredients <span class="small muted">(tap to cross off)</span></h3>${ingredients}` : ""}
       ${instructions ? `<h3>Recipe</h3>${instructions}` : ""}</div>`;
+  }
+  // The recipe lines this step covers, right under it (and in its alert), so a step that pops up says what to do.
+  function howHTML(s) {
+    return (s.how || []).length ? `<ol class="s-how">${s.how.map(line => `<li>${esc(line)}</li>`).join("")}</ol>` : "";
   }
   function sectionsFor(list, name) {
     name = (name || "").toLowerCase();
@@ -255,7 +263,8 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
           ${goto}<button class="primary" data-dismiss-timer="${a.timer.id}">Stop timer</button></div>`;
       const s = a.step;
       return `<div class="alert" role="alert"><div class="what"><strong>${esc(s.title)}</strong> ${pill(s.cook)}
-          <div class="small">${esc(a.dish.name)} · ${esc(s.clock)} · ${esc(rel(s.start_ms))}${s.temp ? ` · ${s.temp}°F` : ""}</div></div>
+          <div class="small">${esc(a.dish.name)} · ${esc(s.clock)} · ${esc(rel(s.start_ms))}${s.temp ? ` · ${s.temp}°F` : ""}</div>
+          ${howHTML(s)}${!(s.how || []).length && s.detail ? `<div class="small">${esc(s.detail)}</div>` : ""}</div>
         ${goto}<button class="primary" data-done="${esc(s.key)}">Done</button>
         <button data-ack="${esc(s.key)}">On it</button>
         <span class="snooze" role="group" aria-label="Remind me later"><span class="small">Later:</span>${SNOOZES.map(([m, label]) =>

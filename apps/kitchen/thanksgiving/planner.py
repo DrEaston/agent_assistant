@@ -186,6 +186,7 @@ def build_timeline(plan, dishes, cooks=()):
                 "section": step.get("section") or "",
                 "series": step.get("series") or [],  # [[minutes after starting, label], ...]: a run of timers
                 "series_button": step.get("series_button") or "",  # e.g. "Start fold timers"
+                "how": step_how(dish.get("instructions_text"), step.get("how")),
             })
     tasks.sort(key=lambda t: (t["start"], t["end"], t["dish_name"], t["title"]))
     return tasks
@@ -361,6 +362,24 @@ def recipe_sections(text, with_timers=False):
             sections.append({"heading": "", "lines": []})
         sections[-1]["lines"].append(instruction_lines(line)[0] if with_timers else line)
     return [s for s in sections if s["lines"]]
+
+
+def _norm(text):
+    return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+
+def step_how(instructions_text, how):
+    """The recipe lines a step covers, as the recipe says them now. A step lists the start of each line
+    (step["how"], e.g. ["Roll on a floured counter", "Ease it into"]), so an edited or rescaled recipe still shows
+    up to date; a line that's no longer there is left out."""
+    lines = [line.strip() for line in (instructions_text or "").splitlines() if line.strip() and not is_heading(line.strip())]
+    out = []
+    for start in how or []:
+        want = _norm(start)
+        found = next((line for line in lines if want and _norm(line).startswith(want)), None)
+        if found and found not in out:
+            out.append(found)
+    return out
 
 
 def sections_for_step(sections, section_name):

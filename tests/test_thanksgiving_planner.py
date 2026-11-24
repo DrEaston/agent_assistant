@@ -1459,5 +1459,38 @@ class RouteTests(unittest.TestCase):
             reset_current_user_id(token)
 
 
+class StepGuideTests(unittest.TestCase):
+    """A step that pops up in cook mode says what to do: the recipe lines it covers, as the recipe says them now."""
+
+    def test_step_how_finds_lines_by_their_start(self):
+        from apps.kitchen.thanksgiving import planner
+        text = "\n".join(["Crust:", "Roll on a floured counter into a 12-inch circle.", "Ease it into a 9-inch plate.",
+                          "Bake at 425°F for 15 minutes."])
+        self.assertEqual(planner.step_how(text, ["roll on a floured", "Bake at 425", "Gone line"]),
+                         ["Roll on a floured counter into a 12-inch circle.", "Bake at 425°F for 15 minutes."])
+        self.assertEqual(planner.step_how(text, None), [])
+
+    def test_guide_fills_in_steps_but_keeps_hand_edits(self):
+        from apps.kitchen.thanksgiving import step_guide
+        steps = [{"id": "shell", "detail": "Freeze it in the plate, wrapped in plastic and foil."},
+                 {"id": "dough", "detail": "My own note", "how": ["Whisk the flour"]},
+                 {"id": "mine", "detail": ""}]
+        self.assertTrue(step_guide.apply("Pumpkin pie", steps))
+        self.assertEqual(steps[0]["how"][0], "Roll on a floured counter")
+        self.assertIn("Double batch", steps[0]["detail"])
+        self.assertEqual(steps[1]["detail"], "My own note")  # edited by hand: kept
+        self.assertEqual(steps[1]["how"], ["Whisk the flour"])
+        self.assertNotIn("how", steps[2])
+        self.assertFalse(step_guide.apply("Pumpkin pie", steps))  # nothing left to do
+
+    def test_new_pie_steps_show_their_instructions(self):
+        from apps.kitchen.thanksgiving import planner, presets
+        pie = dict(presets.preset_dish("pie"), id=1)
+        plan = {"dinner_at": "2026-11-26T16:00"}
+        tasks = {t["step_id"]: t for t in planner.build_timeline(plan, [pie])}
+        self.assertTrue(tasks["shell"]["how"][0].startswith("Roll on a floured counter"))
+        self.assertTrue(all(tasks[k]["how"] for k in ("dough", "blind1", "filling", "blind2", "bake1", "bake2", "cream")))
+
+
 if __name__ == "__main__":
     unittest.main()
