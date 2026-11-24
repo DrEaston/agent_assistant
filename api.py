@@ -241,6 +241,15 @@ DIETER_CHAT = dieter_chat.ChatSetup(
     offer=lambda schema: not schema["name"].startswith("thanksgiving_")
     or schema.get("annotations", {}).get("readOnlyHint", False),
 )
+def dieter_chat_log(summary, said, page_url):
+    """Dieter's chat was asked for something it can't do: a Studio report to review later."""
+    user = dict_from_row(db.get_user_by_id(get_current_user_id())) or {}
+    db.add_app_feedback_report(title=f"[Dieter couldn't] {summary[:80]}", area="Dieter chat", page_url=page_url[:300],
+                               page_title="Ask Dieter", reporter_name=user.get("display_name") or user.get("name") or "",
+                               reporter_email="", raw_feedback=f"Asked Dieter: {said}\n\nWhat it couldn't do: {summary}")
+
+
+DIETER_CHAT.log_for_later = dieter_chat_log
 # Pages whose Ask Dieter goes to Dieter's chat (the rest still use the older handlers in api_dieter_action).
 DIETER_CHAT_PATHS = ("/apps/recipes",)
 app.include_router(connector_auth.router())

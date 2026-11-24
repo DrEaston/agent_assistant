@@ -986,6 +986,19 @@ class RouteTests(unittest.TestCase):
         self.client.post("/thanksgiving/api/command/undo")
         self.assertEqual(tg_router.store().get_extra_groceries(plan["id"]), [])
 
+    def test_claude_brain_logs_what_it_cant_do(self):
+        self.client.get("/thanksgiving")
+        seen = self.claude_with(
+            [("tool", "log_for_later", {"summary": "Wants the dog fed at 5"})],
+            [("text", "I can't feed the dog yet, but I've logged it to review later.")])
+        r = self.client.post("/thanksgiving/api/command", json={"text": "feed the dog at 5", "brain": "claude"}).json()
+        self.assertIn("logged it", r["reply"])
+        self.assertIn("log_for_later", {t["name"] for t in seen["calls"][0]["tools"]})
+        self.assertIn("Things you can't do", seen["calls"][0]["system"][0]["text"])
+        row = self.db.connect().execute("SELECT * FROM app_feedback_reports ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertEqual(row["title"], "[Dieter couldn't] Wants the dog fed at 5")
+        self.assertIn("Asked Dieter: feed the dog at 5", row["raw_feedback"])
+
     def test_claude_brain_opens_pages_on_the_screen(self):
         self.client.get("/thanksgiving")
         plan, pie = self.pie()

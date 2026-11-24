@@ -91,6 +91,20 @@ class ChatEngineTests(unittest.TestCase):
         self.assertEqual(saved, ["p1"])
         self.assertEqual(out["do"], [{"type": "decided", "id": "p1", "status": "saved"}, {"type": "reload"}])
 
+    def test_what_it_cant_do_is_logged(self):
+        logged = []
+        setup = demo_setup([])
+        setup.log_for_later = lambda summary, said, page: logged.append((summary, said, page))
+        claude = script([("log_for_later", {"summary": "Wants a meal plan emailed"})], "Logged it for later.")
+        out = chat.answer(setup, "email me my meal plan", page_url="/demo", model_call=claude)
+        self.assertEqual(logged, [("Wants a meal plan emailed", "email me my meal plan", "/demo")])
+        self.assertIn("log_for_later", claude.seen[0]["tools"])
+        self.assertIn("Things you can't do", claude.seen[0]["system"][0]["text"])
+        self.assertEqual(out["reply"], "Logged it for later.")
+        plain = script("Hi.")
+        chat.answer(demo_setup([]), "hi", model_call=plain)
+        self.assertNotIn("log_for_later", plain.seen[0]["tools"])  # only where an app handles it
+
     def test_tools_can_be_held_back(self):
         setup = demo_setup([])
         setup.offer = lambda schema: schema["annotations"]["readOnlyHint"]
