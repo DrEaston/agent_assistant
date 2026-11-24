@@ -333,12 +333,14 @@ class ConnectorFlowTests(unittest.TestCase):
         self.assertIn("kitchen_create_shopping_list", [t["name"] for t in found])
         self.assertIn("properties", found[0]["inputSchema"])
         self.assertGreater(len(self.tool(token, "dieter_find_tools")["tools"]), 20)
-        made = self.tool(token, "dieter_use_tool", name="kitchen_create_shopping_list",
-                         arguments={"title": "Via the back door", "items": ["foil"]})
+        def use(**arguments):  # self.tool's own first argument is called name
+            answer = self.rpc(token, "tools/call", {"name": "dieter_use_tool", "arguments": arguments}).json()["result"]
+            return answer["content"][0]["text"] if answer["isError"] else json.loads(answer["content"][0]["text"])
+
+        made = use(name="kitchen_create_shopping_list", arguments={"title": "Via the back door", "items": ["foil"]})
         self.assertEqual(made["title"], "Via the back door")
-        self.assertIn("no tool", self.tool(token, "dieter_use_tool", name="music_play")["error"])
-        self.assertIn("no tool", self.tool(token, "dieter_use_tool", name="dieter_use_tool",
-                                           arguments={"name": "dieter_find_tools"})["error"])
+        self.assertIn("no tool", use(name="music_play"))
+        self.assertIn("no tool", use(name="dieter_use_tool", arguments={"name": "dieter_find_tools"}))
 
     def test_kitchen_shopping_lists(self):
         _, tokens = self.connect()
