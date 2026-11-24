@@ -1076,7 +1076,7 @@ class RouteTests(unittest.TestCase):
             [("text", "Here's a less sweet pie. Look it over and tap Save.")])
         r = self.client.post("/thanksgiving/api/command", json={"text": "make the pie less sweet", "brain": "claude"}).json()
         card = next(a["card"] for a in r["do"] if a["type"] == "proposal")
-        self.assertIn({"type": "navigate", "url": f"/thanksgiving/menu/{pie['id']}", "title": "Dish"}, r["do"])
+        self.assertIn({"type": "navigate", "url": f"/thanksgiving/menu/{pie['id']}", "title": "Dish", "auto": True}, r["do"])  # opened to show the card (cook mode stays put)
         self.assertEqual(card["title"], "Change the recipe: Pumpkin pie")
         self.assertIn({"op": "removed", "text": "3/4 cup sugar"}, card["diffs"][0]["lines"])
         self.assertIn({"op": "added", "text": "2/3 cup sugar"}, card["diffs"][0]["lines"])

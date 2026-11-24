@@ -150,7 +150,8 @@ def understand(text, summary, history=(), sass="normal", spoken_prompt="", hando
             card = connector.propose_recipe_change(args, request=text)
             state["do"] = [a for a in state["do"] if a.get("type") != "proposal"] + [{"type": "proposal", "card": card}]
             if not any(a.get("type") == "navigate" for a in state["do"]):
-                state["do"].append({"type": "navigate", "url": card["open_url"], "title": "Dish"})
+                # "auto": opened to show the card, not asked for; cook mode stays put and shows the card in the chat.
+                state["do"].append({"type": "navigate", "url": card["open_url"], "title": "Dish", "auto": True})
             return card
         if name == "save_recipe_change":
             from core.connector.proposals import said_save
