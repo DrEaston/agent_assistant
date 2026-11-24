@@ -74,7 +74,17 @@ html.tg-asleep, html.tg-asleep body { overflow: hidden; }  /* no scroll bar show
     // kitchen PC that put Windows into standby (it woke to the sign-in screen). The page itself is black either way.
     const watching = !!(helper && helper.display_stays_on);
     $("sleep-note").textContent = watching ? "" : "Tap, move the mouse, press a key, or say “Hey Dieter” to wake";
-    if (watching) helperCall("/sleep", "POST");
+    if (watching) {
+      const asked = await helperCall("/sleep", "POST");
+      // A few seconds later: is the helper watching, and did the webcam open? (For the server log.)
+      setTimeout(async () => {
+        const s = await helperCall("/status", "GET", 2500);
+        fetch("/thanksgiving/api/voice-log", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ event: "helper-sleep", detail: JSON.stringify({ asked_ok: !!(asked && asked.ok),
+            asleep: s ? s.asleep : null, camera: s ? s.camera : null, can_dim: s ? s.can_dim : null }),
+            agent: navigator.userAgent }) }).catch(() => {});
+      }, 3000);
+    }
   }
 
   // Listen to the helper for as long as the page is open (long poll; it answers within 25 s either way).
