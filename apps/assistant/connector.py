@@ -144,6 +144,47 @@ def add_action(args):
     return {"id": action_id, "action": text, "project": project["name"]}
 
 
+def create_project(args):
+    name = " ".join(str(args.get("name") or "").split())[:120]
+    if not name:
+        raise ToolError("What's the project called?")
+    existing = [dict(p) for p in db().get_all_projects() if dict(p)["name"].strip().lower() == name.lower()]
+    if existing:
+        raise ToolError(f"There's already a project called {name} (id {existing[0]['id']}).")
+    kind = args.get("kind") if args.get("kind") in ("general", "research", "technical") else "general"
+    project_id = db().add_project(name, str(args.get("description") or "").strip()[:20000], project_type=kind)
+    return {"id": project_id, "name": name, "url": site_url(f"/projects/{project_id}")}
+
+
+def update_project(args):
+    """Rename a project or replace its description (the project's standing context, e.g. a roadmap)."""
+    project = _project(args.get("project_id"))
+    name = " ".join(str(args.get("name") or "").split())[:120] or None
+    description = args.get("description")
+    if name is None and description is None:
+        raise ToolError("Give a new name or description.")
+    db().update_project_details(project["id"], name=name,
+                                description=None if description is None else str(description).strip()[:20000])
+    return {"id": project["id"], "name": name or project["name"], "url": site_url(f"/projects/{project['id']}")}
+
+
+def _action(action_id):
+    action = _row(db().get_recommended_action(whole_number(action_id, "action_id")))
+    if not action:
+        raise ToolError(f"There's no action {action_id}. Use assistant_get_project.")
+    _project(action["project_id"])  # someone else's project isn't found
+    return action
+
+
+def add_action_step(args):
+    action = _action(args.get("action_id"))
+    text = " ".join(str(args.get("step") or "").split())[:300]
+    if not text:
+        raise ToolError("What's the step?")
+    step_id = db().add_task_step(action["id"], text)
+    return {"id": step_id, "step": text, "action": action.get("action") or ""}
+
+
 def complete_action(args):
     action = _row(db().get_recommended_action(whole_number(args.get("action_id"), "action_id")))
     if not action:
@@ -255,6 +296,19 @@ def tools():
         Tool("assistant_add_project_action", "Add a next action", "Add a next action to a project.", add_action,
              dict(PROJECT_ID, action={"type": "string"}, priority={"type": "string", "enum": ["high", "medium", "low"]}),
              ("project_id", "action")),
+        Tool("assistant_create_project", "Start a project",
+             "A new project with a description (its standing context: goals, roadmap, decisions). kind: general, "
+             "research or technical.", create_project,
+             {"name": {"type": "string"}, "description": {"type": "string"},
+              "kind": {"type": "string", "enum": ["general", "research", "technical"]}}, ("name",)),
+        Tool("assistant_update_project", "Change a project",
+             "Rename a project or replace its description. Read it first (assistant_get_project): the description is "
+             "replaced whole.", update_project,
+             dict(PROJECT_ID, name={"type": "string"}, description={"type": "string"}), ("project_id",)),
+        Tool("assistant_add_action_step", "Add a step to an action",
+             "Break a project's next action into checklist steps.", add_action_step,
+             {"action_id": {"type": "integer", "description": "From assistant_get_project."},
+              "step": {"type": "string"}}, ("action_id", "step")),
         Tool("assistant_complete_project_action", "Finish a next action", "Mark a project action done (done false "
              "reopens it).", complete_action, {"action_id": {"type": "integer"}, "done": {"type": "boolean"}},
              ("action_id",)),
