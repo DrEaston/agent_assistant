@@ -1028,6 +1028,33 @@ def api_speak(text: str = ""):
     return StreamingResponse(body(), media_type="audio/mpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
+# The kitchen helper (helper/), for the kitchen PC to download and install: built with helper/build.ps1 and
+# uploaded to the app's Cloud Storage bucket. Signed-in only.
+HELPER_VERSION = "0.2.0"
+HELPER_OBJECT = f"helper/DieterHelper-{HELPER_VERSION}.zip"
+
+
+@router.get("/thanksgiving/helper/DieterHelper.zip")
+def helper_download():
+    bucket_name = os.getenv("GCS_BUCKET") or os.getenv("DIETER_GCS_BUCKET")
+    if not bucket_name:
+        raise HTTPException(status_code=404, detail="The helper download isn't set up here.")
+    from google.cloud import storage
+
+    blob = storage.Client().bucket(bucket_name).blob(HELPER_OBJECT)
+
+    def chunks():
+        with blob.open("rb", chunk_size=1 << 20) as f:
+            while True:
+                data = f.read(1 << 20)
+                if not data:
+                    break
+                yield data
+
+    return StreamingResponse(chunks(), media_type="application/zip",
+                             headers={"Content-Disposition": 'attachment; filename="DieterHelper.zip"'})
+
+
 @router.post("/thanksgiving/api/warm")
 def api_warm():
     """The voice panel calls this when it opens, so the first phrase doesn't wait on a cold start. It answers once

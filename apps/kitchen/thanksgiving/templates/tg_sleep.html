@@ -8,10 +8,20 @@
 .sleep-screen { position: fixed; inset: 0; z-index: 1000; background: #000; opacity: 1; transition: opacity .9s ease;
   cursor: none; }
 .sleep-screen[hidden] { display: none; }
+.helper-update { position: fixed; left: 1rem; right: 1rem; bottom: 1rem; z-index: 60; display: flex; flex-wrap: wrap;
+  gap: .6rem; align-items: center; padding: .7rem .9rem; border-radius: 12px; background: #fff7ed; border: 2px solid #f59e0b;
+  box-shadow: 0 6px 20px rgba(0,0,0,.18); color: #3b2a14; max-width: 52rem; margin: 0 auto; }
+.helper-update[hidden] { display: none; }
 html.tg-asleep, html.tg-asleep body { overflow: hidden; }  /* no scroll bar showing down the side while asleep */
 .sleep-screen.fading { opacity: 0; }
 .sleep-note { position: absolute; bottom: 1.5rem; left: 0; right: 0; text-align: center; color: #3f3f46; font-size: .85rem; }
 </style>
+<div class="helper-update" id="helper-update" hidden role="status">
+  <strong>Update the kitchen helper</strong> to get dimming and motion wake back.
+  <a class="button primary" href="/thanksgiving/helper/DieterHelper.zip" download>Download</a>
+  <span>Then unzip it and double-click <em>Install Dieter helper.cmd</em>.</span>
+  <button type="button" class="quiet" id="helper-update-close" aria-label="Hide for today">✕</button>
+</div>
 <div class="sleep-screen" id="sleep-screen" hidden aria-hidden="true">
   <div class="sleep-note" id="sleep-note"></div>
 </div>
@@ -37,6 +47,12 @@ html.tg-asleep, html.tg-asleep body { overflow: hidden; }  /* no scroll bar show
     if (helper) lastEvent = helper.last_event || 0;
     // Remember this is the kitchen PC, so every Thanksgiving page shows the full-screen button (tg_fullscreen.html).
     if (helper) try { localStorage.setItem("dieter-kitchen-screen", "1"); } catch (e) {}
+    // An old helper (switches the monitor off, which put the PC into standby): offer the new one, once a day.
+    if (helper && !helper.display_stays_on) {
+      let hiddenUntil = 0;
+      try { hiddenUntil = Number(localStorage.getItem("dieter-helper-update-hidden") || 0); } catch (e) {}
+      $("helper-update").hidden = Date.now() < hiddenUntil;
+    }
     if (helper && !reportedHelper) {  // once per page: which helper this PC has (for the server log)
       reportedHelper = true;
       fetch("/thanksgiving/api/voice-log", { method: "POST", headers: { "Content-Type": "application/json" },
@@ -95,6 +111,10 @@ html.tg-asleep, html.tg-asleep body { overflow: hidden; }  /* no scroll bar show
   }
 
   button.addEventListener("click", () => sleep());
+  $("helper-update-close").addEventListener("click", () => {
+    $("helper-update").hidden = true;
+    try { localStorage.setItem("dieter-helper-update-hidden", String(Date.now() + 24 * 3600e3)); } catch (e) {}
+  });
   // Someone at the keyboard, mouse, or screen. (Ignore the first second: that's the tap that put it to sleep.)
   for (const type of ["pointerdown", "pointermove", "keydown", "touchstart"]) {
     document.addEventListener(type, () => { if (asleep && Date.now() - sleptAt > 1200) wake("center"); }, true);
