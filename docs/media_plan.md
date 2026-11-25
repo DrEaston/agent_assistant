@@ -12,8 +12,10 @@ file from the phone.
 3. He taps **Keep** or **Discard**. Discarding deletes the file. Waiting pictures he never decides on are deleted
    after 7 days.
 4. Assistants use only kept pictures (`media_list` shows kept by default). There's no tool to keep or discard.
-5. Pictures he uploads on `/media` himself are kept straight away. (Claude can't pass files to tools; Claude Code
-   uploads there.)
+5. Pictures he uploads on `/media` himself are kept straight away. Claude can't pass files to tools, so Claude Code
+   uploads to `/media/api/upload` with a token from Dieter's own sign-in (he taps Allow once per computer); those
+   wait like ChatGPT's, and **Keep all** on `/media` takes a batch at once. The `firefly-intake` skill
+   (`.claude/skills/firefly-intake/`) does this for Firefly videos: stills and animations from one clip.
 
 ## Where the bytes live
 

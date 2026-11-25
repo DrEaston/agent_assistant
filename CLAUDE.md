@@ -77,6 +77,11 @@ python -m unittest discover -s tests
 Add or update tests next to the behaviour you change (`tests/test_<area>.py`). Tests use temporary databases;
 none of them need network access or API keys.
 
+## Mascot videos
+
+Firefly videos of Dieter (the dragon) become transparent stills and animations in Media with the
+`firefly-intake` skill (`.claude/skills/firefly-intake/`).
+
 ## Kitchen PC helper
 
 `helper/` is a small Windows tray app for the kitchen PC: cook mode's Sleep turns the monitor fully off and

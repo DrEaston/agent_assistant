@@ -22,6 +22,9 @@
     </a>
     {% endfor %}
   </div>
+  {% if waiting | length > 1 %}
+  <form class="row" method="post" action="/media/keep-all"><button class="primary" type="submit">Keep all {{ waiting | length }}</button></form>
+  {% endif %}
   <p class="small muted">Pictures you don't keep are deleted after {{ wait_days }} days.</p>
   {% endcall %}
   {% endif %}
