@@ -48,6 +48,11 @@ NAMES = {1000: "1K", 1609: "mile"}
 BEST_DISTANCES = (400, 800, 1000, 1609, 3000, 5000)
 HIST_FROM = 3.0                     # m/s: the histogram starts here (slower running never counts as speed work)
 FIT_WEEKS = 26                      # critical speed and top speed come from this many weeks of best efforts
+# The line not to cross without building up (acute:chronic workload ratio, Gabbett 2016): this week against the
+# average of the 4 weeks before. Over 1.5x is where injury risk rose in that research (it's debated: a guide).
+CHRONIC_WEEKS, RATIO = 4, 1.5
+FLOOR_TANKS = 2                     # speed work line never below 2 x D' (a set of strides after a quiet month is fine)
+FLOOR_NEAR_TOP = 500                # top-speed running line never below 500 m
 LOOKBACK_WEEKS = 52                 # older runs are read back this far
 METERS_PER_MILE = 1609.344
 
@@ -358,9 +363,10 @@ def weekly(db, user_id, week_starts):
     metres, strides and stride speed, and the fast stretches by kind."""
     if not week_starts:
         return {}
-    runs = _rows(db, user_id, week_starts[0] - timedelta(weeks=FIT_WEEKS))
+    runs = _rows(db, user_id, week_starts[0] - timedelta(weeks=FIT_WEEKS + CHRONIC_WEEKS))
+    lead = [week_starts[0] - timedelta(weeks=n) for n in range(CHRONIC_WEEKS, 0, -1)]
     out = {}
-    for w in week_starts:
+    for w in lead + list(week_starts):
         end = w + timedelta(days=6)
         model = model_at(runs, end)
         week_runs = [r for r in runs if w <= r["day"] <= end]
@@ -379,7 +385,16 @@ def weekly(db, user_id, week_starts):
                   "tanks": round(used / model["d_prime"], 1) if model["cs"] and model["d_prime"] else None,
                   "near_top": round(near), "strides": len(strides), "stride_mps": stride_mps,
                   "stride_pace": pace(stride_mps), "kinds": kinds, "read": len(week_runs)}
-    return out
+    for w in week_starts:
+        before = [out[w - timedelta(weeks=n)] for n in range(1, CHRONIC_WEEKS + 1)]
+        week = out[w]
+        work_usual = sum(b["speed_work"] or 0 for b in before) / CHRONIC_WEEKS
+        top_usual = sum(b["near_top"] for b in before) / CHRONIC_WEEKS
+        week["work_line"] = (round(max(RATIO * work_usual, FLOOR_TANKS * week["d_prime"])) if week["d_prime"] else None)
+        week["top_line"] = round(max(RATIO * top_usual, FLOOR_NEAR_TOP))
+        week["work_over"] = bool(week["work_line"] and (week["speed_work"] or 0) > week["work_line"])
+        week["top_over"] = week["near_top"] > week["top_line"]
+    return {w: out[w] for w in week_starts}
 
 
 def latest(db, user_id):

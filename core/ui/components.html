@@ -118,7 +118,8 @@
   <svg viewBox="0 0 {{ width }} 108" preserveAspectRatio="none" role="img" aria-label="{{ label }}">
     {% for b in bars %}
     {% set h = ((b.value or 0) / (max_value or 1) * 100) | round(1) %}
-    <rect class="chart-bar{% if target and (b.value or 0) >= target %} hit{% endif %}{% if b.current %} current{% endif %}" x="{{ loop.index0 * 24 + 3 }}" y="{{ 104 - h }}" width="18" height="{{ h }}" rx="3"><title>{{ b.label }}: {{ b.value }}{{ unit }}</title></rect>
+    <rect class="chart-bar{% if target and (b.value or 0) >= target %} hit{% endif %}{% if b.current %} current{% endif %}{% if b.limit and (b.value or 0) > b.limit %} over{% endif %}" x="{{ loop.index0 * 24 + 3 }}" y="{{ 104 - h }}" width="18" height="{{ h }}" rx="3"><title>{{ b.label }}: {{ b.value }}{{ unit }}{% if b.limit %} (line {{ b.limit }}{{ unit }}){% endif %}</title></rect>
+    {% if b.limit %}{% set ly = (104 - b.limit / (max_value or 1) * 100) | round(1) %}<line class="chart-limit" x1="{{ loop.index0 * 24 }}" x2="{{ loop.index0 * 24 + 24 }}" y1="{{ ly }}" y2="{{ ly }}"></line>{% endif %}
     {% endfor %}
     {% if target %}{% set ty = (104 - target / (max_value or 1) * 100) | round(1) %}
     <line class="chart-target" x1="0" x2="{{ width }}" y1="{{ ty }}" y2="{{ ty }}"></line>{% endif %}

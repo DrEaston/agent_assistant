@@ -283,6 +283,8 @@ textarea.short { min-height: 5rem; }
 .chart-bar.hit { fill: var(--accent); }
 .chart-bar.current { fill: var(--info); }
 .chart-target { stroke: var(--accent-strong); stroke-width: 1.5; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+.chart-bar.over { fill: var(--warn); }
+.chart-limit { stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 3 2; vector-effect: non-scaling-stroke; }
 .chart-axis { display: flex; justify-content: space-between; margin-top: .25rem; }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: var(--s3); }
 .stat { display: flex; flex-direction: column; gap: .15rem; }

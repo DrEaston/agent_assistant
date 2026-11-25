@@ -346,3 +346,42 @@ class StrideTests(SyncTests):
         speed.ensure(self.db)
         row = conn.execute("SELECT version, efforts_json FROM tr_run_speed WHERE external_id = 'old'").fetchone()
         self.assertEqual((row["version"], row["efforts_json"]), (0, "[]"))  # read again (version 0 < VERSION)
+
+    def load_weeks(self, weekly_runs):
+        """weekly_runs: {weeks_ago: [stream, ...]}, plus a hard mile and 5K 10 weeks ago for critical speed."""
+        from datetime import date, timedelta
+        monday = date.today() - timedelta(days=date.today().weekday())
+        weekly_runs = dict(weekly_runs)
+        weekly_runs.setdefault(10, []).extend([stream([(600, 2.8), (318, 1609.344 / 318), (600, 2.8)]),
+                                               stream([(600, 2.8), (1059, 5000 / 1059), (600, 2.8)])])
+        n = 700
+        for weeks_ago, streams in weekly_runs.items():
+            for i, st in enumerate(streams):
+                day = (monday - timedelta(weeks=weeks_ago) + timedelta(days=i)).isoformat()
+                self.fake.activities[n] = activity(n, day=day)
+                self.fake.streams[n] = st
+                self.sync._store(self.user, self.fake.activities[n])
+                n += 1
+        from apps.trainer import speed
+        speed.fill(self.sync, self.user, limit=100)
+
+    def test_a_sudden_block_of_400s_goes_over_the_line(self):
+        from apps.trainer import analysis
+        quiet = {w: [easy_run_with_strides(strides=4, fast=5.0)] for w in (2, 3, 4, 5)}
+        quiet[1] = [session_of(18, 82, 400 / 82, jog=30), easy_run_with_strides(strides=4, fast=5.0)]
+        self.load_weeks(quiet)
+        o = analysis.overview(self.db, self.user)["speed"]
+        last = o["weeks"][-2]
+        self.assertTrue(last["work_over"], last)
+        self.assertGreater(last["speed_work"], last["work_line"])
+        self.assertIn(last["label"], o["over_weeks"])
+        self.assertFalse(any(w["work_over"] for w in o["weeks"][-6:-2]))  # the strides weeks stay under
+
+    def test_building_up_to_it_stays_under(self):
+        from apps.trainer import analysis
+        build = {6: [session_of(8, 82, 400 / 82, jog=60)], 5: [session_of(10, 82, 400 / 82, jog=60)],
+                 4: [session_of(12, 82, 400 / 82, jog=45)], 3: [session_of(14, 82, 400 / 82, jog=45)],
+                 2: [session_of(16, 82, 400 / 82, jog=30)], 1: [session_of(18, 82, 400 / 82, jog=30)]}
+        self.load_weeks(build)
+        o = analysis.overview(self.db, self.user)["speed"]
+        self.assertFalse(o["weeks"][-2]["work_over"], o["weeks"][-2])

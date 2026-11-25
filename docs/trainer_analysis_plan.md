@@ -49,6 +49,9 @@ Derived numbers are labelled as estimates wherever they are (load score, 5K esti
   and rTSS's squared weighting isn't derived; the critical speed model is the established basis for "faster counts
   more". The plain two-parameter model is used with no sprint correction (published corrections disagree). Planned
   strides are ticked when found. Runs from the last 52 weeks are read a few per Trainer visit and 25 per Sync now.
+  **The line** (Curtis, after 18 x 400 in 81-83 s with 30 s rest hurt): each week's speed work and top-speed running
+  against 1.5 x the average of the 4 weeks before (acute:chronic workload ratio; debated, shown as a guide), floors
+  2 x D' and 500 m. A sudden block goes over; building up over a few weeks keeps under.
 
 - Threshold pace from Tuesday's workout laps toward 5:40/mi.
 - Best efforts over time (400 m, 1 km, mile, 5K) from Strava best efforts and races.
