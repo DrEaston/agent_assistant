@@ -56,11 +56,13 @@ def _build_clip(c, data, fit):
     count = sum(1 for _ in fr.each(data))
     sheet = fr.Sheet(count)
     first = previous = None
-    steps, anchors, ms = [], [], []
+    steps, anchors, ms, boxes = [], [], [], []
     for image, duration in fr.each(data):
         placed = fr.place_one(image, *fit)
         sheet.add(placed)
         anchors.append(fr.anchor(placed))
+        if fr.box(placed):
+            boxes.append(fr.box(placed))
         ms.append(duration)
         if previous is not None:
             steps.append(fr.seam(previous, placed))
@@ -69,6 +71,8 @@ def _build_clip(c, data, fit):
         previous = placed
     last = previous
     drift = max((abs(x - anchors[0][0]) + abs(y - anchors[0][1]) for x, y in anchors), default=0)
+    sides = sorted({side for b in boxes for side, cut in (("left", b[0] <= 0), ("top", b[1] <= 0),
+                                                         ("right", b[2] >= fr.CANVAS), ("bottom", b[3] >= fr.CANVAS)) if cut})
     out = {"frames": count, "columns": sheet.columns, "per_page": fr.Sheet.PAGE, "ms": round(sum(ms) / len(ms)) if ms else 100,
            "seconds": round(sum(ms) / 1000, 1), "biggest_step": max(steps, default=0.0),
            "biggest_step_at": steps.index(max(steps)) + 1 if steps else 0, "drift_px": round(drift),
@@ -77,6 +81,9 @@ def _build_clip(c, data, fit):
         out["loop_seam"] = fr.seam(last, first)
         if fr.verdict(out["loop_seam"]) == "jump":
             out["problems"].append(f"jumps when it loops (last frame to first: {out['loop_seam']})")
+    if sides:
+        out["problems"].append("sized to match the others, he runs off the canvas (" + ", ".join(sides) + "): "
+                               "drawn at a different size or camera angle from the rest")
     if fr.verdict(out["biggest_step"]) == "jump":
         out["problems"].append(f"jumps between frames {out['biggest_step_at']} and {out['biggest_step_at'] + 1} "
                                f"({out['biggest_step']})")
@@ -124,20 +131,33 @@ def build(store):
             edges[c["name"]] = (fr.small_frame(first), fr.small_frame(last))
             clips.append({**{k: c[k] for k in ("name", "title", "media_id", "play", "starts", "ends", "role")},
                           "fitted": how, **report})
+        # Every clip has to start and end on its pose's home frame (the loop that holds that pose: alert breathing,
+        # thinking hold, sleeping), so that's what each clip is checked against; any two clips that both match
+        # home also join smoothly to each other, so the other pairings would only repeat the same problems.
+        homes = home_clips(spec, {c["name"] for c in clips})
         joins = []
         for a in clips:
             for b in clips:
-                if a["ends"] == b["starts"] and a["name"] != b["name"]:
+                if a["ends"] == b["starts"] and a["name"] != b["name"] and homes.get(a["ends"]) in (a["name"], b["name"]):
                     score = fr.seam(edges[a["name"]][1], edges[b["name"]][0])
                     joins.append({"from": a["name"], "to": b["name"], "pose": a["ends"], "seam": score,
                                   "verdict": fr.verdict(score)})
         joins.sort(key=lambda j: -j["seam"])
-        result = {"clips": clips, "joins": joins, "missing": missing, "canvas": fr.CANVAS,
+        result = {"clips": clips, "joins": joins, "homes": homes, "missing": missing, "canvas": fr.CANVAS,
                   "limits": {"ok": fr.OK, "look": fr.LOOK}, "sheets": sheets}
         with _lock:
             _cache.clear()  # only the latest build is kept
             _cache[key] = result
         return result
+
+
+def home_clips(spec, names):
+    """pose -> the clip that holds it (the first loop that starts and ends in that pose)."""
+    homes = {}
+    for c in spec["clips"]:
+        if c["name"] in names and c["play"] in ("loop", "pingpong") and c["starts"] == c["ends"]:
+            homes.setdefault(c["starts"], c["name"])
+    return homes
 
 
 def store_user(store):

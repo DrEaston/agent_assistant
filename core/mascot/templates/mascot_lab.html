@@ -36,7 +36,7 @@
   {% endcall %}
 
   {% call ui.section("Joins") %}
-  <p class="small muted">Where one clip ends and the next begins. Seam score: how much the picture jumps (under {{ lab.limits.ok }} smooth, over {{ lab.limits.look }} a visible jump).</p>
+  <p class="small muted">Every clip has to start and end exactly where its pose's home loop is ({% for pose, name in lab.homes.items() %}{{ pose }}: {{ name }}{{ ", " if not loop.last }}{% endfor %}), so each one is checked against that. Seam score: how much the picture jumps (under {{ lab.limits.ok }} smooth, over {{ lab.limits.look }} a visible jump). Turn on onion skin to see the two poses over each other.</p>
   <div class="table-scroll card"><table class="data-table">
     <tr><th>From</th><th>To</th><th>Pose</th><th class="num">Seam</th><th></th></tr>
     {% for j in lab.joins %}
