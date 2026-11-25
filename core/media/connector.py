@@ -31,7 +31,7 @@ def store():
 
 
 def _brief(item):
-    out = {"id": item["id"], "title": item["title"], "status": item["status"], "made_by": item["who"],
+    out = {"id": item["id"], "title": item["title"], "kind": item["kind"], "status": item["status"], "made_by": item["who"],
            "size": f"{item['width']}x{item['height']} {item['format']}", "transparent": item["has_alpha"],
            "url": site_url(item["page"])}
     for field in ("source", "note"):
@@ -108,6 +108,10 @@ def get_item(args):
         raise ToolError(str(exc))
     out = _brief(item)
     out.update(file_name=item["file_name"], prompt=item["prompt"], bytes=item["bytes"])
+    if item["kind"] == "video":
+        out["shown"] = ("This is a video (a Firefly clip). Claude Code turns it into stills and animations; ask Curtis "
+                        "to say \"check Media\" to Claude.")
+        return out
     if args.get("show_image", True) is False or item["status"] == "discarded":
         return out
     try:

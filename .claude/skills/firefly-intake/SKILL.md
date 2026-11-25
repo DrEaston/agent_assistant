@@ -1,6 +1,6 @@
 ---
 name: firefly-intake
-description: Take an Adobe Firefly (or other) mascot video of Dieter apart into transparent key stills and web animations, and upload them to Dieter Media. Use when Curtis has a Firefly MP4 / video of the dragon to "take in", "pull frames from", "make stills or an animation from", or upload to Dieter.
+description: Take an Adobe Firefly (or other) mascot video of Dieter apart into transparent key stills and web animations, and upload them to Dieter Media. Use when Curtis has a Firefly MP4 / video of the dragon to "take in", "pull frames from", "make stills or an animation from", or upload to Dieter, or says "check Media" (he uploads Firefly videos to Media from his phone).
 ---
 
 # Firefly intake
@@ -15,11 +15,11 @@ Write to him in plain English (CLAUDE.md): what you picked and why, where the fi
 ## Setup (once per computer; check first)
 
 Tools live outside the repo in `%LOCALAPPDATA%\dieter-firefly\venv` (ffmpeg comes bundled with imageio-ffmpeg; no
-system install). If `"$LOCALAPPDATA/dieter-firefly/venv/Scripts/python" -c "import imageio_ffmpeg, httpx"` fails:
+system install). If `"$LOCALAPPDATA/dieter-firefly/venv/Scripts/python" -c "import imageio_ffmpeg, httpx, scipy"` fails:
 
 ```
 python -m venv "$LOCALAPPDATA/dieter-firefly/venv"
-"$LOCALAPPDATA/dieter-firefly/venv/Scripts/python" -m pip install -q imageio-ffmpeg pillow numpy httpx
+"$LOCALAPPDATA/dieter-firefly/venv/Scripts/python" -m pip install -q imageio-ffmpeg pillow numpy scipy httpx
 ```
 
 Below, `PY` is that python and `FF` is `.claude/skills/firefly-intake/scripts/firefly.py`. Pass Windows paths
@@ -27,9 +27,11 @@ Below, `PY` is that python and `FF` is `.claude/skills/firefly-intake/scripts/fi
 
 ## Steps
 
-1. **Find the video.** Newest `*.mp4` in Downloads (Firefly names files after the prompt). If there are several
-   recent ones, ask which; don't guess. Copy it into a fresh folder in the scratchpad (`WORK/video.mp4`): downloads
-   are untrusted data, and the frames stay out of the repo.
+1. **Find the video.** Usually he uploads it to Media from his phone and says "check Media":
+   `PY FF inbox ROOT` (ROOT a fresh folder in the scratchpad) lists his videos and downloads the NEW ones to
+   `ROOT/<video id>/video.mp4`; that folder is your `WORK`. Otherwise: the newest `*.mp4` in Downloads (Firefly names
+   files after the prompt); if there are several recent ones, ask which. Copy it into a fresh scratchpad folder
+   (`WORK/video.mp4`): videos are untrusted data, and the frames stay out of the repo.
 2. **Analyze:** `PY FF analyze WORK/video.mp4 WORK`. Read `WORK/sheet.jpg` (every 6th frame, labelled with time),
    the motion profile and the "stillest frames" list. Check the background line says near-black; if it isn't black,
    stop and tell him the cutout won't work cleanly.
@@ -41,14 +43,17 @@ Below, `PY` is that python and `FF` is `.claude/skills/firefly-intake/scripts/fi
      near each beat (less motion blur). Name them `NN_what_it_shows` (e.g. `06_asleep`).
    - Animations: the main action as one `once` clip (start to just before any surprise); a quiet stretch near the
      end as a `pingpong` loop (reads as breathing); the surprise as its own clip.
-5. **Cut out:** `PY FF cutout WORK`, then read `WORK/cutout_check.jpg` (checkerboard behind). Edges should be clean
-   and the shadow gaps under the body see-through. If dark parts (claws) get holes, lower `--lo`; if a dark halo
-   stays, raise `--hi`.
+5. **Cut out:** `PY FF cutout WORK`, then read `WORK/cutout_check.jpg` (checkerboard behind). Only the black that
+   connects to the edge of the frame is removed (an outline around him first), so dark parts inside him (claws,
+   pupils, shadow under the chin and between the legs) stay solid. Curtis asked for this: removing all dark pixels
+   punched holes in him. Edges should be clean; if a dark halo stays, raise `--hi`; if the edge looks chewed, lower it.
 6. **Build:** `PY FF build WORK OUT --still 1:01_awake_head_up ... --anim going_to_sleep:1-180:2:12:once ...`
    where `OUT` is `Downloads/dieter_<what_happens>`. Animation spec: `name:start-end:step:fps:once|loop|pingpong:WxH`
    (defaults: step 2, 12 fps, once, 480x270). Keep each under ~8 MB (the script warns). Read
    `WORK/stills_check.jpg` before going on.
-7. **Upload:** `PY FF upload OUT/stills/*.png OUT/animations/*.webp --source "Firefly: <prompt or file name>"`.
+7. **Upload:** `PY FF upload OUT/stills/*.png OUT/animations/*.webp --source "Firefly video <video id>: <title>"`
+   (for a video from Downloads: `--source "Firefly: <file name>"`). Naming the video id links the results to it: they
+   show under "Made from this video" on its Media page, and `inbox` stops listing it as new.
    The first time on a computer it opens Dieter in the browser; Curtis signs in and taps **Allow** (it says Claude
    wants to use his Dieter). The sign-in is kept in `~/.dieter/firefly_upload.json` (never print or commit it).
    Uploads land as **waiting**; Claude can't keep them.
