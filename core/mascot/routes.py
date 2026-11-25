@@ -35,12 +35,12 @@ def lab_clips():
     return JSONResponse(_public(lab.build(media.store())))
 
 
-@router.get("/media/lab/sheet/{name}.webp")
-def lab_sheet(name: str):
-    sheet = lab.build(media.store())["sheets"].get(name)
-    if sheet is None:
+@router.get("/media/lab/sheet/{name}/{page}.webp")
+def lab_sheet(name: str, page: int):
+    pages = lab.build(media.store())["sheets"].get(name) or []
+    if not 0 <= page < len(pages):
         return Response(status_code=404)
-    return Response(sheet, media_type="image/webp", headers={"Cache-Control": "private, max-age=3600"})
+    return Response(pages[page], media_type="image/webp", headers={"Cache-Control": "private, max-age=3600"})
 
 
 @router.post("/media/lab/rebuild")

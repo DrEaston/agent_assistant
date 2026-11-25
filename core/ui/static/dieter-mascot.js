@@ -1,25 +1,35 @@
 /* Dieter's animation player (docs/mascot_plan.md). Clips come from /media/lab/clips.json and their sprite sheets
-   (/media/lab/sheet/<name>.webp): every frame is a CANVAS-square tile, `columns` across, all lined up the same way.
+   (/media/lab/sheet/<name>/<page>.webp, `per_page` frames each): every frame is a CANVAS-square tile, `columns`
+   across, all lined up the same way.
    DieterMascot.load() fetches them; a Viewer draws one clip or a join between two, at any speed, a frame at a time. */
 (function () {
   const sheets = {};
 
   async function load(base = "/media/lab") {
     const lab = await (await fetch(base + "/clips.json", { cache: "no-store" })).json();
-    await Promise.all(lab.clips.map((c) => new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => { sheets[c.name] = img; resolve(); };
-      img.onerror = () => resolve();
-      img.src = `${base}/sheet/${c.name}.webp`;
-    })));
+    const jobs = [];
+    for (const c of lab.clips) {
+      sheets[c.name] = [];
+      for (let p = 0; p < Math.ceil(c.frames / c.per_page); p++) {
+        jobs.push(new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => { sheets[c.name][p] = img; resolve(); };
+          img.onerror = () => resolve();
+          img.src = `${base}/sheet/${c.name}/${p}.webp`;
+        }));
+      }
+    }
+    await Promise.all(jobs);
     lab.byName = Object.fromEntries(lab.clips.map((c) => [c.name, c]));
     return lab;
   }
 
   function draw(ctx, lab, name, frame, alpha = 1) {
-    const clip = lab.byName[name], img = sheets[name], size = lab.canvas;
-    if (!clip || !img) return;
-    const n = Math.max(0, Math.min(clip.frames - 1, frame));
+    const clip = lab.byName[name], size = lab.canvas;
+    if (!clip) return;
+    const f = Math.max(0, Math.min(clip.frames - 1, frame));
+    const img = (sheets[name] || [])[Math.floor(f / clip.per_page)], n = f % clip.per_page;
+    if (!img) return;
     ctx.globalAlpha = alpha;
     ctx.drawImage(img, (n % clip.columns) * size, Math.floor(n / clip.columns) * size, size, size,
                   0, 0, ctx.canvas.width, ctx.canvas.height);

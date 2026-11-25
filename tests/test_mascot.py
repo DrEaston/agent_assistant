@@ -27,7 +27,7 @@ def dragon(n=6, size=(362, 362), scale=1.0, jitter=0, head_drop=0, fmt="GIF"):
         d.point((10, 10), fill=(i, 0, 0, 255 if i % 2 else 254))  # keep frames distinct so the GIF keeps them all
         out.append(im)
     buf = io.BytesIO()
-    extra = {"disposal": 2} if fmt == "GIF" else {}
+    extra = {"disposal": 2} if fmt == "GIF" else {"lossless": True}
     out[0].save(buf, fmt, save_all=True, append_images=out[1:], duration=100, loop=0, **extra)
     return buf.getvalue()
 
@@ -91,7 +91,7 @@ class LabTests(unittest.TestCase):
         self.assertEqual(next(c for c in built["clips"] if c["name"] == "breathing")["problems"], [])
         self.assertEqual(built["joins"][0]["verdict"], "jump")  # worst first
         self.assertTrue(all(j["pose"] == "alert" for j in built["joins"]))  # nothing starts asleep, so no join there
-        self.assertTrue(built["sheets"]["breathing"].startswith(b"RIFF"))  # a WebP sprite sheet
+        self.assertTrue(built["sheets"]["breathing"][0].startswith(b"RIFF"))  # WebP sprite sheet pages
 
         from core import ui
         page = ui.templates(Path(lab.__file__).parent / "templates").get_template("mascot_lab.html").render(
