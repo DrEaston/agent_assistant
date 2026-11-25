@@ -11,20 +11,35 @@ import math
 
 from PIL import Image, ImageChops, ImageSequence, ImageStat
 
-CANVAS = 512
+CANVAS = 384        # big enough for the stage on a phone or the kitchen screen; small enough to build quickly
 MARGIN = 24          # around the reference clip's first frame
 SCORE_SIZE = 128     # frames are compared at this size (fine detail and GIF noise don't count)
 ALPHA_EDGE = 40      # alpha above this counts as Dieter
 OK, LOOK = 4.0, 8.0  # seam score: under OK is smooth, under LOOK worth a look, above it a visible jump
 
 
-def decode(data):
-    """[(RGBA image, ms)] for every frame; GIF/WebP frames come back already composited by Pillow."""
+def each(data):
+    """Every frame as (RGBA image, ms), one at a time (a long clip never sits in memory whole).
+    GIF/WebP frames come back already composited by Pillow."""
     picture = Image.open(io.BytesIO(data))
-    frames = []
     for frame in ImageSequence.Iterator(picture):
-        frames.append((frame.convert("RGBA").copy(), int(frame.info.get("duration") or 100)))
-    return frames
+        yield frame.convert("RGBA"), int(frame.info.get("duration") or 100)
+
+
+def decode(data):
+    """[(RGBA image, ms)] for every frame."""
+    return [(image.copy(), ms) for image, ms in each(data)]
+
+
+def ends(data):
+    """(first frame, last frame, how many) without keeping the frames in between."""
+    first = last = None
+    count = 0
+    for image, _ in each(data):
+        if first is None:
+            first = image.copy()
+        last, count = image, count + 1
+    return first, (last.copy() if last is not None else None), count
 
 
 def box(image):
@@ -50,16 +65,23 @@ def first_fit(source_box):
     return fit(source_box, target)
 
 
+def place_one(image, scale, dx, dy):
+    """One frame drawn onto the shared canvas."""
+    size = (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
+    canvas = Image.new("RGBA", (CANVAS, CANVAS), (0, 0, 0, 0))
+    scaled = image.resize(size, Image.BILINEAR if scale < 0.5 else Image.LANCZOS)
+    canvas.paste(scaled, (round(dx), round(dy)), scaled)  # onto an empty canvas, so paste = composite
+    return canvas
+
+
 def place(frames, scale, dx, dy):
     """The frames drawn onto the shared canvas."""
-    out = []
-    for image, ms in frames:
-        size = (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
-        canvas = Image.new("RGBA", (CANVAS, CANVAS), (0, 0, 0, 0))
-        scaled = image.resize(size, Image.LANCZOS)
-        canvas.paste(scaled, (round(dx), round(dy)), scaled)  # onto an empty canvas, so paste = composite
-        out.append((canvas, ms))
-    return out
+    return [(place_one(image, scale, dx, dy), ms) for image, ms in frames]
+
+
+def small_frame(image):
+    """A frame at the size seams are scored at (enough to compare joins later without keeping the full frame)."""
+    return image.resize((SCORE_SIZE, SCORE_SIZE), Image.BILINEAR)
 
 
 def _small(image):
@@ -94,12 +116,41 @@ def verdict(score):
     return "ok" if score < OK else "look" if score < LOOK else "jump"
 
 
-def sheet(frames, columns=8):
-    """All frames in one WebP, `columns` across, each CANVAS square."""
-    rows = math.ceil(len(frames) / columns)
-    grid = Image.new("RGBA", (CANVAS * min(columns, len(frames)), CANVAS * rows), (0, 0, 0, 0))
-    for n, (image, _) in enumerate(frames):
-        grid.paste(image, ((n % columns) * CANVAS, (n // columns) * CANVAS))
-    out = io.BytesIO()
-    grid.save(out, "WEBP", quality=88, alpha_quality=90, method=4)
-    return out.getvalue()
+class Sheet:
+    """A clip's frames as WebP pages of up to PAGE frames, `columns` across, each CANVAS square, added one at a time.
+    Small pages because the WebP encoder needs a lot of memory for one big picture (a 90-frame sheet took ~270 MB)."""
+    PAGE = 16
+
+    def __init__(self, count, columns=4):
+        self.columns = min(columns, max(1, count))
+        self.count, self.n, self.pages, self.grid = max(1, count), 0, [], None
+
+    def add(self, image):
+        at = self.n % self.PAGE
+        if at == 0:
+            left = min(self.PAGE, self.count - self.n) or self.PAGE
+            self.grid = Image.new("RGBA", (CANVAS * self.columns, CANVAS * math.ceil(left / self.columns)),
+                                  (0, 0, 0, 0))
+        self.grid.paste(image, ((at % self.columns) * CANVAS, (at // self.columns) * CANVAS))
+        self.n += 1
+        if self.n % self.PAGE == 0:
+            self._close()
+
+    def _close(self):
+        if self.grid is not None:
+            out = io.BytesIO()
+            self.grid.save(out, "WEBP", quality=85, alpha_quality=85, method=2)
+            self.pages.append(out.getvalue())
+            self.grid = None
+
+    def webp(self):
+        """[page bytes, ...]"""
+        self._close()
+        return self.pages
+
+
+def sheet(frames, columns=4):
+    s = Sheet(len(frames), columns)
+    for image, _ in frames:
+        s.add(image)
+    return s.webp()
