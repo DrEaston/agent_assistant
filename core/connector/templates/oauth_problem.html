@@ -1,10 +1,10 @@
 {% extends "layout.html" %}
 {% import "components.html" as ui %}
-{% block title %}Connect Claude{% endblock %}
+{% block title %}Connect to Dieter{% endblock %}
 {% block dock %}{% endblock %}
 {% block content %}
 <main class="wrap">
-  {% call ui.section("Couldn't connect Claude") %}
+  {% call ui.section("Couldn't connect") %}
   <div class="card stack">
     <p>{{ problem }}</p>
     <p><a href="/">Back to Dieter</a></p>

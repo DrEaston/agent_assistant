@@ -6,18 +6,18 @@
   <div class="now-grid">
     {% if status.overdue %}
     <div class="card overdue"><h3>Overdue</h3>
-      {% for t in status.overdue[-4:] %}<div class="now-item"><strong>{{ t.title }}</strong>
+      {% for t in status.overdue[-4:] %}<div class="now-item"><a class="now-link" href="/thanksgiving/menu/{{ t.dish_id }}#task-{{ t.key|replace(':', '-') }}"><strong>{{ t.title }}</strong></a>
         <div class="small muted">{{ t.dish_name }} · was {{ planner.short_date(t.start) }} {{ planner.format_clock(t.start) }}</div></div>{% endfor %}
       {% if status.overdue|length > 4 %}<p class="small muted">+ {{ status.overdue|length - 4 }} more in the timeline</p>{% endif %}
     </div>
     {% endif %}
     <div class="card"><h3>Happening now</h3>
-      {% for t in status.current %}<div class="now-item"><strong>{{ t.title }}</strong>
+      {% for t in status.current %}<div class="now-item"><a class="now-link" href="/thanksgiving/menu/{{ t.dish_id }}#task-{{ t.key|replace(':', '-') }}"><strong>{{ t.title }}</strong></a>
         <div class="small muted">{{ t.dish_name }} · until {{ planner.format_clock(t.end) }}</div></div>
       {% else %}<p class="muted small">Nothing in progress.</p>{% endfor %}
     </div>
     <div class="card"><h3>Up next</h3>
-      {% for t in status.next %}<div class="now-item"><strong>{{ t.title }}</strong>
+      {% for t in status.next %}<div class="now-item"><a class="now-link" href="/thanksgiving/menu/{{ t.dish_id }}#task-{{ t.key|replace(':', '-') }}"><strong>{{ t.title }}</strong></a>
         <div class="small muted">{{ t.dish_name }} · {{ planner.short_date(t.start) }} {{ planner.format_clock(t.start) }}</div></div>
       {% else %}<p class="muted small">All done. Enjoy dinner!</p>{% endfor %}
     </div>

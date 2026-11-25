@@ -1,0 +1,54 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Reading{% endblock %}
+{% block content %}
+{% call ui.page_header("Reading", crumbs=(("Dieter", "/"), ("Assistant", "/apps/assistant")), tabs=tabs, current=current,
+    sub=counts.want ~ " to find · " ~ counts.owned ~ " owned · " ~ counts.reading ~ " reading · " ~ counts.read ~ " read") %}
+  <a class="button primary" href="/apps/assistant/reading/bookstore">At the bookstore</a>
+{% endcall %}
+<main class="wrap">
+  <nav class="row small" aria-label="Show">
+    <a href="/apps/assistant/reading"{% if not show %} aria-current="page"{% endif %}>All ({{ total }})</a>
+    {% for s in statuses if counts[s] %}<a href="/apps/assistant/reading?show={{ s }}"{% if show == s %} aria-current="page"{% endif %}>{{ labels[s] }} ({{ counts[s] }})</a>{% endfor %}
+  </nav>
+  {% for g in groups %}
+  <section class="gap-above" aria-label="{{ g.author }}">
+    <h2 class="section-title">{{ g.author }}</h2>
+    <div class="card flush">
+      {% for b in g.books if not show or b.status == show %}
+      <div class="list-row">
+        <div class="grow"><div>{% if b.high_priority %}<span aria-label="High priority">★ </span>{% endif %}{{ b.title }}</div>
+          {% if b.notes %}<div class="small muted">{{ b.notes }}</div>{% endif %}</div>
+        <form method="post" action="/apps/assistant/reading/{{ b.id }}/status" class="row">
+          <label class="visually-hidden" for="status-{{ b.id }}">Status of {{ b.title }}</label>
+          <select id="status-{{ b.id }}" name="status" data-autosubmit>
+            {% for s in statuses %}<option value="{{ s }}"{% if s == b.status %} selected{% endif %}>{{ labels[s] }}</option>{% endfor %}
+          </select>
+          <noscript><button type="submit">Save</button></noscript>
+        </form>
+        {{ ui.remove_button("/apps/assistant/reading/" ~ b.id ~ "/delete", "Remove " ~ b.title) }}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% else %}
+  {{ ui.empty("No books yet. Add one below, or tell Dieter “add Piranesi by Susanna Clarke”.") }}
+  {% endfor %}
+
+  {% call ui.section("Add a book") %}
+  <form method="post" action="/apps/assistant/reading/add" class="card stack">
+    <div class="cols">
+      {{ ui.field("Title", "title", required=True, maxlength=200) }}
+      {{ ui.field("Author", "author", maxlength=120, placeholder="Last, First") }}
+    </div>
+    <label class="row"><input type="checkbox" name="high_priority" value="1"> ★ High priority</label>
+    <button type="submit" class="primary">Add book</button>
+  </form>
+  {% endcall %}
+</main>
+{% endblock %}
+{% block after %}
+<script>
+document.addEventListener("change", (e) => { const s = e.target.closest("select[data-autosubmit]"); if (s) s.form.submit(); });
+</script>
+{% endblock %}

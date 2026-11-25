@@ -178,6 +178,7 @@ class ThanksgivingStore:
 
     def _update_saved_dishes(self, conn):
         """One-time changes to dishes already in a plan (each runs once per plan; your later edits stay)."""
+        from . import step_guide
         from .presets import WHIPPED_CREAM_INGREDIENTS, WHIPPED_CREAM_INSTRUCTIONS, fold_step, whipped_cream_step
 
         def once(plan_id, marker):
@@ -270,6 +271,62 @@ class ThanksgivingStore:
                         "In cook mode, Start fold timers chimes for each set.")
                     conn.execute("UPDATE tg_dishes SET steps_json = ?, instructions_text = ? WHERE id = ?",
                                  (json.dumps(kept), instructions, row["id"]))
+            if once(plan_id, "gravy-neck-stock"):
+                # Mom's tip: the neck and giblets simmer into stock for the gravy. Only if the gravy is still as
+                # written; recorded in its Recipe history (with Restore).
+                changed = True
+                from .presets import GRAVY_INGREDIENTS, GRAVY_INSTRUCTIONS, OLD_GRAVY_INGREDIENTS, OLD_GRAVY_INSTRUCTIONS, _gravy_steps
+                for row in conn.execute("SELECT * FROM tg_dishes WHERE plan_id = ? AND name = 'Gravy'", (plan_id,)).fetchall():
+                    if ((row["ingredients_text"] or "").strip() != OLD_GRAVY_INGREDIENTS
+                            or (row["instructions_text"] or "").strip() != OLD_GRAVY_INSTRUCTIONS):
+                        continue
+                    try:
+                        steps = json.loads(row["steps_json"] or "[]")
+                    except json.JSONDecodeError:
+                        continue
+                    if not any(s.get("id") == "stock" for s in steps):
+                        steps.insert(0, _gravy_steps()[0])
+                    conn.execute("UPDATE tg_dishes SET ingredients_text = ?, instructions_text = ?, steps_json = ? WHERE id = ?",
+                                 (GRAVY_INGREDIENTS, GRAVY_INSTRUCTIONS, json.dumps(steps), row["id"]))
+                    conn.execute(
+                        "INSERT INTO tg_recipe_versions (plan_id, dish_id, request, summary, before_json, after_json) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (plan_id, row["id"], "Mom: boil the turkey neck and giblets into broth for the gravy",
+                         "Added neck-and-giblet stock for the gravy",
+                         json.dumps({"ingredients_text": OLD_GRAVY_INGREDIENTS, "instructions_text": OLD_GRAVY_INSTRUCTIONS}),
+                         json.dumps({"ingredients_text": GRAVY_INGREDIENTS, "instructions_text": GRAVY_INSTRUCTIONS})))
+            if once(plan_id, "olive-more-water"):
+                # The olive loaf at 330 g water was dry and got very thick quickly: 365 g. Recorded in its Recipe
+                # history (with Restore). Only lines still as they were change.
+                changed = True
+                from .presets import OLIVE_NEW_WATER_LINE, OLIVE_OLD_WATER_LINE
+                for row in conn.execute("SELECT * FROM tg_dishes WHERE plan_id = ? AND name = 'Olive and rosemary sourdough'",
+                                        (plan_id,)).fetchall():
+                    ing, ins = row["ingredients_text"] or "", row["instructions_text"] or ""
+                    new_ing = "\n".join("365 g water" if line.strip() == "330 g water" else line for line in ing.split("\n"))
+                    new_ins = ins.replace(OLIVE_OLD_WATER_LINE, OLIVE_NEW_WATER_LINE)
+                    if (new_ing, new_ins) == (ing, ins):
+                        continue
+                    conn.execute("UPDATE tg_dishes SET ingredients_text = ?, instructions_text = ? WHERE id = ?",
+                                 (new_ing, new_ins, row["id"]))
+                    conn.execute(
+                        "INSERT INTO tg_recipe_versions (plan_id, dish_id, request, summary, before_json, after_json) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (plan_id, row["id"], "The olive recipe needs more water: it was dry and got very thick quickly",
+                         "More water: 365 g instead of 330 g",
+                         json.dumps({"ingredients_text": ing, "instructions_text": ins}),
+                         json.dumps({"ingredients_text": new_ing, "instructions_text": new_ins})))
+            if once(plan_id, step_guide.GUIDE_VERSION):
+                # Each step says what to do: the recipe lines it covers (step_guide.py). Checkmarks are kept: they're
+                # stored by step id, which doesn't change.
+                changed = True
+                for row in conn.execute("SELECT id, name, steps_json FROM tg_dishes WHERE plan_id = ?", (plan_id,)).fetchall():
+                    try:
+                        steps = json.loads(row["steps_json"] or "[]")
+                    except json.JSONDecodeError:
+                        continue
+                    if step_guide.apply(row["name"], steps):
+                        conn.execute("UPDATE tg_dishes SET steps_json = ? WHERE id = ?", (json.dumps(steps), row["id"]))
         return changed
 
     def _commit(self):
@@ -409,6 +466,12 @@ class ThanksgivingStore:
             "SELECT item_key FROM tg_checks WHERE plan_id = ? AND kind = ?", (plan_id, kind)).fetchall()
         return {row["item_key"] for row in rows}
 
+    def clear_checked(self, plan_id, kind, prefix):
+        """Uncheck every key of this kind that starts with prefix (e.g. one dish's ingredients: "12:")."""
+        self._conn().execute("DELETE FROM tg_checks WHERE plan_id = ? AND kind = ? AND substr(item_key, 1, ?) = ?",
+                             (plan_id, kind, len(prefix), prefix))
+        self._commit()
+
     def set_checked(self, plan_id, kind, key, checked):
         conn = self._conn()
         if checked:
@@ -447,6 +510,11 @@ class ThanksgivingStore:
             (plan_id, dish_id, label[:120], int(ends_at_ms)))
         self._commit()
         return cur.lastrowid
+
+    def move_timer(self, plan_id, timer_id, ends_at_ms):
+        self._conn().execute("UPDATE tg_timers SET ends_at_ms = ? WHERE id = ? AND plan_id = ? AND state = 'running'",
+                             (int(ends_at_ms), timer_id, plan_id))
+        self._commit()
 
     def dismiss_timer(self, plan_id, timer_id):
         self._conn().execute("UPDATE tg_timers SET state = 'dismissed' WHERE id = ? AND plan_id = ?",

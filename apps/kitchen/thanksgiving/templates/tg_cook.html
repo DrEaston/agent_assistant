@@ -10,6 +10,31 @@ body { overflow-x: hidden; }
 .bar-top .spacer { flex: 1; }
 .bar-top a, .bar-top button { color: #fff; background: transparent; border-color: rgba(255,255,255,.25); min-height: 40px; }
 .bar-top button[aria-pressed=true] { background: #fff; color: #2a2118; }
+.s-how { margin: .3rem 0 .2rem; padding-left: 1.2rem; font-size: .95rem; line-height: 1.4; }
+.s-how li { margin: .15rem 0; }
+.alert .s-how { font-size: .9rem; margin-top: .35rem; }
+#recipe .spacer { flex: 1; }
+.checklist { list-style: none; padding: 0; margin: .3rem 0; display: grid; gap: .3rem; }
+.checklist .ing { display: flex; gap: .6rem; align-items: center; padding: .55rem .7rem; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--panel); cursor: pointer; min-height: 44px; transition: opacity .3s; }
+.checklist .ing.got { color: var(--muted); text-decoration: line-through; }
+.ing-box { flex: none; width: 1.4rem; height: 1.4rem; border: 2px solid var(--line); border-radius: 6px; display: grid;
+  place-items: center; font-weight: 800; color: var(--ok); }
+.ing.got .ing-box { background: var(--ok-soft); border-color: var(--ok); }
+details.added { margin: .2rem 0 .6rem; }
+details.added > summary { cursor: pointer; color: var(--ok); font-weight: 700; font-size: .9rem; padding: .2rem 0; }
+.ing-group { scroll-margin-top: 5rem; }
+.ing-group:target { background: #fff4d6; border-radius: 8px; }
+.ing-hint { margin: 0; }
+.s-ing { display: inline-block; margin: .1rem 0 .2rem; }
+.s-ref { display: inline-block; margin: .1rem 0 .2rem; }
+.instructions li, .step { scroll-margin-top: 5rem; }
+.instructions li:target, .step:target { background: #fff4d6; border-radius: 6px; }
+.line-steps { display: inline-flex; flex-wrap: wrap; gap: .25rem; margin-left: .3rem; vertical-align: middle; }
+.step-chip { font-size: .72rem; padding: .05rem .45rem; border-radius: 999px; background: var(--accent); color: #fff;
+  text-decoration: none; white-space: nowrap; }
+.step-chip.done { background: var(--ok-soft); color: var(--ok); }
+.step-chip.none { background: transparent; color: var(--muted); border: 1px dashed var(--line); }
 .bar-top .voice-top { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
 body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is still at the bottom of the page */
 @media (max-width: 600px) {  /* phones: one row */
@@ -133,7 +158,8 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
     const key = ev.target.dataset && ev.target.dataset.openKey;
     if (key) ev.target.open ? openRecipes.add(key) : openRecipes.delete(key);
   }, true);
-  selected = Number(safeGet("tg-dish")) || null;
+  // ?dish=<id> (the dish page's "Open in cook mode") picks the dish; otherwise the last one shown on this device.
+  selected = Number(new URLSearchParams(location.search).get("dish")) || Number(safeGet("tg-dish")) || null;
   filter = "";  // no per-cook views: each device shows every step
 
   function safeGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -199,32 +225,114 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
   function renderRecipe(force) {
     const dish = state.dishes.find(d => d.id === selected);
     if (!dish) { $("recipe").innerHTML = '<p class="muted">No dishes yet. Add them in the plan.</p>'; return; }
-    const sig = JSON.stringify([dish, [...pendingDone], Math.floor(now() / 30000)]);
+    const sig = JSON.stringify([dish, [...pendingDone], [...ingLocal], Math.floor(now() / 30000)]);
     if (!force && sig === lastRecipeSig) return;
     lastRecipeSig = sig;
     const t = now();
     const steps = dish.steps.map(s => {
       const due = !isDone(s) && s.start_ms <= t && s.end_ms > t;
-      return `<li class="step${isDone(s) ? " done" : ""}${due ? " due" : ""}">
+      return `<li class="step${isDone(s) ? " done" : ""}${due ? " due" : ""}" id="cook-step-${esc(s.key.replace(":", "-"))}">
         <button class="check" data-done="${esc(s.key)}" aria-label="${isDone(s) ? "Mark not done" : "Mark done"}: ${esc(s.title)}">${isDone(s) ? "✓" : ""}</button>
         <div><div class="s-when">${esc(s.day)} · ${esc(s.clock)}${s.minutes ? ` · ${s.minutes} min` : ""}${s.temp ? ` · ${s.temp}°F` : ""} ${isDone(s) ? "" : `· <span class="${s.start_ms < t && !due ? "late" : ""}">${esc(rel(s.start_ms))}</span>`}</div>
           <div class="s-title">${esc(s.title)} ${s.cook && s.cook !== dish.cook ? pill(s.cook) : ""}</div>
+          ${howHTML(s, true)}
+          ${usesHTML(dish, s)}
           ${s.detail ? `<div class="small muted">${esc(s.detail)}</div>` : ""}
           ${(s.series || []).length && !isDone(s) ? `<button type="button" class="series-btn" data-series="${esc(s.key)}">⏱ ${esc(s.series_button || "Start timers")}</button>` : ""}
-          ${stepRecipe(dish, s)}
+          ${(s.how || []).length ? "" : stepRecipe(dish, s)}
         </div></li>`;
     }).join("");
-    const ingredients = ingredientsHTML(dish, dish.ingredient_sections);
-    const instructions = instructionsHTML(dish, dish.instruction_sections);
+    const ingredients = checklistHTML(dish);
+    const instructions = methodHTML(dish);
     $("recipe").innerHTML = `<div class="stack">
-      <div class="row"><h2>${esc(dish.name)}</h2>${pill(dish.cook)}</div>
+      <div class="row"><h2>${esc(dish.name)}</h2>${pill(dish.cook)}<span class="spacer"></span>
+        <a class="small" href="/thanksgiving/menu/${dish.id}">Recipe page →</a></div>
       ${(dish.size_options || []).length ? `<label class="row small">Batch size
         <select data-size-dish="${dish.id}" aria-label="Batch size for ${esc(dish.name)}">${dish.size_options.map(o =>
           `<option value="${esc(o.value)}"${o.value === dish.size_value ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>` : ""}
       ${dish.notes ? `<p class="muted">${esc(dish.notes)}</p>` : ""}
-      <h3>Schedule</h3><ol class="steps">${steps || '<li class="muted">No timed steps.</li>'}</ol>
-      ${ingredients ? `<h3>Ingredients <span class="small muted">(tap to cross off)</span></h3>${ingredients}` : ""}
-      ${instructions ? `<h3>Recipe</h3>${instructions}` : ""}</div>`;
+      <h3>Steps</h3><ol class="steps">${steps || '<li class="muted">No timed steps.</li>'}</ol>
+      ${ingredients}
+      ${instructions ? `<h3>Method</h3>${instructions}` : ""}</div>`;
+  }
+  // The recipe lines this step covers, right under it (and in its alert), so a step that pops up says what to do.
+  // withRef: "Crust 6–8 in the recipe ↓", jumping to those lines in the method below.
+  function howHTML(s, withRef) {
+    if (!(s.how || []).length) return "";
+    const dishId = s.key.split(":")[0];
+    return `<ol class="s-how">${s.how.map(line => `<li>${esc(line.text)}</li>`).join("")}</ol>`
+      + (withRef ? `<a class="s-ref small" href="#cook-line-${esc(dishId)}-${s.how[0].index}">${esc(s.how_ref)} in the recipe ↓</a>` : "");
+  }
+  // ---------- Ingredient checklist: tap an ingredient as it goes in. It's checked at once, and a moment later moves
+  // to its group's "Added" list (tap it there to put it back). Shared by every device (the server keeps it; other
+  // screens see it on their next poll, within a few seconds), and kept until "Start over".
+  const ingLocal = new Map();  // key -> {added, at}: taps not yet confirmed by the server
+  const SETTLE_MS = 1500;
+  function isAdded(line) {
+    const local = ingLocal.get(line.key);
+    if (local && (local.added === line.added || now() - local.at > 15000)) { ingLocal.delete(line.key); return line.added; }
+    return local ? local.added : line.added;
+  }
+  function settling(line) {  // just tapped: stays in place, checked, for a moment
+    const local = ingLocal.get(line.key);
+    return !!local && local.added && now() - local.at < SETTLE_MS;
+  }
+  const groupId = (dish, heading) => `cook-ing-${dish.id}-${(heading || "all").toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+  function checklistHTML(dish) {
+    const groups = dish.checklist || [];
+    const all = groups.flatMap(g => g.lines);
+    if (!all.length) return "";
+    const count = all.filter(isAdded).length;
+    const done = dish.steps.length && dish.steps.every(isDone);
+    const status = done ? "Dish done ✓" : count === all.length ? "All added ✓" : `${count} of ${all.length} added`;
+    const row = (l) => `<li class="ing${isAdded(l) ? " got" : ""}" data-ing="${esc(l.key)}" role="checkbox" aria-checked="${isAdded(l)}" tabindex="0">
+      <span class="ing-box" aria-hidden="true">${isAdded(l) ? "✓" : ""}</span><span>${esc(l.text)}</span></li>`;
+    return `<div class="row"><h3>Ingredients</h3><span class="small muted">${status}</span><span class="spacer"></span>
+        ${count ? `<button type="button" class="quiet small" data-ing-reset="${dish.id}">Start over</button>` : ""}</div>
+      <p class="small muted ing-hint">Tap each one as it goes in.</p>
+      ${groups.map(g => {
+        const id = groupId(dish, g.heading);
+        const left = g.lines.filter(l => !isAdded(l) || settling(l)), went = g.lines.filter(l => isAdded(l) && !settling(l));
+        return `<div class="ing-group" id="${id}">${g.heading ? `<h4>${esc(g.heading)}</h4>` : ""}
+          ${left.length ? `<ul class="checklist">${left.map(row).join("")}</ul>` : `<p class="small muted">All added ✓</p>`}
+          ${went.length ? `<details class="added" data-open-key="added:${id}"${openRecipes.has("added:" + id) ? " open" : ""}>
+            <summary>✓ Added (${went.length})</summary><ul class="checklist">${went.map(row).join("")}</ul></details>` : ""}</div>`;
+      }).join("")}`;
+  }
+  // On a step that adds ingredients: "Crust ingredients: 2 of 5 added ↓", jumping to them in the checklist.
+  function usesHTML(dish, s) {
+    const uses = (s.uses || []).map(u => u.toLowerCase());
+    if (!uses.length) return "";
+    const groups = (dish.checklist || []).filter(g => uses.includes("*") || uses.includes(g.heading.toLowerCase()));
+    const lines = groups.flatMap(g => g.lines);
+    if (!lines.length) return "";
+    const named = uses.includes("*") ? "Ingredients" : `${groups.map(g => g.heading).join(" and ")} ingredients`;
+    return `<a class="s-ing small" href="#${groupId(dish, groups[0].heading)}">${esc(named)}: ${lines.filter(isAdded).length} of ${lines.length} added ↓</a>`;
+  }
+  function findIngredient(key) {
+    for (const d of state.dishes) for (const g of d.checklist || []) for (const l of g.lines) if (l.key === key) return l;
+    return null;
+  }
+  function toggleIngredient(key) {
+    const line = findIngredient(key);
+    if (!line) return;
+    const added = !isAdded(line);
+    ingLocal.set(key, { added, at: now() });
+    renderAll(true);
+    if (added) setTimeout(() => renderAll(true), SETTLE_MS + 50);  // then it moves to "Added"
+    post("/thanksgiving/api/ingredients/added", { key, added }).catch(() => {
+      ingLocal.delete(key); $("offline").hidden = false; renderAll(true);
+    });
+  }
+
+  // The method, numbered within each section, each line with the step(s) that cover it (tap to jump to the step).
+  function methodHTML(dish) {
+    const byLine = {};
+    for (const s of dish.steps) for (const line of s.how || []) (byLine[line.index] = byLine[line.index] || []).push(s);
+    return (dish.method || []).map(sec => `${sec.heading ? `<h4>${esc(sec.heading)}</h4>` : ""}<ol class="instructions">${sec.lines.map(line =>
+      `<li value="${line.n}" id="cook-line-${dish.id}-${line.index}">${esc(line.text)} <span class="line-steps">${(byLine[line.index] || []).map(s =>
+        `<a class="step-chip${isDone(s) ? " done" : ""}" href="#cook-step-${esc(s.key.replace(":", "-"))}">${esc(s.day)} ${esc(s.clock)}</a>`).join("")
+        || '<span class="step-chip none">not scheduled</span>'}</span></li>`).join("")}</ol>`).join("");
   }
   function sectionsFor(list, name) {
     name = (name || "").toLowerCase();
@@ -247,6 +355,12 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
     return `<details class="s-recipe" data-open-key="${esc(step.key)}"${openRecipes.has(step.key) ? " open" : ""}>
       <summary>Recipe for this step</summary>${ingredientsHTML(dish, ing)}${instructionsHTML(dish, ins)}</details>`;
   }
+  // A dish's steps that are due or overdue and not done: "All of the olive loaf so far" checks them off in one tap
+  // (later steps, like tomorrow's bake, still come up when it's their time).
+  function dueSteps(dish) {
+    const d = state.dishes.find((x) => x.id === (dish && dish.id));
+    return d ? d.steps.filter((s) => !isDone(s) && s.start_ms <= now()) : [];
+  }
   const SNOOZES = [[10, "10 min"], [60, "1 h"], [120, "2 h"], [240, "4 h"]];  // "Later:" on a step alert
   function renderAlerts(alerts) {
     setHTML("alerts", alerts.map(a => {
@@ -255,8 +369,10 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
           ${goto}<button class="primary" data-dismiss-timer="${a.timer.id}">Stop timer</button></div>`;
       const s = a.step;
       return `<div class="alert" role="alert"><div class="what"><strong>${esc(s.title)}</strong> ${pill(s.cook)}
-          <div class="small">${esc(a.dish.name)} · ${esc(s.clock)} · ${esc(rel(s.start_ms))}${s.temp ? ` · ${s.temp}°F` : ""}</div></div>
+          <div class="small">${esc(a.dish.name)} · ${esc(s.clock)} · ${esc(rel(s.start_ms))}${s.temp ? ` · ${s.temp}°F` : ""}</div>
+          ${howHTML(s)}${!(s.how || []).length && s.detail ? `<div class="small">${esc(s.detail)}</div>` : ""}</div>
         ${goto}<button class="primary" data-done="${esc(s.key)}">Done</button>
+        ${dueSteps(a.dish).length > 1 ? `<button data-done-dish="${a.dish.id}" title="Check off every ${esc(a.dish.name)} step that's due">All of ${esc(a.dish.name)} so far</button>` : ""}
         <button data-ack="${esc(s.key)}">On it</button>
         <span class="snooze" role="group" aria-label="Remind me later"><span class="small">Later:</span>${SNOOZES.map(([m, label]) =>
           `<button class="quiet" data-snooze="${esc(s.key)}" data-minutes="${m}" aria-label="Remind me in ${label}">${label}</button>`).join("")}</span>
@@ -309,10 +425,28 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
       g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22); o.start(t0); o.stop(t0 + 0.25);
     });
   }
-  let wakeLock = null;
-  async function keepAwake() {
-    try { if ("wakeLock" in navigator && document.visibilityState === "visible") wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+  // Keep the PC awake the whole time cook mode is open: without this lock, Windows puts the PC to sleep while the
+  // helper has the monitor off (Sleep), and it wakes to the sign-in screen. Taken as soon as the page opens (no tap
+  // needed), and taken again whenever the browser drops it (it can, e.g. after the screen goes off).
+  let wakeLock = null, wakeLockReported = "";
+  function reportLock(state) {
+    if (state === wakeLockReported) return;
+    wakeLockReported = state;
+    fetch("/thanksgiving/api/voice-log", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event: "keep-awake", detail: state, agent: navigator.userAgent }) }).catch(() => {});
   }
+  async function keepAwake() {
+    if (!("wakeLock" in navigator)) { reportLock("not supported"); return; }
+    if ((wakeLock && !wakeLock.released) || document.visibilityState !== "visible") return;
+    try {
+      wakeLock = await navigator.wakeLock.request("screen");
+      reportLock("held");
+      wakeLock.addEventListener("release", () => { reportLock("released"); setTimeout(keepAwake, 1000); });
+    } catch (e) { reportLock("refused: " + (e.name || e.message)); }
+  }
+  keepAwake();
+  setInterval(keepAwake, 30000);
+  for (const type of ["pointerdown", "keydown", "touchstart"]) document.addEventListener(type, keepAwake, { passive: true });
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { keepAwake(); poll(); } });
   $("start-btn").addEventListener("click", () => {
     try { audio = new (window.AudioContext || window.webkitAudioContext)(); chime(); } catch (e) {}
@@ -347,8 +481,16 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
     act(() => post(`/thanksgiving/api/dishes/${select.dataset.sizeDish}/size`, { scale: select.value }));
   });
   document.addEventListener("click", (ev) => {
-    const el = ev.target.closest("button, li[data-got], .up[data-goto]");
+    const el = ev.target.closest("button, li[data-got], li[data-ing], .up[data-goto]");
     if (!el || !state) return;
+    if (el.dataset.ing) { toggleIngredient(el.dataset.ing); return; }
+    if (el.dataset.ingReset) {
+      const dish = state.dishes.find(d => d.id === Number(el.dataset.ingReset));
+      for (const g of (dish && dish.checklist) || []) for (const l of g.lines) ingLocal.set(l.key, { added: false, at: now() });
+      renderAll(true);
+      act(() => post("/thanksgiving/api/ingredients/reset", { dish_id: Number(el.dataset.ingReset) }));
+      return;
+    }
     if (el.dataset.cook !== undefined && el.closest("#filter")) {
       filter = el.dataset.cook; safeSet("tg-cook", filter); renderFilter(); renderAll(true);
     } else if (el.dataset.dish) {
@@ -366,6 +508,12 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
       renderAll();
     } else if (el.dataset.goto) {
       selected = Number(el.dataset.goto); safeSet("tg-dish", selected); renderAll(true); window.scrollTo({ top: 0 });
+    } else if (el.dataset.doneDish) {
+      for (const s of dueSteps({ id: Number(el.dataset.doneDish) })) {
+        pendingDone.set(s.key, true); handled.set(s.key, Date.now());
+        act(() => post("/thanksgiving/api/steps/done", { key: s.key, done: true }));
+      }
+      renderAll(true);
     } else if (el.dataset.done) {
       const key = el.dataset.done, step = allSteps().find(s => s.key === key);
       const value = step ? !isDone(step) : true;
@@ -392,6 +540,10 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
       const k = el.dataset.got; got.has(k) ? got.delete(k) : got.add(k); safeSet("tg-got", JSON.stringify([...got]));
       el.classList.toggle("got");
     }
+  });
+  document.addEventListener("keydown", (ev) => {  // the checklist works from a keyboard too
+    const li = ev.target.closest && ev.target.closest("li[data-ing]");
+    if (li && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); toggleIngredient(li.dataset.ing); }
   });
   // "potatoes 20 min" / "rolls 1h 15m" / "pie 1 1/2 hours" / "half an hour" / "gravy 10" -> {minutes, label}
   const WORD_NUM = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,

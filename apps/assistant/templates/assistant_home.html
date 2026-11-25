@@ -1,0 +1,87 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}To-dos{% endblock %}
+{% block content %}
+{{ ui.page_header("Assistant", crumbs=(("Dieter", "/"),), tabs=tabs, current=current,
+    sub="To-dos and reminders, projects, and your reading list. Tell Dieter “remind me to… on Friday”.") }}
+<main class="wrap">
+  {% call ui.section("To-dos") %}
+  <form method="post" action="/scheduler/create" class="card stack" aria-label="Add a to-do">
+    <div class="row">
+      <label class="visually-hidden" for="todo-title">To-do</label>
+      <input class="grow" type="text" id="todo-title" name="title" required maxlength="200" placeholder="Add a to-do">
+      <label class="visually-hidden" for="todo-date">Date (optional)</label>
+      <input type="date" id="todo-date" name="scheduled_for" min="{{ today }}" aria-label="Date (optional)">
+      <button type="submit" class="primary">Add</button>
+    </div>
+  </form>
+  <div class="card flush gap-above">
+    {% for t in todos %}
+    <div class="list-row">
+      <form method="post" action="/scheduler/{{ t.id }}/complete">
+        <input type="hidden" name="next" value="/apps/assistant">
+        <button type="submit" class="quiet icon-button" aria-label="Done: {{ t.title }}">○</button>
+      </form>
+      <div class="grow">
+        <div>{{ t.title }}</div>
+        {% if t.notes %}<div class="small muted">{{ t.notes.splitlines()[0][:120] }}</div>{% endif %}
+        {% if t.project %}<div class="small muted">{{ t.project }}</div>{% endif %}
+      </div>
+      {% if t.when %}{{ ui.tag(t.when, t.tone) }}{% endif %}
+      {{ ui.remove_button("/scheduler/" ~ t.id ~ "/delete", "Delete " ~ t.title, {"next": "/apps/assistant"}) }}
+    </div>
+    {% else %}
+    {{ ui.empty("Nothing to do. Add one above, or tell Dieter.") }}
+    {% endfor %}
+  </div>
+  {% if done %}
+  <details class="gap-above">
+    <summary class="small muted">Done recently ({{ done|length }})</summary>
+    <div class="card flush">
+      {% for t in done %}
+      <div class="list-row">
+        <form method="post" action="/scheduler/{{ t.id }}/reopen">
+          <input type="hidden" name="next" value="/apps/assistant">
+          <button type="submit" class="quiet icon-button" aria-label="Not done: {{ t.title }}">✓</button>
+        </form>
+        <div class="grow muted">{{ t.title }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+  {% endcall %}
+
+  <div class="cols gap-above">
+    <section aria-label="Projects">
+      <div class="section-head"><h2 class="section-title">Projects</h2><a href="/apps/assistant/projects">All</a></div>
+      <div class="card flush">
+        {% for p in projects[:5] %}
+        <a class="link-row" href="/projects/{{ p.id }}">
+          <span class="label-stack"><span class="title">{{ p.name }}</span>
+            <span class="small muted">{% if p.next %}Next: {{ p.next }}{% else %}No open actions{% endif %}</span></span>
+          <span class="chev" aria-hidden="true">›</span>
+        </a>
+        {% else %}
+        {{ ui.empty("No projects yet.") }}
+        {% endfor %}
+      </div>
+    </section>
+    <section aria-label="Reading">
+      <div class="section-head"><h2 class="section-title">Reading</h2><a href="/apps/assistant/reading">List</a></div>
+      <div class="card flush">
+        <a class="link-row" href="/apps/assistant/reading">
+          <span class="label-stack"><span class="title">{{ reading.want }} book{{ "s" if reading.want != 1 }} to find</span>
+            <span class="small muted">{{ reading.reading }} reading · {{ reading.read }} read</span></span>
+          <span class="chev" aria-hidden="true">›</span>
+        </a>
+        <a class="link-row" href="/apps/assistant/reading/bookstore">
+          <span class="label-stack"><span class="title">At the bookstore</span>
+            <span class="small muted">Authors A–Z, with what you're looking for</span></span>
+          <span class="chev" aria-hidden="true">›</span>
+        </a>
+      </div>
+    </section>
+  </div>
+</main>
+{% endblock %}

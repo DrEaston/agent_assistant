@@ -1,0 +1,34 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+{{ ui.page_header(title, crumbs=(("Assistant", "/apps/assistant"), ("Projects", "/apps/assistant/projects"), (project.name, "/projects/" ~ project.id))) }}
+<main class="wrap">
+  {% call ui.section("Steps") %}
+  <div class="card flush">
+    {% for s in steps %}
+    <div class="list-row">
+      <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/steps/{{ s.id }}/{{ 'reopen' if s.done else 'complete' }}">
+        <button type="submit" class="quiet icon-button" aria-label="{{ 'Not done' if s.done else 'Done' }}: {{ s.step }}">{{ "✓" if s.done else "○" }}</button>
+      </form>
+      <span class="grow{% if s.done %} muted{% endif %}">{{ s.step }}</span>
+    </div>
+    {% else %}{{ ui.empty("No steps. Break it down below, or just do it.") }}{% endfor %}
+  </div>
+  <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/steps/create" class="row gap-above">
+    <label class="visually-hidden" for="new-step">New step</label>
+    <input class="grow" type="text" id="new-step" name="step" required maxlength="300" placeholder="Add a step">
+    <button type="submit">Add</button>
+  </form>
+  {% endcall %}
+  {% call ui.section() %}
+  <div class="row">
+    {% if action.done %}{{ ui.tag("Done", "ok") }}
+    {% else %}
+    <form method="post" action="/projects/{{ project.id }}/actions/{{ action.id }}/complete"><button type="submit" class="primary">Mark the action done</button></form>
+    {% endif %}
+    <a class="button quiet" href="/projects/{{ project.id }}">Back to {{ project.name }}</a>
+  </div>
+  {% endcall %}
+</main>
+{% endblock %}

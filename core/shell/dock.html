@@ -50,7 +50,7 @@
   const $ = (id) => document.getElementById(id);
   const sheet = $("ask-sheet"), log = $("ask-log"), input = $("ask-input"), form = $("ask-form");
   const confirmBox = $("ask-confirm"), mic = $("ask-mic"), micLabel = $("ask-mic-label");
-  const KEEP_CHAT_ON = ["/apps/recipes"];  // pages with Dieter's chat: the conversation follows you there
+  const KEEP_CHAT_ON = ["/apps/recipes", "/apps/assistant", "/projects"];  // pages with Dieter's chat: the conversation follows you there
   const history = [];
   const shown = [];        // what's in the log, to bring back on the next page: {role, text} or {card}
   let pending = null;      // {content, token, plan} while Dieter waits for a yes

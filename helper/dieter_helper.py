@@ -7,7 +7,7 @@ is saved or sent anywhere.
 
 Endpoints (called by askdieter.ai pages in this PC's browser):
   GET  /status                -> {"ok", "version", "asleep", "camera"}
-  POST /sleep                 -> monitor off, start watching
+  POST /sleep                 -> start watching; the page goes black, the display stays on (see Monitor.off)
   POST /wake                  -> monitor on (e.g. a step alert or timer went off)
   GET  /events?after=N        -> waits up to 25 s for the next event: {"id", "type": "wake", "reason", "side"}
 Later the "hey Dieter" listener joins this same helper.
@@ -23,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-VERSION = "0.1.0"
+VERSION = "0.2.1"  # 0.2: Sleep never switches the display off; 0.2.1: one PowerShell kept open, so dimming is quick
 PORT = 47613
 ALLOWED_ORIGINS = {"https://askdieter.ai", "https://www.askdieter.ai", "http://localhost:8000", "http://127.0.0.1:8000"}
 # Pull request previews (https://pr-12---dieter-preview-2hu6ba6ata-uc.a.run.app). The "2hu6ba6ata" part is unique
@@ -59,16 +59,65 @@ def save_settings(settings):
 
 # ---------------------------------------------------------------- the monitor (Windows)
 
+class _Shell:
+    """One PowerShell kept open for the helper's whole run. Starting a new one for every brightness change took
+    seconds on the kitchen PC, so Sleep only dimmed the screen about when the camera saw someone (11/24)."""
+
+    def __init__(self):
+        self._proc = None
+        self._lines = None
+        self._lock = threading.Lock()
+
+    def _start(self):
+        import queue
+        import subprocess
+        self._proc = subprocess.Popen(
+            ["powershell", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        self._lines = queue.Queue()
+        proc, lines = self._proc, self._lines
+
+        def read():
+            for line in proc.stdout:
+                lines.put(line.rstrip("\r\n"))
+            lines.put(None)  # it ended
+
+        threading.Thread(target=read, name="powershell", daemon=True).start()
+
+    def run(self, command, timeout=10):
+        """Run one line of PowerShell; returns its output ('' on failure or timeout)."""
+        import queue
+        import uuid
+        with self._lock:
+            try:
+                if self._proc is None or self._proc.poll() is not None:
+                    self._start()
+                marker = "__dieter_done_" + uuid.uuid4().hex
+                self._proc.stdin.write(f"{command}\nWrite-Output '{marker}'\n")
+                self._proc.stdin.flush()
+                out, deadline = [], time.time() + timeout
+                while True:
+                    line = self._lines.get(timeout=max(0.05, deadline - time.time()))
+                    if line is None or line == marker:
+                        break
+                    out.append(line)
+                return "\n".join(out).strip()
+            except (OSError, ValueError, queue.Empty):
+                try:
+                    self._proc.kill()  # stuck: start a fresh one next time
+                except Exception:
+                    pass
+                self._proc = None
+                return ""
+
+
+_SHELL = _Shell()
+
+
 def _powershell(command, timeout=10):
     """Run a short PowerShell command without a window; returns its output ('' on failure)."""
-    import subprocess
-    try:
-        done = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
-                              capture_output=True, text=True, timeout=timeout,
-                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        return done.stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        return ""
+    return _SHELL.run(command, timeout)
 
 
 class Monitor:
@@ -155,8 +204,10 @@ class Monitor:
                 save_settings(self.settings)
             self._set_brightness(0)
         else:
-            # WM_SYSCOMMAND, SC_MONITORPOWER, 2 = off. PostMessage so a busy window can't block us.
-            self.user32.PostMessageW(0xFFFF, 0x0112, 0xF170, 2)
+            # An external monitor can't be dimmed. Switching it off (SC_MONITORPOWER) put the whole PC into standby
+            # on this kind of machine, so it woke to the sign-in screen. Keep the display on instead (the page is
+            # black) and keep Windows awake while the camera watches.
+            self._hold_display(True)
 
     def on(self):
         if not self.win:
@@ -168,7 +219,7 @@ class Monitor:
             if level is not None:
                 self._set_brightness(level)
                 save_settings(self.settings)
-            self._hold_display(False)
+        self._hold_display(False)
         # ES_DISPLAY_REQUIRED without ES_CONTINUOUS: counts as activity once, doesn't pin the screen on.
         self.kernel32.SetThreadExecutionState(0x00000002)
         # A one-pixel mouse nudge (and back) is what reliably turns a sleeping monitor on in Windows 10/11.
@@ -293,13 +344,15 @@ class Helper:
         self.asleep = True
         self._emit(type="sleep")
         # Give the page a moment to go dark first, then switch the monitor off and start watching.
-        threading.Timer(0.6, self._sleep_now).start()
+        threading.Timer(0.3, self._sleep_now).start()
 
     def _sleep_now(self):
         with self._screen:
             if not self.asleep:
                 return
+            started = time.time()
             self.monitor.off()
+            self.last_dim_ms = int((time.time() - started) * 1000)
             self.watcher.start()
 
     def wake(self, reason="asked", side="center"):
@@ -317,6 +370,9 @@ class Helper:
 
     def status(self):
         return {"ok": True, "version": VERSION, "asleep": self.asleep, "camera": self.watcher.camera_ok,
+                "display_stays_on": True,  # pages may ask this helper to watch (older ones switched the display off)
+                "can_dim": bool(getattr(self.monitor, "can_dim", False)),  # Sleep turns the brightness down
+                "last_dim_ms": getattr(self, "last_dim_ms", None),  # how long the last dim took
                 "sensitivity": self.settings.get("sensitivity"), "last_event": self.latest_id()}
 
     def set_sensitivity(self, level):

@@ -1,0 +1,29 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Projects{% endblock %}
+{% block content %}
+{{ ui.page_header("Projects", crumbs=(("Dieter", "/"), ("Assistant", "/apps/assistant")), tabs=tabs, current=current) }}
+<main class="wrap">
+  <div class="card flush">
+    {% for p in projects %}
+    <a class="link-row" href="/projects/{{ p.id }}">
+      <span class="label-stack"><span class="title">{{ p.name }}</span>
+        {% if p.about %}<span class="small muted">{{ p.about }}</span>{% endif %}
+        <span class="small muted">{{ p.open }} open action{{ "s" if p.open != 1 }}{% if p.next %} · Next: {{ p.next }}{% endif %}</span></span>
+      <span class="chev" aria-hidden="true">›</span>
+    </a>
+    {% else %}
+    {{ ui.empty("No projects yet.") }}
+    {% endfor %}
+  </div>
+  {% call ui.section("New project") %}
+  <form method="post" action="/projects/create" class="card stack">
+    {{ ui.field("Name", "name", required=True, maxlength=120) }}
+    <div class="field"><label for="description">What it's about</label>
+      <textarea class="short" id="description" name="description"></textarea></div>
+    <input type="hidden" name="priority_score" value="3">
+    <button type="submit" class="primary">Create project</button>
+  </form>
+  {% endcall %}
+</main>
+{% endblock %}

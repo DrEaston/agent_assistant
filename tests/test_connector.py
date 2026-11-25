@@ -31,8 +31,13 @@ class PieceTests(unittest.TestCase):
         self.assertTrue(oauth.redirect_allowed(CALLBACK))
         self.assertTrue(oauth.redirect_allowed("http://localhost:4312/callback"))
         self.assertTrue(oauth.redirect_allowed("http://127.0.0.1/callback"))
+        self.assertTrue(oauth.redirect_allowed("https://chatgpt.com/connector_platform_oauth_redirect"))
+        self.assertTrue(oauth.redirect_allowed("https://chatgpt.com/connector/oauth/6mt_L_yi2KyC"))
+        self.assertEqual(oauth.app_name("https://chatgpt.com/connector_platform_oauth_redirect"), "ChatGPT")
+        self.assertEqual(oauth.app_name(CALLBACK), "Claude")
         for bad in ("https://evil.example/cb", "http://localhost.evil.example/cb", "https://claude.ai/other",
-                    "http://localhost:80@evil.example/"):
+                    "http://localhost:80@evil.example/", "https://chatgpt.com/other",
+                    "https://chatgpt.com/connector/oauth/x/../../evil", "https://chatgpt.com.evil.example/connector_platform_oauth_redirect"):
             self.assertFalse(oauth.redirect_allowed(bad), bad)
         self.assertTrue(oauth.redirect_matches(["http://localhost/callback"], "http://localhost:5555/callback"))
         self.assertFalse(oauth.redirect_matches(["http://localhost/callback"], "http://localhost:5555/other"))
@@ -207,6 +212,34 @@ class ConnectorFlowTests(unittest.TestCase):
         self.client.cookies.clear()  # from here on Claude only has its token
         return client_id, tokens
 
+    def test_chatgpt_connects_the_same_way(self):
+        chatgpt = "https://chatgpt.com/connector_platform_oauth_redirect"
+        registered = self.client.post("/oauth/register", json={"redirect_uris": [chatgpt]}).json()
+        self.assertEqual(registered["client_name"], "ChatGPT")
+        meta = self.client.get("/.well-known/oauth-authorization-server").json()
+        self.assertIn("offline_access", meta["scopes_supported"])
+        self.assertTrue(meta["authorization_response_iss_parameter_supported"])
+        verifier, challenge = pkce()
+        query = {"response_type": "code", "client_id": registered["client_id"], "redirect_uri": chatgpt,
+                 "state": "s1", "code_challenge": challenge, "code_challenge_method": "S256",
+                 "scope": "dieter offline_access", "resource": "http://testserver/mcp"}
+        self.sign_in()
+        page = self.client.get("/oauth/authorize", params=query)
+        self.assertIn("Let ChatGPT use your Dieter?", page.text)
+        decision = self.client.post("/oauth/authorize", data=dict(query, decision="allow"), follow_redirects=False)
+        location = decision.headers["location"]
+        self.assertTrue(location.startswith(chatgpt + "?"))
+        answer = parse_qs(urlsplit(location).query)
+        self.assertEqual(answer["iss"], ["http://testserver"])
+        tokens = self.client.post("/oauth/token", data={"grant_type": "authorization_code", "code": answer["code"][0],
+                                                        "client_id": registered["client_id"], "redirect_uri": chatgpt,
+                                                        "code_verifier": verifier,
+                                                        "resource": "http://testserver/mcp"}).json()
+        self.assertIn("refresh_token", tokens)
+        self.client.cookies.clear()
+        names = {t["name"] for t in self.rpc(tokens["access_token"], "tools/list").json()["result"]["tools"]}
+        self.assertIn("assistant_get_project", names)
+
     def rpc(self, token, method, params=None, msg_id=1):
         return self.client.post("/mcp", headers={"Authorization": f"Bearer {token}"},
                                 json={"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params or {}})
@@ -322,6 +355,25 @@ class ConnectorFlowTests(unittest.TestCase):
         self.assertEqual(self.rpc(token, "tools/call", {"name": "music_play"}).json()["error"]["code"], -32602)
         self.assertEqual(self.rpc(token, "nope/nope").json()["error"]["code"], -32601)
         self.assertEqual(self.client.get("/mcp").status_code, 405)
+
+    def test_tools_added_after_connecting_are_still_reachable(self):
+        # Clients keep the tool list from when the person connected; these two always reach every tool there is now.
+        _, tokens = self.connect()
+        token = tokens["access_token"]
+        names = [t["name"] for t in self.rpc(token, "tools/list").json()["result"]["tools"]]
+        self.assertEqual(names[:2], ["dieter_find_tools", "dieter_use_tool"])
+        found = self.tool(token, "dieter_find_tools", query="shopping list create")["tools"]
+        self.assertIn("kitchen_create_shopping_list", [t["name"] for t in found])
+        self.assertIn("properties", found[0]["inputSchema"])
+        self.assertGreater(len(self.tool(token, "dieter_find_tools")["tools"]), 20)
+        def use(**arguments):  # self.tool's own first argument is called name
+            answer = self.rpc(token, "tools/call", {"name": "dieter_use_tool", "arguments": arguments}).json()["result"]
+            return answer["content"][0]["text"] if answer["isError"] else json.loads(answer["content"][0]["text"])
+
+        made = use(name="kitchen_create_shopping_list", arguments={"title": "Via the back door", "items": ["foil"]})
+        self.assertEqual(made["title"], "Via the back door")
+        self.assertIn("no tool", use(name="music_play"))
+        self.assertIn("no tool", use(name="dieter_use_tool", arguments={"name": "dieter_find_tools"}))
 
     def test_kitchen_shopping_lists(self):
         _, tokens = self.connect()

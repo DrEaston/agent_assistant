@@ -186,7 +186,11 @@ def build_timeline(plan, dishes, cooks=()):
                 "section": step.get("section") or "",
                 "series": step.get("series") or [],  # [[minutes after starting, label], ...]: a run of timers
                 "series_button": step.get("series_button") or "",  # e.g. "Start fold timers"
+                "how": step_how(dish.get("instructions_text"), step.get("how")),
+                "missing_how": missing_how(dish.get("instructions_text"), step.get("how")),
+                "uses": step.get("uses") or [],  # ingredient groups this step adds ("*" = all)
             })
+            tasks[-1]["how_ref"] = ref_range(tasks[-1]["how"])
     tasks.sort(key=lambda t: (t["start"], t["end"], t["dish_name"], t["title"]))
     return tasks
 
@@ -361,6 +365,104 @@ def recipe_sections(text, with_timers=False):
             sections.append({"heading": "", "lines": []})
         sections[-1]["lines"].append(instruction_lines(line)[0] if with_timers else line)
     return [s for s in sections if s["lines"]]
+
+
+def _norm(text):
+    return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+
+# ---------------------------------------------------------------- recipe <-> steps
+# One dish has one recipe: ingredients plus method lines, numbered within their section ("Crust 6"). Each timed
+# step names the method lines it covers (step["how"], by how each line starts), so the two link both ways: a step
+# shows its lines and where they are in the recipe, and the recipe shows which step (and when) covers each line.
+
+def recipe_lines(instructions_text):
+    """The method, numbered: [{index (0-based over the whole method), section, n (1-based within the section),
+    ref ("Crust 6", or "6" with no sections), text}]."""
+    out, section, n = [], "", 0
+    for raw in (instructions_text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if is_heading(line):
+            section, n = line[:-1].strip(), 0
+            continue
+        n += 1
+        out.append({"index": len(out), "section": section, "n": n, "ref": f"{section} {n}".strip(), "text": line})
+    return out
+
+
+def step_how(instructions_text, how, lines=None):
+    """The recipe lines a step covers, as the recipe says them now (dicts from recipe_lines). A step lists the start
+    of each line (["Roll on a floured counter", "Ease it into"]), so an edited or rescaled recipe still shows up to
+    date; a line that's no longer there is left out (see missing_how)."""
+    lines = lines if lines is not None else recipe_lines(instructions_text)
+    out = []
+    for start in how or []:
+        want = _norm(start)
+        found = next((line for line in lines if want and _norm(line["text"]).startswith(want)), None)
+        if found and found not in out:
+            out.append(found)
+    return out
+
+
+def ingredient_checklist(dish, added=()):
+    """The dish's ingredients for cook mode's checklist: [{heading, lines: [{text, key, added}]}]. text is scaled to
+    the batch; key comes from the line as written (so it survives a batch-size change): "<dish id>:<line>"."""
+    base = (dish.get("base_ingredients_text") if dish.get("base_ingredients_text") is not None
+            else dish.get("ingredients_text")) or ""
+    shown = (dish.get("ingredients_text") or "").splitlines()
+    base_lines = base.splitlines()
+    sections = []
+    for i, raw in enumerate(base_lines):
+        line = raw.strip()
+        if not line:
+            continue
+        if is_heading(line):
+            sections.append({"heading": line[:-1].strip(), "lines": []})
+            continue
+        if not sections:
+            sections.append({"heading": "", "lines": []})
+        key = f"{dish['id']}:{_norm(line)}"[:200]
+        text = (shown[i].strip() if i < len(shown) else "") or line
+        sections[-1]["lines"].append({"text": text, "key": key, "added": key in added})
+    return [s for s in sections if s["lines"]]
+
+
+def missing_how(instructions_text, how):
+    """Line starts a step names that aren't in the recipe any more (the recipe was edited)."""
+    lines = recipe_lines(instructions_text)
+    return [start for start in how or [] if not step_how("", [start], lines)]
+
+
+def ref_range(lines):
+    """Where lines are in the recipe, short: "Crust 6–8", "Blind bake 1", "Smokies 1, Pasta 1, Sauce 1–7"."""
+    parts, run = [], []
+
+    def flush():
+        if run:
+            first, last = run[0], run[-1]
+            span = f"{first['n']}–{last['n']}" if last["n"] != first["n"] else str(first["n"])
+            parts.append(f"{first['section']} {span}".strip())
+
+    for line in sorted(lines or [], key=lambda l: l["index"]):
+        if run and (line["section"] != run[-1]["section"] or line["n"] != run[-1]["n"] + 1):
+            flush()
+            run = []
+        run.append(line)
+    flush()
+    return ", ".join(parts)
+
+
+def coverage(dish, tasks):
+    """For the dish's recipe: {line index: [tasks that cover it]} (lines no step covers aren't in it)."""
+    covered = {}
+    for task in tasks:
+        if task["dish_id"] != dish["id"]:
+            continue
+        for line in task.get("how") or []:
+            covered.setdefault(line["index"], []).append(task)
+    return covered
 
 
 def sections_for_step(sections, section_name):

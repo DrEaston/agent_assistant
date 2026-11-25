@@ -10,5 +10,30 @@
     <div class="field"><label>Ovens</label><select name="ovens"><option value="1" {% if plan.ovens == 1 %}selected{% endif %}>1</option><option value="2" {% if plan.ovens == 2 %}selected{% endif %}>2</option></select></div>
     <button class="primary" type="submit">Save</button>
   </form>
+
+  <div class="card stack" id="helper-card" style="margin-top:1rem">
+    <h3>Kitchen PC helper</h3>
+    <p class="muted">Optional, for the kitchen PC only: a small Windows program that dims the screen when cook mode
+      sleeps and opens cook mode full screen when you sign in. Everything else works without it.</p>
+    <p id="helper-here" class="small">Checking this computer…</p>
+    <div class="row">
+      <a class="button primary" href="/thanksgiving/helper/DieterHelper.zip" download>Download the helper ({{ helper_version }})</a>
+    </div>
+    <p class="small muted">Unzip it and double-click <em>Install Dieter helper.cmd</em>. If Windows blocks it, right-click
+      the zip first, choose Properties, tick Unblock, then OK.</p>
+  </div>
 </section>
+<script>
+(async () => {
+  const here = document.getElementById("helper-here"), want = "{{ helper_version }}";
+  const newer = (a, b) => { const x = a.split(".").map(Number), y = b.split(".").map(Number);
+    for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
+  try {
+    const ctl = new AbortController(); setTimeout(() => ctl.abort(), 2000);
+    const s = await (await fetch("http://127.0.0.1:47613/status", { signal: ctl.signal, cache: "no-store" })).json();
+    here.textContent = newer(want, s.version || "0") ? `This computer has helper ${s.version}. Version ${want} is available: download it below.`
+      : `This computer has helper ${s.version}: up to date.`;
+  } catch (e) { here.textContent = "The helper isn't running on this computer (that's fine anywhere but the kitchen PC)."; }
+})();
+</script>
 {% endblock %}
