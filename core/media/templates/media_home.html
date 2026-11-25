@@ -3,6 +3,7 @@
 {% block title %}Media{% endblock %}
 {% block content %}
 {{ ui.page_header("Media", sub="Pictures sent to Dieter. ChatGPT and Claude only use the ones you keep.") }}
+<div class="wrap row"><a class="button quiet" href="/media/lab">Animation lab</a></div>
 <main class="wrap">
   {% if done %}{% call ui.banner("ok") %}{{ done }}{% endcall %}{% endif %}
   {% if error %}{% call ui.banner("warn") %}{{ error }}{% endcall %}{% endif %}

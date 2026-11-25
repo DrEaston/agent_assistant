@@ -233,6 +233,8 @@ class _MediaCloud:
 media_connector.configure(db, MediaBlobs(Path(os.getenv("MEDIA_DIR", str(db_path.resolve().parent / "media"))),
                                          _MediaCloud() if cloud_persistence.enabled else None))
 app.include_router(logbook_routes.router)
+from core.mascot import routes as mascot_routes  # noqa: E402  (the animation lab, /media/lab: before /media/<id>)
+app.include_router(mascot_routes.router)
 app.include_router(media_routes.router)
 media_routes.configure_api(lambda request: connector_auth.authenticate(request))
 CONNECTOR_TOOLSETS = [

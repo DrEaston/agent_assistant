@@ -288,6 +288,13 @@ textarea.short { min-height: 5rem; }
 .stat { display: flex; flex-direction: column; gap: .15rem; }
 .stat strong { font-size: var(--text-xl); font-variant-numeric: tabular-nums; }
 
+/* ---------- Mascot stage (core/mascot): Dieter drawn on a canvas; the checkerboard shows what's transparent ---------- */
+.stage { display: block; width: 100%; max-width: 26rem; aspect-ratio: 1; margin: 0 auto; border-radius: var(--r-md, 12px);
+  background-color: var(--panel); background-size: 24px 24px; background-position: 0 0, 12px 12px;
+  background-image: linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%),
+                    linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%); }
+.stage.plain { background-image: none; background-color: transparent; }
+
 /* ---------- Inline confirm (details that swaps its button for the form) ---------- */
 .confirm > summary { list-style: none; }
 .confirm > summary::-webkit-details-marker { display: none; }
