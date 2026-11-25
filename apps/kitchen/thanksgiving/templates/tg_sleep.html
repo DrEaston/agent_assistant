@@ -8,9 +8,20 @@
 .sleep-screen { position: fixed; inset: 0; z-index: 1000; background: #000; opacity: 1; transition: opacity .9s ease;
   cursor: none; }
 .sleep-screen[hidden] { display: none; }
+.helper-update { position: fixed; left: 1rem; right: 1rem; bottom: 1rem; z-index: 60; display: flex; flex-wrap: wrap;
+  gap: .6rem; align-items: center; padding: .7rem .9rem; border-radius: 12px; background: #fff7ed; border: 2px solid #f59e0b;
+  box-shadow: 0 6px 20px rgba(0,0,0,.18); color: #3b2a14; max-width: 52rem; margin: 0 auto; }
+.helper-update[hidden] { display: none; }
+html.tg-asleep, html.tg-asleep body { overflow: hidden; }  /* no scroll bar showing down the side while asleep */
 .sleep-screen.fading { opacity: 0; }
 .sleep-note { position: absolute; bottom: 1.5rem; left: 0; right: 0; text-align: center; color: #3f3f46; font-size: .85rem; }
 </style>
+<div class="helper-update" id="helper-update" hidden role="status">
+  <strong>Update the kitchen helper</strong> ({{ helper_version }}): the screen dims as soon as it sleeps.
+  <a class="button primary" href="/thanksgiving/helper/DieterHelper.zip" download>Download</a>
+  <span>Then unzip it and double-click <em>Install Dieter helper.cmd</em>.</span>
+  <button type="button" class="quiet" id="helper-update-close" aria-label="Hide for today">✕</button>
+</div>
 <div class="sleep-screen" id="sleep-screen" hidden aria-hidden="true">
   <div class="sleep-note" id="sleep-note"></div>
 </div>
@@ -20,9 +31,14 @@
   const $ = (id) => document.getElementById(id);
   const screen = $("sleep-screen"), button = $("sleep-btn");
   const pause = (ms) => new Promise((r) => setTimeout(r, ms));
-  let helper = null;        // the helper's /status when it's running on this PC
+  let helper = null, reportedHelper = false;        // the helper's /status when it's running on this PC
   let asleep = false, waking = false, sleptAt = 0, lastEvent = 0;
 
+  function olderThan(have, want) {  // "0.2.0" older than "0.2.1"?
+    const a = String(have || "0").split(".").map(Number), b = String(want).split(".").map(Number);
+    for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) < (b[i] || 0);
+    return false;
+  }
   async function helperCall(path, method = "GET", timeoutMs = 2500) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeoutMs);
@@ -36,6 +52,18 @@
     if (helper) lastEvent = helper.last_event || 0;
     // Remember this is the kitchen PC, so every Thanksgiving page shows the full-screen button (tg_fullscreen.html).
     if (helper) try { localStorage.setItem("dieter-kitchen-screen", "1"); } catch (e) {}
+    // An out-of-date helper: offer the new one, once a day.
+    if (helper && olderThan(helper.version, "{{ helper_version }}")) {
+      let hiddenUntil = 0;
+      try { hiddenUntil = Number(localStorage.getItem("dieter-helper-update-hidden") || 0); } catch (e) {}
+      $("helper-update").hidden = Date.now() < hiddenUntil;
+    }
+    if (helper && !reportedHelper) {  // once per page: which helper this PC has (for the server log)
+      reportedHelper = true;
+      fetch("/thanksgiving/api/voice-log", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event: "helper", detail: JSON.stringify({ version: helper.version, can_dim: helper.can_dim,
+          display_stays_on: !!helper.display_stays_on }), agent: navigator.userAgent }) }).catch(() => {});
+    }
     button.title = helper ? "Dim the screen; the webcam wakes it" : "Black out the screen (tap to wake)";
   }
 
@@ -43,11 +71,78 @@
   async function sleep(fromHelper = false) {
     if (asleep) return;
     asleep = true; waking = false; sleptAt = Date.now();
+    document.documentElement.classList.add("tg-asleep");
     screen.classList.remove("fading"); screen.hidden = false;
-    $("sleep-note").textContent = helper ? "" : "Tap, move the mouse, or press a key to wake";
     if (fromHelper) return;
     if (!helper) await findHelper();
-    if (helper) helperCall("/sleep", "POST");
+    // Only a helper that keeps the display on gets asked to watch: older ones switched the monitor off, and on the
+    // kitchen PC that put Windows into standby (it woke to the sign-in screen). The page itself is black either way.
+    const watching = !!(helper && helper.display_stays_on);
+    $("sleep-note").textContent = "";
+    if (!watching) { startBrowserWatch(); return; }  // no helper (or an old one): Chrome watches the webcam itself
+    const asked = await helperCall("/sleep", "POST");
+    // A few seconds later: is the helper watching, and did the webcam open? If it couldn't open the webcam (on the
+    // kitchen PC Windows stopped it, 11/24), Chrome watches instead; the helper still dims the screen.
+    setTimeout(async () => {
+      const s = await helperCall("/status", "GET", 2500);
+      log("helper-sleep", JSON.stringify({ asked_ok: !!(asked && asked.ok), asleep: s ? s.asleep : null,
+        camera: s ? s.camera : null, can_dim: s ? s.can_dim : null, version: s ? s.version : null,
+        dim_ms: s ? s.last_dim_ms : null }));
+      if (asleep && !(s && s.camera === true)) startBrowserWatch();
+    }, 3000);
+  }
+
+  function log(event, detail) {
+    fetch("/thanksgiving/api/voice-log", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event, detail: String(detail).slice(0, 300), agent: navigator.userAgent }) }).catch(() => {});
+  }
+
+  // ---------- Motion wake from Chrome, when the helper can't use the webcam. Same idea as the helper's: a small grey
+  // picture a few times a second, compared with a slowly updating background; enough change wakes the screen. The
+  // pictures never leave this page, and the camera is on only while the screen is asleep.
+  const MOTION_NEEDED = 0.012;  // share of the picture that has to change (the helper's "medium")
+  let cam = null;
+  async function startBrowserWatch() {
+    if (cam || !asleep || !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) return;
+    cam = { starting: true };
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 160, height: 120 }, audio: false });
+    } catch (e) { cam = null; log("browser-camera", "not allowed: " + (e.name || e.message)); return; }
+    if (!asleep) { stream.getTracks().forEach((t) => t.stop()); cam = null; return; }
+    const video = document.createElement("video");
+    video.muted = true; video.playsInline = true; video.srcObject = stream;
+    try { await video.play(); } catch (e) {}
+    const W = 80, H = 60, canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    let background = null;
+    const started = Date.now();
+    cam = { stream, timer: setInterval(() => {
+      if (!asleep) { stopBrowserWatch(); return; }
+      ctx.drawImage(video, 0, 0, W, H);
+      const px = ctx.getImageData(0, 0, W, H).data, gray = new Float32Array(W * H);
+      for (let i = 0; i < W * H; i++) gray[i] = 0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2];
+      if (!background) { background = gray; return; }
+      let changed = 0, sumX = 0;
+      for (let i = 0; i < W * H; i++) {
+        if (Math.abs(gray[i] - background[i]) > 28) { changed++; sumX += i % W; }
+        background[i] = background[i] * 0.92 + gray[i] * 0.08;  // slow changes (light fading) blend in
+      }
+      if (Date.now() - started > 1500 && changed / (W * H) >= MOTION_NEEDED) {
+        const x = sumX / changed / W;  // the webcam faces the room, so its left is the viewer's right
+        stopBrowserWatch();
+        log("browser-camera", "motion");
+        wake(x < 0.4 ? "right" : x > 0.6 ? "left" : "center");
+      }
+    }, 160) };
+    log("browser-camera", "watching");
+  }
+  function stopBrowserWatch() {
+    if (!cam) return;
+    if (cam.timer) clearInterval(cam.timer);
+    if (cam.stream) cam.stream.getTracks().forEach((t) => t.stop());
+    cam = null;
   }
 
   // Listen to the helper for as long as the page is open (long poll; it answers within 25 s either way).
@@ -71,16 +166,24 @@
   function wake(side = "center", tellHelper = true) {
     if (!asleep || waking) return;
     waking = true;
+    stopBrowserWatch();
     if (tellHelper && helper) helperCall("/wake", "POST");  // bring the screen back and turn the camera off
     $("sleep-note").textContent = "";
     // Dieter's bubble comes alive over the dark screen, then the page fades back in around it.
     const lasts = window.dieterBubble ? window.dieterBubble.perform(side) : 0;
     const fadeAt = Math.max(400, lasts - 1000);
     setTimeout(() => { screen.classList.add("fading"); }, fadeAt);
-    setTimeout(() => { screen.hidden = true; screen.classList.remove("fading"); asleep = false; waking = false; }, fadeAt + 950);
+    setTimeout(() => {
+      screen.hidden = true; screen.classList.remove("fading"); asleep = false; waking = false;
+      document.documentElement.classList.remove("tg-asleep");
+    }, fadeAt + 950);
   }
 
   button.addEventListener("click", () => sleep());
+  $("helper-update-close").addEventListener("click", () => {
+    $("helper-update").hidden = true;
+    try { localStorage.setItem("dieter-helper-update-hidden", String(Date.now() + 24 * 3600e3)); } catch (e) {}
+  });
   // Someone at the keyboard, mouse, or screen. (Ignore the first second: that's the tap that put it to sleep.)
   for (const type of ["pointerdown", "pointermove", "keydown", "touchstart"]) {
     document.addEventListener(type, () => { if (asleep && Date.now() - sleptAt > 1200) wake("center"); }, true);

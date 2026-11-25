@@ -47,14 +47,36 @@ Add 1/2 cup broth if the pan gets dry. Tent the breast with foil once it is gold
 Start checking at 2 1/2 hours: 165°F in the thickest part of the breast and thigh, not touching bone.
 Rest, loosely tented, 30 to 40 minutes. The vegetables are soft and rich: use them for gravy or serve them."""
 
-GRAVY_INGREDIENTS = """turkey pan drippings
+OLD_GRAVY_INGREDIENTS = """turkey pan drippings
 4 tbsp unsalted butter (or skimmed turkey fat)
 1/4 cup flour
 low-sodium broth to make 3 to 4 cups liquid with the drippings"""
 
-GRAVY_INSTRUCTIONS = """Strain the pan juices and skim the fat.
+OLD_GRAVY_INSTRUCTIONS = """Strain the pan juices and skim the fat.
 Melt 4 tbsp butter or fat, whisk in 1/4 cup flour, and cook 1 minute.
 Whisk in 3 to 4 cups drippings topped up with broth. Simmer 5 to 10 minutes.
+Taste before adding any salt (the turkey is pre-brined)."""
+
+# Mom's tip (11/23): simmer the neck and giblets into stock while the turkey roasts, for a richer gravy.
+GRAVY_INGREDIENTS = """Neck stock:
+turkey neck, heart and gizzard, from the turkey (not the liver)
+onion ends and celery leaves, saved from the turkey vegetables
+1 bay leaf (optional)
+6 cups water
+Gravy:
+turkey pan drippings
+4 tbsp unsalted butter (or skimmed turkey fat)
+1/4 cup flour
+low-sodium broth, only if the stock and drippings come up short of 3 to 4 cups"""
+
+GRAVY_INSTRUCTIONS = """Neck stock:
+Put the neck, heart and gizzard in a pot with the onion ends, celery leaves, bay leaf and 6 cups water. Leave out the liver: it makes stock bitter. No salt: the turkey is pre-brined.
+Bring to a boil, skim off the foam, then simmer gently, partly covered, about 2 hours.
+Strain and keep warm on low. You should have 3 to 4 cups.
+Gravy:
+Strain the pan juices and skim the fat.
+Melt 4 tbsp butter or fat, whisk in 1/4 cup flour, and cook 1 minute.
+Whisk in 3 to 4 cups drippings topped up with the neck stock (low-sodium broth if you run short). Simmer 5 to 10 minutes.
 Taste before adding any salt (the turkey is pre-brined)."""
 
 POTATO_INGREDIENTS = """2 lb russet potatoes
@@ -332,7 +354,8 @@ def _mac_steps():
 
 
 def _gravy_steps():
-    return [_s("make", "T-35", "Make the gravy from the drippings", 15, "stove")]
+    return [_s("stock", "T-275", "Simmer the turkey neck and giblets into stock", 120, "stove"),
+            _s("make", "T-35", "Make the gravy from the drippings", 15, "stove")]
 
 
 def _house_steps():
@@ -344,8 +367,12 @@ def _house_steps():
 
 
 def _dish(name, category, ingredients="", instructions="", steps=None, notes=""):
+    from . import step_guide
+
+    steps = steps or []
+    step_guide.apply(name, steps)  # each step says what to do (the recipe lines it covers)
     return {"name": name, "category": category, "cook": "", "ingredients_text": ingredients,
-            "instructions_text": instructions, "notes": notes, "steps": steps or []}
+            "instructions_text": instructions, "notes": notes, "steps": steps}
 
 
 def preset_dish(key, dinner=None):
@@ -532,14 +559,14 @@ def janice_onions_dish():
 
 OLIVE_INGREDIENTS = """440 g flour
 90 g active starter
-330 g water
+365 g water
 9 g salt
 120 g pitted Kalamata or Castelvetrano olives, roughly chopped
 2 tbsp fresh rosemary, finely chopped
 rice flour for dusting"""
 
 OLIVE_INSTRUCTIONS = """Pat the chopped olives very dry with paper towels; wet olives make a slack dough.
-Mix flour, starter, water, salt, and rosemary in the mixer. 330 g water, not 350: the olives add moisture.
+Mix flour, starter, water, salt, and rosemary in the mixer. 365 g water, a bit more than the plain loaf: patted-dry olives add little moisture, and this dough tightens up fast.
 Stretch and folds, 6 sets over 2 hours, with the plain loaf. On the first set, scatter the olives over the dough and fold them in.
 Cold shape: turn onto the counter, fold into a round with the bench scraper, drag toward you to tighten the surface. Tuck any olives poking out underneath so they don't burn. Seam-side up in a rice-floured, towel-lined bowl. Cover and refrigerate overnight.
 Next morning: preheat the Dutch oven at 500°F for 45 to 60 minutes.
@@ -548,6 +575,11 @@ Flip straight from the fridge onto parchment, dust, score, and lower in with the
 Bake 25 minutes at 500°F with the lid on.
 Lid off, 450°F, 15 minutes (205 to 210°F inside).
 Cool at least 1 hour before slicing."""
+
+
+# 11/24: 330 g water made a dry dough that got very thick quickly; 365 g now (saved plans updated once, store.py).
+OLIVE_OLD_WATER_LINE = 'Mix flour, starter, water, salt, and rosemary in the mixer. 330 g water, not 350: the olives add moisture.'
+OLIVE_NEW_WATER_LINE = 'Mix flour, starter, water, salt, and rosemary in the mixer. 365 g water, a bit more than the plain loaf: patted-dry olives add little moisture, and this dough tightens up fast.'
 
 
 def _olive_steps():

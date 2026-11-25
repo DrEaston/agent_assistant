@@ -40,6 +40,23 @@ is not enough: ask them to tap Save or say "save it".
 
 Your reply: 1-3 short sentences of plain text, no markdown or lists (it may be read aloud)."""
 
+# Asked for something no tool can do: say so kindly and log it (a Studio report) instead of pretending or dropping it.
+# Any app's chat can use these (Thanksgiving's brain.py does too).
+LOG_TOOL = {"name": "log_for_later",
+            "description": "Log something they asked for that you can't do with your tools, so it gets reviewed "
+                           "later. One short line on what they wanted.",
+            "input_schema": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}}
+LOG_NOTE = """Things you can't do: if they ask for something none of your tools can do (a change no tool makes, a new
+feature, something about how the site itself works), don't pretend and don't just refuse. Call log_for_later with one
+short line on what they wanted, then tell them kindly that you can't do that yet and you've logged it to review later.
+Don't log questions you answered or things you did."""
+
+
+def log_reply(text):
+    """The tool's answer to Claude."""
+    return "Logged for later review. Tell them kindly you can't do that yet and that you've logged it."
+
+
 SAVE_TOOL = {"name": "save_change",
              "description": "Save a change waiting for an OK (listed under 'Waiting for their OK'). Only when the "
                             "person's latest message plainly says to save it.",
@@ -56,6 +73,7 @@ class ChatSetup:
     savers: dict = field(default_factory=dict)  # proposal kind -> save(proposal_id) -> card
     pending: Callable[[], list] = lambda: []  # cards waiting for an OK (this person's)
     offer: Callable[[dict], bool] = lambda schema: True  # which tools (schemas) this chat offers
+    log_for_later: Callable = None  # (summary, what they said, page_url) -> None: files it for review (LOG_TOOL)
     persona: str = PERSONA
 
     def pages(self):
@@ -83,12 +101,14 @@ def _schemas(setup):
 
 
 def _system(setup):
-    return agent.cached_system(setup.persona + "".join("\n\n" + n.strip() for n in setup.notes if n))
+    notes = list(setup.notes) + ([LOG_NOTE] if setup.log_for_later else [])
+    return agent.cached_system(setup.persona + "".join("\n\n" + n.strip() for n in notes if n))
 
 
 def _tools(setup, schemas):
     open_page = open_page_tool(setup.page_lists, on_open=lambda url, page: "")
-    return agent.api_tools(schemas + [open_page.schema()]) + ([SAVE_TOOL] if setup.savers else [])
+    return (agent.api_tools(schemas + [open_page.schema()]) + ([SAVE_TOOL] if setup.savers else [])
+            + ([LOG_TOOL] if setup.log_for_later else []))
 
 
 def prime(setup):
@@ -131,6 +151,9 @@ def answer(setup, text, history=(), page_url="", page_title="", model_call=None)
             state["do"] = [a for a in state["do"] if a.get("type") != "reload"] + [
                 {"type": "decided", "id": proposal_id, "status": "saved"}, {"type": "reload"}]
             return {"saved": True, "title": saved.get("title", "")}
+        if name == "log_for_later" and setup.log_for_later:
+            setup.log_for_later(str(args.get("summary") or "").strip()[:200] or text[:200], text, page_url)
+            return log_reply(text)
         if name not in names:
             raise ToolError(f"There's no tool called {name}.")
         toolset = next(t for t in setup.toolsets if t.owns(name))

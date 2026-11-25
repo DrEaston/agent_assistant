@@ -118,6 +118,16 @@ def render(name, **context):
 
 # ---------------------------------------------------------------- context
 
+def method_sections(dish):
+    """The dish's method, numbered, grouped by section: [{heading, lines: [recipe_lines dicts]}]."""
+    sections = []
+    for line in planner.recipe_lines(dish.get("instructions_text")):
+        if not sections or sections[-1]["heading"] != line["section"]:
+            sections.append({"heading": line["section"], "lines": []})
+        sections[-1]["lines"].append(line)
+    return sections
+
+
 def plan_context(plan, now=None):
     now = now or local_now()
     s = store()
@@ -131,6 +141,11 @@ def plan_context(plan, now=None):
     for dish in dishes:
         dish["ingredient_sections"] = planner.recipe_sections(dish["ingredients_text"])
         dish["instruction_sections"] = planner.recipe_sections(dish["instructions_text"])
+        dish["method"] = method_sections(dish)
+        dish["covered"] = planner.coverage(dish, tasks)  # line index -> the steps that cover it
+        dish["stale_steps"] = [t for t in tasks if t["dish_id"] == dish["id"] and t.get("missing_how")]
+        if dish.get("source_meal_id"):
+            dish["library_url"] = f"/apps/recipes/meals/{int(dish['source_meal_id'])}"
     return {
         "dishes_by_id": {d["id"]: d for d in dishes},
         "plan": plan,
@@ -684,6 +699,8 @@ async def save_dish(dish_id: int, request: Request):
             # Timers the step can start (presets.with_timers); not on the form, so keep what was saved.
             "series": existing_steps.get(step_id, {}).get("series") or [],
             "series_button": existing_steps.get(step_id, {}).get("series_button") or "",
+            "how": existing_steps.get(step_id, {}).get("how") or [],  # the recipe lines it covers (planner.step_how)
+            "uses": existing_steps.get(step_id, {}).get("uses") or [],  # ingredient groups it adds
         })
     if (form.get("new_step_title") or "").strip():
         steps.append({
@@ -1011,6 +1028,34 @@ def api_speak(text: str = ""):
     return StreamingResponse(body(), media_type="audio/mpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
+# The kitchen helper (helper/), for the kitchen PC to download and install: built with helper/build.ps1 and
+# uploaded to the app's Cloud Storage bucket. Signed-in only.
+HELPER_VERSION = "0.2.1"
+HELPER_OBJECT = f"helper/DieterHelper-{HELPER_VERSION}.zip"
+_templates.globals["helper_version"] = HELPER_VERSION  # Settings and cook mode offer it when this PC's is older
+
+
+@router.get("/thanksgiving/helper/DieterHelper.zip")
+def helper_download():
+    bucket_name = os.getenv("GCS_BUCKET") or os.getenv("DIETER_GCS_BUCKET")
+    if not bucket_name:
+        raise HTTPException(status_code=404, detail="The helper download isn't set up here.")
+    from google.cloud import storage
+
+    blob = storage.Client().bucket(bucket_name).blob(HELPER_OBJECT)
+
+    def chunks():
+        with blob.open("rb", chunk_size=1 << 20) as f:
+            while True:
+                data = f.read(1 << 20)
+                if not data:
+                    break
+                yield data
+
+    return StreamingResponse(chunks(), media_type="application/zip",
+                             headers={"Content-Disposition": 'attachment; filename="DieterHelper.zip"'})
+
+
 @router.post("/thanksgiving/api/warm")
 def api_warm():
     """The voice panel calls this when it opens, so the first phrase doesn't wait on a cold start. It answers once
@@ -1179,6 +1224,7 @@ def cook_state():
     dishes = [sizes.with_size(d) for d in s.get_dishes(plan["id"])]
     tasks = planner.build_timeline(plan, dishes)
     done = s.get_checked(plan["id"], "step")
+    added = s.get_checked(plan["id"], "ingredient")
     by_dish = {}
     for task in tasks:
         by_dish.setdefault(task["dish_id"], []).append({
@@ -1188,6 +1234,8 @@ def cook_state():
             "clock": planner.format_clock(task["start"]), "day": planner.short_date(task["start"]),
             "done": task["key"] in done, "section": task["section"], "series": task.get("series") or [],
             "series_button": task.get("series_button") or "",
+            "how": [{"index": l["index"], "ref": l["ref"], "text": l["text"]} for l in task.get("how") or []],
+            "how_ref": task.get("how_ref") or "", "uses": task.get("uses") or [],
         })
     return JSONResponse({
         "now_ms": int(time.time() * 1000),
@@ -1201,6 +1249,8 @@ def cook_state():
             "size_options": d.get("size_options", []), "size_value": d.get("size_value", ""),
             "ingredient_sections": planner.recipe_sections(d["ingredients_text"]),
             "instruction_sections": planner.recipe_sections(d["instructions_text"], with_timers=True),
+            "method": method_sections(d),
+            "checklist": planner.ingredient_checklist(d, added),  # "Added" as you cook, shared by every device
             "steps": by_dish.get(d["id"], []),
         } for d in dishes],
         "timers": [{"id": t["id"], "dish_id": t["dish_id"], "label": t["label"], "ends_ms": t["ends_at_ms"]}
@@ -1217,6 +1267,31 @@ async def _json(request):
     except Exception:
         data = {}
     return data if isinstance(data, dict) else {}
+
+
+@router.post("/thanksgiving/api/ingredients/added")
+async def api_ingredient_added(request: Request):
+    """Cook mode's ingredient checklist: an ingredient went in (or, added false, back out)."""
+    plan = require_plan()
+    data = await _json(request)
+    key = str(data.get("key") or "")[:200]
+    if not re.fullmatch(r"\d+:.+", key):
+        raise HTTPException(status_code=400, detail="Missing ingredient")
+    store().set_checked(plan["id"], "ingredient", key, bool(data.get("added", True)))
+    return {"ok": True}
+
+
+@router.post("/thanksgiving/api/ingredients/reset")
+async def api_ingredients_reset(request: Request):
+    """Start over: every ingredient of one dish back on the checklist."""
+    plan = require_plan()
+    data = await _json(request)
+    try:
+        dish_id = int(data.get("dish_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Missing dish") from None
+    store().clear_checked(plan["id"], "ingredient", f"{dish_id}:")
+    return {"ok": True}
 
 
 @router.post("/thanksgiving/api/steps/done")

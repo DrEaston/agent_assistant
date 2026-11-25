@@ -1,5 +1,5 @@
 {% extends "tg_page.html" %}
-{% from "tg_macros.html" import render_sections, size_picker, recipe_block, kind_pill, task_row, day_chart with context %}
+{% from "tg_macros.html" import render_sections, size_picker, recipe_block, recipe_numbered, kind_pill, task_row, day_chart with context %}
 {% block title %}{{ dish.name }}{% endblock %}
 {% block page %}
 <section id="dish-{{ dish.id }}" class="dish-page">
@@ -8,6 +8,15 @@
     <h2>{{ dish.name }}</h2>
     <a class="small" href="#edit" data-open-editor>Edit dish</a>
   </div>
+  <p class="dish-links small">
+    {% if dish_tasks %}<a href="/thanksgiving/cook?dish={{ dish.id }}">Open in cook mode →</a>{% endif %}
+    {% if dish.library_url %}<a href="{{ dish.library_url }}">From your Kitchen library →</a>{% endif %}
+  </p>
+  {% if dish.stale_steps %}
+  <div class="banner warn">Some steps point at recipe lines that were changed:
+    {% for t in dish.stale_steps %}<strong>{{ t.title }}</strong> (“{{ t.missing_how|join("”, “") }}”){% if not loop.last %}; {% endif %}{% endfor %}.
+    Ask Dieter to fix the steps, or edit them below.</div>
+  {% endif %}
   {% for card in pending_cards %}
   <div class="proposal-slot" data-proposal-card='{{ card|tojson }}'></div>
   {% endfor %}
@@ -15,17 +24,16 @@
   <div class="card">
     <h3 class="card-title">Recipe{% if dish.size_label %} <span data-size-label-for="{{ dish.id }}">· {{ dish.size_label }}</span>{% endif %}</h3>
     {{ size_picker(dish) }}
-    <div data-recipe-for="{{ dish.id }}">
     {% if dish.ingredient_sections or dish.instruction_sections %}
-      {{ render_sections(dish.ingredient_sections, dish.instruction_sections) }}
+      {{ recipe_numbered(dish) }}
+      {% if dish_tasks %}<p class="small muted">Each method line shows the step that covers it and when. Tap one to jump to that step.</p>{% endif %}
     {% else %}
-      <p class="muted">No recipe yet. Paste the ingredients and steps under Edit dish.</p>
+      <div data-recipe-for="{{ dish.id }}"><p class="muted">No recipe yet. Paste the ingredients and method under Edit dish.</p></div>
     {% endif %}
-    </div>
   </div>
   <h3 class="block-title">Steps</h3>
   <div class="card">
-  {% for t in dish_tasks %}{{ task_row(t, show_dish=False) }}{% else %}<p class="muted">No steps yet.</p>{% endfor %}
+  {% for t in dish_tasks %}{{ task_row(t, show_dish=False, show_lines=False) }}{% else %}<p class="muted">No steps yet.</p>{% endfor %}
   </div>
   {% if recipe_versions %}
   <h3 class="block-title" id="history">Recipe history</h3>

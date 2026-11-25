@@ -2,8 +2,9 @@ APP = {
     "id": "assistant",
     "title": "Dieter Assistant",
     "nav_label": "Assistant",
-    "home_url": "/apps/assistant/planner",
-    "route_prefixes": ("/apps/assistant", "/apps/planner", "/dashboard"),
+    "accent": "assistant",
+    "home_url": "/apps/assistant",
+    "route_prefixes": ("/apps/assistant", "/apps/planner", "/dashboard", "/projects", "/scheduler"),
     "body_class": "planner-shell-page",
     "shell_class": "app-shell-planner",
     "top_class": "",
@@ -18,8 +19,9 @@ APP = {
     "subtitle": "Plan projects, remember agenda items, and keep life moving.",
     "home_label": "Assistant Home",
     "nav_items": (
-        {"label": "Planner", "url": "/apps/assistant/planner"},
-        {"label": "Scheduler", "url": "/apps/assistant/scheduler"},
+        {"label": "To-dos", "url": "/apps/assistant"},
+        {"label": "Projects", "url": "/apps/assistant/projects"},
+        {"label": "Reading", "url": "/apps/assistant/reading"},
     ),
     "theme": {
         "header": "#083344",

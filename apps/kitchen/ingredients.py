@@ -147,9 +147,12 @@ def identify(text):
 
 
 def is_not_bought(line):
-    """Water, pan drippings, sourdough starter, and recipe-card notes are not things to buy."""
+    """Water, pan drippings, sourdough starter, leftovers saved from another dish ("onion ends, saved from the
+    turkey vegetables", "turkey neck, from the turkey"), and recipe-card notes are not things to buy."""
     text = line.lower().strip()
     if "starter" in text or ("drippings" in text and "broth" not in text and "stock" not in text):
+        return True
+    if re.search(r"\b(saved|reserved) from\b|\bfrom the turkey\b", text):
         return True
     # A sentence like "Chicken breasts can be substituted for pork chops." is a note, not an item.
     if text.endswith(".") and len(text.split()) > 4 and not _AMOUNT.match(text):

@@ -50,6 +50,7 @@ from core import internal as core_internal, proxy as core_proxy, ui as core_ui
 from apps.kitchen.shopping import router as shopping
 from apps.kitchen import pages as kitchen_pages
 from apps.launcher import today as today_page
+from apps.assistant import pages as assistant_pages, reading as assistant_reading
 from apps.music import routes as music_routes
 from apps.issues import routes as studio_routes
 from apps.registry import app_shell_for_path, global_nav_apps, launcher_cards
@@ -184,6 +185,7 @@ app.include_router(shopping.router)
 # Claude's connector (core/connector): /mcp for the tools, /oauth/* and /.well-known/* for signing in. Each app
 # adds its ToolSet here; an app running as its own service is reached through RemoteToolSet.
 from apps.issues import connector as studio_connector  # noqa: E402
+from apps.assistant import connector as assistant_connector, nav as assistant_nav  # noqa: E402
 from apps.kitchen import connector as kitchen_connector  # noqa: E402
 from apps.kitchen.thanksgiving import connector as thanksgiving_connector  # noqa: E402
 from core.connector import oauth as connector_oauth, server as connector_server  # noqa: E402
@@ -194,14 +196,17 @@ from apps.kitchen.thanksgiving import nav as thanksgiving_nav  # noqa: E402
 
 connector_auth = connector_oauth.OAuth(db, lambda user_id: dict(db.get_user_by_id(user_id) or {}) or None)
 KITCHEN_TOOLS = kitchen_connector.tools()
+ASSISTANT_TOOLS = assistant_connector.tools()
+assistant_connector.configure(db)
 THANKSGIVING_TOOLS = (RemoteToolSet("thanksgiving", THANKSGIVING_SERVICE_URL, "/thanksgiving/api/connector/tools")
                       if THANKSGIVING_SERVICE_URL else thanksgiving_connector.tools())
 CONNECTOR_TOOLSETS = [
     KITCHEN_TOOLS,
     THANKSGIVING_TOOLS,
     # Every app's pages (apps/<app>/nav.py): links Claude can hand over. Dieter's own chat opens them instead.
-    ToolSet("dieter", [open_page_tool([kitchen_nav.PAGES, thanksgiving_nav.PAGES])]),
+    ToolSet("dieter", [open_page_tool([kitchen_nav.PAGES, thanksgiving_nav.PAGES, assistant_nav.PAGES])]),
     studio_connector.tools(),  # Studio reports, for the admin
+    ASSISTANT_TOOLS,
 ]
 
 
@@ -233,16 +238,25 @@ from apps.kitchen import recipe_changes as kitchen_recipe_changes  # noqa: E402
 
 SITE_PAGES = [Page("today.home", "Today", "Dieter's home page: today across every app.", "/")]
 DIETER_CHAT = dieter_chat.ChatSetup(
-    toolsets=[KITCHEN_TOOLS, THANKSGIVING_TOOLS],
-    page_lists=[SITE_PAGES, kitchen_nav.PAGES, thanksgiving_nav.PAGES],
-    notes=[kitchen_connector.CHAT_NOTES],
+    toolsets=[KITCHEN_TOOLS, THANKSGIVING_TOOLS, ASSISTANT_TOOLS],
+    page_lists=[SITE_PAGES, kitchen_nav.PAGES, thanksgiving_nav.PAGES, assistant_nav.PAGES],
+    notes=[kitchen_connector.CHAT_NOTES, assistant_connector.CHAT_NOTES],
     savers=kitchen_connector.savers(),
     pending=kitchen_connector.pending,
     offer=lambda schema: not schema["name"].startswith("thanksgiving_")
     or schema.get("annotations", {}).get("readOnlyHint", False),
 )
+def dieter_chat_log(summary, said, page_url):
+    """Dieter's chat was asked for something it can't do: a Studio report to review later."""
+    user = dict_from_row(db.get_user_by_id(get_current_user_id())) or {}
+    db.add_app_feedback_report(title=f"[Dieter couldn't] {summary[:80]}", area="Dieter chat", page_url=page_url[:300],
+                               page_title="Ask Dieter", reporter_name=user.get("display_name") or user.get("name") or "",
+                               reporter_email="", raw_feedback=f"Asked Dieter: {said}\n\nWhat it couldn't do: {summary}")
+
+
+DIETER_CHAT.log_for_later = dieter_chat_log
 # Pages whose Ask Dieter goes to Dieter's chat (the rest still use the older handlers in api_dieter_action).
-DIETER_CHAT_PATHS = ("/apps/recipes",)
+DIETER_CHAT_PATHS = ("/apps/recipes", "/apps/assistant", "/projects")
 app.include_router(connector_auth.router())
 app.include_router(connector_server.make_router(CONNECTOR_TOOLSETS, connector_auth.authenticate, connector_run_as,
                                                 signer=core_proxy.signer_user))
@@ -4415,14 +4429,13 @@ def guest_repository_chat_response(content, page_url=""):
     return GUEST_APP_OVERVIEW
 
 def dieter_chat_handles(message):
-    """Dieter's chat (Claude) answers on Kitchen pages, and on Today unless it's a planner request (which still goes
-    through the older planner preview and confirm)."""
+    """Dieter's chat (Claude) answers on Kitchen and Assistant pages and on Today (to-dos and reminders included)."""
     if not claude_agent.available() or (message.previous_action_plan or "").strip() or message.confirmation_token:
         return False
     path = (message.page_url or "").split("#")[0].split("?")[0]
     if path.startswith(DIETER_CHAT_PATHS):
         return True
-    return path in ("", "/") and not message_requests_planner_action(message.content)
+    return path in ("", "/")
 
 
 _dieter_chat_primed = {"at": 0.0}
@@ -5188,6 +5201,58 @@ def merge_legacy_cct_projects_on_startup():
 
 _after_db_ready.append(merge_legacy_cct_projects_on_startup)
 
+
+def assistant_cleanup_once():
+    """Approved 11/23/2026: drop the duplicate and test projects, and move the reading list (written as text in the
+    Reading list project) into Reading. Each runs once; matched by id and name, so nothing else can be hit."""
+    conn = db.connect()
+    conn.execute("CREATE TABLE IF NOT EXISTS app_migrations (key TEXT PRIMARY KEY, at TEXT DEFAULT CURRENT_TIMESTAMP)")
+
+    changed = []
+
+    def once(key):
+        if conn.execute("SELECT 1 FROM app_migrations WHERE key = ?", (key,)).fetchone():
+            return False
+        conn.execute("INSERT INTO app_migrations (key) VALUES (?)", (key,))
+        changed.append(key)
+        return True
+
+    if once("drop-test-projects-2026-11-23"):
+        doomed = {4: "Dieter Router Scratch Test", 5: "Recipe display app (2)", 6: "Recipe display app (3)",
+                  7: "Recipe display app (4)", 9: "Recipe display app (5)", 10: "Recipe display app (6)",
+                  14: "Dieter Demo Review"}
+        for project_id, name in doomed.items():
+            row = conn.execute("SELECT name FROM projects WHERE id = ?", (project_id,)).fetchone()
+            if not row or row["name"] != name:
+                continue
+            actions = [r["id"] for r in conn.execute("SELECT id FROM recommended_actions WHERE project_id = ?", (project_id,))]
+            for action_id in actions:
+                conn.execute("DELETE FROM task_steps WHERE action_id = ?", (action_id,))
+            for table in ("recommended_actions", "notes", "blockers", "weekly_goals", "project_shares", "project_artifacts"):
+                conn.execute(f"DELETE FROM {table} WHERE project_id = ?", (project_id,))
+            conn.execute("UPDATE scheduler_items SET project_id = NULL, action_id = NULL WHERE project_id = ?", (project_id,))
+            conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+            print(f"Assistant clean-up: dropped project {project_id} {name}")
+    if once("reading-from-project-2026-11-23"):
+        row = conn.execute("SELECT * FROM projects WHERE name = 'Reading list' ORDER BY id LIMIT 1").fetchone()
+        if row:
+            books = assistant_reading.parse_checklist(row["description"] or "")
+            token = set_current_user_id(row["user_id"])
+            try:
+                store = assistant_reading.ReadingStore(db)
+                have = {(b["title"].lower(), b["author_sort"]) for b in store.books()}
+                for book in books:
+                    if (book["title"].lower(), assistant_reading.author_sort(book["author"])) not in have:
+                        store.add(book["title"], book["author"], book["high_priority"])
+            finally:
+                reset_current_user_id(token)
+            print(f"Assistant clean-up: {len(books)} books moved into Reading")
+    if changed:
+        db._commit()  # only when something ran, so a normal start doesn't upload a backup
+
+
+_after_db_ready.append(assistant_cleanup_once)
+
 def safe_redirect_path(path, fallback="/"):
     """Keep form redirects inside this app."""
     return path if path and path.startswith("/") and not path.startswith("//") else fallback
@@ -5453,18 +5518,103 @@ def planner_app(request: Request):
 
 @app.get("/apps/assistant")
 def assistant_app(request: Request):
-    """Dieter Assistant default page."""
-    return RedirectResponse(url="/apps/assistant/planner", status_code=303)
+    """The Assistant: to-dos (with dates), projects and reading at a glance (apps/assistant/pages.py)."""
+    items = [assistant_pages.todo_view(dict(r)) for r in db.get_scheduler_items(status="open", limit=100)]
+    done = [assistant_pages.todo_view(dict(r)) for r in db.get_recent_completed_scheduler_items(limit=8)]
+    books = assistant_reading.ReadingStore(db).books()
+    reading = {s: sum(1 for b in books if b["status"] == s) for s in assistant_reading.STATUSES}
+    return assistant_pages.home_page(todos=items, done=done, projects=assistant_project_rows(), reading=reading)
+
+
+def assistant_project_rows():
+    rows = []
+    for project in dicts_from_rows(db.get_all_projects()):
+        open_actions = dicts_from_rows(db.get_open_recommended_actions(project["id"]))
+        rows.append({"id": project["id"], "name": project["name"], "open": len(open_actions),
+                     "next": open_actions[0]["action"] if open_actions else "",
+                     "about": (project.get("description") or "").strip().splitlines()[0][:140]
+                     if (project.get("description") or "").strip() else ""})
+    return rows
+
+
+@app.get("/apps/assistant/projects")
+def assistant_projects_page(request: Request):
+    return assistant_pages.projects_page(projects=assistant_project_rows())
+
+
+@app.get("/apps/assistant/reading")
+def assistant_reading_page(request: Request, show: str = ""):
+    store = assistant_reading.ReadingStore(db)
+    return assistant_pages.reading_page(books=store.books(), show=show if show in assistant_reading.STATUSES else "")
+
+
+@app.get("/apps/assistant/reading/bookstore")
+def assistant_bookstore_page(request: Request):
+    return assistant_pages.bookstore_page(checklist=assistant_reading.ReadingStore(db).checklist())
+
+
+@app.post("/apps/assistant/reading/add")
+def assistant_reading_add(title: str = Form(...), author: str = Form(""), high_priority: str = Form("")):
+    try:
+        assistant_reading.ReadingStore(db).add(title, author, bool(high_priority))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse(url="/apps/assistant/reading", status_code=303)
+
+
+@app.post("/apps/assistant/reading/{book_id}/status")
+def assistant_reading_status(book_id: int, status: str = Form(...), next: str = Form("/apps/assistant/reading")):
+    try:
+        assistant_reading.ReadingStore(db).update(book_id, status=status)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/reading"), status_code=303)
+
+
+@app.post("/apps/assistant/reading/{book_id}/delete")
+def assistant_reading_delete(book_id: int):
+    assistant_reading.ReadingStore(db).delete(book_id)
+    return RedirectResponse(url="/apps/assistant/reading", status_code=303)
+
+
+@app.post("/apps/assistant/reading/bookstore/shelf")
+def assistant_bookstore_shelf(key: str = Form(...), checked: str = Form("")):
+    assistant_reading.ReadingStore(db).check_shelf(key, bool(checked))
+    return RedirectResponse(url="/apps/assistant/reading/bookstore", status_code=303)
+
+
+@app.post("/apps/assistant/reading/bookstore/done")
+def assistant_bookstore_done():
+    assistant_reading.ReadingStore(db).finish_visit()
+    return RedirectResponse(url="/apps/assistant/reading", status_code=303)
+
+
+@app.post("/apps/assistant/feedback")
+def assistant_feedback(request: Request, text: str = Form(...), page: str = Form("/apps/assistant")):
+    """The Assistant pages' "Report a problem" box: a Studio report."""
+    text = (text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Describe the problem.")
+    user = getattr(request.state, "current_user", None) or {}
+    db.add_app_feedback_report(title=f"[Assistant] {text.splitlines()[0][:80]}", area="Assistant", page_url=page[:300],
+                               page_title="Assistant", reporter_name=user.get("name", "") or "",
+                               reporter_email=user.get("email", "") or "", raw_feedback=text[:4000])
+    return RedirectResponse(url=safe_redirect_path(page, "/apps/assistant") , status_code=303)
 
 
 @app.get("/apps/assistant/planner")
 def assistant_planner_app(request: Request):
-    """Assistant planner page."""
-    return render_planner_app(request)
+    """The old planner page: the Assistant's home now."""
+    return RedirectResponse(url="/apps/assistant", status_code=303)
 
 
 @app.get("/apps/assistant/scheduler")
 def assistant_scheduler_app(request: Request):
+    """The old scheduler page: to-dos are the Assistant's home now."""
+    return RedirectResponse(url="/apps/assistant", status_code=303)
+
+
+def old_assistant_scheduler_app(request: Request):
     """Assistant scheduler page."""
     split_mixed_priority_scheduler_notes()
     data = api_dashboard()
@@ -7005,6 +7155,11 @@ def delete_trainer_session(session_id: int, next: str = Form("/apps/trainer/upco
 
 @app.get("/projects")
 def projects_page(request: Request):
+    """The old projects page: the Assistant's Projects tab now."""
+    return RedirectResponse(url="/apps/assistant/projects", status_code=303)
+
+
+def old_projects_page(request: Request):
     """Projects list page."""
     ensure_cct_starter_projects(request)
     projects = dicts_from_rows(db.get_all_projects())
@@ -7032,7 +7187,24 @@ def chat_page(request: Request):
 
 @app.get("/projects/{project_id}")
 def project_detail(request: Request, project_id: int):
-    """Project detail page."""
+    """A project in the Assistant: next actions (with steps), goals, blockers, notes (apps/assistant/pages.py)."""
+    project = dict_from_row(db.get_project_by_id(project_id))
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    actions = []
+    for action in dicts_from_rows(db.get_recommended_actions(project_id)):
+        steps = dicts_from_rows(db.get_task_steps(action["id"]))
+        actions.append(dict(action, done=action.get("status") == "done", steps_total=len(steps),
+                            steps_done=sum(1 for s in steps if s.get("status") == "done")))
+    notes = [dict(n, when=str(n.get("created_at") or "")[:10]) for n in dicts_from_rows(db.get_notes(project_id))]
+    todos = [assistant_pages.todo_view(dict(r)) for r in db.get_scheduler_items(status="open", limit=100)
+             if dict(r).get("project_id") == project_id]
+    return assistant_pages.project_page(project=project, actions=actions, goals=dicts_from_rows(db.get_weekly_goals(project_id)),
+                                        blockers=dicts_from_rows(db.get_blockers(project_id)), notes=notes, todos=todos)
+
+
+def old_project_detail(request: Request, project_id: int):
+    """Project detail page (the old one, kept for reference until the Codex pieces are retired for good)."""
     cct_project_ids = ensure_cct_starter_projects(request)
     project = dict_from_row(db.get_project_by_id(project_id))
     if not project and project_id in {15, 16} and cct_project_ids:
@@ -7256,6 +7428,16 @@ def save_project_codex_review(request: Request, project_id: int):
 
 @app.get("/projects/{project_id}/actions/{action_id}")
 def action_detail(request: Request, project_id: int, action_id: int):
+    """A project action and its steps (apps/assistant/pages.py)."""
+    project = dict_from_row(db.get_project_by_id(project_id))
+    action = dict_from_row(db.get_recommended_action(action_id))
+    if not project or not action or action["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    steps = [dict(s, done=s.get("status") == "done") for s in dicts_from_rows(db.get_task_steps(action_id))]
+    return assistant_pages.action_page(project=project, action=dict(action, done=action.get("status") == "done"), steps=steps)
+
+
+def old_action_detail(request: Request, project_id: int, action_id: int):
     """Task detail page with checklist and links to app-specific work surfaces."""
     project = dict_from_row(db.get_project_by_id(project_id))
     action = dict_from_row(db.get_recommended_action(action_id))
@@ -7290,7 +7472,7 @@ def create_scheduler_item_form(
         notes=notes,
         source="manual",
     )
-    return RedirectResponse(url="/apps/assistant/scheduler", status_code=303)
+    return RedirectResponse(url="/apps/assistant", status_code=303)
 
 
 @app.post("/scheduler/{item_id}/complete")

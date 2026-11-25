@@ -6,6 +6,7 @@ Spec: https://modelcontextprotocol.io/specification/2025-11-25/basic/transports
 """
 
 import json
+import os
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
@@ -15,7 +16,28 @@ from .oauth import public_base
 from .tools import ToolError
 
 PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
-SERVER_INFO = {"name": "dieter", "title": "Dieter", "version": "1.0"}
+# The version changes with every deploy (Cloud Run sets K_REVISION), so a client that compares it knows to fetch
+# tools/list again.
+SERVER_INFO = {"name": "dieter", "title": "Dieter", "version": os.getenv("K_REVISION") or "1.0"}
+
+# Claude (and other clients) keep the tool list from when the person connected and don't always fetch it again,
+# so a tool added later can be invisible until they reconnect. These two are always in the list: through them a
+# client reaches every tool Dieter has now, with the same checks as calling it directly.
+FIND_TOOLS, USE_TOOL = "dieter_find_tools", "dieter_use_tool"
+META_TOOLS = [
+    {"name": FIND_TOOLS, "title": "Find Dieter tools",
+     "description": "Every tool Dieter has right now, with what it does and its inputs. Use it when the tool you need "
+                    "isn't in your list: your list can be older than Dieter. query narrows it (words in the name or "
+                    "description).",
+     "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}},
+     "annotations": {"readOnlyHint": True}},
+    {"name": USE_TOOL, "title": "Use a Dieter tool",
+     "description": "Run any Dieter tool by name (from dieter_find_tools) with its arguments. Same result and checks "
+                    "as calling it directly.",
+     "inputSchema": {"type": "object", "properties": {"name": {"type": "string"},
+                                                      "arguments": {"type": "object"}},
+                     "required": ["name"]}},
+]
 
 INSTRUCTIONS = """Dieter is this person's household app (askdieter.ai): Kitchen (recipes, shopping lists and the
 Thanksgiving planner), with more apps to come. Tools act on their real data, as them.
@@ -27,7 +49,9 @@ Thanksgiving planner), with more apps to come. Tools act on their real data, as 
 - Thanksgiving: thanksgiving_get_plan has every dish, step and time. Plan changes go through
   thanksgiving_change_plan; preview first when a change moves several steps.
 - When they want to see something in Dieter (a recipe, a list, a day of the plan), give the link from dieter_open_page.
-- Keep answers short; they're often reading on a phone in a store or kitchen."""
+- Keep answers short; they're often reading on a phone in a store or kitchen.
+- Your tool list may be older than Dieter. If a tool you need is missing, dieter_find_tools lists them all and
+  dieter_use_tool runs one."""
 
 
 def make_router(toolsets, authenticate, run_as, signer=lambda user: user, instructions=INSTRUCTIONS):
@@ -53,8 +77,26 @@ def make_router(toolsets, authenticate, run_as, signer=lambda user: user, instru
             tools.extend(toolset.list(signer(user)))
         return tools
 
+    def find_tools(user, arguments):
+        words = str(arguments.get("query") or "").lower().split()
+        found = [t for t in all_tools(user)
+                 if all(w in f"{t.get('name', '')} {t.get('description', '')}".lower() for w in words)]
+        return {"tools": [{"name": t["name"], "description": t.get("description") or "",
+                           "inputSchema": t.get("inputSchema") or {}} for t in found]}
+
     def call_tool(user, params):
         name = str(params.get("name") or "")
+        arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+        if name == FIND_TOOLS:
+            return {"content": [{"type": "text", "text": json.dumps(find_tools(user, arguments), ensure_ascii=False,
+                                                                    indent=1)}], "isError": False}
+        if name == USE_TOOL:
+            inner = str(arguments.get("name") or "")
+            if inner in (FIND_TOOLS, USE_TOOL) or not owner(inner):
+                return {"content": [{"type": "text", "text": f"Dieter has no tool called {inner!r}. "
+                                                             "dieter_find_tools lists them."}], "isError": True}
+            params = {"name": inner, "arguments": arguments.get("arguments")}
+            name = inner
         toolset = owner(name)
         if not toolset:
             return None
@@ -81,7 +123,8 @@ def make_router(toolsets, authenticate, run_as, signer=lambda user: user, instru
         if method == "ping":
             return _result(msg_id, {})
         if method == "tools/list":
-            return _result(msg_id, {"tools": await run_in_threadpool(run_as, user, lambda: all_tools(user))})
+            return _result(msg_id, {"tools": META_TOOLS + await run_in_threadpool(run_as, user,
+                                                                                    lambda: all_tools(user))})
         if method == "tools/call":
             answer = await run_in_threadpool(run_as, user, lambda: call_tool(user, params))
             if answer is None:

@@ -7,7 +7,7 @@ dish's recipe, the Thanksgiving and Kitchen shopping lists and the recipe librar
 list after a trip, using the same tools as the Claude connector (core/connector).
 """
 
-from core.connector import agent
+from core.connector import agent, chat
 from core.connector.pages import open_page_tool
 from core.connector.tools import ToolError
 
@@ -48,11 +48,15 @@ few words what you opened. Don't open pages they didn't ask for.
 
 How to think:{_THINKING}
 
+{chat.LOG_NOTE}
+
 Your reply: 1-3 short sentences of plain text, no markdown or lists (it may be read aloud)."""
 
 LOCAL_TOOLS = ("thanksgiving_get_dish", "thanksgiving_get_shopping_list", "thanksgiving_check_items",
                "thanksgiving_finish_trip", "thanksgiving_put_back", "thanksgiving_start_timer",
-               "thanksgiving_start_step_timers", "thanksgiving_propose_recipe_change", "thanksgiving_recipe_history")
+               "thanksgiving_start_step_timers", "thanksgiving_propose_recipe_change", "thanksgiving_recipe_history",
+               "thanksgiving_list_timers", "thanksgiving_cancel_timers", "thanksgiving_change_timer",
+               "thanksgiving_shift_timers")
 
 SAVE_TOOL = {"name": "save_recipe_change",
              "description": "Save a proposed recipe change. Only when the cook's latest message plainly says to save it.",
@@ -76,6 +80,11 @@ SPOKEN_TOOLS = [
 def _store():
     from . import router
     return router.store()
+
+
+def _platform():
+    from . import router
+    return router._state["platform"]
 
 
 def _db():
@@ -102,7 +111,7 @@ def _tools(local, kitchen_tools, spoken):
         except Exception as exc:
             print(f"Warning: Kitchen tools unavailable: {exc}")
     schemas = [s for s in local.list() if s["name"] in LOCAL_TOOLS] + kitchen_schemas
-    tools = agent.api_tools(schemas) + EXTRA_TOOLS + [SAVE_TOOL] + (SPOKEN_TOOLS if spoken else [])
+    tools = agent.api_tools(schemas) + EXTRA_TOOLS + [SAVE_TOOL, chat.LOG_TOOL] + (SPOKEN_TOOLS if spoken else [])
     tools.append(agent.api_tools([_open_page(lambda url, page: "").schema()])[0])
     return tools
 
@@ -143,7 +152,8 @@ def understand(text, summary, history=(), sass="normal", spoken_prompt="", hando
             card = connector.propose_recipe_change(args, request=text)
             state["do"] = [a for a in state["do"] if a.get("type") != "proposal"] + [{"type": "proposal", "card": card}]
             if not any(a.get("type") == "navigate" for a in state["do"]):
-                state["do"].append({"type": "navigate", "url": card["open_url"], "title": "Dish"})
+                # "auto": opened to show the card, not asked for; cook mode stays put and shows the card in the chat.
+                state["do"].append({"type": "navigate", "url": card["open_url"], "title": "Dish", "auto": True})
             return card
         if name == "save_recipe_change":
             from core.connector.proposals import said_save
@@ -153,6 +163,17 @@ def understand(text, summary, history=(), sass="normal", spoken_prompt="", hando
             card = recipe_changes.save(_store(), _db(), plan, str(args.get("proposal_id") or ""))
             state["do"] = [a for a in state["do"] if a.get("type") != "reload"] + [{"type": "reload"}]
             return {"saved": True, "title": card["title"]}
+        if name == "log_for_later":
+            summary = str(args.get("summary") or "").strip()[:200] or text[:200]
+            try:
+                _platform().report(dict(title=f"[Dieter couldn't] {summary[:80]}", area="Thanksgiving / Dieter",
+                                        page_url="/thanksgiving", page_title="Tell Dieter", reporter_name="",
+                                        reporter_email="",
+                                        raw_feedback=f"Asked Dieter: {text}\n\nWhat it couldn't do: {summary}"))
+            except Exception as exc:
+                print(f"Warning: couldn't log a request for later: {exc}")
+            print("Dieter couldn't: " + summary)
+            return chat.log_reply(text)
         if name == "stay_quiet":
             state["ignore"] = True
             return "OK. Say nothing."

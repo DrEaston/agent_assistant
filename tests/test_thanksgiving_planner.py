@@ -64,7 +64,10 @@ class MenuTimelineTests(unittest.TestCase):
     def test_sourdough_and_pie_schedule(self):
         self.assertEqual(find(self.tasks, "Sourdough", "feed1")["start"], datetime(2026, 11, 23, 21, 0))
         self.assertEqual(find(self.tasks, "Sourdough", "mix")["start"], datetime(2026, 11, 24, 18, 0))
-        self.assertEqual(find(self.tasks, "Sourdough", "bake1")["start"], datetime(2026, 11, 25, 10, 0))
+        # Right after the olive loaf comes out at 8:40: a short reheat, then the plain loaf at 9.
+        self.assertEqual(find(self.tasks, "Sourdough", "bake1")["start"], datetime(2026, 11, 25, 9, 0))
+        self.assertEqual(find(self.tasks, "Sourdough", "preheat")["start"],
+                         find(self.tasks, "Olive and rosemary sourdough", "bake2")["end"])
         bread_done = find(self.tasks, "Sourdough", "bake2")["end"]
         self.assertGreaterEqual(find(self.tasks, "pie", "blind1")["start"], bread_done)
 
@@ -76,7 +79,7 @@ class MenuTimelineTests(unittest.TestCase):
         self.assertEqual(folds["series_button"], "Start fold timers")
         olive = preset_dish("olive_sourdough")
         self.assertEqual(olive["category"], "bread")
-        self.assertIn("330 g water", olive["ingredients_text"])
+        self.assertIn("365 g water", olive["ingredients_text"])
         self.assertIn("rosemary", olive["ingredients_text"])
         self.assertIn("olives", olive["ingredients_text"])
         # The olive loaf is out of the oven before the plain loaf's preheat
@@ -294,16 +297,51 @@ class RouteTests(unittest.TestCase):
         self.assertIn("Shopping list", pages)
         self.assertIn("Yukon Gold", pages)
 
-    def test_steps_expand_to_their_recipe_section(self):
+    def test_ingredient_checklist_is_shared_and_starts_over(self):
         self.client.get("/thanksgiving")
-        page = self.client.get("/thanksgiving/timeline").text
-        self.assertIn("Roll, crimp, and freeze the pie shell", page)
-        self.assertIn('class="t-open"', page)
-        self.assertIn("coin-size pieces", page)
         state = self.client.get("/thanksgiving/api/state").json()
         pie = next(d for d in state["dishes"] if d["name"] == "Pumpkin pie")
-        self.assertEqual([s["heading"] for s in pie["instruction_sections"]][0], "Crust")
-        self.assertEqual(next(s for s in pie["steps"] if s["key"].endswith(":dough"))["section"], "Crust")
+        crust = pie["checklist"][0]
+        self.assertEqual(crust["heading"], "Crust")
+        flour = crust["lines"][0]
+        self.assertIn("flour", flour["text"])
+        self.assertFalse(flour["added"])
+        dough = next(s for s in pie["steps"] if s["key"].endswith(":dough"))
+        self.assertEqual(dough["uses"], ["Crust"])
+        self.assertEqual(self.client.post("/thanksgiving/api/ingredients/added", json={"key": "nope"}).status_code, 400)
+        self.client.post("/thanksgiving/api/ingredients/added", json={"key": flour["key"], "added": True})
+        # Another device asks for the state: the flour is added there too.
+        again = next(d for d in self.client.get("/thanksgiving/api/state").json()["dishes"] if d["id"] == pie["id"])
+        self.assertTrue(again["checklist"][0]["lines"][0]["added"])
+        # A batch-size change rescales the text but keeps what's been added.
+        self.client.post(f"/thanksgiving/api/dishes/{pie['id']}/size", json={"scale": "1"})
+        resized = next(d for d in self.client.get("/thanksgiving/api/state").json()["dishes"] if d["id"] == pie["id"])
+        self.assertTrue(resized["checklist"][0]["lines"][0]["added"])
+        self.client.post("/thanksgiving/api/ingredients/reset", json={"dish_id": pie["id"]})
+        cleared = next(d for d in self.client.get("/thanksgiving/api/state").json()["dishes"] if d["id"] == pie["id"])
+        self.assertFalse(any(l["added"] for g in cleared["checklist"] for l in g["lines"]))
+
+    def test_steps_and_recipe_link_both_ways(self):
+        self.client.get("/thanksgiving")
+        state = self.client.get("/thanksgiving/api/state").json()
+        pie = next(d for d in state["dishes"] if d["name"] == "Pumpkin pie")
+        shell = next(s for s in pie["steps"] if s["key"].endswith(":shell"))
+        self.assertEqual(shell["how_ref"], "Crust 6–8")
+        self.assertEqual(shell["how"][0]["index"], 5)
+        self.assertEqual(pie["method"][0]["heading"], "Crust")
+        self.assertEqual(pie["method"][0]["lines"][5]["n"], 6)
+        # Timeline: the step shows its own lines and where they are in the recipe.
+        page = self.client.get("/thanksgiving/timeline").text
+        self.assertIn("Roll, crimp, and freeze the pie shell", page)
+        self.assertIn('class="t-how"', page)
+        self.assertIn(f'href="/thanksgiving/menu/{pie["id"]}#line-{pie["id"]}-5">Crust 6–8 in the recipe →</a>', page)
+        # Dish page: each method line names the step that covers it, linking back to that step.
+        dish = self.client.get(f"/thanksgiving/menu/{pie['id']}").text
+        self.assertIn(f'id="line-{pie["id"]}-5"', dish)
+        self.assertIn(f'href="/thanksgiving/menu/{pie["id"]}#task-{pie["id"]}-shell"', dish)
+        self.assertIn(f'id="task-{pie["id"]}-shell"', dish)
+        self.assertIn(f'href="/thanksgiving/cook?dish={pie["id"]}"', dish)
+        self.assertNotIn("not scheduled", dish)  # every pie line is in a step
 
     def test_each_tab_is_its_own_page(self):
         self.client.get("/thanksgiving")
@@ -346,7 +384,7 @@ class RouteTests(unittest.TestCase):
         for who in ("Parrisa", "Janice"):
             self.assertNotIn(who, card)  # who makes what stays off the shareable card
         self.assertNotIn("In the kitchen", page)
-        self.assertIn("House prep tasks", page)
+        self.assertIn("House prep steps", page)
         self.assertIn('id="add-dish"', page)
         self.assertEqual(self.client.get("/thanksgiving/photos/turkey.jpg").status_code, 404)
 
@@ -371,7 +409,7 @@ class RouteTests(unittest.TestCase):
         self.assertEqual((beans["cook"], beans["ingredients_text"]), ("Janice", ""))  # nothing to buy
         warm = next(s for s in beans["steps"] if s["id"] == "warm")
         self.assertEqual((warm["anchor"], warm["temp"]), ("T-25", 400))  # same oven temperature as the mac
-        self.assertEqual(next(s for s in cran["steps"] if s["id"] == "make")["anchor"], "D-2 18:00")
+        self.assertEqual(next(s for s in cran["steps"] if s["id"] == "make")["anchor"], "D-2 16:00")  # before the sourdough mixing at 6
         self.assertIn("Janice's", self.dish_page(beans))
         grocery = self.client.get("/thanksgiving/shopping").text
         self.assertIn("cranberries", grocery)
@@ -419,8 +457,10 @@ class RouteTests(unittest.TestCase):
         self.assertIn("Ingredients", page)
         self.assertNotIn("Roast the turkey", page)  # only this dish's steps
         self.assertEqual(self.client.get("/thanksgiving/menu/99999").status_code, 404)
-        recipes = self.client.get("/thanksgiving/recipes").text
-        self.assertIn(f'href="#recipe-{mac["id"]}"', recipes)
+        recipes = self.client.get("/thanksgiving/recipes").text  # an index: each recipe lives on its dish page
+        self.assertIn(f'id="recipe-{mac["id"]}"', recipes)
+        self.assertIn(f'href="/thanksgiving/menu/{mac["id"]}"', recipes)
+        self.assertNotIn("Whisk in the flour", recipes)
 
     def test_saves_return_to_the_page_they_came_from(self):
         self.client.get("/thanksgiving")
@@ -506,12 +546,12 @@ class RouteTests(unittest.TestCase):
         self.client.get("/thanksgiving")
         plan, mac = self.mac()
         page = self.all_pages()
-        # The dish page, the Recipes page, and each timeline step's recipe all carry the picker.
-        self.assertGreaterEqual(page.count('aria-label="Batch size for Mac and cheese"'), 3)
+        # The recipe lives on the dish page, which carries the picker (cook mode has its own).
+        self.assertGreaterEqual(page.count('aria-label="Batch size for Mac and cheese"'), 1)
         self.assertIn(f'<span data-size-label-for="{mac["id"]}">· Full · 9x13 pan · about 8 servings</span>',
                       self.dish_page(mac))
         # The recipe text sits in blocks the page refreshes in place when the size changes.
-        self.assertGreaterEqual(page.count(f'data-recipe-for="{mac["id"]}"'), 2)
+        self.assertGreaterEqual(page.count(f'data-recipe-for="{mac["id"]}"'), 1)
         state = self.client.get("/thanksgiving/api/state").json()
         cook_mac = next(d for d in state["dishes"] if d["name"] == "Mac and cheese")
         self.assertEqual(cook_mac["size_value"], "1")
@@ -712,6 +752,33 @@ class RouteTests(unittest.TestCase):
         self.assertIn("potatoes", labels)
         with self.assertRaisesRegex(Exception, "no step with timers"):
             tools.call("thanksgiving_start_step_timers", {"dish": "Gravy"})
+        # Starting them again replaces the running set, here offset so the first fold is in 10 minutes.
+        again = tools.call("thanksgiving_start_step_timers", {"dish": "Sourdough", "first_in_minutes": 10})
+        self.assertEqual(again["replaced_running"], 6)
+        self.assertEqual([t["minutes"] for t in again["started"]], [10, 25, 40, 55, 85, 115])
+        self.assertEqual(again["usual_pattern"], "first at 15 min, then every 15 min (x3), then every 30 min (x2)")
+        running = tools.call("thanksgiving_list_timers", {})["running"]
+        self.assertEqual(len(running), 7)  # six folds and the potatoes
+        # "Leave out the first timer": folds 2 to 6 at their usual times.
+        skipped = tools.call("thanksgiving_start_step_timers", {"dish": "Sourdough", "skip": [1]})
+        self.assertEqual([(t["minutes"], t["label"][-6:]) for t in skipped["started"]][:2], [(30, "2 of 6"), (45, "3 of 6")])
+        potatoes = next(t for t in tools.call("thanksgiving_list_timers", {})["running"] if t["label"] == "potatoes")
+        tools.call("thanksgiving_change_timer", {"timer_id": potatoes["id"], "minutes_from_now": 5})
+        moved = next(t for t in tools.call("thanksgiving_list_timers", {})["running"] if t["id"] == potatoes["id"])
+        self.assertIn(moved["minutes_left"], (4, 5))
+        # Stray fold timers someone made by hand ("Fold 4", "Last stretch and fold") go too when folds are re-timed.
+        tools.call("thanksgiving_start_timer", {"label": "Fold 4", "minutes": 12})
+        tools.call("thanksgiving_start_timer", {"label": "Last stretch and fold", "minutes": 90})
+        # "I just did fold 3": folds 4 to 6 at their usual gaps from now (15, then 30, then 30).
+        after3 = tools.call("thanksgiving_start_step_timers", {"dish": "Sourdough", "done_through": 3})
+        self.assertEqual(after3["replaced_running"], 7)  # five from skip=[1], plus the two strays
+        self.assertEqual([(t["minutes"], t["label"][-6:]) for t in after3["started"]],
+                         [(15, "4 of 6"), (45, "5 of 6"), (75, "6 of 6")])
+        pushed = tools.call("thanksgiving_shift_timers", {"label_words": "fold", "minutes": 5})
+        self.assertEqual([t["minutes_left"] for t in pushed["moved"]], [20, 50, 80])
+        gone = tools.call("thanksgiving_cancel_timers", {"label_words": "fold"})
+        self.assertEqual(len(gone["cancelled"]), 3)
+        self.assertEqual([t["label"] for t in tools.call("thanksgiving_list_timers", {})["running"]], ["potatoes"])
 
     def test_saved_mac_gets_goat_cheese_swap_on_restart(self):
         from apps.kitchen.thanksgiving import presets
@@ -904,16 +971,16 @@ class RouteTests(unittest.TestCase):
         self.voice_with({"reply": "Pecans, fancy.", "question": "", "actions": [
             {"type": "add", "dish_id": pie["id"], "title": "Toast pecans for the top", "date": "2026-11-25",
              "time": "09:00", "minutes": 12, "kind": "oven", "temp": 350},
-            {"type": "remove", "dish_id": pie["id"], "step_ids": ["chill"]},
+            {"type": "remove", "dish_id": pie["id"], "step_ids": ["cream"]},
             {"type": "edit", "dish_id": pie["id"], "step_id": "cool", "minutes": 150, "detail": "Away from the dog"}]})
         r = self.client.post("/thanksgiving/api/command", json={"text": "pecans, no chilling, cool longer"}).json()
         self.assertEqual(r["problems"], [])
         self.assertIn("add “Toast pecans for the top”", r["changes"][0])
-        self.assertIn("remove “Refrigerate the pie”", r["changes"][1])
+        self.assertIn("remove “Whip the cream for the pie and refrigerate”", r["changes"][1])
         self.assertIn("2h → 2h 30m", r["changes"][2])
         self.client.post("/thanksgiving/api/command/apply")
         steps = {s["id"]: s for s in self.pie()[1]["steps"]}
-        self.assertNotIn("chill", steps)
+        self.assertNotIn("cream", steps)
         self.assertEqual(steps["cool"]["minutes"], 150)
         added = next(s for s in steps.values() if s["title"] == "Toast pecans for the top")
         self.assertEqual((added["anchor"], added["temp"], added["kind"]), ("D-1 09:00", 350, "oven"))
@@ -986,6 +1053,19 @@ class RouteTests(unittest.TestCase):
         self.client.post("/thanksgiving/api/command/undo")
         self.assertEqual(tg_router.store().get_extra_groceries(plan["id"]), [])
 
+    def test_claude_brain_logs_what_it_cant_do(self):
+        self.client.get("/thanksgiving")
+        seen = self.claude_with(
+            [("tool", "log_for_later", {"summary": "Wants the dog fed at 5"})],
+            [("text", "I can't feed the dog yet, but I've logged it to review later.")])
+        r = self.client.post("/thanksgiving/api/command", json={"text": "feed the dog at 5", "brain": "claude"}).json()
+        self.assertIn("logged it", r["reply"])
+        self.assertIn("log_for_later", {t["name"] for t in seen["calls"][0]["tools"]})
+        self.assertIn("Things you can't do", seen["calls"][0]["system"][0]["text"])
+        row = self.db.connect().execute("SELECT * FROM app_feedback_reports ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertEqual(row["title"], "[Dieter couldn't] Wants the dog fed at 5")
+        self.assertIn("Asked Dieter: feed the dog at 5", row["raw_feedback"])
+
     def test_claude_brain_opens_pages_on_the_screen(self):
         self.client.get("/thanksgiving")
         plan, pie = self.pie()
@@ -1023,7 +1103,7 @@ class RouteTests(unittest.TestCase):
             [("text", "Here's a less sweet pie. Look it over and tap Save.")])
         r = self.client.post("/thanksgiving/api/command", json={"text": "make the pie less sweet", "brain": "claude"}).json()
         card = next(a["card"] for a in r["do"] if a["type"] == "proposal")
-        self.assertIn({"type": "navigate", "url": f"/thanksgiving/menu/{pie['id']}", "title": "Dish"}, r["do"])
+        self.assertIn({"type": "navigate", "url": f"/thanksgiving/menu/{pie['id']}", "title": "Dish", "auto": True}, r["do"])  # opened to show the card (cook mode stays put)
         self.assertEqual(card["title"], "Change the recipe: Pumpkin pie")
         self.assertIn({"op": "removed", "text": "3/4 cup sugar"}, card["diffs"][0]["lines"])
         self.assertIn({"op": "added", "text": "2/3 cup sugar"}, card["diffs"][0]["lines"])
@@ -1457,6 +1537,74 @@ class RouteTests(unittest.TestCase):
             self.assertIsNone(tg_router.store().get_plan())
         finally:
             reset_current_user_id(token)
+
+
+class StepGuideTests(unittest.TestCase):
+    """A step that pops up in cook mode says what to do: the recipe lines it covers, as the recipe says them now."""
+
+    def test_step_how_finds_lines_by_their_start(self):
+        from apps.kitchen.thanksgiving import planner
+        text = "\n".join(["Crust:", "Roll on a floured counter into a 12-inch circle.", "Ease it into a 9-inch plate.",
+                          "Bake at 425°F for 15 minutes."])
+        found = planner.step_how(text, ["roll on a floured", "Bake at 425", "Gone line"])
+        self.assertEqual([l["text"] for l in found],
+                         ["Roll on a floured counter into a 12-inch circle.", "Bake at 425°F for 15 minutes."])
+        self.assertEqual([l["ref"] for l in found], ["Crust 1", "Crust 3"])
+        self.assertEqual(planner.ref_range(found), "Crust 1, Crust 3")
+        self.assertEqual(planner.missing_how(text, ["Roll on", "Gone line"]), ["Gone line"])
+        self.assertEqual(planner.step_how(text, None), [])
+
+    def test_guide_fills_in_steps_but_keeps_hand_edits(self):
+        from apps.kitchen.thanksgiving import step_guide
+        steps = [{"id": "shell", "detail": "Freeze it in the plate, wrapped in plastic and foil."},
+                 {"id": "dough", "detail": "My own note", "how": ["Whisk the flour"]},
+                 {"id": "mine", "detail": ""}]
+        self.assertTrue(step_guide.apply("Pumpkin pie", steps))
+        self.assertEqual(steps[0]["how"][0], "Roll on a floured counter")
+        self.assertIn("Double batch", steps[0]["detail"])
+        self.assertEqual(steps[1]["detail"], "My own note")  # edited by hand: kept
+        self.assertEqual(steps[1]["how"], ["Whisk the flour"])
+        self.assertNotIn("how", steps[2])
+        self.assertFalse(step_guide.apply("Pumpkin pie", steps))  # nothing left to do
+
+    def test_every_menu_recipe_line_is_in_a_step(self):
+        """The check that would have caught the pie: every method line of every dish on our menu is covered by a
+        timed step, and every line a step names is really in its recipe."""
+        from apps.kitchen.thanksgiving import planner, presets, step_guide
+        plan = {"dinner_at": "2026-11-26T16:00"}
+        problems = []
+        for n, key in enumerate(presets.OUR_MENU):
+            dish = presets.preset_dish(key)
+            if not dish:
+                continue
+            dish = dict(dish, id=n + 1)
+            tasks = planner.build_timeline(plan, [dish])
+            covered = planner.coverage(dish, tasks)
+            for line in planner.recipe_lines(dish["instructions_text"]):
+                if line["index"] not in covered:
+                    problems.append(f"{dish['name']} {line['ref']} isn't in any step: {line['text'][:60]}")
+            for t in tasks:
+                if t["missing_how"]:
+                    problems.append(f"{dish['name']} [{t['step_id']}] names lines not in the recipe: {t['missing_how']}")
+            for step_id, entry in step_guide.GUIDE.get(dish["name"], {}).items():
+                if not entry.get("remove") and step_id not in {s["id"] for s in dish["steps"]}:
+                    problems.append(f"{dish['name']}: the guide has no step {step_id}")
+            groups = {g["heading"].lower() for g in planner.ingredient_checklist(dish)}
+            for t in tasks:
+                for use in t["uses"]:
+                    if use != "*" and use.lower() not in groups:
+                        problems.append(f"{dish['name']} [{t['step_id']}] uses ingredients {use!r}, not in the recipe")
+        self.assertEqual(problems, [])
+
+    def test_new_pie_steps_show_their_instructions(self):
+        from apps.kitchen.thanksgiving import planner, presets
+        pie = dict(presets.preset_dish("pie"), id=1)
+        plan = {"dinner_at": "2026-11-26T16:00"}
+        tasks = {t["step_id"]: t for t in planner.build_timeline(plan, [pie])}
+        self.assertTrue(tasks["shell"]["how"][0]["text"].startswith("Roll on a floured counter"))
+        self.assertEqual(tasks["shell"]["how_ref"], "Crust 6–8")
+        self.assertEqual(tasks["dough"]["how_ref"], "Crust 1–5")
+        self.assertTrue(all(tasks[k]["how"] for k in ("dough", "blind1", "filling", "blind2", "bake1", "bake2", "cream")))
 
 
 if __name__ == "__main__":
