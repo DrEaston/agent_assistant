@@ -28,7 +28,7 @@ class DemoGuestLoginTests(unittest.TestCase):
 
         self.assertEqual("/apps/recipes", response.headers["location"])
 
-    def test_demo_home_landing_only_for_logged_out_visitors(self):
+    def test_signed_out_home_goes_to_sign_in(self):
         request = SimpleNamespace(
             url=SimpleNamespace(path="/"),
             query_params={},
@@ -40,8 +40,10 @@ class DemoGuestLoginTests(unittest.TestCase):
             patch.object(api, "render_demo_landing", return_value="landing") as landing,
             patch.object(api, "render_today_page", return_value="apps") as apps,
         ):
-            self.assertEqual("landing", api.home_default(request))
-            landing.assert_called_once()
+            answer = api.home_default(request)
+            self.assertEqual(303, answer.status_code)
+            self.assertEqual("/login", answer.headers["location"])
+            landing.assert_not_called()
             apps.assert_not_called()
 
         request.state.current_user = {"id": 42, "role": "guest"}
