@@ -1,0 +1,59 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Logbook{% endblock %}
+{% block content %}
+{{ ui.page_header("Logbook", sub="Checked tables ChatGPT and Claude look facts up in.") }}
+<main class="wrap">
+  {% if done %}{% call ui.banner("ok") %}{{ done }}{% endcall %}{% endif %}
+  {% if error %}{% call ui.banner("warn") %}{{ error }}{% endcall %}{% endif %}
+
+  {% if proposals %}
+  {% call ui.section("Waiting for you") %}
+  <div class="card flush">
+    {% for p in proposals %}
+    <a class="link-row" href="/logbook/proposals/{{ p.id }}">
+      <span class="label-stack">
+        <span class="small muted">{{ who(p.made_by) }} proposes{% if p.kind == "create" %} a new table{% endif %}</span>
+        <span class="title">{{ p.table_name }}: {{ summary_line(p.summary) }}</span>
+        {% if p.reason %}<span class="small muted">{{ p.reason }}</span>{% endif %}
+      </span>
+      <span class="chev" aria-hidden="true">›</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% endcall %}
+  {% endif %}
+
+  {% call ui.section("Tables") %}
+  {% if tables %}
+  <div class="card flush">
+    {% for t in tables %}
+    <a class="link-row" href="/logbook/{{ t.id }}">
+      <span class="label-stack">
+        <span class="title">{{ t.name }}</span>
+        <span class="small muted">{{ t.columns | length }} columns · {{ t.latest.row_count if t.latest else 0 }} rows · v{{ t.latest.number if t.latest else 0 }}</span>
+      </span>
+      {% if t.verified and t.verified.id == t.latest.id %}{{ ui.tag("Verified", "ok") }}
+      {% elif t.verified %}{{ ui.tag("Draft on top of v" ~ t.verified.number, "info") }}
+      {% else %}{{ ui.tag("Not verified", "warn") }}{% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  {{ ui.empty("No tables yet. Upload a CSV below, or ask ChatGPT or Claude to propose one.") }}
+  {% endif %}
+  {% endcall %}
+
+  {% call ui.section("Add a table from a CSV") %}
+  <form class="card stack" method="post" action="/logbook/upload" enctype="multipart/form-data">
+    {{ ui.field("Name", "name", placeholder="Ragnar Trail Arizona 2026 legs") }}
+    <div class="field">
+      <label for="file">CSV file</label>
+      <input type="file" id="file" name="file" accept=".csv,text/csv" required>
+    </div>
+    <p class="small muted">The first row is the column names. Up to {{ max_rows }} rows. You'll check the column types before it's saved.</p>
+    <div class="row"><button class="primary" type="submit">Next</button></div>
+  </form>
+  {% endcall %}
+</main>
+{% endblock %}

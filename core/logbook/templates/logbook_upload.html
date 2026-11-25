@@ -1,0 +1,36 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Check the columns · Logbook{% endblock %}
+{% block content %}
+{{ ui.page_header("Check the columns", crumbs=(("Logbook", "/logbook"),), sub=total ~ " rows. Dieter guessed each column's type; change any that are wrong.") }}
+<main class="wrap">
+  <form class="stack" method="post" action="/logbook/create">
+    <input type="hidden" name="csv_text" value="{{ csv_text }}">
+    <div class="card stack">
+      {{ ui.field("Name", "name", value=name, required=True) }}
+      {{ ui.field("Description (optional)", "description", placeholder="What this table is, where it came from") }}
+    </div>
+    <div class="card flush table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>{% for c in columns %}<th>
+            <input type="text" name="label_{{ loop.index0 }}" value="{{ c.label }}" aria-label="Column {{ loop.index }} name">
+            <select name="type_{{ loop.index0 }}" aria-label="{{ c.label }} type">
+              {% for t in types %}<option value="{{ t }}"{% if t == c.type %} selected{% endif %}>{{ t }}</option>{% endfor %}
+            </select>
+          </th>{% endfor %}</tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}<tr>{% for c in columns %}<td>{{ r[c.name] }}</td>{% endfor %}</tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if total > rows | length %}<p class="small muted">Showing the first {{ rows | length }} of {{ total }} rows.</p>{% endif %}
+    <p class="small muted">Types: {% for t in types %}<strong>{{ t }}</strong> is {{ type_help[t] }}{% if not loop.last %}; {% endif %}{% endfor %}. If a value doesn't fit its type, nothing is saved and you'll see which rows.</p>
+    <div class="row">
+      <button class="primary" type="submit">Save as a draft</button>
+      <a class="button quiet" href="/logbook">Cancel</a>
+    </div>
+  </form>
+</main>
+{% endblock %}

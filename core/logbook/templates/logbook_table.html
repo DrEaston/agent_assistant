@@ -1,0 +1,59 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}{{ table.name }} · Logbook{% endblock %}
+{% block content %}
+{{ ui.page_header(table.name, crumbs=(("Logbook", "/logbook"),), sub=table.description or None, wide=True) }}
+<main class="wrap wide">
+  {% if done %}{% call ui.banner("ok") %}{{ done }}{% endcall %}{% endif %}
+  {% if error %}{% call ui.banner("warn") %}{{ error }}{% endcall %}{% endif %}
+
+  {% for p in proposals %}
+  {% call ui.banner("info") %}
+  <a href="/logbook/proposals/{{ p.id }}">{{ who(p.made_by) }} proposes a change: {{ summary_line(p.summary) }}</a>
+  {% endcall %}
+  {% endfor %}
+
+  {% if version %}
+  <div class="row spread section">
+    <div class="row">
+      {{ ui.tag(version.status | capitalize, tone(version.status)) }}
+      <span class="small muted">{{ label }} · {{ rows | length }} rows · made by {{ who(version.made_by) }}{% if version.reason %}: {{ version.reason }}{% endif %}</span>
+    </div>
+    {% if version.status == "draft" and version.id == table.latest.id %}
+    <form method="post" action="/logbook/{{ table.id }}/verify" class="row">
+      <input type="hidden" name="version_id" value="{{ version.id }}">
+      <button class="primary" type="submit">I've checked it: mark verified</button>
+    </form>
+    {% endif %}
+  </div>
+  {% if version.status == "draft" and table.verified %}
+  <p class="small muted">Until you verify this draft, ChatGPT and Claude keep using v{{ table.verified.number }}.</p>
+  {% elif version.status == "draft" %}
+  <p class="small muted">Not verified yet, so ChatGPT and Claude won't use it for answers.</p>
+  {% endif %}
+
+  <div class="card flush table-scroll section">
+    <table class="data-table">
+      <thead><tr>{% for c in version.columns %}<th>{{ c.label }}<span class="col-type">{{ c.type }}</span></th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for r in rows %}<tr>{% for cell in r %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% call ui.section("Versions") %}
+  <div class="card flush">
+    {% for v in table.versions %}
+    <a class="link-row" href="/logbook/{{ table.id }}?version={{ v.id }}">
+      <span class="label-stack">
+        <span class="title">v{{ v.number }}{% if version and v.id == version.id %} (showing){% endif %}</span>
+        <span class="small muted">{{ short_day(v.created_at) }} · {{ v.row_count }} rows · {{ who(v.made_by) }}{% if v.reason %}: {{ v.reason }}{% endif %}</span>
+      </span>
+      {{ ui.tag(v.status | capitalize, tone(v.status)) }}
+    </a>
+    {% endfor %}
+  </div>
+  {% endcall %}
+</main>
+{% endblock %}

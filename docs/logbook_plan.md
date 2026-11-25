@@ -40,8 +40,10 @@ next table could be for Kitchen or Music, and an app folder can't import another
 - Every change makes a new version. Marking one verified keeps it available; later changes make a draft on top
   of it, and the verified one stays the answer to "latest verified" until he verifies the draft.
 - Private to the owner: every query is scoped to the signed-in user, the same as the rest of Dieter.
-- Additive tables only (`logbook_tables`, `logbook_versions`, `logbook_rows`, `logbook_proposals`) in the store's
-  own module; no change to existing tables. Same SQLite file, restored and backed up the same way.
+- Additive tables only (`logbook_tables`, `logbook_versions`, `logbook_proposals`, in `core/logbook/store.py`); no
+  change to existing tables. Each version keeps its columns and rows whole (tables are small). Rows carry a stable
+  `row_id` (`r1`, `r2`, ...) that later versions keep and never reuse. Same SQLite file, restored and backed up the
+  same way.
 - Previews are read-only copies: a table loaded in a preview is gone when the preview restarts. The real Ragnar
   tables are loaded on the live site after merge.
 
@@ -50,8 +52,8 @@ next table could be for Kitchen or Music, and an app folder can't import another
 1. **Assistants propose; Curtis approves.** Creating a table or changing rows makes a proposal. He sees it on his
    Today page and the Logbook page as rows added, changed and removed, and approves or discards it. Only he can
    approve and only he can mark a version verified; there is no tool for either.
-   Reuses `core/connector/proposals.py` cards, but Logbook proposals are saved in the database and don't expire
-   after 30 minutes (he may get to them hours later).
+   Logbook proposals have their own review page (`/logbook/proposals/<id>`), are saved in the database and don't
+   expire (he may get to them hours later). Approving makes a draft; he still marks it verified.
 2. **No editing from stale data.** A proposal names the version it was based on. If the table has moved on, it's
    refused and the assistant is told to read it again.
 3. **All or nothing, checked against the columns.** If any value doesn't fit its column type, the whole proposal is
@@ -75,7 +77,7 @@ next table could be for Kitchen or Music, and an app folder can't import another
 | `logbook_read_rows` | Rows of a version (`version_id`, or `"verified"` for latest verified), `offset`/`limit` paging with `total` and `next_offset`, and the version label. |
 | `logbook_summarize` | Sums, averages, counts, min/max (with the row they came from) over the verified version, optionally grouped by a column. |
 | `logbook_propose_create` | Name, columns with types, rows, reason. Validated; becomes a proposal. |
-| `logbook_propose_change` | Table id, `base_version_id`, rows to add / change (by row id) / remove, reason. Validated; becomes a proposal. |
+| `logbook_propose_change` | Table id, `base_version_id`, rows to add / change (by row id) / remove, new columns, reason. Existing columns can't be renamed or removed by an assistant. Validated; becomes a proposal. |
 | `logbook_list_proposals` | His pending proposals and what happened to earlier ones, so the assistant can follow up. |
 
 All are listed by `dieter_find_tools`, so ChatGPT finds them even with an older tool list. The connector's

@@ -20,7 +20,8 @@ STYLE_ATTR = re.compile(r"\sstyle\s*=", re.I)
 
 
 def new_style_templates():
-    for path in APPS.rglob("templates/*.html"):
+    # Apps' pages, and shared pages that live in core/ (the Logbook, the connector's sign-in).
+    for path in [*APPS.rglob("templates/*.html"), *(ROOT / "core").rglob("templates/*.html")]:
         text = path.read_text(encoding="utf-8")
         if '{% extends "layout.html" %}' in text:
             yield path, text

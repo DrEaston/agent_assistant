@@ -1,0 +1,46 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Proposal · Logbook{% endblock %}
+{% block content %}
+{{ ui.page_header(("New table: " if prop.kind == "create" else "Change to ") ~ prop.table_name, crumbs=(("Logbook", "/logbook"),), sub=who(prop.made_by) ~ " proposed this " ~ short_day(prop.created_at) ~ ". " ~ summary_line(prop.summary) ~ ".") }}
+<main class="wrap">
+  {% if error %}{% call ui.banner("warn") %}{{ error }}{% endcall %}{% endif %}
+  {% if prop.reason %}<p class="section"><strong>Why:</strong> {{ prop.reason }}</p>{% endif %}
+
+  {% if prop.status != "pending" %}
+  {% call ui.banner(tone(prop.status)) %}This was {{ prop.status }}{% if prop.note %}: {{ prop.note }}{% endif %}{% endcall %}
+  {% endif %}
+
+  <div class="card stack section">
+    {% if prop.summary.added_columns %}
+    <div class="diff-label">{{ "Columns" if prop.kind == "create" else "New columns" }}</div>
+    {% for c in prop.summary.added_columns %}<div class="diff-line diff-added">{{ c }}</div>{% endfor %}
+    {% endif %}
+    {% if prop.summary.changed %}
+    <div class="diff-label">Changed</div>
+    {% for c in prop.summary.changed %}
+    <div class="diff-line diff-removed">{{ c.before }}</div>
+    <div class="diff-line diff-added">{{ c.after }}</div>
+    {% endfor %}
+    {% endif %}
+    {% if prop.summary.added %}
+    <div class="diff-label">{{ "Rows" if prop.kind == "create" else "Added" }}</div>
+    {% for r in prop.summary.added %}<div class="diff-line diff-added">{{ r.row }}</div>{% endfor %}
+    {% endif %}
+    {% if prop.summary.removed %}
+    <div class="diff-label">Removed</div>
+    {% for r in prop.summary.removed %}<div class="diff-line diff-removed">{{ r.row }}</div>{% endfor %}
+    {% endif %}
+  </div>
+
+  {% if prop.status == "pending" %}
+  <p class="small muted">Approving makes a new draft. ChatGPT and Claude keep using the verified version until you check the draft and mark it verified.</p>
+  <div class="row">
+    <form method="post" action="/logbook/proposals/{{ prop.id }}/approve"><button class="primary" type="submit">Approve</button></form>
+    <form method="post" action="/logbook/proposals/{{ prop.id }}/discard"><button class="quiet" type="submit">Discard</button></form>
+  </div>
+  {% elif prop.result_version_id and prop.table_id %}
+  <p><a href="/logbook/{{ prop.table_id }}?version={{ prop.result_version_id }}">See the version it made</a></p>
+  {% endif %}
+</main>
+{% endblock %}
