@@ -31,7 +31,7 @@ Ask these in order and stop at the first yes, whether the request came from Clau
    `core/portable_list.py`), with at most a small page of its own. Apps show it their own way.
 
 If two answers fit, say which you'd pick and why, and let him choose. Big features get a plan in `docs/` first
-(e.g. `docs/datasets_plan.md`).
+(e.g. `docs/logbook_plan.md`).
 
 ## Where things live
 
