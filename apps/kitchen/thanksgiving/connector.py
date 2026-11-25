@@ -175,12 +175,17 @@ def _timer_view(t, dishes_by_id=None):
             "dish": (dishes_by_id or {}).get(t.get("dish_id"), "")}
 
 
-def plan_series(series, first_in=None, already=None, skip=()):
+def plan_series(series, first_in=None, already=None, skip=(), done_through=None):
     """Which timers to start, and in how many minutes: [(minutes, label)].
     first_in: the first timer goes off in this many minutes and the rest keep their gaps after it.
     already: this many minutes have passed since the step started (timers already past are left out).
-    skip: timer numbers (1 = first) to leave out; the others keep their usual times."""
+    skip: timer numbers (1 = first) to leave out; the others keep their usual times.
+    done_through: timer N was just done (e.g. fold 3 just now): the ones after it keep their usual gaps from now."""
     timers = [(int(m), str(label)) for m, label in series]
+    if done_through:
+        n = max(1, min(int(done_through), len(timers)))
+        base = timers[n - 1][0]
+        return [(m - base, label) for m, label in timers[n:]]
     if first_in is not None and timers:
         shift = int(first_in) - timers[0][0]
         timers = [(m + shift, label) for m, label in timers]
@@ -201,11 +206,12 @@ def start_step_timers(args):
         first_in = None if args.get("first_in_minutes") in (None, "") else float(args["first_in_minutes"])
         already = float(args.get("already_minutes") or 0)
         skip = [int(n) for n in (args.get("skip") or [])]
+        done_through = int(args["done_through"]) if args.get("done_through") not in (None, "") else None
     except (TypeError, ValueError):
         raise ToolError("first_in_minutes and already_minutes are numbers; skip is a list of timer numbers.") from None
-    timers = plan_series(task["series"], first_in, already, skip)
+    timers = plan_series(task["series"], first_in, already, skip, done_through)
     if not timers:
-        raise ToolError("That leaves no timers to start.")
+        raise ToolError("That leaves no timers to start." + (" That was the last one." if done_through else ""))
     # Starting a step's timers again replaces the set that's running (never two sets at once).
     labels = {label for _, label in task["series"]}
     replaced = 0
@@ -238,6 +244,26 @@ def cancel_timers(args):
     for t in gone:
         _r().store().dismiss_timer(plan["id"], t["id"])
     return {"cancelled": [t["label"] for t in gone], "still_running": len(running) - len(gone)}
+
+
+def shift_timers(args):
+    """Push running timers later (or earlier, with negative minutes): every one whose label has these words, or all."""
+    plan, _ = _plan()
+    try:
+        minutes = float(args.get("minutes"))
+    except (TypeError, ValueError):
+        raise ToolError("How many minutes later (negative for earlier)?") from None
+    words = str(args.get("label_words") or "").lower().split()
+    moved = []
+    for t in _r().store().get_timers(plan["id"]):
+        if words and not all(w in t["label"].lower() for w in words):
+            continue
+        new_end = max(_ms_now() + 30_000, t["ends_at_ms"] + int(minutes * 60_000))
+        _r().store().move_timer(plan["id"], t["id"], new_end)
+        moved.append({"label": t["label"], "minutes_left": max(0, round((new_end - _ms_now()) / 60000))})
+    if not moved:
+        raise ToolError("No running timers match that.")
+    return {"moved": moved}
 
 
 def change_timer(args):
@@ -363,12 +389,13 @@ def tools():
              "Starting them again REPLACES the running set (never two sets). Adjust without changing the pattern: "
              "first_in_minutes = the first one goes off in that many minutes and the rest keep their gaps after it "
              "(\"first fold in 10 minutes\"); already_minutes = that many minutes have passed since the step started "
-             "(\"I'm 5 minutes in\", \"I already did the first fold\" = 15); skip = timer numbers to leave out, the "
-             "rest keep their usual times (\"leave out the first timer\" = [1]). The answer lists each timer's "
-             "minutes: say them back.", start_step_timers,
+             "(\"I'm 5 minutes in\"); done_through = N when the cook just did timer N, early or late (\"I just did fold "
+             "3\" = 3): the rest keep their usual gaps from now; skip = timer numbers to leave out, the rest keep "
+             "their usual times (\"leave out the first timer\" = [1]). The answer lists each timer's minutes: say "
+             "them back.", start_step_timers,
              {"dish": {"type": "string"}, "step_id": {"type": "string"},
               "first_in_minutes": {"type": "number"}, "already_minutes": {"type": "number"},
-              "skip": {"type": "array", "items": {"type": "integer"}},
+              "skip": {"type": "array", "items": {"type": "integer"}}, "done_through": {"type": "integer"},
               "replace": {"type": "boolean", "description": "false only to run a second set alongside (rare)."}},
              ("dish",)),
         Tool("thanksgiving_list_timers", "Running timers",
@@ -378,6 +405,10 @@ def tools():
              "label_words (e.g. \"fold\"), or all.", cancel_timers,
              {"timer_ids": {"type": "array", "items": {"type": "integer"}}, "label_words": {"type": "string"},
               "all": {"type": "boolean"}}, destructive=True),
+        Tool("thanksgiving_shift_timers", "Push timers later",
+             "Move running timers later by minutes (negative = earlier): those whose label has label_words (e.g. "
+             "\"fold\"), or all of them. \"Push the folds back 5 minutes\".", shift_timers,
+             {"minutes": {"type": "number"}, "label_words": {"type": "string"}}, ("minutes",)),
         Tool("thanksgiving_change_timer", "Change a timer",
              "Make a running timer go off in minutes_from_now instead.", change_timer,
              {"timer_id": {"type": "integer"}, "minutes_from_now": {"type": "number"}}, ("timer_id", "minutes_from_now")),

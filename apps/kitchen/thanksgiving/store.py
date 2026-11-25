@@ -295,6 +295,27 @@ class ThanksgivingStore:
                          "Added neck-and-giblet stock for the gravy",
                          json.dumps({"ingredients_text": OLD_GRAVY_INGREDIENTS, "instructions_text": OLD_GRAVY_INSTRUCTIONS}),
                          json.dumps({"ingredients_text": GRAVY_INGREDIENTS, "instructions_text": GRAVY_INSTRUCTIONS})))
+            if once(plan_id, "olive-more-water"):
+                # The olive loaf at 330 g water was dry and got very thick quickly: 365 g. Recorded in its Recipe
+                # history (with Restore). Only lines still as they were change.
+                changed = True
+                from .presets import OLIVE_NEW_WATER_LINE, OLIVE_OLD_WATER_LINE
+                for row in conn.execute("SELECT * FROM tg_dishes WHERE plan_id = ? AND name = 'Olive and rosemary sourdough'",
+                                        (plan_id,)).fetchall():
+                    ing, ins = row["ingredients_text"] or "", row["instructions_text"] or ""
+                    new_ing = "\n".join("365 g water" if line.strip() == "330 g water" else line for line in ing.split("\n"))
+                    new_ins = ins.replace(OLIVE_OLD_WATER_LINE, OLIVE_NEW_WATER_LINE)
+                    if (new_ing, new_ins) == (ing, ins):
+                        continue
+                    conn.execute("UPDATE tg_dishes SET ingredients_text = ?, instructions_text = ? WHERE id = ?",
+                                 (new_ing, new_ins, row["id"]))
+                    conn.execute(
+                        "INSERT INTO tg_recipe_versions (plan_id, dish_id, request, summary, before_json, after_json) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (plan_id, row["id"], "The olive recipe needs more water: it was dry and got very thick quickly",
+                         "More water: 365 g instead of 330 g",
+                         json.dumps({"ingredients_text": ing, "instructions_text": ins}),
+                         json.dumps({"ingredients_text": new_ing, "instructions_text": new_ins})))
             if once(plan_id, step_guide.GUIDE_VERSION):
                 # Each step says what to do: the recipe lines it covers (step_guide.py). Checkmarks are kept: they're
                 # stored by step id, which doesn't change.

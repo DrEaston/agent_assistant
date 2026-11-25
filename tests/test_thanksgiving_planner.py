@@ -79,7 +79,7 @@ class MenuTimelineTests(unittest.TestCase):
         self.assertEqual(folds["series_button"], "Start fold timers")
         olive = preset_dish("olive_sourdough")
         self.assertEqual(olive["category"], "bread")
-        self.assertIn("330 g water", olive["ingredients_text"])
+        self.assertIn("365 g water", olive["ingredients_text"])
         self.assertIn("rosemary", olive["ingredients_text"])
         self.assertIn("olives", olive["ingredients_text"])
         # The olive loaf is out of the oven before the plain loaf's preheat
@@ -766,8 +766,14 @@ class RouteTests(unittest.TestCase):
         tools.call("thanksgiving_change_timer", {"timer_id": potatoes["id"], "minutes_from_now": 5})
         moved = next(t for t in tools.call("thanksgiving_list_timers", {})["running"] if t["id"] == potatoes["id"])
         self.assertIn(moved["minutes_left"], (4, 5))
+        # "I just did fold 3": folds 4 to 6 at their usual gaps from now (15, then 30, then 30).
+        after3 = tools.call("thanksgiving_start_step_timers", {"dish": "Sourdough", "done_through": 3})
+        self.assertEqual([(t["minutes"], t["label"][-6:]) for t in after3["started"]],
+                         [(15, "4 of 6"), (45, "5 of 6"), (75, "6 of 6")])
+        pushed = tools.call("thanksgiving_shift_timers", {"label_words": "fold", "minutes": 5})
+        self.assertEqual([t["minutes_left"] for t in pushed["moved"]], [20, 50, 80])
         gone = tools.call("thanksgiving_cancel_timers", {"label_words": "fold"})
-        self.assertEqual(len(gone["cancelled"]), 5)
+        self.assertEqual(len(gone["cancelled"]), 3)
         self.assertEqual([t["label"] for t in tools.call("thanksgiving_list_timers", {})["running"]], ["potatoes"])
 
     def test_saved_mac_gets_goat_cheese_swap_on_restart(self):

@@ -559,14 +559,14 @@ def janice_onions_dish():
 
 OLIVE_INGREDIENTS = """440 g flour
 90 g active starter
-330 g water
+365 g water
 9 g salt
 120 g pitted Kalamata or Castelvetrano olives, roughly chopped
 2 tbsp fresh rosemary, finely chopped
 rice flour for dusting"""
 
 OLIVE_INSTRUCTIONS = """Pat the chopped olives very dry with paper towels; wet olives make a slack dough.
-Mix flour, starter, water, salt, and rosemary in the mixer. 330 g water, not 350: the olives add moisture.
+Mix flour, starter, water, salt, and rosemary in the mixer. 365 g water, a bit more than the plain loaf: patted-dry olives add little moisture, and this dough tightens up fast.
 Stretch and folds, 6 sets over 2 hours, with the plain loaf. On the first set, scatter the olives over the dough and fold them in.
 Cold shape: turn onto the counter, fold into a round with the bench scraper, drag toward you to tighten the surface. Tuck any olives poking out underneath so they don't burn. Seam-side up in a rice-floured, towel-lined bowl. Cover and refrigerate overnight.
 Next morning: preheat the Dutch oven at 500°F for 45 to 60 minutes.
@@ -575,6 +575,11 @@ Flip straight from the fridge onto parchment, dust, score, and lower in with the
 Bake 25 minutes at 500°F with the lid on.
 Lid off, 450°F, 15 minutes (205 to 210°F inside).
 Cool at least 1 hour before slicing."""
+
+
+# 11/24: 330 g water made a dry dough that got very thick quickly; 365 g now (saved plans updated once, store.py).
+OLIVE_OLD_WATER_LINE = 'Mix flour, starter, water, salt, and rosemary in the mixer. 330 g water, not 350: the olives add moisture.'
+OLIVE_NEW_WATER_LINE = 'Mix flour, starter, water, salt, and rosemary in the mixer. 365 g water, a bit more than the plain loaf: patted-dry olives add little moisture, and this dough tightens up fast.'
 
 
 def _olive_steps():

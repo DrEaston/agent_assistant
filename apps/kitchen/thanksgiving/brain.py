@@ -55,7 +55,8 @@ Your reply: 1-3 short sentences of plain text, no markdown or lists (it may be r
 LOCAL_TOOLS = ("thanksgiving_get_dish", "thanksgiving_get_shopping_list", "thanksgiving_check_items",
                "thanksgiving_finish_trip", "thanksgiving_put_back", "thanksgiving_start_timer",
                "thanksgiving_start_step_timers", "thanksgiving_propose_recipe_change", "thanksgiving_recipe_history",
-               "thanksgiving_list_timers", "thanksgiving_cancel_timers", "thanksgiving_change_timer")
+               "thanksgiving_list_timers", "thanksgiving_cancel_timers", "thanksgiving_change_timer",
+               "thanksgiving_shift_timers")
 
 SAVE_TOOL = {"name": "save_recipe_change",
              "description": "Save a proposed recipe change. Only when the cook's latest message plainly says to save it.",
