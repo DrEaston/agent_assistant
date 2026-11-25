@@ -63,6 +63,15 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(schema["_meta"], {"openai/fileParams": ["image"]})
         self.assertNotIn("_meta", probe.tools().tools["media_test_results"].schema())
 
+    def test_an_unexpected_failure_is_logged_and_explained(self):
+        def broken(url):
+            raise RuntimeError("boom")
+        report = probe.test_image({"image": {"download_url": "https://files.example/x.png", "file_id": "file_1"}},
+                                  fetch=broken)
+        self.assertFalse(report["worked"])
+        self.assertIn("internal error (RuntimeError)", report["message"])
+        self.assertEqual(len(probe.results({})["results"]), 1)  # it left a trace
+
     def test_other_people_dont_see_my_results(self):
         probe.test_image({"image": "x"})
         other = set_current_user_id(8)

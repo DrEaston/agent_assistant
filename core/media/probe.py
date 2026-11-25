@@ -87,6 +87,23 @@ def describe(data):
 
 
 def test_image(args, fetch=None):
+    """Never fails without a trace: anything unexpected is logged and returned as a structured error."""
+    try:
+        return _test_image(args, fetch)
+    except Exception as exc:  # report what broke, not a generic "Dieter hit an error"
+        report = {"sent_by": str(args.get("device") or "")[:40] or "not said",
+                  "received": type(args.get("image")).__name__, "worked": False,
+                  "image": {"error": f"Dieter hit an internal error ({exc.__class__.__name__})."}}
+        print(f"Warning: media_test_image failed: {exc!r}")
+        try:
+            _log(report)
+        except Exception as log_exc:
+            print(f"Warning: media_test_image couldn't log: {log_exc!r}")
+        report["message"] = "It didn't work this time: " + report["image"]["error"] + " Tell Curtis exactly that."
+        return report
+
+
+def _test_image(args, fetch=None):
     raw = args.get("image")
     report = {"sent_by": str(args.get("device") or "").strip()[:40] or "not said", "received": type(raw).__name__}
     if isinstance(raw, dict):

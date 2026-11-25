@@ -87,8 +87,18 @@ def make_router(toolsets, authenticate, run_as, signer=lambda user: user, instru
         words = str(arguments.get("query") or "").lower().split()
         found = [t for t in all_tools(user)
                  if all(w in f"{t.get('name', '')} {t.get('description', '')}".lower() for w in words)]
-        return {"tools": [{"name": t["name"], "description": t.get("description") or "",
-                           "inputSchema": t.get("inputSchema") or {}} for t in found]}
+        listed = []
+        for t in found:
+            entry = {"name": t["name"], "description": t.get("description") or "",
+                     "inputSchema": t.get("inputSchema") or {}}
+            if file_params(t):
+                entry["takes_files"] = file_params(t)
+                entry["call_directly"] = FILE_TOOL_NOTE
+            listed.append(entry)
+        return {"tools": listed}
+
+    def tool_named(user, name):
+        return next((t for t in all_tools(user) if t.get("name") == name), None)
 
     def call_tool(user, params):
         name = str(params.get("name") or "")
@@ -101,6 +111,10 @@ def make_router(toolsets, authenticate, run_as, signer=lambda user: user, instru
             if inner in (FIND_TOOLS, USE_TOOL) or not owner(inner):
                 return {"content": [{"type": "text", "text": f"Dieter has no tool called {inner!r}. "
                                                              "dieter_find_tools lists them."}], "isError": True}
+            if file_params(tool_named(user, inner) or {}):
+                return {"content": [{"type": "text", "text": json.dumps(
+                    {"error": "needs_direct_call", "tool": inner, "message": FILE_TOOL_NOTE},
+                    ensure_ascii=False)}], "isError": True}
             params = {"name": inner, "arguments": arguments.get("arguments")}
             name = inner
         toolset = owner(name)
@@ -167,6 +181,19 @@ def make_router(toolsets, authenticate, run_as, signer=lambda user: user, instru
         return Response(status_code=405, headers={"Allow": "POST"})
 
     return router
+
+
+FILE_TOOL_NOTE = ("This tool takes a file. ChatGPT only attaches a file to a tool that's in its own tool list "
+                  "(it reads the tool's openai/fileParams), so it can't be run through dieter_use_tool. Ask Curtis "
+                  "to refresh the Dieter connector in ChatGPT's settings (Apps & Connectors, Dieter, Refresh, or "
+                  "disconnect and connect again), then call the tool directly.")
+
+
+def file_params(tool):
+    """The parameters a tool takes as files (ChatGPT's _meta["openai/fileParams"]), or []."""
+    meta = tool.get("_meta") if isinstance(tool, dict) else None
+    params = meta.get("openai/fileParams") if isinstance(meta, dict) else None
+    return list(params) if isinstance(params, list) else []
 
 
 def _result(msg_id, result):
