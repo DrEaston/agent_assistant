@@ -167,7 +167,8 @@ def tools():
                         "properties": {"download_url": {"type": "string"}, "file_id": {"type": "string"},
                                        "mime_type": {"type": "string"}, "file_name": {"type": "string"}}},
               "device": {"type": "string"}},
-             ("image",), meta={"openai/fileParams": ["image"]}),
+             ("image",), read_only=True,  # ChatGPT Plus/Pro only offers read-only tools; this saves just a result note
+             meta={"openai/fileParams": ["image"]}),
         Tool("media_test_results", "Image test results",
              "The last 20 results of media_test_image: what ChatGPT sent and whether Dieter could read the image.",
              results, read_only=True),
