@@ -200,13 +200,13 @@ class WebhookPageTests(unittest.TestCase):
         token = set_current_user_id(user)
         try:
             client.post("/apps/trainer/log/add", data={"day": "2026-11-23", "activity_type": "Pilates",
-                                                       "title": "Reformer class", "minutes": "50"})
+                                                       "title": "Barre fusion 77", "minutes": "50"})
             page = client.get("/apps/trainer/log")
             self.assertEqual(page.status_code, 200)
             self.assertIn("Last 12 weeks", page.text)
-            self.assertNotIn("Reformer class", page.text)  # totals, not a list of every session
+            self.assertNotIn("Barre fusion 77", page.text)  # totals, not a list of every session
             exported = client.get("/apps/trainer/log.csv")
-            self.assertIn("Reformer class", exported.text)
+            self.assertIn("Barre fusion 77", exported.text)
             self.assertTrue(exported.text.startswith("date,time,source,type"))
             self.assertEqual(client.post("/apps/trainer/sync/live").status_code, 403)  # admin only
         finally:
