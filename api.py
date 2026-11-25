@@ -5469,8 +5469,8 @@ def admin_update_member_trainer_mode(request: Request, user_id: int, trainer_mod
 @app.get("/")
 def home_default(request: Request):
     """Today: the home page."""
-    if DEMO_MODE and not request.state.current_user:
-        return render_demo_landing(request)
+    if not request.state.current_user:  # signed out: straight to sign-in (the old demo front page stays at /demo)
+        return RedirectResponse(url="/login", status_code=303)
     return render_today_page(request)
 
 
