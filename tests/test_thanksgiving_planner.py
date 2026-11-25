@@ -766,8 +766,12 @@ class RouteTests(unittest.TestCase):
         tools.call("thanksgiving_change_timer", {"timer_id": potatoes["id"], "minutes_from_now": 5})
         moved = next(t for t in tools.call("thanksgiving_list_timers", {})["running"] if t["id"] == potatoes["id"])
         self.assertIn(moved["minutes_left"], (4, 5))
+        # Stray fold timers someone made by hand ("Fold 4", "Last stretch and fold") go too when folds are re-timed.
+        tools.call("thanksgiving_start_timer", {"label": "Fold 4", "minutes": 12})
+        tools.call("thanksgiving_start_timer", {"label": "Last stretch and fold", "minutes": 90})
         # "I just did fold 3": folds 4 to 6 at their usual gaps from now (15, then 30, then 30).
         after3 = tools.call("thanksgiving_start_step_timers", {"dish": "Sourdough", "done_through": 3})
+        self.assertEqual(after3["replaced_running"], 7)  # five from skip=[1], plus the two strays
         self.assertEqual([(t["minutes"], t["label"][-6:]) for t in after3["started"]],
                          [(15, "4 of 6"), (45, "5 of 6"), (75, "6 of 6")])
         pushed = tools.call("thanksgiving_shift_timers", {"label_words": "fold", "minutes": 5})

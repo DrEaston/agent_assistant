@@ -4,6 +4,8 @@ Plan changes use the same checks as Tell Dieter (voice.check), so Claude can't d
 and the in-app Undo button undoes Claude's last change too.
 """
 
+import re
+
 from fastapi import HTTPException
 
 from core.connector.tools import STRINGS, Tool, ToolError, ToolSet, site_url, text_list
@@ -164,6 +166,12 @@ def series_pattern(series):
     return ", ".join(parts)
 
 
+def series_words(series):
+    """Words every label in a run of timers shares ("stretch", "fold"): how to spot other timers for the same thing."""
+    sets = [set(w for w in re.findall(r"[a-z]+", str(label).lower()) if len(w) > 3) - {"then"} for _, label in series]
+    return set.intersection(*sets) if sets else set()
+
+
 def _ms_now():
     import time as _time
     return int(_time.time() * 1000)
@@ -212,12 +220,16 @@ def start_step_timers(args):
     timers = plan_series(task["series"], first_in, already, skip, done_through)
     if not timers:
         raise ToolError("That leaves no timers to start." + (" That was the last one." if done_through else ""))
-    # Starting a step's timers again replaces the set that's running (never two sets at once).
+    # Starting a step's timers again replaces what's running for it (never two sets at once): the series' own timers,
+    # and any other running timer named like them ("Fold 4", "Last stretch and fold"), whichever dish it was on.
     labels = {label for _, label in task["series"]}
     replaced = 0
     if args.get("replace", True) is not False:
+        words = series_words(task["series"])
         for t in _r().store().get_timers(plan["id"]):
-            if t.get("dish_id") == dish["id"] and t["label"] in labels:
+            mine = t.get("dish_id") == dish["id"] and t["label"] in labels
+            alike = bool(words & set(re.findall(r"[a-z]+", t["label"].lower())))
+            if mine or alike:
                 _r().store().dismiss_timer(plan["id"], t["id"])
                 replaced += 1
     started = [_start(plan, dish["id"], label, minutes) for minutes, label in timers]
@@ -381,7 +393,8 @@ def tools():
              "Undo next-trip or don't-need for these items (next-trip items come off the Kitchen list).", put_back, keys, ("keys",)),
         Tool("thanksgiving_start_timer", "Start a timer",
              "Start one kitchen timer, e.g. {\"label\": \"potatoes\", \"minutes\": 20}. It shows and chimes in cook "
-             "mode on every screen.", start_timer,
+             "mode on every screen. Not for a step's run of timers (stretch and folds): use "
+             "thanksgiving_start_step_timers for those, never one timer per fold.", start_timer,
              {"label": {"type": "string"}, "minutes": {"type": "number"}}, ("minutes",)),
         Tool("thanksgiving_start_step_timers", "Start a step's timers",
              "Start the run of timers a step comes with (e.g. the sourdough's six stretch and folds: 15, then every "
