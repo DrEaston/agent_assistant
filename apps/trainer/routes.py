@@ -312,14 +312,12 @@ def sync_now():
 def log_page(request: Request, kind: str = "", year: str = "", live: int = 0, history: int = 0, problem: str = ""):
     catch_up()
     user = get_current_user_id()
-    entries = strava.log(_state["db"], user, kind=kind, year=year or None)
+    totals = strava.summary(_state["db"], user)
     profile = _state["db"].get_trainer_profile(user)
     connected = bool(profile and dict(profile).get("strava_refresh_token"))
     return render("trainer_log.html", title="Training log", current=BASE + "/log", page_url=BASE + "/log",
-                  entries=entries, kind=kind, year=year, status=sync().status(), connected=connected,
+                  totals=totals, status=sync().status(), connected=connected,
                   is_admin=_is_admin(request), live=live, history=history, problem=problem,
-                  years=[str(y) for y in range(date.today().year, date.today().year - 8, -1)],
-                  miles=round(sum(e["miles"] for e in entries if e["category"].startswith("run")), 1),
                   today=date.today().isoformat())
 
 

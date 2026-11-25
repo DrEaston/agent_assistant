@@ -143,6 +143,20 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(sum(1 for e in self.entries() if not e["has_detail"]), 1)
         self.assertEqual(next(e for e in self.entries() if e["date"] == "2026-11-20")["title"], "Already here")
 
+    def test_weekly_and_monthly_totals(self):
+        from datetime import date
+        strava.add_manual(self.db, self.user, "2026-11-23", "Pilates", "Reformer", minutes=60)
+        strava.add_manual(self.db, self.user, "2026-11-24", "Weight Training", "Hips", minutes=30)
+        self.sync._store(self.user, activity(1, day="2026-11-24", miles=6.0), None)
+        self.sync._store(self.user, activity(2, day="2026-11-25", miles=8.0), None)
+        totals = strava.summary(self.db, self.user, today=date(2026, 11, 26))
+        week = totals["weeks"][0]
+        self.assertEqual((week["key"], week["run_miles"], week["runs"], week["strength"], week["pilates"]),
+                         ("2026-11-23", 14.0, 2, 1, 1))
+        self.assertEqual(totals["weeks"][1]["runs"], 0)
+        self.assertEqual(totals["months"][0]["key"], "2026-11")
+        self.assertEqual(len(totals["weeks"]), 12)
+
     def test_manual_entries_and_filters(self):
         strava.add_manual(self.db, self.user, "2026-11-23", "Pilates", "Reformer class", minutes=50, notes="core")
         self.sync._store(self.user, activity(1, day="2026-11-24"), None)
@@ -186,12 +200,13 @@ class WebhookPageTests(unittest.TestCase):
         token = set_current_user_id(user)
         try:
             client.post("/apps/trainer/log/add", data={"day": "2026-11-23", "activity_type": "Pilates",
-                                                       "title": "Reformer class", "minutes": "50"})
+                                                       "title": "Barre fusion 77", "minutes": "50"})
             page = client.get("/apps/trainer/log")
             self.assertEqual(page.status_code, 200)
-            self.assertIn("Reformer class", page.text)
+            self.assertIn("Last 12 weeks", page.text)
+            self.assertNotIn("Barre fusion 77", page.text)  # totals, not a list of every session
             exported = client.get("/apps/trainer/log.csv")
-            self.assertIn("Reformer class", exported.text)
+            self.assertIn("Barre fusion 77", exported.text)
             self.assertTrue(exported.text.startswith("date,time,source,type"))
             self.assertEqual(client.post("/apps/trainer/sync/live").status_code, 403)  # admin only
         finally:

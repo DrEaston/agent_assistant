@@ -394,6 +394,61 @@ def log(db, user_id, kind="", year=None, include_deleted=False, limit=500):
     return out
 
 
+def _bucket(category):
+    if category.startswith("run"):
+        return "run"
+    if category.startswith("strength"):
+        return "strength"
+    if category in ("pilates", "yoga"):
+        return "pilates"
+    if category.startswith("bike"):
+        return "bike"
+    return "other"
+
+
+def summary(db, user_id, weeks=12, today=None):
+    """Totals instead of a list: the last `weeks` weeks and the last 12 months, by kind of session."""
+    from datetime import timedelta
+
+    today = today or date.today()
+    monday = today - timedelta(days=today.weekday())
+    first = monday - timedelta(weeks=weeks - 1)
+    year_ago = date(today.year - 1, today.month, 1)
+    entries = log(db, user_id, limit=100000)
+
+    def empty():
+        return {"run_miles": 0.0, "runs": 0, "strength": 0, "pilates": 0, "bike_miles": 0.0, "other": 0, "minutes": 0.0}
+
+    by_week = {(first + timedelta(weeks=n)).isoformat(): empty() for n in range(weeks)}
+    by_month = {}
+    for e in entries:
+        try:
+            day = date.fromisoformat(e["date"][:10])
+        except ValueError:
+            continue
+        bucket = _bucket(e["category"])
+        targets = []
+        week = (day - timedelta(days=day.weekday())).isoformat()
+        if week in by_week:
+            targets.append(by_week[week])
+        if day >= year_ago:
+            targets.append(by_month.setdefault(day.strftime("%Y-%m"), empty()))
+        for t in targets:
+            t["minutes"] += e["minutes"]
+            if bucket == "run":
+                t["runs"] += 1
+                t["run_miles"] += e["miles"]
+            elif bucket == "bike":
+                t["bike_miles"] += e["miles"]
+            elif bucket in ("strength", "pilates"):
+                t[bucket] += 1
+            else:
+                t["other"] += 1
+    rows = lambda d: [dict(v, key=k, run_miles=round(v["run_miles"], 1), bike_miles=round(v["bike_miles"], 1),
+                           hours=round(v["minutes"] / 60, 1)) for k, v in sorted(d.items(), reverse=True)]
+    return {"weeks": rows(by_week), "months": rows(by_month), "total": len(entries), "recent": entries[:5]}
+
+
 def add_manual(db, user_id, day, activity_type, title="", minutes=None, miles=None, notes=""):
     """An activity done without Strava (e.g. a Pilates class); kept in the same log, source 'dieter'."""
     try:
