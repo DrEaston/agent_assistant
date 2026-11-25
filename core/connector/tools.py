@@ -65,6 +65,9 @@ class Tool:
         return schema
 
 
+IMAGES = "_images"  # a tool result dict may carry [{"data": base64, "mimeType": ...}] here to show pictures
+
+
 class ToolSet:
     """One app's tools. Every name starts with `prefix` + "_", so the server knows which set to ask."""
 

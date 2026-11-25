@@ -1,6 +1,7 @@
 """Media (core/media): pictures sent to Dieter wait for Curtis's OK; only he keeps or discards them."""
 
 import io
+import base64
 import json
 import secrets
 import tempfile
@@ -302,7 +303,30 @@ class MediaPageTests(unittest.TestCase):
             "/mcp", headers={"Authorization": f"Bearer {self.token}"},
             json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                   "params": {"name": "media_get", "arguments": {"media_id": sent["id"]}}}).json()["result"]
-        self.assertEqual(json.loads(answer["content"][0]["text"])["status"], "waiting")
+        details = json.loads(answer["content"][0]["text"])
+        self.assertEqual(details["status"], "waiting")
+        self.assertNotIn("_images", details)
+        # The picture itself comes back as MCP image content, so ChatGPT and Claude can look at it.
+        self.assertEqual(answer["content"][1]["type"], "image")
+        self.assertEqual(answer["content"][1]["mimeType"], "image/png")
+        from PIL import Image
+        with Image.open(io.BytesIO(base64.b64decode(answer["content"][1]["data"]))) as shown:
+            self.assertEqual(shown.mode, "RGBA")  # transparency kept
+        details_only = TestClient(self.api.app).post(
+            "/mcp", headers={"Authorization": f"Bearer {self.token}"},
+            json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                  "params": {"name": "media_get", "arguments": {"media_id": sent["id"], "show_image": False}}}
+        ).json()["result"]
+        self.assertEqual(len(details_only["content"]), 1)
+
+    def test_big_pictures_are_shown_scaled_down(self):
+        from PIL import Image
+        out = io.BytesIO()
+        Image.new("RGBA", (3000, 1500), (200, 100, 0, 0)).save(out, "PNG")
+        encoded, width, height = connector.viewable(out.getvalue())
+        self.assertEqual((width, height), (1024, 512))
+        with Image.open(io.BytesIO(base64.b64decode(encoded))) as shown:
+            self.assertEqual((shown.mode, shown.size), ("RGBA", (1024, 512)))
 
 
 if __name__ == "__main__":

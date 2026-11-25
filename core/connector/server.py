@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from .oauth import public_base
-from .tools import ToolError
+from .tools import IMAGES, ToolError
 
 PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 # The version changes with every deploy (Cloud Run sets K_REVISION), so a client that compares it knows to fetch
@@ -131,8 +131,12 @@ def make_router(toolsets, authenticate, run_as, signer=lambda user: user, instru
             print(f"Warning: connector tool {name} failed: {exc!r}")
             return {"content": [{"type": "text", "text": f"Dieter hit an error running {name}. Try again, or "
                                                           "use the website for this one."}], "isError": True}
+        images = result.pop(IMAGES, None) if isinstance(result, dict) else None
         text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, indent=1, default=str)
-        return {"content": [{"type": "text", "text": text}], "isError": False}
+        content = [{"type": "text", "text": text}]
+        for image in images or []:  # MCP image content: the assistant sees the picture itself
+            content.append({"type": "image", "data": image["data"], "mimeType": image["mimeType"]})
+        return {"content": content, "isError": False}
 
     async def handle(message, user):
         method, msg_id = message.get("method"), message.get("id")

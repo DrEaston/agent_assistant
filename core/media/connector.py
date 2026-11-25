@@ -6,10 +6,12 @@ tools, so Claude Code uploads on the Media page instead. There is deliberately n
 only Curtis does that, on /media.
 """
 
+import base64
+import io
 from urllib.parse import urlsplit
 
 from core.connector.pages import Page
-from core.connector.tools import Tool, ToolError, ToolSet, site_url
+from core.connector.tools import IMAGES, Tool, ToolError, ToolSet, site_url
 
 from . import fetch
 from .store import Invalid, MediaStore, WAIT_DAYS
@@ -76,6 +78,29 @@ def list_items(args):
     return {"pictures": [_brief(i) for i in items]}
 
 
+# What the assistant is shown: the picture itself, scaled so its long side is at most this, as PNG so the transparent
+# background survives. Big enough to judge a pose or a face; small enough to keep the reply light.
+SHOW_SIDE = 1024
+SHOW_MAX_BYTES = 3 * 1024 * 1024
+
+
+def viewable(data, side=SHOW_SIDE):
+    """(base64 PNG, width, height) of the picture scaled down to at most `side` on its long edge, alpha kept."""
+    from PIL import Image
+
+    with Image.open(io.BytesIO(data)) as image:
+        image.load()
+        picture = image.convert("RGBA") if image.mode not in ("RGBA", "RGB") else image.copy()
+    while True:
+        shown = picture.copy()
+        shown.thumbnail((side, side))
+        out = io.BytesIO()
+        shown.save(out, "PNG", optimize=True)
+        if out.tell() <= SHOW_MAX_BYTES or side <= 256:
+            return base64.b64encode(out.getvalue()).decode("ascii"), shown.width, shown.height
+        side //= 2
+
+
 def get_item(args):
     try:
         item = store().item(args.get("media_id"))
@@ -83,6 +108,23 @@ def get_item(args):
         raise ToolError(str(exc))
     out = _brief(item)
     out.update(file_name=item["file_name"], prompt=item["prompt"], bytes=item["bytes"])
+    if args.get("show_image", True) is False or item["status"] == "discarded":
+        return out
+    try:
+        data, _ = store().read(item["id"])
+        encoded, width, height = viewable(data)
+    except Invalid as exc:
+        out["image_problem"] = str(exc)
+        return out
+    except Exception as exc:  # an unreadable file shouldn't hide the details
+        print(f"Warning: media_get couldn't show {item['id']}: {exc!r}")
+        out["image_problem"] = "Dieter couldn't open the picture file."
+        return out
+    out["shown"] = (f"The picture is attached below as a PNG, {width}x{height}"
+                    + (" (scaled down from the original)" if (width, height) != (item["width"], item["height"]) else "")
+                    + ", transparent background kept. Look at it, but this doesn't hand it to image generation: if "
+                      "you need it as a reference for a new image, ask Curtis to attach the file to the chat.")
+    out[IMAGES] = [{"data": encoded, "mimeType": "image/png"}]
     return out
 
 
@@ -117,7 +159,10 @@ def tools():
         Tool("media_list", "Dieter pictures",
              "His pictures, newest first: kept (default; the ones you may use), waiting (sent, not yet OK'd) or all.",
              list_items, {"show": {"type": "string", "enum": ["kept", "waiting", "all"]}}, read_only=True),
-        Tool("media_get", "A Dieter picture", "One picture's details: size, transparency, source, prompt, status.",
-             get_item, {"media_id": {"type": "string", "description": "From media_list."}}, ("media_id",),
+        Tool("media_get", "A Dieter picture",
+             "One picture: its details (size, transparency, source, prompt, status) and the picture itself, so you "
+             "can look at it (a PNG up to 1024 px, transparency kept). show_image false for details only.",
+             get_item, {"media_id": {"type": "string", "description": "From media_list."},
+                        "show_image": {"type": "boolean", "description": "Default true."}}, ("media_id",),
              read_only=True),
     ])
