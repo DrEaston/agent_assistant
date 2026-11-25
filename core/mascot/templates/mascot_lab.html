@@ -1,0 +1,97 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Animation lab · Media{% endblock %}
+{% block content %}
+{{ ui.page_header("Animation lab", crumbs=(("Media", "/media"),), sub="Dieter's clips, lined up and checked before he goes live") }}
+<main class="wrap">
+  {% if done %}{% call ui.banner("ok") %}{{ done }}{% endcall %}{% endif %}
+  {% if problems %}
+  {% call ui.banner("warn") %}{{ problems }} thing{{ "s" if problems != 1 }} to fix: listed below, worst first. Tap one to watch it.{% endcall %}
+  {% else %}
+  {% call ui.banner("ok") %}Every clip and every join passes the checks.{% endcall %}
+  {% endif %}
+
+  {% call ui.section("Watch") %}
+  <div class="card stack">
+    <canvas class="stage" id="stage" width="512" height="512" aria-label="Dieter"></canvas>
+    <div class="spread"><strong id="now">Loading…</strong><span class="small muted num" id="frame"></span></div>
+    <label class="field"><span>Clip or join</span>
+      <select id="pick">
+        <optgroup label="Clips">{% for c in lab.clips %}<option value="{{ c.name }}">{{ c.title }}</option>{% endfor %}</optgroup>
+        <optgroup label="Joins (end of one → start of the next)">{% for j in lab.joins %}<option value="join:{{ j.from }}>{{ j.to }}">{{ j.from }} → {{ j.to }} ({{ j.seam }})</option>{% endfor %}</optgroup>
+      </select></label>
+    <div class="row">
+      <button type="button" class="primary" id="play">Pause</button>
+      <button type="button" class="quiet" id="back" aria-label="Previous frame">◀ Frame</button>
+      <button type="button" class="quiet" id="next" aria-label="Next frame">Frame ▶</button>
+    </div>
+    <div class="row">
+      <div class="seg" role="group" aria-label="Speed">
+        <button type="button" data-speed="0.25">¼×</button><button type="button" data-speed="0.5">½×</button><button type="button" data-speed="1" aria-pressed="true">1×</button>
+      </div>
+      <label class="row small"><input type="checkbox" id="onion"> Onion skin (last frame shows faintly)</label>
+      <label class="row small"><input type="checkbox" id="plain"> No checkerboard</label>
+    </div>
+  </div>
+  {% endcall %}
+
+  {% call ui.section("Joins") %}
+  <p class="small muted">Where one clip ends and the next begins. Seam score: how much the picture jumps (under {{ lab.limits.ok }} smooth, over {{ lab.limits.look }} a visible jump).</p>
+  <div class="table-scroll card"><table class="data-table">
+    <tr><th>From</th><th>To</th><th>Pose</th><th class="num">Seam</th><th></th></tr>
+    {% for j in lab.joins %}
+    <tr><td><a href="#" data-watch="join:{{ j.from }}>{{ j.to }}">{{ j.from }}</a></td><td>{{ j.to }}</td><td>{{ j.pose }}</td><td class="num">{{ j.seam }}</td>
+      <td>{{ ui.tag({"ok": "Smooth", "look": "Look", "jump": "Jumps"}[j.verdict], {"ok": "ok", "look": "info", "jump": "warn"}[j.verdict]) }}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% endcall %}
+
+  {% call ui.section("Clips") %}
+  <div class="table-scroll card"><table class="data-table">
+    <tr><th>Clip</th><th>Play</th><th>Poses</th><th class="num">Frames</th><th class="num">Biggest step</th><th class="num">Loop seam</th><th class="num">Paws move</th></tr>
+    {% for c in lab.clips %}
+    <tr><td><a href="#" data-watch="{{ c.name }}">{{ c.title }}</a>{% for p in c.problems %}<div class="small">{{ ui.tag("Fix", "warn") }} {{ p }}</div>{% endfor %}</td>
+      <td>{{ c.play }}</td><td>{{ c.starts }} → {{ c.ends }}</td><td class="num">{{ c.frames }} · {{ c.seconds }} s</td>
+      <td class="num">{{ c.biggest_step }}</td><td class="num">{{ c.loop_seam if c.loop_seam is not none else "–" }}</td><td class="num">{{ c.drift_px }} px</td></tr>
+    {% endfor %}
+  </table></div>
+  {% if lab.missing %}
+  <div class="card section"><strong>Not in the lab</strong>
+    <ul>{% for m in lab.missing %}<li>{{ m.name }}: {{ m.why }}</li>{% endfor %}</ul></div>
+  {% endif %}
+  <form method="post" action="/media/lab/rebuild" class="section"><button class="quiet" type="submit">Rebuild from Media</button>
+    <span class="small muted">after you keep a new or fixed clip</span></form>
+  {% endcall %}
+</main>
+<script src="{{ asset_url("dieter-mascot.js") }}"></script>
+<script>
+(async function () {
+  const $ = (id) => document.getElementById(id);
+  const lab = await DieterMascot.load();
+  const viewer = new DieterMascot.Viewer($("stage"), lab, (step, at, total) => {
+    const clip = lab.byName[step[0]];
+    $("now").textContent = clip ? clip.title : step[0];
+    $("frame").textContent = `frame ${step[1] + 1} of ${clip ? clip.frames : "?"} · step ${at + 1}/${total}`;
+  });
+  function watch(what) { $("pick").value = what; viewer.show(what); }
+  $("pick").addEventListener("change", () => viewer.show($("pick").value));
+  $("play").addEventListener("click", () => {
+    if (viewer.playing) { viewer.pause(); $("play").textContent = "Play"; } else { viewer.play(); $("play").textContent = "Pause"; }
+  });
+  $("back").addEventListener("click", () => { viewer.pause(); $("play").textContent = "Play"; viewer.step(-1); });
+  $("next").addEventListener("click", () => { viewer.pause(); $("play").textContent = "Play"; viewer.step(1); });
+  $("onion").addEventListener("change", (e) => { viewer.onion = e.target.checked; viewer.render(); });
+  $("plain").addEventListener("change", (e) => $("stage").classList.toggle("plain", e.target.checked));
+  document.querySelectorAll("[data-speed]").forEach((b) => b.addEventListener("click", () => {
+    document.querySelectorAll("[data-speed]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    viewer.speed = Number(b.dataset.speed);
+  }));
+  document.querySelectorAll("[data-watch]").forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault(); watch(a.dataset.watch); window.scrollTo({ top: 0, behavior: "smooth" });
+  }));
+  const worst = lab.joins.find((j) => j.verdict === "jump");
+  watch(worst ? `join:${worst.from}>${worst.to}` : (lab.clips[0] || {}).name || "");
+  viewer.play();
+})();
+</script>
+{% endblock %}
