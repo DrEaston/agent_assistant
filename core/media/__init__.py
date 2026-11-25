@@ -1,1 +1,1 @@
-"""Media: images handed to Dieter (docs/animation_plan.md; the shared storage comes after the ChatGPT image test)."""
+"""Media: pictures handed to Dieter (docs/media_plan.md). Shared storage any app can use; Animation is first."""

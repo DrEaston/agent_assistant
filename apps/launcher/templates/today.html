@@ -181,7 +181,26 @@
       </section>
       {% endif %}
 
-      <p class="small muted center"><a href="/apps/issues">Dieter Studio</a> · <a href="/logbook">Logbook</a> · ask for a change or report a problem</p>
+      {% if media %}
+      <section aria-label="Media">
+        <div class="section-head">
+          <h2 class="section-title">Media</h2>
+          <a href="/media">Open</a>
+        </div>
+        <div class="card flush">
+          <a class="link-row" href="{% if media.waiting == 1 %}{{ media.first.page }}{% else %}/media{% endif %}">
+            <img class="media-thumb" src="{{ media.first.file }}" alt="" loading="lazy">
+            <span class="label-stack">
+              <span class="small muted">Waiting for your OK</span>
+              <span class="title">{% if media.waiting == 1 %}{{ "ChatGPT" if media.first.made_by == "chatgpt" else "Claude" }} sent “{{ media.first.title }}”{% else %}{{ media.waiting }} pictures to keep or discard{% endif %}</span>
+            </span>
+            <span class="chev" aria-hidden="true">›</span>
+          </a>
+        </div>
+      </section>
+      {% endif %}
+
+      <p class="small muted center"><a href="/apps/issues">Dieter Studio</a> · <a href="/logbook">Logbook</a> · <a href="/media">Media</a> · ask for a change or report a problem</p>
     </div>
   </div>
 </main>

@@ -18,3 +18,4 @@ codex_worker_status.*.json
 
 # The kitchen-PC helper is not part of the website.
 helper/
+/media/
