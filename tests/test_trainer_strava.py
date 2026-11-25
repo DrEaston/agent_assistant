@@ -27,7 +27,7 @@ class FakeStrava:
     """Strava's API, in memory: records calls, serves activities, and can be told to fail."""
 
     def __init__(self):
-        self.calls, self.activities, self.subscriptions, self.fail = [], {}, [], None
+        self.calls, self.activities, self.subscriptions, self.fail, self.streams = [], {}, [], None, {}
 
     def __call__(self, url, method="GET", data=None, token=""):
         self.calls.append((method, url.split("?")[0], token))
@@ -49,6 +49,8 @@ class FakeStrava:
             items = [a for a in self.activities.values()
                      if datetime.fromisoformat(a["start_date"].replace("Z", "+00:00")).timestamp() > after]
             return sorted(items, key=lambda a: a["start_date"])[:2]  # small pages, so paging is exercised
+        if "/streams" in url:
+            return self.streams.get(int(url.split("/activities/")[1].split("/")[0]), {})
         if "/activities/" in url:
             found = self.activities.get(int(url.rsplit("/", 1)[1].split("?")[0]))
             if not found:
@@ -221,3 +223,68 @@ class WebhookPageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def easy_run_with_strides(strides=5, easy=2.8, fast=5.3, minutes=50):
+    """Strava's speed stream for an easy run that ends with strides: 20 s fast, 60 s easy jog between, with wobble."""
+    times, speeds, t = [], [], 0
+    for i in range(minutes * 60):
+        times.append(t); speeds.append(easy + (0.15 if i % 7 < 3 else -0.15)); t += 1
+    for _ in range(strides):
+        for i in range(20):
+            times.append(t); speeds.append(fast - (0.4 if i < 3 or i > 16 else 0) + (0.05 if i % 2 else 0)); t += 1
+        for _ in range(60):
+            times.append(t); speeds.append(2.2); t += 1
+    return {"time": {"data": times}, "velocity_smooth": {"data": speeds}}
+
+
+class StrideTests(SyncTests):
+    """Strides found in each run's speed stream, ticked on the plan, and stride speed week by week."""
+
+    def test_finding_strides(self):
+        from apps.trainer import speed
+        stream = easy_run_with_strides()
+        found, usual = speed.find_strides(stream["time"]["data"], stream["velocity_smooth"]["data"])
+        self.assertEqual(len(found), 5)
+        self.assertAlmostEqual(usual, 2.8, delta=0.2)
+        self.assertTrue(all(14 <= s["seconds"] <= 21 for s in found), found)
+        self.assertAlmostEqual(found[0]["top_mps"], 5.3, delta=0.1)
+        # A plain easy run, one GPS spike, and a long tempo stretch aren't strides.
+        plain = easy_run_with_strides(strides=0)
+        self.assertEqual(speed.find_strides(plain["time"]["data"], plain["velocity_smooth"]["data"])[0], [])
+        spiky = list(plain["velocity_smooth"]["data"]); spiky[500] = 9.0
+        self.assertEqual(speed.find_strides(plain["time"]["data"], spiky)[0], [])
+        tempo = list(plain["velocity_smooth"]["data"]); tempo[600:1500] = [4.5] * 900
+        self.assertEqual(speed.find_strides(plain["time"]["data"], tempo)[0], [])
+        self.assertEqual(speed.pace(5.3645), "5:00")
+
+    def test_a_new_run_with_strides_ticks_the_plan(self):
+        from apps.trainer import plan, speed
+        store = plan.PlanStore(self.db)
+        session = store.add_session("2026-11-24", "easy", "Easy run", 6, strides=6)
+        self.fake.activities[501] = activity(501)
+        self.fake.streams[501] = easy_run_with_strides()
+        self.sync.receive({"object_type": "activity", "object_id": 501, "aspect_type": "create", "owner_id": ATHLETE})
+        self.sync.process()
+        self.assertEqual(speed.for_day(self.db, self.user, "2026-11-24")[0]["seconds"] > 10, True)
+        self.assertTrue(store.session(session["id"])["strides_done"])
+        week = store.week_view(__import__("datetime").date(2026, 11, 24))
+        run = next(a for d in week["days"] for a in d["strava"] if a["is_run"])
+        self.assertEqual(run["strides"], 5)
+
+    def test_older_runs_are_read_a_few_at_a_time_and_stride_speed_by_week(self):
+        from datetime import date, timedelta
+        from apps.trainer import analysis, speed
+        today = date.today()
+        for i, (days_ago, fast) in enumerate(((70, 4.9), (63, 4.9), (56, 5.0), (49, 5.0), (21, 5.3), (14, 5.35), (7, 5.4))):
+            day = (today - timedelta(days=days_ago)).isoformat()
+            self.fake.activities[600 + i] = activity(600 + i, day=day)
+            self.fake.streams[600 + i] = easy_run_with_strides(fast=fast)
+            self.sync._store(self.user, self.fake.activities[600 + i])
+        self.assertEqual(speed.fill(self.sync, self.user, limit=3), 3)
+        self.assertEqual(speed.fill(self.sync, self.user, limit=10), 4)
+        self.assertEqual(speed.fill(self.sync, self.user, limit=10), 0)  # each run is read once
+        o = analysis.overview(self.db, self.user)["speed"]
+        self.assertTrue(o["stride_pace_recent"] < o["stride_pace_before"], o)  # quicker pace now
+        self.assertGreater(o["stride_gain"], 10)
+        self.assertEqual(o["latest_strides"]["strides"], 5)

@@ -40,6 +40,12 @@ Derived numbers are labelled as estimates wherever they are (load score, 5K esti
 
 ## Speed progression
 
+- **Strides and stride speed (built 2026-11-25, `apps/trainer/speed.py`).** Each run's second-by-second speed from
+  Strava is read once (one extra request per run; results kept in `tr_run_speed`, not the stream). Strides are bursts
+  of 6-60 s above max(1.4 x the run's usual speed, usual + 1 m/s); each keeps its best 5 s. Planned strides that day
+  are ticked. Stride speed (the middle of a week's stride top speeds) is the Overview's "getting speedier" number:
+  last 4 weeks against the 8 before, in seconds per mile.
+
 - Threshold pace from Tuesday's workout laps toward 5:40/mi.
 - Best efforts over time (400 m, 1 km, mile, 5K) from Strava best efforts and races.
 - Rep pace vs. HR for the same session type.

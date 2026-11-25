@@ -54,15 +54,26 @@
   {% call ui.section("Speed") %}
   <div class="card stack">
     <div class="stat-grid">
+      <div class="stat"><span class="small muted">Stride speed, last 4 weeks</span><strong>{{ sp.stride_pace_recent or "–" }}</strong>
+        <span class="small">{% if sp.stride_gain is not none %}{% if sp.stride_gain > 0 %}{{ sp.stride_gain }} s/mi faster{% elif sp.stride_gain < 0 %}{{ -sp.stride_gain }} s/mi slower{% else %}same{% endif %} than the 8 weeks before ({{ sp.stride_pace_before }}){% elif sp.stride_pace_recent %}/mi pace · needs a few more weeks to compare{% else %}no strides found yet{% endif %}</span></div>
       <div class="stat"><span class="small muted">Top speed, last 4 weeks</span><strong>{{ sp.top_pace_recent or "–" }}</strong>
         <span class="small">/mi pace{% if sp.top_pace_before %} · before: {{ sp.top_pace_before }}{% endif %}</span></div>
       <div class="stat"><span class="small muted">Strides this week</span><strong>{{ t.strides[0] }}/{{ t.strides[1] }}</strong>
-        <span class="small">logged in Dieter</span></div>
+        <span class="small">{% if sp.latest_strides %}last: {{ sp.latest_strides.strides }} on {{ sp.latest_strides.day }}, best {{ sp.latest_strides.best_pace }}/mi{% else %}ticked when Strava shows them{% endif %}</span></div>
       <div class="stat"><span class="small muted">Aerobic efficiency</span><strong>{{ sp.efficiency_recent or "–" }}</strong>
         <span class="small">{% if sp.efficiency_before %}{{ "up" if sp.efficiency_up else "down" }} from {{ sp.efficiency_before }}{% else %}easy runs, last 4 weeks{% endif %}</span></div>
     </div>
-    <p class="small muted">Top speed is the fastest moment GPS saw on your runs (strides and sprints show here; one
-      GPS glitch can too). Aerobic efficiency is easy-run speed per heartbeat (metres a minute ÷ heart rate): when it
+    {% set weeks_with = sp.weeks | selectattr("stride_mps") | list %}
+    {% if weeks_with %}
+    <div class="table-scroll"><table class="data-table">
+      <tr><th>Week</th><th class="num">Strides</th><th class="num">Stride speed</th></tr>
+      {% for w in sp.weeks | reverse %}{% if w.strides %}<tr><td>{{ w.label }}</td><td class="num">{{ w.strides }}</td><td class="num">{{ w.stride_pace }}/mi</td></tr>{% endif %}{% endfor %}
+    </table></div>
+    {% endif %}
+    <p class="small muted">Strides are found in each run's second-by-second speed from Strava: short bursts (6 to 60
+      seconds) well above that run's usual pace. Stride speed is how fast they are at their best 5 seconds, the middle
+      of the week's strides. It's the same relaxed-fast effort each time, so when that pace drops, you're getting faster.
+      Top speed is the fastest moment GPS saw on your runs (one GPS glitch can set it). Aerobic efficiency is easy-run speed per heartbeat (metres a minute ÷ heart rate): when it
       goes up, the same effort is getting you further.</p>
   </div>
   {% endcall %}

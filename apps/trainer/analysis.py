@@ -8,11 +8,15 @@ Everything here is an estimate from Strava's numbers and is labelled that way on
   Banister / "performance management" model;
 - aerobic efficiency: easy-run speed per heartbeat (metres per minute ÷ average HR), week by week;
 - top speed: the fastest moment Strava saw on each week's runs (GPS max speed: noisy, so the best of several weeks
-  matters more than one number).
+  matters more than one number);
+- stride speed: how fast his strides are at their best 5 seconds, week by week (speed.py): the steady measure of
+  whether he's getting faster, since it's the same relaxed-fast effort each time.
 """
 
 import math
 from datetime import date, timedelta
+
+from . import speed
 
 METERS_PER_MILE = 1609.344
 FITNESS_DAYS, FATIGUE_DAYS = 42, 7
@@ -99,13 +103,14 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None):
         seconds = METERS_PER_MILE / mps
         return f"{int(seconds // 60)}:{int(round(seconds % 60)):02d}"
 
+    strides = speed.weekly(db, user_id, week_starts)
     weekly = []
     for w in week_starts:
         top = max((r["max_speed_mps"] or 0 for r in by_week[w]), default=0)
         f = series.get(min(w + timedelta(days=6), today), (0.0, 0.0))
         weekly.append({"week": w.isoformat(), "label": f"{w.strftime('%b')} {w.day}",
                        "efficiency": efficiency(by_week[w]), "top_mps": top or None, "top_pace": pace(top),
-                       "fitness": round(f[0], 1)})
+                       "fitness": round(f[0], 1), **strides.get(w, {"strides": 0, "stride_mps": None, "stride_pace": ""})})
 
     now_fit, now_fat = series.get(today, (0.0, 0.0))
     form = now_fit - now_fat
@@ -115,6 +120,11 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None):
     eff_recent = [w["efficiency"] for w in weekly[-4:] if w["efficiency"]]
     eff_before = [w["efficiency"] for w in weekly[-12:-4] if w["efficiency"]]
     avg = lambda xs: sum(xs) / len(xs) if xs else None
+    stride_recent = [w["stride_mps"] for w in weekly[-4:] if w["stride_mps"]]
+    stride_before = [w["stride_mps"] for w in weekly[-12:-4] if w["stride_mps"]]
+    s_recent, s_before = avg(stride_recent), avg(stride_before)
+    # Seconds per mile gained (+) or lost (-) at stride speed, last 4 weeks against the 8 before.
+    stride_gain = (round(METERS_PER_MILE / s_before - METERS_PER_MILE / s_recent) if s_recent and s_before else None)
 
     return {
         "miles": miles, "miles_target": miles_target, "chart_max": max([m["miles"] for m in miles] + [miles_target]) or 1,
@@ -132,6 +142,9 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None):
             "efficiency_recent": round(avg(eff_recent), 3) if eff_recent else None,
             "efficiency_before": round(avg(eff_before), 3) if eff_before else None,
             "efficiency_up": bool(eff_recent and eff_before and avg(eff_recent) > avg(eff_before)),
+            "stride_pace_recent": pace(s_recent), "stride_pace_before": pace(s_before), "stride_gain": stride_gain,
+            "stride_series": [w["stride_mps"] for w in weekly],
+            "latest_strides": speed.latest(db, user_id),
             "weeks": weekly,
         },
     }
