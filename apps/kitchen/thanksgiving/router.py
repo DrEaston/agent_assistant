@@ -701,7 +701,6 @@ async def save_dish(dish_id: int, request: Request):
             "series_button": existing_steps.get(step_id, {}).get("series_button") or "",
             "how": existing_steps.get(step_id, {}).get("how") or [],  # the recipe lines it covers (planner.step_how)
             "uses": existing_steps.get(step_id, {}).get("uses") or [],  # ingredient groups it adds
-            "together": existing_steps.get(step_id, {}).get("together") or "",  # done with another dish's step
         })
     if (form.get("new_step_title") or "").strip():
         steps.append({
