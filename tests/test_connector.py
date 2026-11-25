@@ -380,8 +380,14 @@ class ConnectorFlowTests(unittest.TestCase):
         # dieter_use_tool wrapper refuses them with instructions instead of failing obscurely.
         _, tokens = self.connect()
         token = tokens["access_token"]
+        order = [t["name"] for t in self.rpc(token, "tools/list").json()["result"]["tools"]]
+        self.assertEqual(order[:3], ["dieter_find_tools", "dieter_use_tool", "media_test_image"])  # can't fall off the end
         listed = {t["name"]: t for t in self.rpc(token, "tools/list").json()["result"]["tools"]}
         self.assertEqual(listed["media_test_image"]["_meta"], {"openai/fileParams": ["image"]})
+        image = listed["media_test_image"]["inputSchema"]["properties"]["image"]  # the shape ChatGPT documents
+        self.assertEqual((image["type"], image["required"], image["additionalProperties"]),
+                         ("object", ["download_url", "file_id"], False))
+        self.assertEqual(listed["media_test_image"]["inputSchema"]["required"], ["image"])
         found = {t["name"]: t for t in self.tool(token, "dieter_find_tools", query="image")["tools"]}
         self.assertEqual(found["media_test_image"]["takes_files"], ["image"])
         self.assertNotIn("takes_files", found.get("media_test_results", {}))

@@ -165,7 +165,8 @@ def tools():
              test_image,
              {"image": {"type": "object", "description": "The image file to send.",
                         "properties": {"download_url": {"type": "string"}, "file_id": {"type": "string"},
-                                       "mime_type": {"type": "string"}, "file_name": {"type": "string"}}},
+                                       "mime_type": {"type": "string"}, "file_name": {"type": "string"}},
+                        "required": ["download_url", "file_id"], "additionalProperties": False},
               "device": {"type": "string"}},
              ("image",), read_only=True,  # ChatGPT Plus/Pro only offers read-only tools; this saves just a result note
              meta={"openai/fileParams": ["image"]}),

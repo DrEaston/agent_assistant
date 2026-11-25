@@ -143,8 +143,8 @@ def make_router(toolsets, authenticate, run_as, signer=lambda user: user, instru
         if method == "ping":
             return _result(msg_id, {})
         if method == "tools/list":
-            return _result(msg_id, {"tools": META_TOOLS + await run_in_threadpool(run_as, user,
-                                                                                    lambda: all_tools(user))})
+            listed = await run_in_threadpool(run_as, user, lambda: all_tools(user))
+            return _result(msg_id, {"tools": META_TOOLS + files_first(listed)})
         if method == "tools/call":
             answer = await run_in_threadpool(run_as, user, lambda: call_tool(user, params))
             if answer is None:
@@ -194,6 +194,12 @@ def file_params(tool):
     meta = tool.get("_meta") if isinstance(tool, dict) else None
     params = meta.get("openai/fileParams") if isinstance(meta, dict) else None
     return list(params) if isinstance(params, list) else []
+
+
+def files_first(tools):
+    """Tools that take a file go first. ChatGPT may not hand the model every tool in a long list, and it can only
+    attach a file to a tool the model was given (dieter_use_tool can't carry one), so those mustn't fall off the end."""
+    return sorted(tools, key=lambda t: not (t.get("_meta") or {}).get("openai/fileParams"))
 
 
 def _result(msg_id, result):
