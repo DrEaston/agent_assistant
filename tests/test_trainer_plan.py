@@ -164,6 +164,13 @@ class PageTests(unittest.TestCase):
         page = self.client.get(f"/apps/trainer/sessions/{session_id}")
         self.assertIn("Shakeout", page.text)
 
+    def test_overview_is_the_landing_page(self):
+        page = self.client.get("/apps/trainer")
+        self.assertEqual(page.status_code, 200)
+        for part in ("Weekly mileage", "Fitness", "Speed", "This week"):
+            self.assertIn(part, page.text)
+        self.assertEqual(self.client.get("/apps/trainer/week").status_code, 200)
+
     def test_check_in_and_usual_week_pages(self):
         self.assertEqual(self.client.get("/apps/trainer/checkin").status_code, 200)
         self.assertEqual(self.client.get("/apps/trainer/usual").status_code, 200)

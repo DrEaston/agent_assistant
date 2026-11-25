@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from core import ui
 from database import get_current_user_id, reset_current_user_id, set_current_user_id
 
-from . import plan, strava
+from . import analysis, plan, strava
 from .manifest import APP
 
 router = APIRouter()
@@ -28,7 +28,8 @@ _templates = ui.templates(Path(__file__).parent / "templates")
 BASE = "/apps/trainer"
 REPORT_URL = BASE + "/feedback"
 TABS = (
-    ("This week", BASE),
+    ("Overview", BASE),
+    ("This week", BASE + "/week"),
     ("Sunday check-in", BASE + "/checkin"),
     ("Usual week", BASE + "/usual"),
     ("Log", BASE + "/log"),
@@ -91,11 +92,25 @@ def _guard(fn, *args, **kwargs):
 
 
 @router.get(BASE)
+def overview(request: Request, week: str = ""):
+    """The landing page: this week at a glance, weekly mileage, fitness and speed. (?week=... is This week.)"""
+    if week:
+        return this_week(request, week)
+    catch_up()
+    s = store()
+    view = s.week_view(date.today())
+    numbers = analysis.overview(_state["db"], get_current_user_id(), miles_target=view["totals"]["miles_target"])
+    return render("trainer_overview.html", title="Trainer", current=BASE, page_url=BASE, view=view,
+                  guidance=analysis.week_guidance(view), o=numbers,
+                  today=[s for d in view["days"] if d["is_today"] for s in d["sessions"]])
+
+
+@router.get(BASE + "/week")
 def this_week(request: Request, week: str = ""):
     catch_up()
     start = _start(week)
     view = store().week_view(start)
-    return render("trainer_week.html", title="This week", view=view, current=BASE,
+    return render("trainer_week.html", title="This week", view=view, current=BASE + "/week",
                   page_url=f"{BASE}?week={view['start']}", this_monday=plan.week_start(date.today()).isoformat())
 
 
