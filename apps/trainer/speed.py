@@ -9,7 +9,7 @@ summary, not the streams:
   5 seconds, named by length: a stride (under 150 m), a standard rep (200, 300, 400, 600, 800, 1K, 1200, mile) or "rep";
 - the run's best efforts at 400 m to 5K (fastest stretch of each distance anywhere in the run);
 - its best 5 seconds (his top speed);
-- a speed histogram: seconds spent in each 0.1 m/s band above 3 m/s. Scores that depend on his current critical speed
+- a speed histogram: seconds and metres in each 0.05 m/s band above 3 m/s (the metres keep each band's exact speed). Scores that depend on his current critical speed
   are worked out from this, so when critical speed changes nothing has to be read from Strava again.
 
 The measures (all estimates, labelled so on the page):
@@ -179,16 +179,19 @@ def best_efforts(times, dists):
 
 
 def histogram(times, speeds):
-    """{band: seconds}: time in each 0.1 m/s band from HIST_FROM up (band = speed x 10, rounded down). A gap in the
-    recording (paused watch) counts at most 2 seconds."""
+    """{band: [seconds, metres]} in each 0.05 m/s band from HIST_FROM up (band = speed x 20, rounded down). The
+    metres keep the band's exact average speed, so scores near critical speed aren't thrown off by the banding. A gap
+    in the recording (paused watch) counts at most 2 seconds."""
     samples = _samples(times, speeds)
     hist = {}
     for (t, v, _), (t_next, _, _) in zip(samples, samples[1:]):
         if v < HIST_FROM:
             continue
-        band = str(int(v * 10))
-        hist[band] = hist.get(band, 0) + min(t_next - t, 2.0)
-    return {k: round(s, 1) for k, s in hist.items()}
+        dt = min(t_next - t, 2.0)
+        band = hist.setdefault(str(int(v * 20)), [0.0, 0.0])
+        band[0] += dt
+        band[1] += v * dt
+    return {k: [round(s, 1), round(m, 1)] for k, (s, m) in hist.items()}
 
 
 def top_speed(times, speeds):
@@ -243,22 +246,25 @@ def fit_critical_speed(bests):
     return round(cs, 3), round(d_prime)
 
 
-def _speed(band):
-    return int(band) / 10 + 0.05  # the middle of the band
+def _bands(hist):
+    """(seconds, metres, average speed) per band."""
+    for seconds, metres in hist.values():
+        if seconds:
+            yield seconds, metres, metres / seconds
 
 
 def d_prime_used(hist, cs):
     """Metres 'above' critical speed: sum of (speed - CS) x seconds over everything faster than CS."""
     if not cs:
         return 0.0
-    return sum((_speed(b) - cs) * s for b, s in hist.items() if _speed(b) > cs)
+    return sum(metres - cs * seconds for seconds, metres, v in _bands(hist) if v > cs)
 
 
 def near_top_metres(hist, vmax):
     """Metres run at 90% of top speed or faster."""
     if not vmax:
         return 0.0
-    return sum(_speed(b) * s for b, s in hist.items() if _speed(b) >= 0.9 * vmax)
+    return sum(metres for seconds, metres, v in _bands(hist) if v >= 0.9 * vmax)
 
 
 # ---------------------------------------------------------------- reading runs from Strava

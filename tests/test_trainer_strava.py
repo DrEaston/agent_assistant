@@ -385,3 +385,14 @@ class StrideTests(SyncTests):
         self.load_weeks(build)
         o = analysis.overview(self.db, self.user)["speed"]
         self.assertFalse(o["weeks"][-2]["work_over"], o["weeks"][-2])
+
+    def test_a_few_seconds_slower_per_rep_counts_much_less(self):
+        """18 x 400: at 82 s it's about twice the speed work of 85 s; at critical speed (~87 s) almost none."""
+        from apps.trainer import speed
+        used = {}
+        for secs in (82, 83, 85, 87):
+            st = session_of(18, secs, 400 / secs, jog=30)
+            used[secs] = speed.d_prime_used(speed.histogram(st["time"]["data"], st["velocity_smooth"]["data"]), 4.576)
+        self.assertGreater(used[82], used[83])
+        self.assertGreater(used[82], 2 * used[85])
+        self.assertLess(used[87], 60)
