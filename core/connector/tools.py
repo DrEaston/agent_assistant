@@ -51,14 +51,18 @@ class Tool:
     required: tuple = ()
     read_only: bool = False
     destructive: bool = False
+    meta: dict = field(default_factory=dict)  # the tool's _meta, e.g. {"openai/fileParams": ["image"]} for ChatGPT
 
     def schema(self):
         annotations = {"title": self.title, "readOnlyHint": self.read_only, "openWorldHint": False}
         if not self.read_only:
             annotations["destructiveHint"] = self.destructive
-        return {"name": self.name, "title": self.title, "description": self.description,
-                "inputSchema": {"type": "object", "properties": self.params, "required": list(self.required)},
-                "annotations": annotations}
+        schema = {"name": self.name, "title": self.title, "description": self.description,
+                  "inputSchema": {"type": "object", "properties": self.params, "required": list(self.required)},
+                  "annotations": annotations}
+        if self.meta:
+            schema["_meta"] = dict(self.meta)
+        return schema
 
 
 class ToolSet:
