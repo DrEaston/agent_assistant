@@ -6,7 +6,7 @@
 {% call ui.page_header("This week", crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs, current=current,
     sub=view.label ~ " · " ~ t.miles_run ~ " of " ~ (t.miles_target | round(1)) ~ " mi run") %}
   <a class="button quiet" href="/apps/trainer?week={{ view.prev }}" aria-label="Previous week">‹</a>
-  {% if view.start != this_monday %}<a class="button quiet" href="/apps/trainer">This week</a>{% endif %}
+  {% if view.start != this_monday %}<a class="button quiet" href="/apps/trainer/week">This week</a>{% endif %}
   <a class="button quiet" href="/apps/trainer?week={{ view.next }}" aria-label="Next week">›</a>
 {% endcall %}
 <main class="wrap">

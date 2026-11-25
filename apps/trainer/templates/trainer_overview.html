@@ -1,0 +1,71 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Trainer{% endblock %}
+{% block content %}
+{% set t = view.totals %}
+{% call ui.page_header("Trainer", crumbs=(("Dieter", "/"),), tabs=tabs, current=current, sub=view.label) %}{% endcall %}
+<main class="wrap">
+
+  {% call ui.section("This week") %}
+  <div class="card stack">
+    <div class="spread"><span>Miles</span><strong class="num">{{ t.miles_run }} / {{ t.miles_target | round(1) }}</strong></div>
+    {{ ui.meter(t.miles_run, t.miles_target or 1) }}
+    {% if today %}
+    <div><div class="small muted">Today</div>
+      {% for s in today %}<div>{% if s.done %}✓ {% endif %}{{ s.title }}{% if s.miles %} · {{ s.miles | round(1) }} mi{% endif %}{% if s.strides %} + strides{% endif %}{% if s.slot %} · {{ s.slot }}{% endif %}</div>{% endfor %}</div>
+    {% endif %}
+    {% if view.week.goals %}
+    <div><div class="small muted">Your goals this week</div>
+      <ul>{% for g in view.week.goals %}<li>{{ g }}</li>{% endfor %}</ul></div>
+    {% endif %}
+    {% if guidance %}
+    <div><div class="small muted">Where the week stands</div>
+      <ul>{% for line in guidance %}<li>{{ line }}</li>{% endfor %}</ul></div>
+    {% endif %}
+    <div class="row"><a class="button" href="/apps/trainer/week">See the week</a>
+      {% if not view.week.checked_in_at %}<a class="button quiet" href="/apps/trainer/checkin">Set goals</a>{% endif %}</div>
+  </div>
+  {% endcall %}
+
+  {% call ui.section("Weekly mileage") %}
+  <div class="card stack">
+    {% set bars = [] %}{% for m in o.miles %}{% set _ = bars.append({"label": m.label, "value": m.miles, "current": m.current}) %}{% endfor %}
+    {{ ui.bar_chart(bars, o.chart_max, target=o.miles_target, unit=" mi", label="Run miles per week, last 16 weeks") }}
+    <p class="small muted">Run miles per week, last 16 weeks. Dashed line: your {{ o.miles_target | round | int }} mi target; green bars reached it; blue is this week.</p>
+  </div>
+  {% endcall %}
+
+  {% set f = o.fitness %}
+  {% call ui.section("Fitness") %}
+  <div class="card stack">
+    <div class="stat-grid">
+      <div class="stat"><span class="small muted">Fitness</span><strong>{{ f.fitness }}</strong>
+        <span class="small">{{ "+" if f.fitness_change >= 0 }}{{ f.fitness_change }} vs 4 weeks ago</span></div>
+      <div class="stat"><span class="small muted">Fatigue</span><strong>{{ f.fatigue }}</strong><span class="small">last 7 days</span></div>
+      <div class="stat"><span class="small muted">Form</span><strong>{{ "+" if f.form > 0 }}{{ f.form }}</strong><span class="small">{{ f.form_label }}</span></div>
+    </div>
+    <p class="small muted">Estimates from your log. Each session's load is its minutes weighted by heart rate (harder
+      minutes count more; max HR taken as {{ f.max_hr }}). Fitness is the 6-week average load, fatigue the 1-week
+      average, form the difference: low before a hard block, rising toward a race.</p>
+  </div>
+  {% endcall %}
+
+  {% set sp = o.speed %}
+  {% call ui.section("Speed") %}
+  <div class="card stack">
+    <div class="stat-grid">
+      <div class="stat"><span class="small muted">Top speed, last 4 weeks</span><strong>{{ sp.top_pace_recent or "–" }}</strong>
+        <span class="small">/mi pace{% if sp.top_pace_before %} · before: {{ sp.top_pace_before }}{% endif %}</span></div>
+      <div class="stat"><span class="small muted">Strides this week</span><strong>{{ t.strides[0] }}/{{ t.strides[1] }}</strong>
+        <span class="small">logged in Dieter</span></div>
+      <div class="stat"><span class="small muted">Aerobic efficiency</span><strong>{{ sp.efficiency_recent or "–" }}</strong>
+        <span class="small">{% if sp.efficiency_before %}{{ "up" if sp.efficiency_up else "down" }} from {{ sp.efficiency_before }}{% else %}easy runs, last 4 weeks{% endif %}</span></div>
+    </div>
+    <p class="small muted">Top speed is the fastest moment GPS saw on your runs (strides and sprints show here; one
+      GPS glitch can too). Aerobic efficiency is easy-run speed per heartbeat (metres a minute ÷ heart rate): when it
+      goes up, the same effort is getting you further.</p>
+  </div>
+  {% endcall %}
+
+</main>
+{% endblock %}

@@ -362,7 +362,7 @@
         </div>
     {% elif active_tab == "home" %}
         <div class="trainer-card-grid trainer-dashboard-grid">
-            {{ week_dashboard_card(week_dashboard, "/apps/trainer?athlete_user_id=" ~ selected_athlete_id if not is_viewing_own_trainer else "/apps/trainer", mileage_chart) }}
+            {{ week_dashboard_card(week_dashboard, "/apps/trainer/history?athlete_user_id=" ~ selected_athlete_id if not is_viewing_own_trainer else "/apps/trainer/history", mileage_chart) }}
             {{ weekly_plan_card(weekly_workout_plan, selected_athlete_id if not is_viewing_own_trainer else 0, true) }}
         </div>
         {% if is_viewing_own_trainer and strava_connected %}

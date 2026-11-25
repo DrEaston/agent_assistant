@@ -109,3 +109,20 @@
 {% macro toast(id="toast") -%}
 <div class="toast" id="{{ id }}" role="status" hidden></div>
 {%- endmacro %}
+
+
+{# Bar chart: bars = [{"label", "value", "current"}]; target draws a line. Values only; colours come from CSS. #}
+{% macro bar_chart(bars, max_value, target=none, unit="", label="Chart") -%}
+{% set width = (bars | length) * 24 %}
+<figure class="chart" aria-label="{{ label }}">
+  <svg viewBox="0 0 {{ width }} 108" preserveAspectRatio="none" role="img" aria-label="{{ label }}">
+    {% for b in bars %}
+    {% set h = ((b.value or 0) / (max_value or 1) * 100) | round(1) %}
+    <rect class="chart-bar{% if target and (b.value or 0) >= target %} hit{% endif %}{% if b.current %} current{% endif %}" x="{{ loop.index0 * 24 + 3 }}" y="{{ 104 - h }}" width="18" height="{{ h }}" rx="3"><title>{{ b.label }}: {{ b.value }}{{ unit }}</title></rect>
+    {% endfor %}
+    {% if target %}{% set ty = (104 - target / (max_value or 1) * 100) | round(1) %}
+    <line class="chart-target" x1="0" x2="{{ width }}" y1="{{ ty }}" y2="{{ ty }}"></line>{% endif %}
+  </svg>
+  <figcaption class="chart-axis small muted"><span>{{ bars[0].label if bars }}</span><span>{{ bars[-1].label if bars }}</span></figcaption>
+</figure>
+{%- endmacro %}

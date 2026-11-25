@@ -17,9 +17,10 @@ APP = {
     "issue_area": "Trainer",
     "band_label": "Trainer utility navigation",
     "subtitle": "Plan the week, get strides and strength in, and track how it went.",
-    "home_label": "This week",
+    "home_label": "Overview",
     "nav_items": (
-        {"label": "This week", "url": "/apps/trainer"},
+        {"label": "Overview", "url": "/apps/trainer"},
+        {"label": "This week", "url": "/apps/trainer/week"},
         {"label": "Sunday check-in", "url": "/apps/trainer/checkin"},
         {"label": "Usual week", "url": "/apps/trainer/usual"},
         {"label": "History", "url": "/apps/trainer/history"},
