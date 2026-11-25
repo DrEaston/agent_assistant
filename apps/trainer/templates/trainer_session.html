@@ -1,0 +1,29 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+{% call ui.page_header(title, crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer"), ("This week", "/apps/trainer?week=" ~ week)), tabs=tabs, current=current) %}{% endcall %}
+<main class="wrap">
+  <form method="post" action="/apps/trainer/sessions/{{ session.id }}" class="card stack">
+    <div class="cols">
+      {{ ui.field("Day", "day", value=session.day, type="date", required=True) }}
+      {{ ui.field("Time", "slot", value=session.slot, type="time") }}
+    </div>
+    <div class="cols">
+      <div class="field"><label for="kind">What</label>
+        <select id="kind" name="kind">{% for k, label in kinds.items() %}<option value="{{ k }}"{% if k == session.kind %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="status">Status</label>
+        <select id="status" name="status">{% for st in statuses %}<option value="{{ st }}"{% if st == session.status %} selected{% endif %}>{{ st | capitalize }}</option>{% endfor %}</select></div>
+    </div>
+    {{ ui.field("Title", "title", value=session.title, maxlength=120) }}
+    <div class="cols">
+      {{ ui.field("Miles (runs)", "miles", value=(session.miles if session.miles is not none else ""), type="number") }}
+      {{ ui.field("Strides after (count, 0 for none)", "strides", value=session.strides, type="number") }}
+    </div>
+    {{ ui.field("Details", "details", value=session.details, maxlength=500) }}
+    {{ ui.field("Note (how it went, why skipped)", "note", value=session.note, maxlength=500) }}
+    <button type="submit" class="primary">Save</button>
+  </form>
+  <div class="gap-above">{{ ui.delete_button("/apps/trainer/sessions/" ~ session.id ~ "/delete", "Delete session", "Delete this session?") }}</div>
+</main>
+{% endblock %}

@@ -132,7 +132,10 @@
       <div class="tiles">
         <a class="tile accent-trainer" href="/apps/trainer">
           <span class="kicker">Trainer</span>
-          {% if workout %}
+          {% if training %}
+          <span class="tile-title">Today: {{ training.lines[0].text }}</span>
+          <span class="small muted">{% for line in training.lines[1:] %}{{ line.text }}{% if not loop.last %} · {% endif %}{% endfor %}{% if training.left == 0 %} All done ✓{% endif %}</span>
+          {% elif workout %}
           <span class="tile-title">Last: {{ workout.title }}</span>
           <span class="small muted">{{ workout.detail }}</span>
           {% else %}

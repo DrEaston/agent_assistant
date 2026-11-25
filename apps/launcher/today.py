@@ -67,7 +67,7 @@ def short_date(value):
 
 def render(*, user_name, now, thanksgiving=None, planned_meals=(), shopping=None, todos=(), focus=None,
            last_workout=None, playlist_drafts=0, is_guest=False, report_url=None, studio=None, logbook=None,
-           media=None):
+           media=None, training=None):
     workout = None
     if last_workout:
         bits = [short_date(last_workout.get("started_at")), miles(last_workout.get("distance_meters"))]
@@ -92,6 +92,8 @@ def render(*, user_name, now, thanksgiving=None, planned_meals=(), shopping=None
         "logbook": logbook,
         # Media (core/media): pictures ChatGPT or Claude sent, waiting for his OK.
         "media": media,
+        # Trainer (apps/trainer/plan.py): today's planned sessions, if any.
+        "training": training if training and training.get("lines") else None,
         "page_url": "/",
     }
     return HTMLResponse(_templates.get_template("today.html").render(**context))
