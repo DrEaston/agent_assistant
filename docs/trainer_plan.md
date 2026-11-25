@@ -11,6 +11,16 @@ roles stay; they stop being the centre of the app.
 Intake: an existing app (Trainer) rebuilt in its own folder, new-style pages. The sprint/intensity-load capstone
 (project 11) stays a separate study that reads Trainer's data; Trainer doesn't grow into it.
 
+## His week right now (Nov 25, 2026; all of it subject to change, so everything below is editable)
+
+- About **40 miles a week**.
+- **Hard workout Tuesday afternoon.**
+- **1–2 weight workouts** and **1–2 Pilates sessions** a week.
+- **Hydration and fueling** tracked as daily habits, not afterthoughts.
+- A **Sunday night check-in**: look back at the week, set next week's goals and sessions.
+- It has to be **flexible**: the plan bends to his week; moving or swapping a day is one tap, and the totals
+  (miles, strength, Pilates, strides) rebalance around it.
+
 ## What he gets
 
 **This week**, the home page:
@@ -28,7 +38,21 @@ Intake: an existing app (Trainer) rebuilt in its own folder, new-style pages. Th
   twice, a rest day), with mileage that builds and a lighter week every few. He sets the pattern; Dieter fills in
   the dates and adjusts. No hidden algorithm: every change shows why.
 - Built-in session types: easy, long, threshold/tempo, intervals, race, rest, strides (on the end of an easy run),
-  strength, mobility. Sessions carry targets (distance or time, pace or effort, reps × distance, rest).
+  strength (weights), Pilates, mobility. Sessions carry targets (distance or time, pace or effort, reps × distance, rest).
+
+**Sunday night: set the week**
+
+- A short guided check-in on Sunday evening (a reminder through the calendar feed, later a phone notification):
+  last week's miles vs. ~40, the Tuesday workout, weights and Pilates done, how fueling and hydration went.
+- Then next week: confirm or change the miles target, place the Tuesday hard session, pick the weights and
+  Pilates days, and set one or two goals for the week ("strides twice", "fuel before Tuesday's workout").
+  Dieter drafts it from his usual pattern; he adjusts and confirms. Claude or ChatGPT can run the same check-in.
+
+**Hydration and fueling**
+
+- Daily, lightweight: water (glasses or bottles, one tap each) and fueling around key sessions (before Tuesday's
+  workout, during long runs, after). Shown on Today and in the Sunday review. Targets are his own numbers; Dieter
+  doesn't prescribe nutrition.
 
 **Strides and strength, so they stick**
 
@@ -84,7 +108,8 @@ In order of effort:
 | `tr_sessions` | date, slot time, type, targets (JSON), notes, status planned/done/skipped/moved, matched activity id |
 | `tr_extras` | strides/strength items on a session: kind, routine id, prescription, done |
 | `tr_routines` / `tr_exercises` | strength routines and their exercises (sets, reps, cues) |
-| `tr_checkins` | per day: feel 1–5, soreness spots, note |
+| `tr_checkins` | per day: feel 1–5, soreness spots, water, fueling notes, note |
+| `tr_weeks` | the Sunday check-in: miles target, goals for the week, review of the last week |
 
 Existing `trainer_imported_workouts`, shoes and coach grants stay where they are and are read through a small
 adapter, then move into the app's store when touched (CLAUDE.md: move code out of `api.py` as you go).
@@ -94,7 +119,8 @@ adapter, then move into the app's store when touched (CLAUDE.md: move code out o
 1. **Plan doc** (this) and his OK on the shape.
 2. **New-style shell** for Trainer (`core/shell`, design-system macros), routes moved out of `api.py`, existing
    Strava/shoes/coach features carried over unchanged. Tests.
-3. **Week + sessions**: the This-week page, sessions with targets, strides/strength as items, Today card.
+3. **Week + sessions**: the This-week page, sessions with targets, strides/strength/Pilates as items, hydration and
+   fueling taps, Today card, and the Sunday check-in.
 4. **Calendar feed** (`/trainer/calendar/<secret>.ics`, revocable link).
 5. **Plans and blocks**: goal, pattern, generating weeks, moving/skipping with carry-forward.
 6. **Strength routines** and the exercise player; seed his PT exercises.
@@ -106,6 +132,6 @@ Steps 2–4 make it useful on their own. The capstone study (project 11) can sta
 
 ## Open questions
 
-- Which days and times usually work for runs and strength? (Default slots for the calendar.)
-- Current goal and date: a 5K under 16:00, when?
+- Known so far: ~40 mi/week, hard workout Tuesday afternoon, 1–2 weights, 1–2 Pilates, Sunday night check-in.
+- Still to ask: usual times for easy runs, weights and Pilates (calendar slots); long-run day; race goal and date.
 - Keep coach/athlete features prominent, or tuck them into Settings for now?
