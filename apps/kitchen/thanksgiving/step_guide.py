@@ -16,7 +16,7 @@ stays. New preset dishes get it (presets.py), and saved plans get
 it once per GUIDE_VERSION (store.py).
 """
 
-GUIDE_VERSION = "step-how-7"  # bump when GUIDE changes, so saved plans get it
+GUIDE_VERSION = "step-how-8"  # bump when GUIDE changes, so saved plans get it
 
 GUIDE = {
     "Pumpkin pie": {
@@ -98,9 +98,10 @@ GUIDE = {
     },
     "Olive and rosemary sourdough": {
         "starter": {"remove": "Feed enough starter for both loaves"},  # the plain loaf's 9 AM feed covers both
-        "mix": {"uses": ["*"], "how": ["Pat the chopped olives", "Mix flour, starter"]},
-        "folds": {"how": ["Stretch and folds"]},
-        "shape": {"how": ["Cold shape"]},
+        # Made alongside the plain loaf: mixing, folding and shaping are one job (checking one checks both).
+        "mix": {"uses": ["*"], "how": ["Pat the chopped olives", "Mix flour, starter"], "together": "Sourdough:mix"},
+        "folds": {"how": ["Stretch and folds"], "together": "Sourdough:folds"},
+        "shape": {"how": ["Cold shape"], "together": "Sourdough:shape"},
         "preheat": {"how": ["Next morning"]},
         "poke": {"remove": "Poke test the olive loaf"},  # folded into bake1: it's the check right before scoring
         "bake1": {"how": ["Poke test", "Flip straight", "Bake 25 minutes"], "replace_how": ["Flip straight", "Bake 25 minutes"],
@@ -169,6 +170,9 @@ def apply(dish_name, steps):
             if step.get("how") != entry["how"]:
                 step["how"] = list(entry["how"])
                 changed = True
+        if entry.get("together") and not step.get("together"):
+            step["together"] = entry["together"]  # done together with another dish's step: checking one checks both
+            changed = True
         if entry.get("uses") and not step.get("uses"):
             step["uses"] = list(entry["uses"])  # cook mode links the step to those ingredients
             changed = True

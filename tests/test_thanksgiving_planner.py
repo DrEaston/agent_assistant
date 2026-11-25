@@ -297,6 +297,19 @@ class RouteTests(unittest.TestCase):
         self.assertIn("Shopping list", pages)
         self.assertIn("Yukon Gold", pages)
 
+    def test_loaves_made_together_check_off_together(self):
+        self.client.get("/thanksgiving")
+        state = self.client.get("/thanksgiving/api/state").json()
+        plain = next(d for d in state["dishes"] if d["name"] == "Sourdough")
+        olive = next(d for d in state["dishes"] if d["name"].startswith("Olive"))
+        self.client.post("/thanksgiving/api/steps/done", json={"key": f"{plain['id']}:folds", "done": True})
+        after = {s["key"]: s["done"] for d in self.client.get("/thanksgiving/api/state").json()["dishes"] for s in d["steps"]}
+        self.assertTrue(after[f"{olive['id']}:folds"])  # one job: both loaves' folds are done
+        self.assertFalse(after[f"{olive['id']}:bake1"])  # bakes stay separate
+        self.client.post("/thanksgiving/api/steps/done", json={"key": f"{olive['id']}:folds", "done": False})
+        after = {s["key"]: s["done"] for d in self.client.get("/thanksgiving/api/state").json()["dishes"] for s in d["steps"]}
+        self.assertFalse(after[f"{plain['id']}:folds"])
+
     def test_ingredient_checklist_is_shared_and_starts_over(self):
         self.client.get("/thanksgiving")
         state = self.client.get("/thanksgiving/api/state").json()

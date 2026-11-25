@@ -327,6 +327,17 @@ class ThanksgivingStore:
                         continue
                     if step_guide.apply(row["name"], steps):
                         conn.execute("UPDATE tg_dishes SET steps_json = ? WHERE id = ?", (json.dumps(steps), row["id"]))
+            if once(plan_id, "together-sync-1"):
+                # Steps now linked as done together (the olive loaf with the plain loaf): if either was already
+                # checked, check both, so no leftover alert for the one not ticked.
+                changed = True
+                checked = {r["item_key"] for r in conn.execute(
+                    "SELECT item_key FROM tg_checks WHERE plan_id = ? AND kind = 'step'", (plan_id,)).fetchall()}
+                for key in list(checked):
+                    for other in self.together_keys(plan_id, key):
+                        if other not in checked:
+                            conn.execute("INSERT OR IGNORE INTO tg_checks (plan_id, kind, item_key) VALUES (?, 'step', ?)",
+                                         (plan_id, other))
         return changed
 
     def _commit(self):
@@ -472,7 +483,29 @@ class ThanksgivingStore:
                              (plan_id, kind, len(prefix), prefix))
         self._commit()
 
+    def together_keys(self, plan_id, key):
+        """Steps done together with this one (step["together"] = "<dish name>:<step id>", either direction)."""
+        rows = self._conn().execute("SELECT id, name, steps_json FROM tg_dishes WHERE plan_id = ?", (plan_id,)).fetchall()
+        by_name = {r["name"]: r["id"] for r in rows}
+        pairs = []
+        for r in rows:
+            try:
+                steps = json.loads(r["steps_json"] or "[]")
+            except json.JSONDecodeError:
+                continue
+            for step in steps:
+                name, _, other = str(step.get("together") or "").rpartition(":")
+                if name in by_name and other:
+                    pairs.append((f"{r['id']}:{step.get('id')}", f"{by_name[name]}:{other}"))
+        return {b if a == key else a for a, b in pairs if key in (a, b)}
+
     def set_checked(self, plan_id, kind, key, checked):
+        if kind == "step":
+            for other in self.together_keys(plan_id, key):  # one job, two dishes: both checked (or both not)
+                self._set_checked(plan_id, kind, other, checked)
+        self._set_checked(plan_id, kind, key, checked)
+
+    def _set_checked(self, plan_id, kind, key, checked):
         conn = self._conn()
         if checked:
             conn.execute("INSERT OR IGNORE INTO tg_checks (plan_id, kind, item_key) VALUES (?, ?, ?)",
