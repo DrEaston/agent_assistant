@@ -61,6 +61,7 @@ class ProbeTests(unittest.TestCase):
     def test_the_tool_tells_chatgpt_image_is_a_file(self):
         schema = probe.tools().tools["media_test_image"].schema()
         self.assertEqual(schema["_meta"], {"openai/fileParams": ["image"]})
+        self.assertTrue(schema["annotations"]["readOnlyHint"])  # ChatGPT Plus/Pro hides tools that write
         self.assertNotIn("_meta", probe.tools().tools["media_test_results"].schema())
 
     def test_an_unexpected_failure_is_logged_and_explained(self):
