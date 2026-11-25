@@ -205,21 +205,38 @@ from core.logbook import connector as logbook_connector, routes as logbook_route
 
 logbook_connector.configure(db)
 LOGBOOK_TOOLS = logbook_connector.tools()
-# Temporary (core/media/probe.py): can ChatGPT hand Dieter an image, on the phone and the desktop? Remove with Media.
-from core.media import probe as media_probe  # noqa: E402
+# Media (core/media): pictures sent to Dieter, waiting for his OK. Private files, not the public /uploads folder.
+from core.media import connector as media_connector, routes as media_routes  # noqa: E402
+from core.media.store import Blobs as MediaBlobs  # noqa: E402
 
-media_probe.configure(db)
+
+class _MediaCloud:
+    """Media's remote copy: the same Cloud Storage bucket, under its own prefix."""
+
+    def put(self, key, path):
+        cloud_persistence.put_media(key, path)
+
+    def get(self, key, path):
+        cloud_persistence.get_media(key, path)
+
+    def delete(self, key):
+        cloud_persistence.delete_media(key)
+
+
+media_connector.configure(db, MediaBlobs(Path(os.getenv("MEDIA_DIR", str(db_path.resolve().parent / "media"))),
+                                         _MediaCloud() if cloud_persistence.enabled else None))
 app.include_router(logbook_routes.router)
+app.include_router(media_routes.router)
 CONNECTOR_TOOLSETS = [
     KITCHEN_TOOLS,
     THANKSGIVING_TOOLS,
     # Every app's pages (apps/<app>/nav.py): links Claude can hand over. Dieter's own chat opens them instead.
     ToolSet("dieter", [open_page_tool([kitchen_nav.PAGES, thanksgiving_nav.PAGES, assistant_nav.PAGES,
-                                       logbook_connector.PAGES])]),
+                                       logbook_connector.PAGES, media_connector.PAGES])]),
     studio_connector.tools(),  # Studio reports, for the admin
     ASSISTANT_TOOLS,
     LOGBOOK_TOOLS,
-    media_probe.tools(),
+    media_connector.tools(),
 ]
 
 
@@ -5509,6 +5526,7 @@ def render_today_page(request: Request):
         is_guest=current_user_is_guest_session(),
         studio=_quietly("Studio", lambda: studio_routes.store().summary()) if current_user_is_admin(request) else None,
         logbook=_quietly("Logbook", lambda: logbook_connector.store().today()),
+        media=_quietly("Media", lambda: media_connector.store().today()),
     )
 
 

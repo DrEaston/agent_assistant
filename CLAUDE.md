@@ -46,6 +46,8 @@ If two answers fit, say which you'd pick and why, and let him choose. Big featur
 - `core/portable_list.py` - the one format for putting one app's shopping items on a Kitchen list (Thanksgiving's
   "Next trip" uses it). Items stay linked: both apps see and check off the same item. A new planner that needs a
   shopping list should use it rather than sending plain text.
+- `core/logbook/`, `core/media/` - shared storage: checked tables, and pictures sent to Dieter. Assistants propose;
+  he approves on `/logbook` and `/media` (`docs/logbook_plan.md`, `docs/media_plan.md`).
 - `api.py` - the older shared app; still holds Assistant, Kitchen and Trainer routes. Move code out of it into
   the app's folder when you touch it; don't add new app code to it.
 - `database.py` - the older shared data layer. New tables belong in the app's own `store.py`.

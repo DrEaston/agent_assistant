@@ -1,0 +1,61 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Media{% endblock %}
+{% block content %}
+{{ ui.page_header("Media", sub="Pictures sent to Dieter. ChatGPT and Claude only use the ones you keep.") }}
+<main class="wrap">
+  {% if done %}{% call ui.banner("ok") %}{{ done }}{% endcall %}{% endif %}
+  {% if error %}{% call ui.banner("warn") %}{{ error }}{% endcall %}{% endif %}
+
+  {% if waiting %}
+  {% call ui.section("Waiting for your OK") %}
+  <div class="card flush">
+    {% for p in waiting %}
+    <a class="link-row" href="{{ p.page }}">
+      <img class="media-thumb" src="{{ p.file }}" alt="" loading="lazy">
+      <span class="label-stack">
+        <span class="small muted">{{ who(p.made_by) }} sent this</span>
+        <span class="title">{{ p.title }}</span>
+        {% if p.source %}<span class="small muted">{{ p.source }}</span>{% endif %}
+      </span>
+      <span class="chev" aria-hidden="true">›</span>
+    </a>
+    {% endfor %}
+  </div>
+  <p class="small muted">Pictures you don't keep are deleted after {{ wait_days }} days.</p>
+  {% endcall %}
+  {% endif %}
+
+  {% call ui.section("Kept") %}
+  {% if kept %}
+  <div class="card flush">
+    {% for p in kept %}
+    <a class="link-row" href="{{ p.page }}">
+      <img class="media-thumb" src="{{ p.file }}" alt="" loading="lazy">
+      <span class="label-stack">
+        <span class="title">{{ p.title }}</span>
+        <span class="small muted">{{ p.width }} × {{ p.height }} {{ p.format }}{% if p.has_alpha %} · transparent{% endif %} · from {{ who(p.made_by) }}</span>
+      </span>
+      <span class="chev" aria-hidden="true">›</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  {{ ui.empty("Nothing kept yet. Ask ChatGPT to save a picture to Dieter, or upload one below.") }}
+  {% endif %}
+  {% endcall %}
+
+  {% call ui.section("Upload a picture") %}
+  <form class="card stack" method="post" action="/media/upload" enctype="multipart/form-data">
+    {{ ui.field("Title", "title", placeholder="Dieter, eyes half closed") }}
+    {{ ui.field("Where it came from (optional)", "source", placeholder="ChatGPT, from the sitting pose") }}
+    <div class="field">
+      <label for="file">Picture</label>
+      <input type="file" id="file" name="file" accept="image/png,image/webp,image/jpeg,image/gif" required>
+    </div>
+    <p class="small muted">PNG, WebP, JPEG or GIF, up to 25 MB. Pictures you upload are kept straight away.</p>
+    <div class="row"><button class="primary" type="submit">Upload</button></div>
+  </form>
+  {% endcall %}
+</main>
+{% endblock %}
