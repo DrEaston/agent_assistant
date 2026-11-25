@@ -180,7 +180,7 @@ class PageTests(unittest.TestCase):
         self.assertEqual(feed.status_code, 200)
         self.assertTrue(feed.headers["content-type"].startswith("text/calendar"))
         self.assertEqual(signed_out.get("/trainer-calendar/" + "x" * 30 + ".ics").status_code, 404)
-        self.assertNotEqual(signed_out.get("/apps/trainer").status_code, 200)  # the pages still need signing in
+        self.assertNotEqual(signed_out.get("/apps/trainer", follow_redirects=False).status_code, 200)  # pages need sign-in
 
 
 if __name__ == "__main__":
