@@ -12,7 +12,8 @@ import os
 from datetime import date, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Request
+from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from core import ui
@@ -246,14 +247,19 @@ def strava_webhook_check(request: Request):
 
 
 @router.post("/strava/webhook")
-async def strava_webhook(request: Request, background: BackgroundTasks):
+async def strava_webhook(request: Request):
     """A new, changed or deleted Strava activity. Written down now (Strava wants an answer in 2 s), handled after."""
     try:
         event = await request.json()
     except ValueError:
         event = None
-    if sync().receive(event):
-        background.add_task(lambda: sync().process(5))
+    s = sync()
+    if s.receive(event):
+        # Usually handled right here (one Strava call); anything left waits for the next page view (catch_up).
+        try:
+            await run_in_threadpool(s.process, 1)
+        except Exception as exc:
+            print(f"Warning: Strava event not handled yet: {exc!r}")
     return {"ok": True}
 
 
@@ -275,22 +281,20 @@ def turn_on_live_sync(request: Request):
 
 
 @router.post(BASE + "/sync/history")
-def import_history(background: BackgroundTasks):
+def import_history():
+    """One chunk of his Strava history per tap (a few hundred activities), done while he waits.
+
+    Cloud Run only gives a request CPU until it has answered, so work left for after the answer can stall; each tap
+    does a bounded chunk and the page says how far it got.
+    """
     user = get_current_user_id()
-
-    def run():
-        reset = set_current_user_id(user)
-        try:
-            s = sync()
-            s.import_history(user)
-            s.fill_details(user)
-        except Exception as exc:
-            print(f"Warning: Strava history import stopped: {exc!r}")
-        finally:
-            reset_current_user_id(reset)
-
-    background.add_task(run)
-    return back(BASE + "/log?history=1")
+    s = sync()
+    try:
+        stored = s.import_history(user, pages=3)
+        s.fill_details(user, limit=5)
+    except strava.StravaError as exc:
+        return back(BASE + "/log?problem=" + str(exc)[:200].replace("&", " "))
+    return back(BASE + f"/log?history={stored}")
 
 
 @router.post(BASE + "/sync/now")
@@ -309,7 +313,7 @@ def sync_now():
 
 
 @router.get(BASE + "/log")
-def log_page(request: Request, kind: str = "", year: str = "", live: int = 0, history: int = 0, problem: str = ""):
+def log_page(request: Request, kind: str = "", year: str = "", live: int = 0, history: int = -1, problem: str = ""):
     catch_up()
     user = get_current_user_id()
     totals = strava.summary(_state["db"], user)

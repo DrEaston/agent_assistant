@@ -9,7 +9,10 @@
 <main class="wrap">
   {% if problem %}{% call ui.banner("warn") %}{{ problem }}{% endcall %}{% endif %}
   {% if live %}{% call ui.banner("ok") %}Live sync is on. New Strava activities will arrive here by themselves.{% endcall %}{% endif %}
-  {% if history %}{% call ui.banner("info") %}Importing your Strava history in the background. Check back in a few minutes; tap it again to keep going if it stops partway.{% endcall %}{% endif %}
+  {% if history >= 0 %}{% call ui.banner("ok" if status.history_done else "info") %}
+    {% if status.history_done %}History import finished: {{ status.history_count }} activities in your log.
+    {% else %}Imported {{ history }} more ({{ status.history_count }} so far). Tap “Continue history import” again until it says finished.{% endif %}
+  {% endcall %}{% endif %}
 
   {% call ui.section("Strava") %}
   <div class="card stack">

@@ -48,7 +48,7 @@ from apps.kitchen.import_images import UnsupportedRecipeImage, is_heic, normaliz
 from apps.kitchen.thanksgiving.router import configure as configure_thanksgiving, router as thanksgiving_router
 from core import internal as core_internal, proxy as core_proxy, ui as core_ui
 from apps.kitchen.shopping import router as shopping
-from apps.trainer import routes as trainer_routes
+from apps.trainer import connector as trainer_connector, routes as trainer_routes
 from apps.trainer.strava import (  # noqa: E402
     classify_strava_workout, strava_activity_import_payload, strava_first_present)
 from apps.kitchen import pages as kitchen_pages
@@ -245,6 +245,7 @@ CONNECTOR_TOOLSETS = [
     ASSISTANT_TOOLS,
     LOGBOOK_TOOLS,
     media_connector.tools(),
+    trainer_connector.tools(),  # Trainer: this week, the log's totals, whether Strava is syncing
 ]
 
 
