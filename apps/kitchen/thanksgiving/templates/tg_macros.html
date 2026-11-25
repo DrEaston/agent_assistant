@@ -58,7 +58,7 @@
 {% macro task_row(t, show_dish=True, show_lines=True) -%}
     {% set is_overdue = not t.done and t.end <= now and t.kind != 'passive' %}
     <div class="task{% if t.done %} done{% endif %}{% if is_overdue %} overdue{% endif %}" id="task-{{ t.key|replace(':', '-') }}">
-      <form method="post" action="/thanksgiving/steps/toggle">
+      <form method="post" action="/thanksgiving/steps/toggle" data-step-toggle>
         <input type="hidden" name="key" value="{{ t.key }}">
         <input type="hidden" name="anchor" value="task-{{ t.key|replace(':', '-') }}">
         {% if not t.done %}<input type="hidden" name="done" value="1">{% endif %}

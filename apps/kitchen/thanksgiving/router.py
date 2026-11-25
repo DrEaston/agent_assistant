@@ -13,7 +13,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Form, HTTPException, Request
@@ -506,6 +506,8 @@ def dish_page(request: Request, dish_id: int):
         if not dish:
             raise HTTPException(status_code=404, detail="That dish isn't on the menu.")
         return {"dish": dish, "dish_tasks": [t for t in context["tasks"] if t["dish_id"] == dish_id],
+                "delayed": request.query_params.get("delayed", "")[:200],
+                "delay_problem": request.query_params.get("delay_problem", "")[:300],
                 "recipe_versions": recipe_history(context["plan"], dish_id),
                 "pending_cards": recipe_changes.pending_cards(_state["db"], context["plan"], dish_id)}
     return render_page(request, "tg_dish.html", "menu", extend=pick)
@@ -1136,6 +1138,46 @@ def delete_dish(dish_id: int):
     plan = require_plan()
     store().delete_dish(plan["id"], dish_id)
     return back("/thanksgiving/menu")
+
+
+def _dish_page_with(dish_id, **note):
+    return RedirectResponse(url=f"/thanksgiving/menu/{dish_id}" + (f"?{urlencode(note)}" if note else "") + "#steps", status_code=303)
+
+
+@router.post("/thanksgiving/dishes/{dish_id}/delay")
+def delay_dish(dish_id: int, minutes: int = Form(...)):
+    """Dish page "Running late?": push this dish's unfinished steps later, kept apart as they were. Checked the
+    same way as a spoken "push the pie an hour" (nothing past dinner), and Undo-able the same way."""
+    plan = require_plan()
+    minutes = max(5, min(int(minutes), 24 * 60))
+    context = plan_context(plan)
+    dish = context["dishes_by_id"].get(dish_id)
+    if not dish:
+        raise HTTPException(status_code=404, detail="That dish isn't on the menu.")
+    left = [t["step_id"] for t in context["tasks"] if t["dish_id"] == dish_id and not t["done"]]
+    if not left:
+        return _dish_page_with(dish_id, delay_problem="Every step is done; nothing left to move.")
+    actions, _changes, problems = voice.check(
+        [{"type": "shift", "dish_id": dish_id, "step_ids": left, "minutes": minutes}],
+        plan, context["dishes"], context["tasks"], context["cooks"])
+    if not actions:
+        return _dish_page_with(dish_id, delay_problem="Couldn't move it: " + "; ".join(problems or ["unknown reason"]))
+    _state["voice_pending"].pop(plan["id"], None)
+    _state["voice_undo"][plan["id"]] = voice.apply(store(), plan, actions)
+    label = f"{minutes // 60} hr" if minutes % 60 == 0 else f"{minutes} min"
+    print("Delay dish: " + json.dumps({"dish_id": dish_id, "minutes": minutes, "steps": len(left)}))
+    return _dish_page_with(dish_id, delayed=f"Moved the rest of {dish['name']} {label} later "
+                                             f"({len(left)} step{'s' if len(left) != 1 else ''}).")
+
+
+@router.post("/thanksgiving/dishes/{dish_id}/delay/undo")
+def undo_delay_dish(dish_id: int):
+    plan = require_plan()
+    record = _state["voice_undo"].pop(plan["id"], None)
+    if not record:
+        return _dish_page_with(dish_id, delay_problem="Nothing to undo.")
+    voice.undo(store(), plan, record)
+    return _dish_page_with(dish_id)
 
 
 @router.post("/thanksgiving/steps/toggle")
