@@ -65,7 +65,27 @@ def assistant_projects_page(request: Request):
 @router.get("/apps/assistant/reading")
 def assistant_reading_page(request: Request, show: str = ""):
     store = reading.ReadingStore(_db())
-    return pages.reading_page(books=store.books(), show=show if show in reading.STATUSES else "")
+    return pages.reading_page(books=store.books(), show=show if show in reading.STATUSES else "",
+                              suggestions=store.suggestions())
+
+
+@router.post("/apps/assistant/reading/suggestions/{suggestion_id}")
+def assistant_reading_decide(suggestion_id: int, decision: str = Form(...)):
+    """Keep (onto the shelf, ★ with keep_star) or skip (not for me) a suggestion from Claude, ChatGPT or Dieter."""
+    try:
+        reading.ReadingStore(_db()).decide(suggestion_id, decision in ("keep", "keep_star"), decision == "keep_star")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse(url="/apps/assistant/reading", status_code=303)
+
+
+@router.post("/apps/assistant/reading/{book_id}/rate")
+def assistant_reading_rate(book_id: int, rating: str = Form(""), thoughts: str = Form("")):
+    try:
+        reading.ReadingStore(_db()).update(book_id, rating=rating or 0, thoughts=thoughts)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse(url="/apps/assistant/reading?show=read", status_code=303)
 
 
 @router.get("/apps/assistant/reading/bookstore")
