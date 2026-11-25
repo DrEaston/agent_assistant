@@ -91,6 +91,10 @@ class LabTests(unittest.TestCase):
         self.assertEqual(next(c for c in built["clips"] if c["name"] == "breathing")["problems"], [])
         self.assertEqual(built["joins"][0]["verdict"], "jump")  # worst first
         self.assertTrue(all(j["pose"] == "alert" for j in built["joins"]))  # nothing starts asleep, so no join there
+        self.assertEqual(built["homes"], {"alert": "breathing"})
+        # Each clip is checked against the home loop only (not every pairing): jittery and nod_off, to and from.
+        self.assertEqual(sorted((j["from"], j["to"]) for j in built["joins"]),
+                         [("breathing", "jittery"), ("breathing", "nod_off"), ("jittery", "breathing")])
         self.assertTrue(built["sheets"]["breathing"][0].startswith(b"RIFF"))  # WebP sprite sheet pages
 
         from core import ui
@@ -99,6 +103,26 @@ class LabTests(unittest.TestCase):
             lab={k: v for k, v in built.items() if k != "sheets"}, problems=2, done=None)
         self.assertIn("Jumps", page)
         self.assertIn("Waiting: not kept yet", page.replace("waiting: not", "Waiting: not"))
+
+    def test_a_clip_that_runs_off_the_canvas_is_a_problem(self):
+        # A long, low pose sized to the same area as an upright one comes out wider than the canvas.
+        def flat():
+            im = Image.new("RGBA", (900, 200), (0, 0, 0, 0))
+            ImageDraw.Draw(im).rectangle((0, 120, 899, 199), fill=(230, 110, 30, 255))
+            buf = io.BytesIO()
+            im.save(buf, "WEBP", lossless=True)
+            return buf.getvalue()
+        spec = {"reference": "breathing", "clips": [
+            {"name": "breathing", "title": "Breathing", "media_id": self.add(dragon(), "b"), "play": "loop",
+             "starts": "alert", "ends": "alert", "role": "idle"},
+            {"name": "flat", "title": "Flat", "media_id": self.add(flat(), "f"), "play": "once",
+             "starts": "alert", "ends": "alert", "role": ""},
+        ]}
+        with mock.patch.object(lab, "manifest", return_value=spec):
+            built = lab.build(self.store)
+        flat_clip = next(c for c in built["clips"] if c["name"] == "flat")
+        self.assertTrue(any("runs off the canvas" in p for p in flat_clip["problems"]), flat_clip["problems"])
+        self.assertEqual(next(c for c in built["clips"] if c["name"] == "breathing")["problems"], [])
 
     def test_the_real_manifest_names_only_kept_style_ids(self):
         spec = lab.manifest()
