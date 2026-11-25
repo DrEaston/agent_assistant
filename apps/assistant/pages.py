@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse
 from core import ui
 
 from .manifest import APP
-from .reading import STATUS_LABELS, STATUSES
+from .reading import SHELF, STATUS_LABELS, STATUSES
 
 _templates = ui.templates(Path(__file__).parent / "templates")
 REPORT_URL = "/apps/assistant/feedback"
@@ -75,13 +75,16 @@ def action_page(*, project, action, steps):
                   page_url=f"/projects/{project['id']}/actions/{action['id']}")
 
 
-def reading_page(*, books, show):
+def reading_page(*, books, show, suggestions=()):
     groups = {}
-    for book in books:
+    shown = [b for b in books if (b["status"] == show if show else b["status"] in SHELF)]
+    for book in shown:
         groups.setdefault(book["author_sort"] or "~", {"author": book["author"] or "Unknown author", "books": []})["books"].append(book)
     counts = {s: sum(1 for b in books if b["status"] == s) for s in STATUSES}
     return render("assistant_reading.html", title="Reading", groups=[groups[k] for k in sorted(groups)],
-                  counts=counts, statuses=STATUSES, labels=STATUS_LABELS, show=show, total=len(books),
+                  counts=counts, statuses=STATUSES, labels=STATUS_LABELS, show=show,
+                  total=sum(1 for b in books if b["status"] in SHELF), suggestions=list(suggestions),
+                  reading_now=[b for b in books if b["status"] == "reading"],
                   current="/apps/assistant/reading", page_url="/apps/assistant/reading")
 
 

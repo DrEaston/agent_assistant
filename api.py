@@ -51,7 +51,7 @@ from apps.kitchen.shopping import router as shopping
 from apps.trainer import routes as trainer_routes
 from apps.kitchen import pages as kitchen_pages
 from apps.launcher import today as today_page
-from apps.assistant import pages as assistant_pages, reading as assistant_reading
+from apps.assistant import reading as assistant_reading, routes as assistant_routes
 from apps.music import routes as music_routes
 from apps.issues import routes as studio_routes
 from apps.registry import app_shell_for_path, global_nav_apps, launcher_cards
@@ -184,6 +184,8 @@ shopping.configure(
 app.include_router(shopping.router)
 trainer_routes.configure(db)
 app.include_router(trainer_routes.router)  # Trainer's This week, Sunday check-in, usual week, calendar feed
+assistant_routes.configure(db)
+app.include_router(assistant_routes.router)  # the Assistant's pages and forms (apps/assistant/routes.py)
 
 # Claude's connector (core/connector): /mcp for the tools, /oauth/* and /.well-known/* for signing in. Each app
 # adds its ToolSet here; an app running as its own service is reached through RemoteToolSet.
@@ -5557,104 +5559,6 @@ def planner_app(request: Request):
     return RedirectResponse(url="/apps/assistant/planner", status_code=303)
 
 
-@app.get("/apps/assistant")
-def assistant_app(request: Request):
-    """The Assistant: to-dos (with dates), projects and reading at a glance (apps/assistant/pages.py)."""
-    items = [assistant_pages.todo_view(dict(r)) for r in db.get_scheduler_items(status="open", limit=100)]
-    done = [assistant_pages.todo_view(dict(r)) for r in db.get_recent_completed_scheduler_items(limit=8)]
-    books = assistant_reading.ReadingStore(db).books()
-    reading = {s: sum(1 for b in books if b["status"] == s) for s in assistant_reading.STATUSES}
-    return assistant_pages.home_page(todos=items, done=done, projects=assistant_project_rows(), reading=reading)
-
-
-def assistant_project_rows():
-    rows = []
-    for project in dicts_from_rows(db.get_all_projects()):
-        open_actions = dicts_from_rows(db.get_open_recommended_actions(project["id"]))
-        rows.append({"id": project["id"], "name": project["name"], "open": len(open_actions),
-                     "next": open_actions[0]["action"] if open_actions else "",
-                     "about": (project.get("description") or "").strip().splitlines()[0][:140]
-                     if (project.get("description") or "").strip() else ""})
-    return rows
-
-
-@app.get("/apps/assistant/projects")
-def assistant_projects_page(request: Request):
-    return assistant_pages.projects_page(projects=assistant_project_rows())
-
-
-@app.get("/apps/assistant/reading")
-def assistant_reading_page(request: Request, show: str = ""):
-    store = assistant_reading.ReadingStore(db)
-    return assistant_pages.reading_page(books=store.books(), show=show if show in assistant_reading.STATUSES else "")
-
-
-@app.get("/apps/assistant/reading/bookstore")
-def assistant_bookstore_page(request: Request):
-    return assistant_pages.bookstore_page(checklist=assistant_reading.ReadingStore(db).checklist())
-
-
-@app.post("/apps/assistant/reading/add")
-def assistant_reading_add(title: str = Form(...), author: str = Form(""), high_priority: str = Form("")):
-    try:
-        assistant_reading.ReadingStore(db).add(title, author, bool(high_priority))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return RedirectResponse(url="/apps/assistant/reading", status_code=303)
-
-
-@app.post("/apps/assistant/reading/{book_id}/status")
-def assistant_reading_status(book_id: int, status: str = Form(...), next: str = Form("/apps/assistant/reading")):
-    try:
-        assistant_reading.ReadingStore(db).update(book_id, status=status)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/reading"), status_code=303)
-
-
-@app.post("/apps/assistant/reading/{book_id}/delete")
-def assistant_reading_delete(book_id: int):
-    assistant_reading.ReadingStore(db).delete(book_id)
-    return RedirectResponse(url="/apps/assistant/reading", status_code=303)
-
-
-@app.post("/apps/assistant/reading/bookstore/shelf")
-def assistant_bookstore_shelf(key: str = Form(...), checked: str = Form("")):
-    assistant_reading.ReadingStore(db).check_shelf(key, bool(checked))
-    return RedirectResponse(url="/apps/assistant/reading/bookstore", status_code=303)
-
-
-@app.post("/apps/assistant/reading/bookstore/done")
-def assistant_bookstore_done():
-    assistant_reading.ReadingStore(db).finish_visit()
-    return RedirectResponse(url="/apps/assistant/reading", status_code=303)
-
-
-@app.post("/apps/assistant/feedback")
-def assistant_feedback(request: Request, text: str = Form(...), page: str = Form("/apps/assistant")):
-    """The Assistant pages' "Report a problem" box: a Studio report."""
-    text = (text or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="Describe the problem.")
-    user = getattr(request.state, "current_user", None) or {}
-    db.add_app_feedback_report(title=f"[Assistant] {text.splitlines()[0][:80]}", area="Assistant", page_url=page[:300],
-                               page_title="Assistant", reporter_name=user.get("name", "") or "",
-                               reporter_email=user.get("email", "") or "", raw_feedback=text[:4000])
-    return RedirectResponse(url=safe_redirect_path(page, "/apps/assistant") , status_code=303)
-
-
-@app.get("/apps/assistant/planner")
-def assistant_planner_app(request: Request):
-    """The old planner page: the Assistant's home now."""
-    return RedirectResponse(url="/apps/assistant", status_code=303)
-
-
-@app.get("/apps/assistant/scheduler")
-def assistant_scheduler_app(request: Request):
-    """The old scheduler page: to-dos are the Assistant's home now."""
-    return RedirectResponse(url="/apps/assistant", status_code=303)
-
-
 def old_assistant_scheduler_app(request: Request):
     """Assistant scheduler page."""
     split_mixed_priority_scheduler_notes()
@@ -7226,24 +7130,6 @@ def chat_page(request: Request):
     return HTMLResponse(html)
 
 
-@app.get("/projects/{project_id}")
-def project_detail(request: Request, project_id: int):
-    """A project in the Assistant: next actions (with steps), goals, blockers, notes (apps/assistant/pages.py)."""
-    project = dict_from_row(db.get_project_by_id(project_id))
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    actions = []
-    for action in dicts_from_rows(db.get_recommended_actions(project_id)):
-        steps = dicts_from_rows(db.get_task_steps(action["id"]))
-        actions.append(dict(action, done=action.get("status") == "done", steps_total=len(steps),
-                            steps_done=sum(1 for s in steps if s.get("status") == "done")))
-    notes = [dict(n, when=str(n.get("created_at") or "")[:10]) for n in dicts_from_rows(db.get_notes(project_id))]
-    todos = [assistant_pages.todo_view(dict(r)) for r in db.get_scheduler_items(status="open", limit=100)
-             if dict(r).get("project_id") == project_id]
-    return assistant_pages.project_page(project=project, actions=actions, goals=dicts_from_rows(db.get_weekly_goals(project_id)),
-                                        blockers=dicts_from_rows(db.get_blockers(project_id)), notes=notes, todos=todos)
-
-
 def old_project_detail(request: Request, project_id: int):
     """Project detail page (the old one, kept for reference until the Codex pieces are retired for good)."""
     cct_project_ids = ensure_cct_starter_projects(request)
@@ -7265,29 +7151,6 @@ def old_project_detail(request: Request, project_id: int):
     template = jinja_env.get_template("project_detail.html")
     html = template.render(context)
     return HTMLResponse(html)
-
-
-@app.post("/projects/{project_id}/update")
-def update_project_form(
-    project_id: int,
-    name: str = Form(...),
-    description: str = Form(""),
-    priority_score: int = Form(3),
-):
-    """Update the project identity and brief from its detail page."""
-    project = dict_from_row(db.get_project_by_id(project_id))
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    clean_name = re.sub(r"\s+", " ", (name or "").strip())
-    if not clean_name:
-        raise HTTPException(status_code=400, detail="Project name is required")
-    db.update_project_details(
-        project_id,
-        name=clean_name[:80],
-        description=(description or "").strip(),
-        priority_score=max(1, min(5, priority_score)),
-    )
-    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
 
 
 @app.post("/projects/{project_id}/codex-review")
@@ -7465,17 +7328,6 @@ def save_project_codex_review(request: Request, project_id: int):
         "review_result": "",
         "saved_path": str(output_path),
     }))
-
-
-@app.get("/projects/{project_id}/actions/{action_id}")
-def action_detail(request: Request, project_id: int, action_id: int):
-    """A project action and its steps (apps/assistant/pages.py)."""
-    project = dict_from_row(db.get_project_by_id(project_id))
-    action = dict_from_row(db.get_recommended_action(action_id))
-    if not project or not action or action["project_id"] != project_id:
-        raise HTTPException(status_code=404, detail="Task not found")
-    steps = [dict(s, done=s.get("status") == "done") for s in dicts_from_rows(db.get_task_steps(action_id))]
-    return assistant_pages.action_page(project=project, action=dict(action, done=action.get("status") == "done"), steps=steps)
 
 
 def old_action_detail(request: Request, project_id: int, action_id: int):
@@ -8209,13 +8061,6 @@ def create_project_form(
     redirect_url = f"/projects/{project_id}" if next == "detail" else "/projects"
     return RedirectResponse(url=redirect_url, status_code=303)
 
-@app.post("/projects/{project_id}/notes/add")
-@app.post("/projects/{project_id}/notes/create")
-def add_note_form(project_id: int, content: str = Form(...)):
-    """Add note via form."""
-    db.add_note(project_id, content)
-    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
-
 
 @app.post("/projects/{project_id}/share")
 def share_project_form(
@@ -8228,36 +8073,6 @@ def share_project_form(
     share_project_with_email(project_id, email, permission, request)
     return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
 
-@app.post("/projects/{project_id}/actions/add")
-@app.post("/projects/{project_id}/actions/create")
-def add_action_form(project_id: int, title: str = Form(None), action: str = Form(None), priority: str = Form(...)):
-    """Add action via form."""
-    db.add_recommended_action(project_id, title or action, priority)
-    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
-
-@app.post("/projects/{project_id}/actions/{action_id}/complete")
-def complete_action_form(project_id: int, action_id: int):
-    """Mark action complete via form."""
-    db.mark_recommended_action_complete(action_id)
-    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
-
-@app.post("/projects/{project_id}/actions/{action_id}/steps/create")
-def add_task_step_form(project_id: int, action_id: int, step: str = Form(...)):
-    """Add a checklist step to a task."""
-    db.add_task_step(action_id, step)
-    return RedirectResponse(url=f"/projects/{project_id}/actions/{action_id}", status_code=303)
-
-@app.post("/projects/{project_id}/actions/{action_id}/steps/{step_id}/complete")
-def complete_task_step_form(project_id: int, action_id: int, step_id: int):
-    """Mark a task checklist step complete."""
-    db.mark_task_step_complete(step_id)
-    return RedirectResponse(url=f"/projects/{project_id}/actions/{action_id}", status_code=303)
-
-@app.post("/projects/{project_id}/actions/{action_id}/steps/{step_id}/reopen")
-def reopen_task_step_form(project_id: int, action_id: int, step_id: int):
-    """Reopen a completed task checklist step."""
-    db.reopen_task_step(step_id)
-    return RedirectResponse(url=f"/projects/{project_id}/actions/{action_id}", status_code=303)
 
 @app.post("/projects/{project_id}/actions/{action_id}/steps/review")
 def create_step_review_form(project_id: int, action_id: int):
@@ -8593,32 +8408,6 @@ def assign_recipe_image_form(
         url="/apps/recipes/import",
         status_code=303,
     )
-
-@app.post("/projects/{project_id}/blockers/add")
-@app.post("/projects/{project_id}/blockers/create")
-def add_blocker_form(project_id: int, description: str = Form(...), severity: str = Form(...)):
-    """Add blocker via form."""
-    db.add_blocker(project_id, description, severity)
-    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
-
-@app.post("/projects/{project_id}/goals/add")
-@app.post("/projects/{project_id}/goals/create")
-def add_goal_form(project_id: int, title: str = Form(None), goal: str = Form(None), target_completion: str = Form("")):
-    """Add goal via form."""
-    db.add_weekly_goal(project_id, title or goal)
-    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
-
-@app.post("/projects/{project_id}/goals/{goal_id}/complete")
-def complete_goal_form(project_id: int, goal_id: int):
-    """Mark goal as complete via form."""
-    db.mark_goal_complete(goal_id)
-    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
-
-@app.post("/projects/{project_id}/blockers/{blocker_id}/delete")
-def delete_blocker_form(project_id: int, blocker_id: int):
-    """Delete blocker via form."""
-    db.delete_blocker(blocker_id)
-    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
 
 
 # ============================================================================
