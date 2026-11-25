@@ -355,6 +355,12 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
     return `<details class="s-recipe" data-open-key="${esc(step.key)}"${openRecipes.has(step.key) ? " open" : ""}>
       <summary>Recipe for this step</summary>${ingredientsHTML(dish, ing)}${instructionsHTML(dish, ins)}</details>`;
   }
+  // A dish's steps that are due or overdue and not done: "All of the olive loaf so far" checks them off in one tap
+  // (later steps, like tomorrow's bake, still come up when it's their time).
+  function dueSteps(dish) {
+    const d = state.dishes.find((x) => x.id === (dish && dish.id));
+    return d ? d.steps.filter((s) => !isDone(s) && s.start_ms <= now()) : [];
+  }
   const SNOOZES = [[10, "10 min"], [60, "1 h"], [120, "2 h"], [240, "4 h"]];  // "Later:" on a step alert
   function renderAlerts(alerts) {
     setHTML("alerts", alerts.map(a => {
@@ -366,6 +372,7 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
           <div class="small">${esc(a.dish.name)} · ${esc(s.clock)} · ${esc(rel(s.start_ms))}${s.temp ? ` · ${s.temp}°F` : ""}</div>
           ${howHTML(s)}${!(s.how || []).length && s.detail ? `<div class="small">${esc(s.detail)}</div>` : ""}</div>
         ${goto}<button class="primary" data-done="${esc(s.key)}">Done</button>
+        ${dueSteps(a.dish).length > 1 ? `<button data-done-dish="${a.dish.id}" title="Check off every ${esc(a.dish.name)} step that's due">All of ${esc(a.dish.name)} so far</button>` : ""}
         <button data-ack="${esc(s.key)}">On it</button>
         <span class="snooze" role="group" aria-label="Remind me later"><span class="small">Later:</span>${SNOOZES.map(([m, label]) =>
           `<button class="quiet" data-snooze="${esc(s.key)}" data-minutes="${m}" aria-label="Remind me in ${label}">${label}</button>`).join("")}</span>
@@ -501,6 +508,12 @@ body.dieter-on-top .bar-top .report-top { display: none; }  /* the report box is
       renderAll();
     } else if (el.dataset.goto) {
       selected = Number(el.dataset.goto); safeSet("tg-dish", selected); renderAll(true); window.scrollTo({ top: 0 });
+    } else if (el.dataset.doneDish) {
+      for (const s of dueSteps({ id: Number(el.dataset.doneDish) })) {
+        pendingDone.set(s.key, true); handled.set(s.key, Date.now());
+        act(() => post("/thanksgiving/api/steps/done", { key: s.key, done: true }));
+      }
+      renderAll(true);
     } else if (el.dataset.done) {
       const key = el.dataset.done, step = allSteps().find(s => s.key === key);
       const value = step ? !isDone(step) : true;
