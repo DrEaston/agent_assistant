@@ -15,11 +15,11 @@ Write to him in plain English (CLAUDE.md): what you picked and why, where the fi
 ## Setup (once per computer; check first)
 
 Tools live outside the repo in `%LOCALAPPDATA%\dieter-firefly\venv` (ffmpeg comes bundled with imageio-ffmpeg; no
-system install). If `"$LOCALAPPDATA/dieter-firefly/venv/Scripts/python" -c "import imageio_ffmpeg, httpx"` fails:
+system install). If `"$LOCALAPPDATA/dieter-firefly/venv/Scripts/python" -c "import imageio_ffmpeg, httpx, scipy"` fails:
 
 ```
 python -m venv "$LOCALAPPDATA/dieter-firefly/venv"
-"$LOCALAPPDATA/dieter-firefly/venv/Scripts/python" -m pip install -q imageio-ffmpeg pillow numpy httpx
+"$LOCALAPPDATA/dieter-firefly/venv/Scripts/python" -m pip install -q imageio-ffmpeg pillow numpy scipy httpx
 ```
 
 Below, `PY` is that python and `FF` is `.claude/skills/firefly-intake/scripts/firefly.py`. Pass Windows paths
@@ -41,9 +41,10 @@ Below, `PY` is that python and `FF` is `.claude/skills/firefly-intake/scripts/fi
      near each beat (less motion blur). Name them `NN_what_it_shows` (e.g. `06_asleep`).
    - Animations: the main action as one `once` clip (start to just before any surprise); a quiet stretch near the
      end as a `pingpong` loop (reads as breathing); the surprise as its own clip.
-5. **Cut out:** `PY FF cutout WORK`, then read `WORK/cutout_check.jpg` (checkerboard behind). Edges should be clean
-   and the shadow gaps under the body see-through. If dark parts (claws) get holes, lower `--lo`; if a dark halo
-   stays, raise `--hi`.
+5. **Cut out:** `PY FF cutout WORK`, then read `WORK/cutout_check.jpg` (checkerboard behind). Only the black that
+   connects to the edge of the frame is removed (an outline around him first), so dark parts inside him (claws,
+   pupils, shadow under the chin and between the legs) stay solid. Curtis asked for this: removing all dark pixels
+   punched holes in him. Edges should be clean; if a dark halo stays, raise `--hi`; if the edge looks chewed, lower it.
 6. **Build:** `PY FF build WORK OUT --still 1:01_awake_head_up ... --anim going_to_sleep:1-180:2:12:once ...`
    where `OUT` is `Downloads/dieter_<what_happens>`. Animation spec: `name:start-end:step:fps:once|loop|pingpong:WxH`
    (defaults: step 2, 12 fps, once, 480x270). Keep each under ~8 MB (the script warns). Read

@@ -4,7 +4,7 @@ Run with the skill's own Python (see SKILL.md, "Setup"):
 
     firefly.py analyze  VIDEO WORK            frames, contact sheet, motion profile, last-second sheet
     firefly.py peek     WORK N1,N2,...  [--box x0,y0,x1,y1]   close-up sheet of chosen frames
-    firefly.py cutout   WORK [--lo 14 --hi 46]  remove the black background on every frame (+ a checkerboard check)
+    firefly.py cutout   WORK [--lo 14 --hi 60]  remove the black background around him (not inside him) on every frame (+ a checkerboard check)
     firefly.py build    WORK OUT --still N:name ... --anim name:start-end[:step][:fps][:once|loop|pingpong][:WxH]
     firefly.py upload   FILE ... --source TEXT [--site https://askdieter.ai]
 
@@ -94,14 +94,24 @@ def peek(work, numbers, box=None):
 
 # ---------------------------------------------------------------- cutout
 
-def cut(path, lo=14.0, hi=46.0):
-    """Black background -> transparent: alpha from the brightest channel on a soft ramp, pinholes closed, a mild
-    un-premultiply (more than ~1.15x leaves a red fringe on orange edges)."""
+def cut(path, lo=14.0, hi=60.0, bg=20.0, edge=3):
+    """Black background -> transparent, outside the figure only.
+
+    1. The background is the near-black (brightest channel under `bg`) that connects to the edge of the frame.
+       Dark parts inside Dieter (claws, shadow under the chin, dark scales, pupils) don't connect to it, so they
+       stay solid even when they're as dark as the background.
+    2. Only the background and a thin band around it (`edge` px) get see-through, on a soft ramp from `lo` to `hi`
+       so his outline stays smooth; everything else is fully solid.
+    3. A mild un-premultiply on that band (more than ~1.15x leaves a red fringe on orange edges)."""
+    from scipy import ndimage
     rgb = np.asarray(Image.open(path).convert("RGB"), dtype=np.float32)
     m = rgb.max(axis=2)
-    a = np.clip((m - lo) / (hi - lo), 0, 1)
-    closed = Image.fromarray((a * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.MinFilter(5))
-    a = np.maximum(a, np.asarray(closed, dtype=np.float32) / 255 * (m > 6))
+    labels, _ = ndimage.label(m < bg)
+    border = np.unique(np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]]))
+    outside = np.isin(labels, border[border > 0])
+    band = ndimage.binary_dilation(outside, iterations=edge)
+    a = np.where(band, np.clip((m - lo) / (hi - lo), 0, 1), 1.0)
+    a[outside] = np.minimum(a[outside], np.clip((m[outside] - lo) / (hi - lo), 0, 1))
     out = np.where(a[..., None] > 0, np.clip(rgb / np.maximum(a[..., None], 1e-3), 0, 255), 0)
     out = np.where(a[..., None] >= 1, rgb, np.minimum(out, rgb * 1.15))
     return Image.fromarray(np.dstack([out, a * 255]).astype(np.uint8), "RGBA")
@@ -282,7 +292,7 @@ def main():
     a = sub.add_parser("analyze"); a.add_argument("video"); a.add_argument("work")
     p = sub.add_parser("peek"); p.add_argument("work"); p.add_argument("frames"); p.add_argument("--box")
     c = sub.add_parser("cutout"); c.add_argument("work"); c.add_argument("--lo", type=float, default=14)
-    c.add_argument("--hi", type=float, default=46)
+    c.add_argument("--hi", type=float, default=60)
     b = sub.add_parser("build"); b.add_argument("work"); b.add_argument("out")
     b.add_argument("--still", action="append", default=[]); b.add_argument("--anim", action="append", default=[])
     u = sub.add_parser("upload"); u.add_argument("files", nargs="+"); u.add_argument("--source", required=True)
