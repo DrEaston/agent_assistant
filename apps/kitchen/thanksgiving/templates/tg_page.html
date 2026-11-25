@@ -33,6 +33,9 @@ section { scroll-margin-top: 4rem; margin-bottom: 2rem; }  /* clear of the stick
 .task.done .t-title, .task.done .t-time { color: var(--muted); text-decoration: line-through; }
 .task.overdue .t-time { color: var(--warn); font-weight: 700; }
 .task form { margin: 0; }
+.delay-row { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-bottom: .6rem; }
+.delay-row form, .delay-note form { margin: 0; }
+.delay-note { display: flex; gap: .75rem; align-items: center; justify-content: space-between; margin-bottom: .6rem; }
 .check { width: 40px; height: 40px; min-height: 40px; padding: 0; border-radius: 10px; font-size: 1.2rem; }
 .task.done .check { background: var(--ok-soft); border-color: #bcd9a0; color: var(--ok); }
 .t-time { font-variant-numeric: tabular-nums; font-weight: 600; padding-top: .5rem; }
@@ -258,6 +261,55 @@ ol.method li:target { background: #fff4d6; border-radius: 6px; }
       groceryTimer = setTimeout(() => refreshPage().catch(() => {}), nowDone ? 3000 : 800);
     } catch (error) {
       flip(!nowDone);
+      form.submit();
+    }
+  });
+
+  // Timeline and dish steps: tick in place. The page doesn't reload, so nothing jumps or folds away under your
+  // finger; finished days fold up the next time the page loads.
+  document.addEventListener("submit", async (event) => {
+    const form = event.target.closest("form[data-step-toggle]");
+    if (!form) return;
+    event.preventDefault();
+    const row = form.closest(".task");
+    const button = form.querySelector("button.check");
+    const title = row.querySelector(".t-title")?.textContent || "";
+    const data = new FormData(form);
+    const nowDone = data.get("done") === "1";
+    const flip = (done) => {
+      row.classList.toggle("done", done);
+      if (done) row.classList.remove("overdue");
+      button.textContent = done ? "✓" : "";
+      button.setAttribute("aria-label", (done ? "Mark not done: " : "Mark done: ") + title);
+      form.querySelector('input[name="done"]')?.remove();
+      if (!done) {
+        const input = document.createElement("input");
+        input.type = "hidden"; input.name = "done"; input.value = "1";
+        form.appendChild(input);
+      }
+    };
+    flip(nowDone);
+    try {
+      const saved = await fetch(form.action, { method: "POST", body: new URLSearchParams(data), redirect: "manual" });
+      if (saved.type !== "opaqueredirect" && !saved.ok) throw new Error(saved.status);
+    } catch (error) {
+      flip(!nowDone);
+      form.submit();
+    }
+  });
+
+  // Dish page "Running late?" buttons and their Undo: save, then swap the page in place (no jump to the top).
+  document.addEventListener("submit", async (event) => {
+    const form = event.target.closest("form[data-delay]");
+    if (!form) return;
+    event.preventDefault();
+    form.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+    try {
+      const page = await fetch(form.action, { method: "POST", body: new URLSearchParams(new FormData(form)) });
+      if (!page.ok) throw new Error(page.status);
+      swapAll("#page", new DOMParser().parseFromString(await page.text(), "text/html"));
+      applyHideDone();
+    } catch (error) {
       form.submit();
     }
   });
