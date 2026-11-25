@@ -414,7 +414,7 @@ class PlanStore:
             speed.ensure(self.db)
             rows = self._conn().execute(
                 """SELECT w.title, w.activity_type, w.started_at, w.distance_meters, w.moving_time_seconds,
-                          s.strides, s.stride_mps
+                          s.strides, s.efforts_json
                    FROM trainer_imported_workouts w
                    LEFT JOIN tr_run_speed s ON s.user_id = w.user_id AND s.external_id = w.external_id
                    WHERE w.user_id = ? AND substr(w.started_at, 1, 10) BETWEEN ? AND ?
@@ -429,7 +429,8 @@ class PlanStore:
                 "is_run": "run" in kind,
                 "miles": round((r["distance_meters"] or 0) / METERS_PER_MILE, 1),
                 "minutes": round((r["moving_time_seconds"] or 0) / 60),
-                "strides": r["strides"] or 0, "stride_pace": speed.pace(r["stride_mps"])})
+                "strides": r["strides"] or 0,
+                "speed": speed.summary(json.loads(r["efforts_json"])) if r["efforts_json"] else ""})
         return out
 
     def today(self, day=None):

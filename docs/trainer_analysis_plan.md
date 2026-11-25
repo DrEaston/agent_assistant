@@ -40,11 +40,15 @@ Derived numbers are labelled as estimates wherever they are (load score, 5K esti
 
 ## Speed progression
 
-- **Strides and stride speed (built 2026-11-25, `apps/trainer/speed.py`).** Each run's second-by-second speed from
-  Strava is read once (one extra request per run; results kept in `tr_run_speed`, not the stream). Strides are bursts
-  of 6-60 s above max(1.4 x the run's usual speed, usual + 1 m/s); each keeps its best 5 s. Planned strides that day
-  are ticked. Stride speed (the middle of a week's stride top speeds) is the Overview's "getting speedier" number:
-  last 4 weeks against the 8 before, in seconds per mile.
+- **Speed measures (built 2026-11-25, `apps/trainer/speed.py`).** Each run's streams (time, speed, distance) are read
+  once from Strava and kept as a summary in `tr_run_speed`: fast stretches (6 s-8 min above the run's usual speed,
+  named stride / 200 / 400 / ... / mile / rep), best efforts 400 m-5K, best 5 s, and a 0.1 m/s speed histogram so
+  scores can be recomputed when critical speed changes. Weekly: critical speed and D' (linear distance-time fit over
+  2-20 min bests in the last 26 weeks), speed work = D' used (sum of (v - CS) x t above CS, also in "tanks"),
+  top-speed running (metres at >= 90% of best 5 s), stride speed. Why not heart rate or rTSS: HR lags short reps,
+  and rTSS's squared weighting isn't derived; the critical speed model is the established basis for "faster counts
+  more". The plain two-parameter model is used with no sprint correction (published corrections disagree). Planned
+  strides are ticked when found. Runs from the last 52 weeks are read a few per Trainer visit and 25 per Sync now.
 
 - Threshold pace from Tuesday's workout laps toward 5:40/mi.
 - Best efforts over time (400 m, 1 km, mile, 5K) from Strava best efforts and races.

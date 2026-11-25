@@ -321,7 +321,7 @@ def sync_now():
     try:
         s.process(10)
         s.fill_details(user, limit=10)
-        speed.fill(s, user, limit=20)
+        speed.fill(s, user, limit=25)
     except strava.StravaError as exc:
         return back(BASE + "/log?problem=" + str(exc)[:200].replace("&", " "))
     return back(BASE + "/log")

@@ -53,28 +53,40 @@
   {% set sp = o.speed %}
   {% call ui.section("Speed") %}
   <div class="card stack">
+    {% if sp.waiting %}<p class="small muted">Still reading {{ sp.waiting }} older run{{ "s" if sp.waiting != 1 }} from Strava (a few each visit; Sync now on the Log page does more). The numbers fill in as they're read.</p>{% endif %}
     <div class="stat-grid">
+      <div class="stat"><span class="small muted">Critical speed</span><strong>{{ sp.cs_pace or "–" }}</strong>
+        <span class="small">{% if sp.cs_pace %}/mi{% if sp.cs_gain is not none %} · {% if sp.cs_gain > 0 %}{{ sp.cs_gain }} s/mi faster{% elif sp.cs_gain < 0 %}{{ -sp.cs_gain }} s/mi slower{% else %}same{% endif %} than 12 weeks ago{% endif %} · D′ {{ sp.d_prime }} m{% else %}needs two hard efforts (2–20 min) in the last 6 months{% endif %}</span></div>
+      <div class="stat"><span class="small muted">Speed work this week</span><strong>{{ "{:,}".format(sp.speed_work) ~ " m" if sp.speed_work is not none else "–" }}</strong>
+        <span class="small">{% if sp.tanks is not none %}{{ sp.tanks }} tanks of D′{% if sp.speed_work_usual is not none %} · usual {{ "{:,}".format(sp.speed_work_usual) }} m{% endif %}{% endif %}</span></div>
+      <div class="stat"><span class="small muted">Top-speed running this week</span><strong>{{ "{:,}".format(sp.near_top) }} m</strong>
+        <span class="small">{% if sp.near_top_jump %}{{ ui.tag("Well above usual", "warn") }} {% endif %}{% if sp.near_top_usual is not none %}usual {{ "{:,}".format(sp.near_top_usual) }} m{% endif %}</span></div>
       <div class="stat"><span class="small muted">Stride speed, last 4 weeks</span><strong>{{ sp.stride_pace_recent or "–" }}</strong>
-        <span class="small">{% if sp.stride_gain is not none %}{% if sp.stride_gain > 0 %}{{ sp.stride_gain }} s/mi faster{% elif sp.stride_gain < 0 %}{{ -sp.stride_gain }} s/mi slower{% else %}same{% endif %} than the 8 weeks before ({{ sp.stride_pace_before }}){% elif sp.stride_pace_recent %}/mi pace · needs a few more weeks to compare{% else %}no strides found yet{% endif %}</span></div>
-      <div class="stat"><span class="small muted">Top speed, last 4 weeks</span><strong>{{ sp.top_pace_recent or "–" }}</strong>
-        <span class="small">/mi pace{% if sp.top_pace_before %} · before: {{ sp.top_pace_before }}{% endif %}</span></div>
+        <span class="small">{% if sp.stride_gain is not none %}{% if sp.stride_gain > 0 %}{{ sp.stride_gain }} s/mi faster{% elif sp.stride_gain < 0 %}{{ -sp.stride_gain }} s/mi slower{% else %}same{% endif %} than the 8 weeks before{% elif sp.stride_pace_recent %}/mi · needs a few more weeks to compare{% else %}no strides found yet{% endif %}</span></div>
       <div class="stat"><span class="small muted">Strides this week</span><strong>{{ t.strides[0] }}/{{ t.strides[1] }}</strong>
-        <span class="small">{% if sp.latest_strides %}last: {{ sp.latest_strides.strides }} on {{ sp.latest_strides.day }}, best {{ sp.latest_strides.best_pace }}/mi{% else %}ticked when Strava shows them{% endif %}</span></div>
+        <span class="small">{% if sp.latest %}last fast running: {{ sp.latest.summary }} ({{ sp.latest.day }}){% else %}ticked when Strava shows them{% endif %}</span></div>
       <div class="stat"><span class="small muted">Aerobic efficiency</span><strong>{{ sp.efficiency_recent or "–" }}</strong>
         <span class="small">{% if sp.efficiency_before %}{{ "up" if sp.efficiency_up else "down" }} from {{ sp.efficiency_before }}{% else %}easy runs, last 4 weeks{% endif %}</span></div>
     </div>
-    {% set weeks_with = sp.weeks | selectattr("stride_mps") | list %}
-    {% if weeks_with %}
+    {% set bars = [] %}{% for w in sp.weeks %}{% set _ = bars.append({"label": w.label, "value": w.speed_work or 0, "current": loop.last}) %}{% endfor %}
+    {{ ui.bar_chart(bars, sp.work_max, unit=" m", label="Speed work (D′ used) per week, last 16 weeks") }}
+    <p class="small muted">Speed work per week, last 16 weeks: metres run "above" critical speed. Blue is this week.</p>
     <div class="table-scroll"><table class="data-table">
-      <tr><th>Week</th><th class="num">Strides</th><th class="num">Stride speed</th></tr>
-      {% for w in sp.weeks | reverse %}{% if w.strides %}<tr><td>{{ w.label }}</td><td class="num">{{ w.strides }}</td><td class="num">{{ w.stride_pace }}/mi</td></tr>{% endif %}{% endfor %}
+      <tr><th>Week</th><th class="num">Critical speed</th><th class="num">Speed work</th><th class="num">Top-speed</th><th>Fast running</th><th class="num">Stride speed</th></tr>
+      {% for w in sp.weeks | reverse %}{% if w.read %}<tr><td>{{ w.label }}</td><td class="num">{{ w.cs_pace or "–" }}</td>
+        <td class="num">{% if w.speed_work is not none %}{{ "{:,}".format(w.speed_work) }} m{% if w.tanks %} · {{ w.tanks }}×{% endif %}{% else %}–{% endif %}</td>
+        <td class="num">{{ "{:,}".format(w.near_top) }} m</td>
+        <td class="small">{% for kind, k in w.kinds.items() %}{% if kind in ("stride", "rep") %}{{ k.count }} {{ kind }}{{ "s" if k.count != 1 }}{% else %}{{ k.count }} × {{ kind }}{% endif %}{{ ", " if not loop.last }}{% endfor %}</td>
+        <td class="num">{{ (w.stride_pace ~ "/mi") if w.stride_pace else "–" }}</td></tr>{% endif %}{% endfor %}
     </table></div>
-    {% endif %}
-    <p class="small muted">Strides are found in each run's second-by-second speed from Strava: short bursts (6 to 60
-      seconds) well above that run's usual pace. Stride speed is how fast they are at their best 5 seconds, the middle
-      of the week's strides. It's the same relaxed-fast effort each time, so when that pace drops, you're getting faster.
-      Top speed is the fastest moment GPS saw on your runs (one GPS glitch can set it). Aerobic efficiency is easy-run speed per heartbeat (metres a minute ÷ heart rate): when it
-      goes up, the same effort is getting you further.</p>
+    <p class="small muted">Estimates from each run's second-by-second data on Strava. <strong>Critical speed</strong> is the
+      fastest pace you could hold for a long time, and <strong>D′</strong> the distance you can run "above" it before you're
+      spent; both come from your best efforts of 2–20 minutes in the last 6 months (the critical speed model).
+      <strong>Speed work</strong> adds up (speed − critical speed) × seconds over everything faster than critical speed: faster
+      running counts more, by exactly how much faster, whatever your heart rate did. "Tanks" is that divided by your D′.
+      <strong>Top-speed running</strong> is metres at 90% of your top speed or faster: the leg-stress side (watch for sudden
+      jumps). <strong>Stride speed</strong> is how fast your strides are at their best 5 seconds. Aerobic efficiency is
+      easy-run speed per heartbeat.</p>
   </div>
   {% endcall %}
 
