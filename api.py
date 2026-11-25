@@ -49,6 +49,8 @@ from apps.kitchen.thanksgiving.router import configure as configure_thanksgiving
 from core import internal as core_internal, proxy as core_proxy, ui as core_ui
 from apps.kitchen.shopping import router as shopping
 from apps.trainer import routes as trainer_routes
+from apps.trainer.strava import (  # noqa: E402
+    classify_strava_workout, strava_activity_import_payload, strava_first_present)
 from apps.kitchen import pages as kitchen_pages
 from apps.launcher import today as today_page
 from apps.assistant import reading as assistant_reading, routes as assistant_routes
@@ -514,7 +516,8 @@ async def load_authenticated_user(request: Request, call_next):
             return await call_next(request)
         finally:
             reset_current_user_id(user_token)
-    public_exact_paths = {"/cct-roadmap", "/thanksgiving/menu"}  # the shareable Thanksgiving menu
+    public_exact_paths = {"/cct-roadmap", "/thanksgiving/menu",  # the shareable Thanksgiving menu
+                          "/strava/webhook"}  # Strava pushes new activities here (apps/trainer/strava.py)
     if DEMO_MODE:
         public_exact_paths.update({"/", "/demo"})
     token = request.cookies.get(SESSION_COOKIE_NAME, "")
@@ -5537,7 +5540,7 @@ def render_today_page(request: Request):
         studio=_quietly("Studio", lambda: studio_routes.store().summary()) if current_user_is_admin(request) else None,
         logbook=_quietly("Logbook", lambda: logbook_connector.store().today()),
         media=_quietly("Media", lambda: media_connector.store().today()),
-        training=_quietly("Trainer", lambda: trainer_routes.store().today()),
+        training=_quietly("Trainer", lambda: (trainer_routes.catch_up(3), trainer_routes.store().today())[1]),
     )
 
 
@@ -5711,21 +5714,6 @@ TRAINER_CATEGORY_LABELS = {
 jinja_env.globals["trainer_category_labels"] = TRAINER_CATEGORY_LABELS
 
 
-def classify_strava_workout(activity_type, title=""):
-    """Map a Strava activity into a Trainer bucket."""
-    kind = (activity_type or "").strip().lower()
-    text = f"{activity_type or ''} {title or ''}".lower()
-    if kind in {"run", "trailrun", "virtualrun"}:
-        if re.search(r"\b(threshold|tempo|mile|1k|cruise)\b", text):
-            return "run_threshold"
-        if re.search(r"\b(400|interval|speed|rep|track|fartlek)\b", text):
-            return "run_speed"
-        return "run"
-    if kind in {"ride", "virtualride", "ebikeride"}:
-        return "bike_tempo" if re.search(r"\b(tempo|threshold|interval)\b", text) else "bike"
-    if kind in {"weighttraining", "workout", "crossfit", "highintensityintervaltraining"}:
-        return "strength_glutes" if re.search(r"\b(glute|clam|rdl|deadlift|band|bridge|hip)\b", text) else "strength"
-    return kind or "workout"
 
 def strava_configured():
     """Return true when Strava OAuth credentials are available."""
@@ -5842,48 +5830,6 @@ def fetch_strava_activity_detail(access_token, activity_id):
     return result if isinstance(result, dict) else {}
 
 
-def strava_first_present(activity, detail, key):
-    """Prefer detailed Strava fields, falling back to the summary activity."""
-    value = (detail or {}).get(key)
-    if value is None or value == "":
-        value = (activity or {}).get(key)
-    return value
-
-
-def strava_activity_import_payload(activity, detail=None):
-    """Build the persisted metric payload for a Strava activity."""
-    detail = detail or {}
-    merged = {**(activity or {}), **detail}
-    activity_type = merged.get("sport_type") or merged.get("type") or ""
-    title = merged.get("name") or activity_type
-    gear = merged.get("gear") if isinstance(merged.get("gear"), dict) else {}
-    return {
-        "external_id": str(merged.get("id")),
-        "activity_type": activity_type,
-        "workout_category": classify_strava_workout(activity_type, title),
-        "title": title,
-        "started_at": (merged.get("start_date_local") or merged.get("start_date") or "")[:10],
-        "distance_meters": strava_first_present(activity, detail, "distance"),
-        "moving_time_seconds": strava_first_present(activity, detail, "moving_time"),
-        "elapsed_time_seconds": strava_first_present(activity, detail, "elapsed_time"),
-        "elevation_gain_meters": strava_first_present(activity, detail, "total_elevation_gain"),
-        "average_speed_mps": strava_first_present(activity, detail, "average_speed"),
-        "max_speed_mps": strava_first_present(activity, detail, "max_speed"),
-        "average_heartrate": strava_first_present(activity, detail, "average_heartrate"),
-        "max_heartrate": strava_first_present(activity, detail, "max_heartrate"),
-        "average_cadence": strava_first_present(activity, detail, "average_cadence"),
-        "average_watts": strava_first_present(activity, detail, "average_watts"),
-        "kilojoules": strava_first_present(activity, detail, "kilojoules"),
-        "suffer_score": strava_first_present(activity, detail, "suffer_score"),
-        "perceived_exertion": strava_first_present(activity, detail, "perceived_exertion"),
-        "gear_id": strava_first_present(activity, detail, "gear_id") or gear.get("id") or "",
-        "gear_name": gear.get("name") or "",
-        "start_latlng": strava_first_present(activity, detail, "start_latlng") or [],
-        "end_latlng": strava_first_present(activity, detail, "end_latlng") or [],
-        "splits_metric": detail.get("splits_metric") or [],
-        "laps": detail.get("laps") or [],
-        "raw": {"summary": activity or {}, "detail": detail or {}},
-    }
 
 
 def strava_activity_is_supported_training(activity_type):
