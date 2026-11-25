@@ -19,10 +19,12 @@ from pathlib import Path
 from database import get_current_user_id
 
 MAX_BYTES = 25 * 1024 * 1024
+MAX_VIDEO_BYTES = 30 * 1024 * 1024  # Cloud Run takes uploads up to 32 MB; an 8-second Firefly clip is ~5-15 MB
 MAX_PIXELS = 40_000_000
 WAIT_DAYS = 7
 FORMATS = {"PNG": ("png", "image/png"), "WEBP": ("webp", "image/webp"), "JPEG": ("jpg", "image/jpeg"),
-           "GIF": ("gif", "image/gif")}
+           "GIF": ("gif", "image/gif"), "MP4": ("mp4", "video/mp4"), "MOV": ("mov", "video/quicktime")}
+VIDEOS = ("MP4", "MOV")
 WHO = {"you": "you", "chatgpt": "ChatGPT", "claude": "Claude"}
 STATUSES = ("waiting", "kept", "discarded")
 
@@ -58,12 +60,42 @@ def who(made_by):
     return WHO.get(made_by, made_by or "someone")
 
 
+def _video_size(data):
+    """(width, height) from the first video track header (tkhd) of an MP4/MOV, or (0, 0)."""
+    at = data.find(b"tkhd")
+    while at != -1:
+        size = int.from_bytes(data[at - 4:at], "big")
+        end = at - 4 + size
+        if 84 <= size <= 200 and end <= len(data):
+            width = int.from_bytes(data[end - 8:end - 4], "big") >> 16
+            height = int.from_bytes(data[end - 4:end], "big") >> 16
+            if width and height:
+                return width, height
+        at = data.find(b"tkhd", at + 4)
+    return 0, 0
+
+
+def inspect_video(data):
+    """An MP4 or MOV video (Firefly's clips), or Invalid. Checked by its header: Dieter only stores and plays it."""
+    if len(data) > MAX_VIDEO_BYTES:
+        raise Invalid("That video is over 30 MB. Firefly's 8-second clips are well under that; try a shorter one.")
+    if data[4:8] != b"ftyp" or b"moov" not in data:
+        raise Invalid("That video isn't an MP4 Dieter can read.")
+    fmt = "MOV" if data[8:12] == b"qt  " else "MP4"
+    width, height = _video_size(data)
+    ext, mime = FORMATS[fmt]
+    return {"format": fmt, "ext": ext, "mime": mime, "width": width, "height": height, "has_alpha": False}
+
+
 def inspect(data):
-    """What the image is, or Invalid. Only PNG, WebP, JPEG and GIF; the pixels are checked, not just the header."""
+    """What the picture (or video) is, or Invalid. Only PNG, WebP, JPEG and GIF pictures, the pixels checked, not
+    just the header; and MP4/MOV videos."""
     from PIL import Image
 
     if not data:
         raise Invalid("No image came with it.")
+    if data[4:8] == b"ftyp":
+        return inspect_video(data)
     if len(data) > MAX_BYTES:
         raise Invalid("That image is over 25 MB.")
     try:
@@ -138,6 +170,7 @@ class MediaStore:
         item = dict(row)
         item["has_alpha"] = bool(item["has_alpha"])
         item["who"] = who(item["made_by"])
+        item["kind"] = "video" if item["format"] in VIDEOS else "picture"
         item["page"] = f"/media/{item['id']}"
         item["file"] = f"/media/{item['id']}/file" if item["status"] != "discarded" else ""
         return item
@@ -203,6 +236,17 @@ class MediaStore:
         if data is None:
             raise Invalid("Dieter has the record of that picture but can't find the file.")
         return data, FORMATS.get(row["format"], ("", "application/octet-stream"))[1]
+
+    def made_from(self, item_id):
+        """Pictures made from this one (their source names it): what came out of a Firefly video."""
+        rows = self._conn().execute("SELECT * FROM media_items WHERE user_id = ? AND status != 'discarded' AND id != ? "
+                                    "AND source LIKE ? ORDER BY created_at",
+                                    [self._user(), item_id, f"%{item_id}%"]).fetchall()
+        return [self._out(r) for r in rows]
+
+    def videos(self):
+        """Kept videos, each with whether anything has been made from it yet."""
+        return [dict(v, taken_in=bool(self.made_from(v["id"]))) for v in self.items("kept") if v["kind"] == "video"]
 
     def today(self):
         """For the Today page: pictures waiting for his OK (None when there are none)."""

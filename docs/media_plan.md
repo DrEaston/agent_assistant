@@ -43,3 +43,12 @@ doesn't fetch the tool list again.
 
 - Animation's frames point at Media ids instead of storing their own copies (docs/animation_plan.md).
 - Showing a picture to the assistant (MCP image content) when it needs to look, not just read the details.
+
+## Firefly videos (added 2026-11-25)
+
+Firefly can't talk to Dieter, so he uploads its MP4s on /media from his phone (kept straight away, up to 30 MB:
+Cloud Run's request limit is 32 MB). Videos play on their Media page (served with byte ranges, which phones need).
+When he tells Claude Code "check Media", the `firefly-intake` skill's `inbox` command lists his videos over the API
+(`GET /media/api/videos`, Bearer token) and downloads the new ones (`GET /media/api/<id>/file`, kept files only).
+What it makes is uploaded with `source` naming the video id, which links the results to the video ("Made from this
+video") and marks it as taken in. No new columns: the link is the source text.

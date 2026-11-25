@@ -10,7 +10,11 @@
   {% if item.status == "discarded" %}
   {% call ui.banner() %}This picture was discarded; its file is deleted.{% endcall %}
   {% else %}
+  {% if item.kind == "video" %}
+  <video class="media-preview section" src="{{ item.file }}" controls playsinline muted loop preload="metadata"></video>
+  {% else %}
   <img class="media-preview section" src="{{ item.file }}" alt="{{ item.title }}">
+  {% endif %}
   {% endif %}
 
   {% if item.status == "waiting" %}
@@ -24,14 +28,32 @@
   <div class="card section">
     <dl class="media-facts">
       <dt>Status</dt><dd>{{ ui.tag(item.status | capitalize, tone(item.status)) }}</dd>
-      <dt>Size</dt><dd>{{ item.width }} × {{ item.height }} {{ item.format }}, {{ (item.bytes / 1048576) | round(1) }} MB</dd>
-      <dt>Background</dt><dd>{{ "Transparent" if item.has_alpha else "Solid" }}</dd>
+      <dt>Size</dt><dd>{% if item.width %}{{ item.width }} × {{ item.height }} {% endif %}{{ item.format }}{% if item.kind == "video" %} video{% endif %}, {{ (item.bytes / 1048576) | round(1) }} MB</dd>
+      {% if item.kind != "video" %}<dt>Background</dt><dd>{{ "Transparent" if item.has_alpha else "Solid" }}</dd>{% endif %}
       {% if item.source %}<dt>Made from</dt><dd>{{ item.source }}</dd>{% endif %}
       {% if item.note %}<dt>Why</dt><dd>{{ item.note }}</dd>{% endif %}
       {% if item.prompt %}<dt>Prompt</dt><dd>{{ item.prompt }}</dd>{% endif %}
       {% if item.file_name %}<dt>File</dt><dd>{{ item.file_name }}</dd>{% endif %}
     </dl>
   </div>
+
+  {% if item.kind == "video" and item.status == "kept" %}
+  {% call ui.section("Made from this video") %}
+  {% if made %}
+  <div class="card flush">
+    {% for p in made %}
+    <a class="link-row" href="{{ p.page }}">
+      <img class="media-thumb" src="{{ p.file }}" alt="" loading="lazy">
+      <span class="label-stack"><span class="title">{{ p.title }}</span><span class="small muted">{{ p.status | capitalize }}</span></span>
+      <span class="chev" aria-hidden="true">›</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  {{ ui.empty("Nothing yet. Tell Claude \"check Media\" and it turns this into stills and animations for your OK.") }}
+  {% endif %}
+  {% endcall %}
+  {% endif %}
 
   {% if item.status == "kept" %}
   <div class="row section">

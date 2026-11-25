@@ -331,3 +331,67 @@ class MediaPageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def mp4(width=1280, height=720, salt=b"frames"):
+    """A tiny MP4: just the boxes Dieter reads (ftyp, and moov/trak/tkhd with the size)."""
+    def box(kind, payload):
+        return (8 + len(payload)).to_bytes(4, "big") + kind + payload
+    tkhd = bytes(4 + 20 + 8 + 8 + 36) + (width << 16).to_bytes(4, "big") + (height << 16).to_bytes(4, "big")
+    return box(b"ftyp", b"isom" + bytes(4) + b"isommp41") + box(b"moov", box(b"trak", box(b"tkhd", tkhd))) \
+        + box(b"mdat", salt)
+
+
+class VideoTests(MediaPageTests):
+    """Firefly videos: he uploads them from his phone, Claude Code fetches the new ones and links what it made."""
+
+    def test_he_uploads_a_video_it_plays_and_claude_code_takes_it_in(self):
+        clip = mp4()
+        r = self.client.post("/media/upload", data={"title": "Dieter nods"},
+                             files={"file": ("nod.mp4", clip, "video/mp4")}, follow_redirects=False)
+        self.assertEqual(r.status_code, 303, r.headers.get("location"))
+        self.assertIn("check+Media", r.headers["location"].replace("%20", "+").replace("%22", ""))
+        video_id = r.headers["location"].split("/media/")[1].split("?")[0]
+        page = self.client.get(f"/media/{video_id}").text
+        self.assertIn("<video", page)
+        self.assertIn("1280 × 720 MP4 video", page)
+        self.assertIn("Made from this video", page)
+        self.assertIn("<video", self.client.get("/media").text)
+
+        # Phones fetch videos in pieces.
+        part = self.client.get(f"/media/{video_id}/file", headers={"Range": "bytes=0-9"})
+        self.assertEqual((part.status_code, part.content), (206, clip[:10]))
+        self.assertEqual(part.headers["content-range"], f"bytes 0-9/{len(clip)}")
+        self.assertEqual(self.client.get(f"/media/{video_id}/file", headers={"Range": "bytes=-4"}).content, clip[-4:])
+        self.assertEqual(self.client.get(f"/media/{video_id}/file",
+                                         headers={"Range": f"bytes={len(clip)}-"}).status_code, 416)
+        whole = self.client.get(f"/media/{video_id}/file")
+        self.assertEqual((whole.status_code, whole.headers["content-type"]), (200, "video/mp4"))
+
+        # Claude Code: needs the token; sees it as new; downloads it.
+        anonymous = TestClient(self.api.app)
+        self.assertEqual(anonymous.get("/media/api/videos").status_code, 401)
+        auth = {"Authorization": f"Bearer {self.token}"}
+        listed = {v["id"]: v for v in anonymous.get("/media/api/videos", headers=auth).json()["videos"]}
+        self.assertFalse(listed[video_id]["taken_in"])
+        self.assertEqual(anonymous.get(f"/media/api/{video_id}/file", headers=auth).content, clip)
+        self.assertEqual(anonymous.get(f"/media/api/{video_id}/file").status_code, 401)
+
+        # What it makes names the video, so it's linked and stops being new.
+        made = anonymous.post("/media/api/upload", headers=auth,
+                              data={"title": "Nod", "source": f"Firefly video {video_id}: Dieter nods"},
+                              files={"file": ("nod.png", picture(color=(8, 8, 8, 0)), "image/png")}).json()
+        listed = {v["id"]: v for v in anonymous.get("/media/api/videos", headers=auth).json()["videos"]}
+        self.assertTrue(listed[video_id]["taken_in"])
+        self.assertIn(made["id"], self.client.get(f"/media/{video_id}").text)
+        # Waiting pictures can't be fetched by Claude Code; only kept ones.
+        self.assertEqual(anonymous.get(f"/media/api/{made['id']}/file", headers=auth).status_code, 403)
+
+    def test_not_a_video_and_too_big(self):
+        bad = self.client.post("/media/upload", files={"file": ("x.mp4", b"\0\0\0\x18ftypisom" + bytes(20), "video/mp4")},
+                               follow_redirects=False)
+        self.assertIn("error=", bad.headers["location"])
+        from core.media import store as media_store
+        with self.assertRaises(media_store.Invalid):
+            media_store.inspect_video(mp4(salt=bytes(media_store.MAX_VIDEO_BYTES)))
+        self.assertEqual(media_store.inspect(mp4(640, 360))["width"], 640)
