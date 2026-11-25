@@ -5,16 +5,20 @@ The older Trainer pages (history, Strava imports, workouts, coaching, settings) 
 look; they move here when they're rebuilt.
 """
 
+import csv
+import io
+import json
+import os
 from datetime import date, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from core import ui
-from database import reset_current_user_id, set_current_user_id
+from database import get_current_user_id, reset_current_user_id, set_current_user_id
 
-from . import plan
+from . import plan, strava
 from .manifest import APP
 
 router = APIRouter()
@@ -26,6 +30,7 @@ TABS = (
     ("This week", BASE),
     ("Sunday check-in", BASE + "/checkin"),
     ("Usual week", BASE + "/usual"),
+    ("Log", BASE + "/log"),
     ("History", BASE + "/history"),
     ("Strava", BASE + "/imports"),
 )
@@ -37,6 +42,20 @@ def configure(db):
 
 def store():
     return plan.PlanStore(_state["db"])
+
+
+def sync():
+    return strava.Sync(_state["db"], os.getenv("STRAVA_CLIENT_ID", ""), os.getenv("STRAVA_CLIENT_SECRET", ""))
+
+
+def catch_up(limit=5):
+    """Handle Strava events still waiting (if the background step after the webhook was cut short). Quiet on errors."""
+    try:
+        s = sync()
+        if s.status()["pending"]:
+            s.process(limit)
+    except Exception as exc:
+        print(f"Warning: Strava catch-up failed: {exc!r}")
 
 
 def render(name, **context):
@@ -72,6 +91,7 @@ def _guard(fn, *args, **kwargs):
 
 @router.get(BASE)
 def this_week(request: Request, week: str = ""):
+    catch_up()
     start = _start(week)
     view = store().week_view(start)
     return render("trainer_week.html", title="This week", view=view, current=BASE,
@@ -210,6 +230,128 @@ def calendar_feed(request: Request, token: str):
         reset_current_user_id(reset)
     return Response(body, media_type="text/calendar; charset=utf-8",
                     headers={"Cache-Control": "no-store", "Content-Disposition": 'inline; filename="dieter-trainer.ics"'})
+
+
+# ---------------------------------------------------------------- Strava, live (apps/trainer/strava.py)
+
+
+@router.get("/strava/webhook")
+def strava_webhook_check(request: Request):
+    """Strava checks the callback when the subscription is made: echo hub.challenge if the token is ours."""
+    q = request.query_params
+    answer = sync().challenge(q.get("hub.mode"), q.get("hub.verify_token"), q.get("hub.challenge"))
+    if not answer:
+        raise HTTPException(status_code=403, detail="Not ours.")
+    return JSONResponse(answer)
+
+
+@router.post("/strava/webhook")
+async def strava_webhook(request: Request, background: BackgroundTasks):
+    """A new, changed or deleted Strava activity. Written down now (Strava wants an answer in 2 s), handled after."""
+    try:
+        event = await request.json()
+    except ValueError:
+        event = None
+    if sync().receive(event):
+        background.add_task(lambda: sync().process(5))
+    return {"ok": True}
+
+
+def _is_admin(request):
+    user = getattr(request.state, "current_user", None) or {}
+    return (user.get("role") if isinstance(user, dict) else None) == "admin"
+
+
+@router.post(BASE + "/sync/live")
+def turn_on_live_sync(request: Request):
+    if not _is_admin(request):
+        raise HTTPException(status_code=403, detail="Only Dieter's admin can turn on live sync.")
+    host = request.headers.get("host") or "askdieter.ai"
+    try:
+        sync().subscribe(f"https://{host}/strava/webhook")
+    except strava.StravaError as exc:
+        return back(BASE + "/log?problem=" + str(exc)[:200].replace("&", " "))
+    return back(BASE + "/log?live=1")
+
+
+@router.post(BASE + "/sync/history")
+def import_history(background: BackgroundTasks):
+    user = get_current_user_id()
+
+    def run():
+        reset = set_current_user_id(user)
+        try:
+            s = sync()
+            s.import_history(user)
+            s.fill_details(user)
+        except Exception as exc:
+            print(f"Warning: Strava history import stopped: {exc!r}")
+        finally:
+            reset_current_user_id(reset)
+
+    background.add_task(run)
+    return back(BASE + "/log?history=1")
+
+
+@router.post(BASE + "/sync/now")
+def sync_now():
+    user = get_current_user_id()
+    s = sync()
+    try:
+        s.process(10)
+        s.fill_details(user, limit=10)
+    except strava.StravaError as exc:
+        return back(BASE + "/log?problem=" + str(exc)[:200].replace("&", " "))
+    return back(BASE + "/log")
+
+
+# ---------------------------------------------------------------- his training log
+
+
+@router.get(BASE + "/log")
+def log_page(request: Request, kind: str = "", year: str = "", live: int = 0, history: int = 0, problem: str = ""):
+    catch_up()
+    user = get_current_user_id()
+    entries = strava.log(_state["db"], user, kind=kind, year=year or None)
+    profile = _state["db"].get_trainer_profile(user)
+    connected = bool(profile and dict(profile).get("strava_refresh_token"))
+    return render("trainer_log.html", title="Training log", current=BASE + "/log", page_url=BASE + "/log",
+                  entries=entries, kind=kind, year=year, status=sync().status(), connected=connected,
+                  is_admin=_is_admin(request), live=live, history=history, problem=problem,
+                  years=[str(y) for y in range(date.today().year, date.today().year - 8, -1)],
+                  miles=round(sum(e["miles"] for e in entries if e["category"].startswith("run")), 1),
+                  today=date.today().isoformat())
+
+
+@router.post(BASE + "/log/add")
+def log_add(day: str = Form(...), activity_type: str = Form(...), title: str = Form(""), minutes: str = Form(""),
+            miles: str = Form(""), notes: str = Form("")):
+    try:
+        strava.add_manual(_state["db"], get_current_user_id(), day, activity_type, title, minutes or None,
+                          miles or None, notes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    return back(BASE + "/log")
+
+
+@router.get(BASE + "/log.csv")
+def log_csv(kind: str = "", year: str = ""):
+    rows = strava.log(_state["db"], get_current_user_id(), kind=kind, year=year or None, include_deleted=True,
+                      limit=100000)
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=strava.CSV_FIELDS, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return Response(out.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="dieter-training-log.csv"'})
+
+
+@router.get(BASE + "/log.json")
+def log_json(kind: str = "", year: str = ""):
+    rows = strava.log(_state["db"], get_current_user_id(), kind=kind, year=year or None, include_deleted=True,
+                      limit=100000)
+    return Response(json.dumps(rows, indent=1), media_type="application/json",
+                    headers={"Content-Disposition": 'attachment; filename="dieter-training-log.json"'})
 
 
 # ---------------------------------------------------------------- Report a problem
