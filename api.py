@@ -205,6 +205,10 @@ from core.logbook import connector as logbook_connector, routes as logbook_route
 
 logbook_connector.configure(db)
 LOGBOOK_TOOLS = logbook_connector.tools()
+# Temporary (core/media/probe.py): can ChatGPT hand Dieter an image, on the phone and the desktop? Remove with Media.
+from core.media import probe as media_probe  # noqa: E402
+
+media_probe.configure(db)
 app.include_router(logbook_routes.router)
 CONNECTOR_TOOLSETS = [
     KITCHEN_TOOLS,
@@ -215,6 +219,7 @@ CONNECTOR_TOOLSETS = [
     studio_connector.tools(),  # Studio reports, for the admin
     ASSISTANT_TOOLS,
     LOGBOOK_TOOLS,
+    media_probe.tools(),
 ]
 
 
