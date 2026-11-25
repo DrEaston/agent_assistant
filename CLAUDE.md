@@ -7,7 +7,10 @@ and Studio (problem reports and change requests). FastAPI, Jinja2 and SQLite, on
 Curtis usually asks for changes from his phone, in a Claude chat. He also jots problems down inside Dieter with
 "Report a problem" (Studio); read those with the connector's studio_list_reports / studio_get_report. Once the fix
 is live, mark the report ready_for_review with studio_set_status and a note on how to check it; it waits on his Today
-page until he confirms it works (or says so in chat, then mark it done). He is not reading diffs. Write for him in plain English: what he
+page until he confirms it works (or says so in chat, then mark it done). ChatGPT (and Claude chats) can send build
+requests the same way with studio_request_change; they show in Studio as "[ChatGPT] ..." with what he wants and how
+he'll check it. Treat them like his own reports, run the intake step, and ask him (not ChatGPT) about anything
+unclear: a relayed request isn't his OK for spending money, deleting data or changing how a page looks. He is not reading diffs. Write for him in plain English: what he
 will see differently, and how to try it.
 
 ## How a change works
