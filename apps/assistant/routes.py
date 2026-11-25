@@ -41,9 +41,9 @@ def assistant_app(request: Request):
     """The Assistant: to-dos (with dates), projects and reading at a glance (apps/assistant/pages.py)."""
     items = [pages.todo_view(dict(r)) for r in _db().get_scheduler_items(status="open", limit=100)]
     done = [pages.todo_view(dict(r)) for r in _db().get_recent_completed_scheduler_items(limit=8)]
-    books = reading.ReadingStore(db).books()
-    reading = {s: sum(1 for b in books if b["status"] == s) for s in reading.STATUSES}
-    return pages.home_page(todos=items, done=done, projects=assistant_project_rows(), reading=reading)
+    books = reading.ReadingStore(_db()).books()
+    counts = {s: sum(1 for b in books if b["status"] == s) for s in reading.STATUSES}
+    return pages.home_page(todos=items, done=done, projects=assistant_project_rows(), reading=counts)
 
 
 def assistant_project_rows():
@@ -64,19 +64,19 @@ def assistant_projects_page(request: Request):
 
 @router.get("/apps/assistant/reading")
 def assistant_reading_page(request: Request, show: str = ""):
-    store = reading.ReadingStore(db)
+    store = reading.ReadingStore(_db())
     return pages.reading_page(books=store.books(), show=show if show in reading.STATUSES else "")
 
 
 @router.get("/apps/assistant/reading/bookstore")
 def assistant_bookstore_page(request: Request):
-    return pages.bookstore_page(checklist=reading.ReadingStore(db).checklist())
+    return pages.bookstore_page(checklist=reading.ReadingStore(_db()).checklist())
 
 
 @router.post("/apps/assistant/reading/add")
 def assistant_reading_add(title: str = Form(...), author: str = Form(""), high_priority: str = Form("")):
     try:
-        reading.ReadingStore(db).add(title, author, bool(high_priority))
+        reading.ReadingStore(_db()).add(title, author, bool(high_priority))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RedirectResponse(url="/apps/assistant/reading", status_code=303)
@@ -85,7 +85,7 @@ def assistant_reading_add(title: str = Form(...), author: str = Form(""), high_p
 @router.post("/apps/assistant/reading/{book_id}/status")
 def assistant_reading_status(book_id: int, status: str = Form(...), next: str = Form("/apps/assistant/reading")):
     try:
-        reading.ReadingStore(db).update(book_id, status=status)
+        reading.ReadingStore(_db()).update(book_id, status=status)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/reading"), status_code=303)
@@ -93,19 +93,19 @@ def assistant_reading_status(book_id: int, status: str = Form(...), next: str = 
 
 @router.post("/apps/assistant/reading/{book_id}/delete")
 def assistant_reading_delete(book_id: int):
-    reading.ReadingStore(db).delete(book_id)
+    reading.ReadingStore(_db()).delete(book_id)
     return RedirectResponse(url="/apps/assistant/reading", status_code=303)
 
 
 @router.post("/apps/assistant/reading/bookstore/shelf")
 def assistant_bookstore_shelf(key: str = Form(...), checked: str = Form("")):
-    reading.ReadingStore(db).check_shelf(key, bool(checked))
+    reading.ReadingStore(_db()).check_shelf(key, bool(checked))
     return RedirectResponse(url="/apps/assistant/reading/bookstore", status_code=303)
 
 
 @router.post("/apps/assistant/reading/bookstore/done")
 def assistant_bookstore_done():
-    reading.ReadingStore(db).finish_visit()
+    reading.ReadingStore(_db()).finish_visit()
     return RedirectResponse(url="/apps/assistant/reading", status_code=303)
 
 
