@@ -152,7 +152,36 @@
         </a>
       </div>
 
-      <p class="small muted center"><a href="/apps/issues">Dieter Studio</a> · ask for a change or report a problem</p>
+      {% if logbook %}
+      <section aria-label="Logbook">
+        <div class="section-head">
+          <h2 class="section-title">Logbook</h2>
+          <a href="/logbook">Open</a>
+        </div>
+        <div class="card flush">
+          {% if logbook.pending %}
+          <a class="link-row" href="{% if logbook.pending == 1 %}/logbook/proposals/{{ logbook.first.id }}{% else %}/logbook{% endif %}">
+            <span class="label-stack">
+              <span class="small muted">Waiting for your OK</span>
+              <span class="title">{% if logbook.pending == 1 %}{{ "ChatGPT" if logbook.first.made_by == "chatgpt" else "Claude" }} proposes a change to {{ logbook.first.table_name }}{% else %}{{ logbook.pending }} proposed changes{% endif %}</span>
+            </span>
+            <span class="chev" aria-hidden="true">›</span>
+          </a>
+          {% endif %}
+          {% if logbook.unverified %}
+          <a class="link-row" href="/logbook">
+            <span class="label-stack">
+              <span class="small muted">Not checked yet</span>
+              <span class="title">{{ logbook.unverified }} table{{ "s" if logbook.unverified != 1 }} to verify</span>
+            </span>
+            <span class="chev" aria-hidden="true">›</span>
+          </a>
+          {% endif %}
+        </div>
+      </section>
+      {% endif %}
+
+      <p class="small muted center"><a href="/apps/issues">Dieter Studio</a> · <a href="/logbook">Logbook</a> · ask for a change or report a problem</p>
     </div>
   </div>
 </main>

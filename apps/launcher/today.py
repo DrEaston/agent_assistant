@@ -66,7 +66,7 @@ def short_date(value):
 
 
 def render(*, user_name, now, thanksgiving=None, planned_meals=(), shopping=None, todos=(), focus=None,
-           last_workout=None, playlist_drafts=0, is_guest=False, report_url=None, studio=None):
+           last_workout=None, playlist_drafts=0, is_guest=False, report_url=None, studio=None, logbook=None):
     workout = None
     if last_workout:
         bits = [short_date(last_workout.get("started_at")), miles(last_workout.get("distance_meters"))]
@@ -87,6 +87,8 @@ def render(*, user_name, now, thanksgiving=None, planned_meals=(), shopping=None
         "report_url": report_url,
         # Studio reports (admin only): shown while any fix waits to be checked or any report is open.
         "studio": studio if studio and (studio.get("to_check") or studio.get("open")) else None,
+        # Logbook (core/logbook): proposals from ChatGPT or Claude waiting for an OK, and tables never verified.
+        "logbook": logbook,
         "page_url": "/",
     }
     return HTMLResponse(_templates.get_template("today.html").render(**context))

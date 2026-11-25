@@ -200,13 +200,21 @@ ASSISTANT_TOOLS = assistant_connector.tools()
 assistant_connector.configure(db)
 THANKSGIVING_TOOLS = (RemoteToolSet("thanksgiving", THANKSGIVING_SERVICE_URL, "/thanksgiving/api/connector/tools")
                       if THANKSGIVING_SERVICE_URL else thanksgiving_connector.tools())
+# The Logbook (core/logbook): checked tables assistants look facts up in. Shared storage, not an app.
+from core.logbook import connector as logbook_connector, routes as logbook_routes  # noqa: E402
+
+logbook_connector.configure(db)
+LOGBOOK_TOOLS = logbook_connector.tools()
+app.include_router(logbook_routes.router)
 CONNECTOR_TOOLSETS = [
     KITCHEN_TOOLS,
     THANKSGIVING_TOOLS,
     # Every app's pages (apps/<app>/nav.py): links Claude can hand over. Dieter's own chat opens them instead.
-    ToolSet("dieter", [open_page_tool([kitchen_nav.PAGES, thanksgiving_nav.PAGES, assistant_nav.PAGES])]),
+    ToolSet("dieter", [open_page_tool([kitchen_nav.PAGES, thanksgiving_nav.PAGES, assistant_nav.PAGES,
+                                       logbook_connector.PAGES])]),
     studio_connector.tools(),  # Studio reports, for the admin
     ASSISTANT_TOOLS,
+    LOGBOOK_TOOLS,
 ]
 
 
@@ -238,9 +246,9 @@ from apps.kitchen import recipe_changes as kitchen_recipe_changes  # noqa: E402
 
 SITE_PAGES = [Page("today.home", "Today", "Dieter's home page: today across every app.", "/")]
 DIETER_CHAT = dieter_chat.ChatSetup(
-    toolsets=[KITCHEN_TOOLS, THANKSGIVING_TOOLS, ASSISTANT_TOOLS],
-    page_lists=[SITE_PAGES, kitchen_nav.PAGES, thanksgiving_nav.PAGES, assistant_nav.PAGES],
-    notes=[kitchen_connector.CHAT_NOTES, assistant_connector.CHAT_NOTES],
+    toolsets=[KITCHEN_TOOLS, THANKSGIVING_TOOLS, ASSISTANT_TOOLS, LOGBOOK_TOOLS],
+    page_lists=[SITE_PAGES, kitchen_nav.PAGES, thanksgiving_nav.PAGES, assistant_nav.PAGES, logbook_connector.PAGES],
+    notes=[kitchen_connector.CHAT_NOTES, assistant_connector.CHAT_NOTES, logbook_connector.CHAT_NOTES],
     savers=kitchen_connector.savers(),
     pending=kitchen_connector.pending,
     offer=lambda schema: not schema["name"].startswith("thanksgiving_")
@@ -5495,6 +5503,7 @@ def render_today_page(request: Request):
         playlist_drafts=_quietly("playlists", lambda: len(db.get_playlist_drafts()), 0),
         is_guest=current_user_is_guest_session(),
         studio=_quietly("Studio", lambda: studio_routes.store().summary()) if current_user_is_admin(request) else None,
+        logbook=_quietly("Logbook", lambda: logbook_connector.store().today()),
     )
 
 
