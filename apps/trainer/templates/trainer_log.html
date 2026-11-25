@@ -3,7 +3,7 @@
 {% block title %}Training log{% endblock %}
 {% block content %}
 {% call ui.page_header("Training log", crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs, current=current,
-    sub="Your own record of every session, from Strava and entered here. It stays in Dieter even if it changes on Strava.") %}
+    sub="Your own record of every session, from Strava and entered here, as weekly and monthly totals.") %}
   <a class="button quiet" href="/apps/trainer/log.csv{% if year %}?year={{ year }}{% endif %}">Download CSV</a>
 {% endcall %}
 <main class="wrap">
@@ -34,31 +34,29 @@
   </div>
   {% endcall %}
 
-  <nav class="row small gap-above" aria-label="Filter">
-    <a href="/apps/trainer/log"{% if not kind %} aria-current="page"{% endif %}>All</a>
-    <a href="/apps/trainer/log?kind=run{% if year %}&year={{ year }}{% endif %}"{% if kind == "run" %} aria-current="page"{% endif %}>Runs</a>
-    <a href="/apps/trainer/log?kind=strength{% if year %}&year={{ year }}{% endif %}"{% if kind == "strength" %} aria-current="page"{% endif %}>Strength</a>
-    <a href="/apps/trainer/log?kind=pilates{% if year %}&year={{ year }}{% endif %}"{% if kind == "pilates" %} aria-current="page"{% endif %}>Pilates</a>
-    <a href="/apps/trainer/log?kind=bike{% if year %}&year={{ year }}{% endif %}"{% if kind == "bike" %} aria-current="page"{% endif %}>Rides</a>
-    <span class="muted">·</span>
-    {% for y in years %}<a href="/apps/trainer/log?year={{ y }}{% if kind %}&kind={{ kind }}{% endif %}"{% if year == y %} aria-current="page"{% endif %}>{{ y }}</a>{% endfor %}
-  </nav>
-
-  {% call ui.section(entries | length ~ " sessions" ~ (" · " ~ miles ~ " run miles" if miles else "")) %}
-  {% if entries %}
+  {% call ui.section("Last 12 weeks") %}
   <div class="card flush">
-    {% for e in entries %}
-    <div class="list-row">
-      <div class="grow"><div>{{ e.title }}{% if e.deleted_on_strava %} {{ ui.tag("deleted on Strava", "warn") }}{% endif %}{% if e.source == "dieter" %} {{ ui.tag("entered here", "info") }}{% endif %}</div>
-        <div class="small muted">{{ e.date }}{% if e.time %} {{ e.time }}{% endif %} · {{ e.type }}{% if e.avg_hr %} · {{ e.avg_hr | round | int }} bpm{% endif %}{% if e.notes %} · {{ e.notes }}{% endif %}</div></div>
-      <span class="num small">{% if e.miles %}{{ e.miles }} mi · {% endif %}{{ e.minutes | round | int }} min</span>
-    </div>
+    <div class="list-row small muted"><span class="grow">Week of</span><span class="num">Run mi · runs · weights · Pilates · hours</span></div>
+    {% for w in totals.weeks %}
+    <div class="list-row"><span class="grow">{{ w.key }}</span>
+      <span class="num small">{{ w.run_miles }} · {{ w.runs }} · {{ w.strength }} · {{ w.pilates }} · {{ w.hours }}</span></div>
     {% endfor %}
   </div>
-  {% else %}
-  {{ ui.empty("Nothing here yet. Import your Strava history above, or add a session below.") }}
-  {% endif %}
   {% endcall %}
+
+  {% if totals.months %}
+  {% call ui.section("By month") %}
+  <div class="card flush">
+    {% for m in totals.months %}
+    <div class="list-row"><span class="grow">{{ m.key }}</span>
+      <span class="num small">{{ m.run_miles }} mi · {{ m.runs }} runs · {{ m.strength }} weights · {{ m.pilates }} Pilates{% if m.bike_miles %} · {{ m.bike_miles }} bike mi{% endif %}</span></div>
+    {% endfor %}
+  </div>
+  {% endcall %}
+  {% endif %}
+
+  <p class="small muted gap-above">{{ totals.total }} sessions in your log. Every one is kept with its full detail;
+    <a href="/apps/trainer/log.csv">download them all</a> any time.</p>
 
   {% call ui.section("Add a session done without Strava") %}
   <form method="post" action="/apps/trainer/log/add" class="card stack">
