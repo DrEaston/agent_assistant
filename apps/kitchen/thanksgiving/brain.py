@@ -54,7 +54,8 @@ Your reply: 1-3 short sentences of plain text, no markdown or lists (it may be r
 
 LOCAL_TOOLS = ("thanksgiving_get_dish", "thanksgiving_get_shopping_list", "thanksgiving_check_items",
                "thanksgiving_finish_trip", "thanksgiving_put_back", "thanksgiving_start_timer",
-               "thanksgiving_start_step_timers", "thanksgiving_propose_recipe_change", "thanksgiving_recipe_history")
+               "thanksgiving_start_step_timers", "thanksgiving_propose_recipe_change", "thanksgiving_recipe_history",
+               "thanksgiving_list_timers", "thanksgiving_cancel_timers", "thanksgiving_change_timer")
 
 SAVE_TOOL = {"name": "save_recipe_change",
              "description": "Save a proposed recipe change. Only when the cook's latest message plainly says to save it.",
@@ -150,7 +151,8 @@ def understand(text, summary, history=(), sass="normal", spoken_prompt="", hando
             card = connector.propose_recipe_change(args, request=text)
             state["do"] = [a for a in state["do"] if a.get("type") != "proposal"] + [{"type": "proposal", "card": card}]
             if not any(a.get("type") == "navigate" for a in state["do"]):
-                state["do"].append({"type": "navigate", "url": card["open_url"], "title": "Dish"})
+                # "auto": opened to show the card, not asked for; cook mode stays put and shows the card in the chat.
+                state["do"].append({"type": "navigate", "url": card["open_url"], "title": "Dish", "auto": True})
             return card
         if name == "save_recipe_change":
             from core.connector.proposals import said_save

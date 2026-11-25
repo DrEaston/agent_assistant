@@ -17,7 +17,7 @@ html.tg-asleep, html.tg-asleep body { overflow: hidden; }  /* no scroll bar show
 .sleep-note { position: absolute; bottom: 1.5rem; left: 0; right: 0; text-align: center; color: #3f3f46; font-size: .85rem; }
 </style>
 <div class="helper-update" id="helper-update" hidden role="status">
-  <strong>Update the kitchen helper</strong> to get dimming and motion wake back.
+  <strong>Update the kitchen helper</strong> ({{ helper_version }}): the screen dims as soon as it sleeps.
   <a class="button primary" href="/thanksgiving/helper/DieterHelper.zip" download>Download</a>
   <span>Then unzip it and double-click <em>Install Dieter helper.cmd</em>.</span>
   <button type="button" class="quiet" id="helper-update-close" aria-label="Hide for today">✕</button>
@@ -34,6 +34,11 @@ html.tg-asleep, html.tg-asleep body { overflow: hidden; }  /* no scroll bar show
   let helper = null, reportedHelper = false;        // the helper's /status when it's running on this PC
   let asleep = false, waking = false, sleptAt = 0, lastEvent = 0;
 
+  function olderThan(have, want) {  // "0.2.0" older than "0.2.1"?
+    const a = String(have || "0").split(".").map(Number), b = String(want).split(".").map(Number);
+    for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) < (b[i] || 0);
+    return false;
+  }
   async function helperCall(path, method = "GET", timeoutMs = 2500) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeoutMs);
@@ -47,8 +52,8 @@ html.tg-asleep, html.tg-asleep body { overflow: hidden; }  /* no scroll bar show
     if (helper) lastEvent = helper.last_event || 0;
     // Remember this is the kitchen PC, so every Thanksgiving page shows the full-screen button (tg_fullscreen.html).
     if (helper) try { localStorage.setItem("dieter-kitchen-screen", "1"); } catch (e) {}
-    // An old helper (switches the monitor off, which put the PC into standby): offer the new one, once a day.
-    if (helper && !helper.display_stays_on) {
+    // An out-of-date helper: offer the new one, once a day.
+    if (helper && olderThan(helper.version, "{{ helper_version }}")) {
       let hiddenUntil = 0;
       try { hiddenUntil = Number(localStorage.getItem("dieter-helper-update-hidden") || 0); } catch (e) {}
       $("helper-update").hidden = Date.now() < hiddenUntil;
@@ -81,7 +86,8 @@ html.tg-asleep, html.tg-asleep body { overflow: hidden; }  /* no scroll bar show
     setTimeout(async () => {
       const s = await helperCall("/status", "GET", 2500);
       log("helper-sleep", JSON.stringify({ asked_ok: !!(asked && asked.ok), asleep: s ? s.asleep : null,
-        camera: s ? s.camera : null, can_dim: s ? s.can_dim : null }));
+        camera: s ? s.camera : null, can_dim: s ? s.can_dim : null, version: s ? s.version : null,
+        dim_ms: s ? s.last_dim_ms : null }));
       if (asleep && !(s && s.camera === true)) startBrowserWatch();
     }, 3000);
   }

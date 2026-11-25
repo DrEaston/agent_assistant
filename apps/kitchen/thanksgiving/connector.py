@@ -150,6 +150,46 @@ def start_timer(args):
     return {"started": [_start(plan, None, label, minutes)], "note": "It shows and chimes in cook mode on every screen."}
 
 
+def series_pattern(series):
+    """A run of timers in words, from its minutes: "15, then every 15 min (x3), then every 30 min (x2)"."""
+    minutes = [int(m) for m, _ in series]
+    gaps = [b - a for a, b in zip(minutes, minutes[1:])]
+    parts, i = [f"first at {minutes[0]} min"] if minutes else [], 0
+    while i < len(gaps):
+        j = i
+        while j < len(gaps) and gaps[j] == gaps[i]:
+            j += 1
+        parts.append(f"then every {gaps[i]} min (x{j - i})")
+        i = j
+    return ", ".join(parts)
+
+
+def _ms_now():
+    import time as _time
+    return int(_time.time() * 1000)
+
+
+def _timer_view(t, dishes_by_id=None):
+    left = max(0, round((t["ends_at_ms"] - _ms_now()) / 60000))
+    return {"id": t["id"], "label": t["label"], "minutes_left": left,
+            "dish": (dishes_by_id or {}).get(t.get("dish_id"), "")}
+
+
+def plan_series(series, first_in=None, already=None, skip=()):
+    """Which timers to start, and in how many minutes: [(minutes, label)].
+    first_in: the first timer goes off in this many minutes and the rest keep their gaps after it.
+    already: this many minutes have passed since the step started (timers already past are left out).
+    skip: timer numbers (1 = first) to leave out; the others keep their usual times."""
+    timers = [(int(m), str(label)) for m, label in series]
+    if first_in is not None and timers:
+        shift = int(first_in) - timers[0][0]
+        timers = [(m + shift, label) for m, label in timers]
+    if already:
+        timers = [(m - int(already), label) for m, label in timers]
+    skip = {int(n) for n in skip or ()}
+    return [(m, label) for n, (m, label) in enumerate(timers, 1) if n not in skip and m > 0]
+
+
 def start_step_timers(args):
     plan, ctx = _plan()
     dish = get_dish({"dish": args.get("dish")})
@@ -157,8 +197,61 @@ def start_step_timers(args):
                  and (not args.get("step_id") or t["step_id"] == args.get("step_id"))), None)
     if not task:
         raise ToolError(f"{dish['name']} has no step with timers to start. Use thanksgiving_start_timer instead.")
-    started = [_start(plan, dish["id"], label, minutes) for minutes, label in task["series"]]
-    return {"step": task["title"], "started": started, "note": "They show and chime in cook mode on every screen."}
+    try:
+        first_in = None if args.get("first_in_minutes") in (None, "") else float(args["first_in_minutes"])
+        already = float(args.get("already_minutes") or 0)
+        skip = [int(n) for n in (args.get("skip") or [])]
+    except (TypeError, ValueError):
+        raise ToolError("first_in_minutes and already_minutes are numbers; skip is a list of timer numbers.") from None
+    timers = plan_series(task["series"], first_in, already, skip)
+    if not timers:
+        raise ToolError("That leaves no timers to start.")
+    # Starting a step's timers again replaces the set that's running (never two sets at once).
+    labels = {label for _, label in task["series"]}
+    replaced = 0
+    if args.get("replace", True) is not False:
+        for t in _r().store().get_timers(plan["id"]):
+            if t.get("dish_id") == dish["id"] and t["label"] in labels:
+                _r().store().dismiss_timer(plan["id"], t["id"])
+                replaced += 1
+    started = [_start(plan, dish["id"], label, minutes) for minutes, label in timers]
+    return {"step": task["title"], "usual_pattern": series_pattern(task["series"]), "started": started,
+            "replaced_running": replaced, "note": "They show and chime in cook mode on every screen."}
+
+
+def list_timers(args):
+    plan, ctx = _plan()
+    names = {d["id"]: d["name"] for d in ctx["dishes"]}
+    return {"running": [_timer_view(t, names) for t in _r().store().get_timers(plan["id"])]}
+
+
+def cancel_timers(args):
+    """Cancel running timers by id, or every running timer whose label has these words (e.g. "fold")."""
+    plan, _ = _plan()
+    running = _r().store().get_timers(plan["id"])
+    ids = {int(i) for i in (args.get("timer_ids") or []) if str(i).strip().isdigit()}
+    words = str(args.get("label_words") or "").lower().split()
+    if not ids and not words and not args.get("all"):
+        raise ToolError("Which timers? Give timer_ids (from thanksgiving_list_timers), label_words, or all.")
+    gone = [t for t in running if args.get("all") or t["id"] in ids
+            or (words and all(w in t["label"].lower() for w in words))]
+    for t in gone:
+        _r().store().dismiss_timer(plan["id"], t["id"])
+    return {"cancelled": [t["label"] for t in gone], "still_running": len(running) - len(gone)}
+
+
+def change_timer(args):
+    plan, _ = _plan()
+    try:
+        timer_id = int(args.get("timer_id"))
+        minutes = float(args.get("minutes_from_now"))
+    except (TypeError, ValueError):
+        raise ToolError("Give timer_id (from thanksgiving_list_timers) and minutes_from_now.") from None
+    timer = next((t for t in _r().store().get_timers(plan["id"]) if t["id"] == timer_id), None)
+    if not timer:
+        raise ToolError("That timer isn't running. Use thanksgiving_list_timers.")
+    _r().store().move_timer(plan["id"], timer_id, _ms_now() + int(max(0.5, min(minutes, 24 * 60)) * 60_000))
+    return {"label": timer["label"], "goes_off_in_minutes": minutes}
 
 
 def propose_recipe_change(args, request=""):
@@ -265,9 +358,29 @@ def tools():
              "mode on every screen.", start_timer,
              {"label": {"type": "string"}, "minutes": {"type": "number"}}, ("minutes",)),
         Tool("thanksgiving_start_step_timers", "Start a step's timers",
-             "Start the run of timers a step comes with (e.g. the sourdough's six stretch and folds). Give the dish, "
-             "and step_id if the dish has more than one such step.", start_step_timers,
-             {"dish": {"type": "string"}, "step_id": {"type": "string"}}, ("dish",)),
+             "Start the run of timers a step comes with (e.g. the sourdough's six stretch and folds: 15, then every "
+             "15 min x3, then every 30 min x2). Give the dish, and step_id if the dish has more than one such step. "
+             "Starting them again REPLACES the running set (never two sets). Adjust without changing the pattern: "
+             "first_in_minutes = the first one goes off in that many minutes and the rest keep their gaps after it "
+             "(\"first fold in 10 minutes\"); already_minutes = that many minutes have passed since the step started "
+             "(\"I'm 5 minutes in\", \"I already did the first fold\" = 15); skip = timer numbers to leave out, the "
+             "rest keep their usual times (\"leave out the first timer\" = [1]). The answer lists each timer's "
+             "minutes: say them back.", start_step_timers,
+             {"dish": {"type": "string"}, "step_id": {"type": "string"},
+              "first_in_minutes": {"type": "number"}, "already_minutes": {"type": "number"},
+              "skip": {"type": "array", "items": {"type": "integer"}},
+              "replace": {"type": "boolean", "description": "false only to run a second set alongside (rare)."}},
+             ("dish",)),
+        Tool("thanksgiving_list_timers", "Running timers",
+             "Every running kitchen timer: id, label, minutes left, dish.", list_timers, read_only=True),
+        Tool("thanksgiving_cancel_timers", "Cancel timers",
+             "Stop running timers: timer_ids (from thanksgiving_list_timers), or every one whose label has "
+             "label_words (e.g. \"fold\"), or all.", cancel_timers,
+             {"timer_ids": {"type": "array", "items": {"type": "integer"}}, "label_words": {"type": "string"},
+              "all": {"type": "boolean"}}, destructive=True),
+        Tool("thanksgiving_change_timer", "Change a timer",
+             "Make a running timer go off in minutes_from_now instead.", change_timer,
+             {"timer_id": {"type": "integer"}, "minutes_from_now": {"type": "number"}}, ("timer_id", "minutes_from_now")),
         Tool("thanksgiving_propose_recipe_change", "Propose a recipe change",
              "Suggest a change to one dish's recipe. Nothing is saved: the cook reviews a card (old and new lines, "
              "and what it does to the shopping list) and taps Save. Read the dish first and send the FULL new text of "

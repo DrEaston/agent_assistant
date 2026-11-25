@@ -490,6 +490,11 @@ class ThanksgivingStore:
         self._commit()
         return cur.lastrowid
 
+    def move_timer(self, plan_id, timer_id, ends_at_ms):
+        self._conn().execute("UPDATE tg_timers SET ends_at_ms = ? WHERE id = ? AND plan_id = ? AND state = 'running'",
+                             (int(ends_at_ms), timer_id, plan_id))
+        self._commit()
+
     def dismiss_timer(self, plan_id, timer_id):
         self._conn().execute("UPDATE tg_timers SET state = 'dismissed' WHERE id = ? AND plan_id = ?",
                              (timer_id, plan_id))

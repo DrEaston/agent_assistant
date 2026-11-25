@@ -338,7 +338,10 @@ body.dieter-on-top .voice-fab { display: none; }
   // An answer can move the screen ("pull up the pie recipe"). The conversation comes along to the next page.
   function follow(data) {
     if (!window.DieterActions || !(data.do || []).length) return;
-    DieterActions.run(data.do, { keepChatOn: ["/thanksgiving"], state: {
+    // In cook mode, don't leave for a page Dieter only opened to show a review card: the card is in the chat already.
+    const actions = location.pathname.startsWith("/thanksgiving/cook")
+      ? data.do.filter((a) => !(a.type === "navigate" && a.auto)) : data.do;
+    DieterActions.run(actions, { keepChatOn: ["/thanksgiving"], state: {
       open: !sheet.hidden, history, log: log.innerHTML, convo: !!convo, about,
       decide: !$("voice-decide").hidden, undo: !$("voice-undo-row").hidden } });
   }
@@ -581,6 +584,17 @@ body.dieter-on-top .voice-fab { display: none; }
     };
     // Chrome ends recognition every so often; keep it going for the rest of the conversation.
     recognition.onend = () => { recognition = null; if (convo && !speaking) setTimeout(listenNext, 200); };
+    // Right after a page change Chrome can start a session that gets no sound at all (the page before hadn't let go
+    // of the microphone): the mic looks on but hears nothing. No sound within 4 seconds: start over.
+    let gotAudio = false;
+    recognition.onaudiostart = () => { gotAudio = true; };
+    setTimeout(() => {
+      if (!gotAudio && recognition === rec && convo) {
+        report("recognition-noaudio", "restarting");
+        stopRecognition();
+        setTimeout(listenNext, 500);
+      }
+    }, 4000);
     try { recognition.start(); }
     catch (error) { report("recognition-start", error && error.message); recognition = null; setTimeout(listenNext, 1000); }
   }
@@ -788,7 +802,8 @@ body.dieter-on-top .voice-fab { display: none; }
     document.body.classList.add("voice-open");
     $("voice-open").hidden = true;
     toLatest();
-    if (resumed.convo && Recognition) startConversation();  // keep listening if we were talking
+    // Keep listening if we were talking, a moment after the page loads (so the page before has let go of the mic).
+    if (resumed.convo && Recognition) setTimeout(() => { if (!sheet.hidden && !convo) startConversation(); }, 1200);
   }
 
   // ---------- "Hey Dieter": whenever the mic is off (chat closed, or open but done talking), listen only for the
