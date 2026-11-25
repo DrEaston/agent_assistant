@@ -268,6 +268,34 @@ class MediaPageTests(unittest.TestCase):
                                follow_redirects=False)
         self.assertIn("error=", bad.headers["location"])
 
+    def test_claude_code_uploads_with_a_token_and_he_keeps_them_all(self):
+        anonymous = TestClient(self.api.app)
+        files = {"file": ("asleep.png", picture(color=(5, 5, 5, 0)), "image/png")}
+        self.assertEqual(anonymous.post("/media/api/upload", data={"title": "x"}, files=files).status_code, 401)
+        self.assertEqual(anonymous.post("/media/api/upload", data={"title": "x"}, files=files,
+                                        headers={"Authorization": "Bearer nope"}).status_code, 401)
+        sent = []
+        for i, color in enumerate(((6, 6, 6, 0), (7, 7, 7, 0))):
+            r = anonymous.post("/media/api/upload", headers={"Authorization": f"Bearer {self.token}"},
+                               data={"title": f"Firefly still {i}", "source": "Firefly: go to sleep, frame 176"},
+                               files={"file": (f"s{i}.png", picture(color=color), "image/png")})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertEqual(r.json()["status"], "waiting")
+            sent.append(r.json()["id"])
+        bad = anonymous.post("/media/api/upload", headers={"Authorization": f"Bearer {self.token}"},
+                             data={"title": "x"}, files={"file": ("x.txt", b"hello", "text/plain")})
+        self.assertEqual(bad.status_code, 400)
+        home = self.client.get("/media").text
+        self.assertIn("Keep all", home)
+        self.client.post("/media/keep-all")
+        token = set_current_user_id(self.user_id)
+        try:
+            kept = {i["id"]: i for i in connector.store().items("kept")}
+        finally:
+            reset_current_user_id(token)
+        self.assertTrue(all(i in kept for i in sent))
+        self.assertEqual(kept[sent[0]]["made_by"], "claude")
+
     def test_chatgpt_sees_it_through_the_connector(self):
         sent = self.send_from_chatgpt("Through MCP", picture(color=(4, 4, 4, 0)))
         answer = TestClient(self.api.app).post(

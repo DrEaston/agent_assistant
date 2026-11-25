@@ -8,9 +8,10 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from core import ui
+from database import reset_current_user_id, set_current_user_id
 
 from . import connector
 from .store import MAX_BYTES, WAIT_DAYS, Invalid, who
@@ -19,6 +20,11 @@ APP = {"id": "media", "title": "Media", "nav_label": "Media", "accent": "today"}
 STATUS_TONE = {"waiting": "info", "kept": "ok", "discarded": None}
 
 router = APIRouter()
+_api = {"authenticate": None}  # request -> user or None: Dieter's connector sign-in (a Bearer token), set by the site
+
+
+def configure_api(authenticate):
+    _api["authenticate"] = authenticate
 _templates = ui.templates(Path(__file__).parent / "templates")
 _templates.globals.update(who=who, tone=STATUS_TONE.get, wait_days=WAIT_DAYS)
 
@@ -58,6 +64,37 @@ async def media_upload(request: Request, file: UploadFile = File(...), title: st
         return back("/media", error=str(exc))
     return back(item["page"], message="Already here: this exact picture was saved before." if item.get("duplicate")
                 else "Saved.")
+
+
+@router.post("/media/keep-all")
+def media_keep_all():
+    s = connector.store()
+    waiting = s.items("waiting")
+    for item in waiting:
+        s.keep(item["id"])
+    return back("/media", message=f"Kept {len(waiting)} picture{'s' if len(waiting) != 1 else ''}.")
+
+
+@router.post("/media/api/upload")
+async def media_api_upload(request: Request, file: UploadFile = File(...), title: str = Form(""),
+                           source: str = Form(""), prompt: str = Form(""), note: str = Form("")):
+    """Claude Code's upload (the Firefly intake skill): signed in with a Bearer token from Dieter's own sign-in, like
+    /mcp. The picture waits for his OK like anything an assistant sends."""
+    user = _api["authenticate"](request) if _api["authenticate"] else None
+    if not user:
+        return JSONResponse({"error": "Sign in to Dieter first (Bearer token from /oauth)."}, status_code=401,
+                            headers={"WWW-Authenticate": "Bearer"})
+    data = await file.read(MAX_BYTES + 1)
+    token = set_current_user_id(user["id"])
+    try:
+        item = connector.store().add(data, title, "claude", note=note, prompt=prompt, source=source,
+                                     file_name=file.filename or "")
+    except Invalid as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    finally:
+        reset_current_user_id(token)
+    return {"id": item["id"], "status": item["status"], "duplicate": bool(item.get("duplicate")),
+            "url": str(request.base_url).rstrip("/") + item["page"]}
 
 
 @router.get("/media/{media_id}")

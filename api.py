@@ -227,6 +227,7 @@ media_connector.configure(db, MediaBlobs(Path(os.getenv("MEDIA_DIR", str(db_path
                                          _MediaCloud() if cloud_persistence.enabled else None))
 app.include_router(logbook_routes.router)
 app.include_router(media_routes.router)
+media_routes.configure_api(lambda request: connector_auth.authenticate(request))
 CONNECTOR_TOOLSETS = [
     KITCHEN_TOOLS,
     THANKSGIVING_TOOLS,
@@ -492,6 +493,7 @@ async def load_authenticated_user(request: Request, call_next):
         "/dashboard",
         "/api/cct-roadmap",
         "/mcp",  # Claude's connector: checks its own bearer token
+        "/media/api/",  # Claude Code's picture upload: checks its own bearer token too
         "/oauth/",  # its sign-in; /oauth/authorize sends people to /login itself
         "/.well-known/oauth-",
     )
