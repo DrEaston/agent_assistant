@@ -31,8 +31,13 @@ class PieceTests(unittest.TestCase):
         self.assertTrue(oauth.redirect_allowed(CALLBACK))
         self.assertTrue(oauth.redirect_allowed("http://localhost:4312/callback"))
         self.assertTrue(oauth.redirect_allowed("http://127.0.0.1/callback"))
+        self.assertTrue(oauth.redirect_allowed("https://chatgpt.com/connector_platform_oauth_redirect"))
+        self.assertTrue(oauth.redirect_allowed("https://chatgpt.com/connector/oauth/6mt_L_yi2KyC"))
+        self.assertEqual(oauth.app_name("https://chatgpt.com/connector_platform_oauth_redirect"), "ChatGPT")
+        self.assertEqual(oauth.app_name(CALLBACK), "Claude")
         for bad in ("https://evil.example/cb", "http://localhost.evil.example/cb", "https://claude.ai/other",
-                    "http://localhost:80@evil.example/"):
+                    "http://localhost:80@evil.example/", "https://chatgpt.com/other",
+                    "https://chatgpt.com/connector/oauth/x/../../evil", "https://chatgpt.com.evil.example/connector_platform_oauth_redirect"):
             self.assertFalse(oauth.redirect_allowed(bad), bad)
         self.assertTrue(oauth.redirect_matches(["http://localhost/callback"], "http://localhost:5555/callback"))
         self.assertFalse(oauth.redirect_matches(["http://localhost/callback"], "http://localhost:5555/other"))
@@ -206,6 +211,34 @@ class ConnectorFlowTests(unittest.TestCase):
                                                         "code_verifier": verifier}).json()
         self.client.cookies.clear()  # from here on Claude only has its token
         return client_id, tokens
+
+    def test_chatgpt_connects_the_same_way(self):
+        chatgpt = "https://chatgpt.com/connector_platform_oauth_redirect"
+        registered = self.client.post("/oauth/register", json={"redirect_uris": [chatgpt]}).json()
+        self.assertEqual(registered["client_name"], "ChatGPT")
+        meta = self.client.get("/.well-known/oauth-authorization-server").json()
+        self.assertIn("offline_access", meta["scopes_supported"])
+        self.assertTrue(meta["authorization_response_iss_parameter_supported"])
+        verifier, challenge = pkce()
+        query = {"response_type": "code", "client_id": registered["client_id"], "redirect_uri": chatgpt,
+                 "state": "s1", "code_challenge": challenge, "code_challenge_method": "S256",
+                 "scope": "dieter offline_access", "resource": "http://testserver/mcp"}
+        self.sign_in()
+        page = self.client.get("/oauth/authorize", params=query)
+        self.assertIn("Let ChatGPT use your Dieter?", page.text)
+        decision = self.client.post("/oauth/authorize", data=dict(query, decision="allow"), follow_redirects=False)
+        location = decision.headers["location"]
+        self.assertTrue(location.startswith(chatgpt + "?"))
+        answer = parse_qs(urlsplit(location).query)
+        self.assertEqual(answer["iss"], ["http://testserver"])
+        tokens = self.client.post("/oauth/token", data={"grant_type": "authorization_code", "code": answer["code"][0],
+                                                        "client_id": registered["client_id"], "redirect_uri": chatgpt,
+                                                        "code_verifier": verifier,
+                                                        "resource": "http://testserver/mcp"}).json()
+        self.assertIn("refresh_token", tokens)
+        self.client.cookies.clear()
+        names = {t["name"] for t in self.rpc(tokens["access_token"], "tools/list").json()["result"]["tools"]}
+        self.assertIn("assistant_get_project", names)
 
     def rpc(self, token, method, params=None, msg_id=1):
         return self.client.post("/mcp", headers={"Authorization": f"Bearer {token}"},

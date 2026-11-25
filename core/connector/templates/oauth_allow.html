@@ -1,15 +1,16 @@
 {% extends "layout.html" %}
 {% import "components.html" as ui %}
-{% block title %}Connect Claude{% endblock %}
+{% block title %}Connect {{ asker }}{% endblock %}
 {% block dock %}{% endblock %}
 {% block content %}
 <main class="wrap">
-  {% call ui.section("Let Claude use your Dieter?") %}
+  {% call ui.section("Let " ~ asker ~ " use your Dieter?") %}
   <div class="card stack">
     <p>Signed in as <strong>{{ user.display_name or user.name or user.email }}</strong>.</p>
-    <p>Claude will be able to see and change your shopping lists, recipes and Thanksgiving plan, as you.</p>
-    <p class="muted">You'll go back to <strong>{{ destination }}</strong>. You can disconnect any time in Claude's
-      settings under Connectors.</p>
+    <p>{{ asker }} will be able to see and change your projects, to-dos, shopping lists, recipes and Thanksgiving
+      plan, as you.</p>
+    <p class="muted">You'll go back to <strong>{{ destination }}</strong>. You can disconnect any time in {{ asker }}'s
+      settings.</p>
     <form method="post" action="/oauth/authorize" class="row">
       {% for name in ("client_id", "redirect_uri", "response_type", "code_challenge", "code_challenge_method", "state", "scope", "resource") %}
       {% if params.get(name) %}<input type="hidden" name="{{ name }}" value="{{ params[name] }}">{% endif %}
