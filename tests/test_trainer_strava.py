@@ -209,6 +209,12 @@ class WebhookPageTests(unittest.TestCase):
             self.assertIn("Barre fusion 77", exported.text)
             self.assertTrue(exported.text.startswith("date,time,source,type"))
             self.assertEqual(client.post("/apps/trainer/sync/live").status_code, 403)  # admin only
+            from apps.trainer import connector
+            status = connector.sync_status({})
+            self.assertEqual((status["strava_connected"], status["sessions_in_log"]), (False, 1))
+            self.assertEqual(status["newest_session"]["title"], "Barre fusion 77")
+            self.assertEqual(len(connector.this_week({})["days"]), 7)
+            self.assertEqual(connector.log_totals({"weeks": 4})["total"], 1)
         finally:
             reset_current_user_id(token)
 
