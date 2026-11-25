@@ -48,6 +48,7 @@ from apps.kitchen.import_images import UnsupportedRecipeImage, is_heic, normaliz
 from apps.kitchen.thanksgiving.router import configure as configure_thanksgiving, router as thanksgiving_router
 from core import internal as core_internal, proxy as core_proxy, ui as core_ui
 from apps.kitchen.shopping import router as shopping
+from apps.trainer import routes as trainer_routes
 from apps.kitchen import pages as kitchen_pages
 from apps.launcher import today as today_page
 from apps.assistant import pages as assistant_pages, reading as assistant_reading
@@ -181,6 +182,8 @@ shopping.configure(
     thanksgiving=remote_thanksgiving if THANKSGIVING_SERVICE_URL else None,
 )
 app.include_router(shopping.router)
+trainer_routes.configure(db)
+app.include_router(trainer_routes.router)  # Trainer's This week, Sunday check-in, usual week, calendar feed
 
 # Claude's connector (core/connector): /mcp for the tools, /oauth/* and /.well-known/* for signing in. Each app
 # adds its ToolSet here; an app running as its own service is reached through RemoteToolSet.
@@ -521,6 +524,9 @@ async def load_authenticated_user(request: Request, call_next):
     user_token = set_current_user_id(user["id"] if user else None)
     try:
         shared_recipe = re.fullmatch(r"/thanksgiving/menu/\d+", path) and request.method in ("GET", "HEAD")
+        # Trainer's calendar feed: calendar apps can't sign in; the long secret in the link is the key.
+        shared_recipe = shared_recipe or (re.fullmatch(r"/trainer-calendar/[A-Za-z0-9_-]{20,}\.ics", path)
+                                          and request.method in ("GET", "HEAD"))
         if not user and path not in public_exact_paths and not path.startswith(public_prefixes) and not shared_recipe:
             if db.get_user_count() == 0:
                 return RedirectResponse(url="/register", status_code=303)
@@ -5529,6 +5535,7 @@ def render_today_page(request: Request):
         studio=_quietly("Studio", lambda: studio_routes.store().summary()) if current_user_is_admin(request) else None,
         logbook=_quietly("Logbook", lambda: logbook_connector.store().today()),
         media=_quietly("Media", lambda: media_connector.store().today()),
+        training=_quietly("Trainer", lambda: trainer_routes.store().today()),
     )
 
 
@@ -6773,9 +6780,9 @@ def selected_trainer_athlete_id_for_mode(request, profile, athlete_user_id=0):
     return None
 
 
-@app.get("/apps/trainer")
+@app.get("/apps/trainer/history")
 def trainer_app(request: Request, athlete_user_id: int = 0):
-    """Dieter Trainer home."""
+    """Trainer's older home: training history, Strava charts and coaching (This week is apps/trainer/routes.py)."""
     profile = dict_from_row(db.get_trainer_profile())
     mode = trainer_role(profile)
     if not mode:

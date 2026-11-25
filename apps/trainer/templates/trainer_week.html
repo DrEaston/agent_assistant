@@ -1,0 +1,98 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}This week{% endblock %}
+{% block content %}
+{% set t = view.totals %}
+{% call ui.page_header("This week", crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs, current=current,
+    sub=view.label ~ " · " ~ t.miles_run ~ " of " ~ (t.miles_target | round(1)) ~ " mi run") %}
+  <a class="button quiet" href="/apps/trainer?week={{ view.prev }}" aria-label="Previous week">‹</a>
+  {% if view.start != this_monday %}<a class="button quiet" href="/apps/trainer">This week</a>{% endif %}
+  <a class="button quiet" href="/apps/trainer?week={{ view.next }}" aria-label="Next week">›</a>
+{% endcall %}
+<main class="wrap">
+  <section class="card stack" aria-label="The week so far">
+    <div class="spread"><span>Miles</span><strong class="num">{{ t.miles_run }} / {{ t.miles_target | round(1) }}</strong></div>
+    {{ ui.meter(t.miles_run, t.miles_target or 1) }}
+    <div class="chips small">
+      <span class="chip">Hard workout {{ t.workout[0] }}/{{ t.workout[1] }}</span>
+      <span class="chip">Strides {{ t.strides[0] }}/{{ t.strides[1] }}</span>
+      <span class="chip">Weights {{ t.weights[0] }}/{{ t.weights[1] }}</span>
+      <span class="chip">Pilates {{ t.pilates[0] }}/{{ t.pilates[1] }}</span>
+      <span class="chip">Water goal {{ t.water_days }}/7 days</span>
+    </div>
+    {% if view.week.goals %}
+    <div><div class="small muted">Goals this week</div>
+      <ul>{% for g in view.week.goals %}<li>{{ g }}</li>{% endfor %}</ul></div>
+    {% endif %}
+  </section>
+
+  {% if view.empty %}
+  {% call ui.banner("info") %}
+    Nothing planned this week yet.
+    <form method="post" action="/apps/trainer/week/fill" class="inline-form">
+      <input type="hidden" name="week" value="{{ view.start }}">
+      <button type="submit" class="primary">Draft it from my usual week</button>
+    </form>
+    You can change anything after.
+  {% endcall %}
+  {% endif %}
+
+  {% for d in view.days %}
+  <section class="gap-above" id="day-{{ d.date }}" aria-label="{{ d.label }}">
+    <h2 class="section-title">{{ d.label }}{% if d.is_today %} {{ ui.tag("Today", "info") }}{% endif %}</h2>
+    <div class="card flush">
+      {% for s in d.sessions %}
+        {% set amount = (s.miles | round(1) ~ " mi") if s.miles else (s.slot or "") %}
+        {% set note = [s.slot if s.miles and s.slot else "", s.details] | select | join(" · ") %}
+        {% call ui.check_row("s-" ~ s.id, s.title or s.kind_label, "/apps/trainer/check", done=s.done, amount=amount, note=note) %}
+          <a class="small" href="/apps/trainer/sessions/{{ s.id }}" aria-label="Change {{ s.title }}">Change</a>
+        {% endcall %}
+        {% if s.strides %}
+          {{ ui.check_row("x-" ~ s.id, s.strides ~ " strides", "/apps/trainer/check", done=s.strides_done, note="after " ~ (s.title | lower)) }}
+        {% endif %}
+        {% if s.status == "skipped" %}<div class="list-row small muted">Skipped{% if s.note %}: {{ s.note }}{% endif %}</div>{% endif %}
+      {% else %}
+        <div class="list-row small muted">Nothing planned.</div>
+      {% endfor %}
+      {% for a in d.strava %}
+        <div class="list-row small"><span class="grow">Strava: {{ a.title }}</span><span class="num">{% if a.miles %}{{ a.miles }} mi · {% endif %}{{ a.minutes }} min</span></div>
+      {% endfor %}
+      {% if d.is_today or (d.is_past and (d.habits.water or d.habits.fueled)) %}
+      <div class="list-row">
+        <span class="grow small">Water {{ d.habits.water }}/{{ view.settings.water_goal }} · {% if d.habits.fueled %}fueled ✓{% else %}fueling not logged{% endif %}</span>
+        <form method="post" action="/apps/trainer/habits" class="row">
+          <input type="hidden" name="day" value="{{ d.date }}"><input type="hidden" name="week" value="{{ view.start }}">
+          <button type="submit" name="water" value="+1" class="quiet">+1 water</button>
+          <button type="submit" name="fueled" value="{{ 'no' if d.habits.fueled else 'yes' }}" class="quiet">{{ "Undo fueled" if d.habits.fueled else "Fueled" }}</button>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+  {% endfor %}
+
+  {% call ui.section("Add a session") %}
+  <form method="post" action="/apps/trainer/sessions/add" class="card stack">
+    <input type="hidden" name="week" value="{{ view.start }}">
+    <div class="cols">
+      <div class="field"><label for="add-day">Day</label>
+        <select id="add-day" name="day">{% for d in view.days %}<option value="{{ d.date }}"{% if d.is_today %} selected{% endif %}>{{ d.label }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="add-kind">What</label>
+        <select id="add-kind" name="kind">{% for k, label in kinds.items() %}<option value="{{ k }}">{{ label }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="cols">
+      {{ ui.field("Miles (runs)", "miles", type="number", placeholder="6") }}
+      {{ ui.field("Time", "slot", type="time") }}
+    </div>
+    {{ ui.field("Details", "details", maxlength=500, placeholder="e.g. 5 × 1 mile at threshold, 60 s rest") }}
+    <button type="submit" class="primary">Add</button>
+  </form>
+  {% endcall %}
+  {% if not view.empty %}
+  <form method="post" action="/apps/trainer/week/fill" class="gap-above">
+    <input type="hidden" name="week" value="{{ view.start }}"><input type="hidden" name="replace" value="1">
+    <button type="submit" class="quiet">Redraft the unfinished sessions from my usual week</button>
+  </form>
+  {% endif %}
+</main>
+{% endblock %}
