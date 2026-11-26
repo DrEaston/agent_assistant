@@ -101,7 +101,8 @@ def overview(request: Request, week: str = ""):
     catch_up()
     s = store()
     view = s.week_view(date.today())
-    numbers = analysis.overview(_state["db"], get_current_user_id(), miles_target=view["totals"]["miles_target"])
+    numbers = analysis.overview(_state["db"], get_current_user_id(), miles_target=view["totals"]["miles_target"],
+                                races=plan.race_bests(s.settings()))
     return render("trainer_overview.html", title="Trainer", current=BASE, page_url=BASE, view=view,
                   guidance=analysis.week_guidance(view), o=numbers,
                   today=[s for d in view["days"] if d["is_today"] for s in d["sessions"]])
@@ -217,10 +218,12 @@ def usual_page(request: Request, renewed: int = 0):
 def save_usual(miles: str = Form(...), workout_day: str = Form(...), workout_time: str = Form(""),
                long_day: str = Form(...), rest_day: str = Form(""), weights: str = Form("2"),
                pilates: str = Form("2"), strides: str = Form("2"), strides_text: str = Form(""),
-               water_goal: str = Form("8"), run_time: str = Form(""), gym_time: str = Form("")):
+               water_goal: str = Form("8"), run_time: str = Form(""), gym_time: str = Form(""),
+               race_mile: str = Form(""), race_3k: str = Form(""), race_5k: str = Form(""), race_10k: str = Form("")):
     _guard(store().save_settings, miles=miles, workout_day=workout_day, workout_time=workout_time, long_day=long_day,
            rest_day=rest_day, weights=weights, pilates=pilates, strides=strides, strides_text=strides_text or None,
-           water_goal=water_goal, run_time=run_time, gym_time=gym_time)
+           water_goal=water_goal, run_time=run_time, gym_time=gym_time, race_mile=race_mile, race_3k=race_3k,
+           race_5k=race_5k, race_10k=race_10k)
     return back(BASE + "/usual")
 
 

@@ -29,6 +29,16 @@
       {{ ui.field("Easy runs with strides a week", "strides", value=settings.strides, type="number") }}
       {{ ui.field("Strides", "strides_text", value=settings.strides_text, maxlength=120) }}
     </div>
+    <p class="small muted">Optional: recent race or time-trial times (minutes:seconds). Dieter works out your critical speed
+      from your runs by itself; add these only if its number looks off, or for a race it can't see.</p>
+    <div class="cols">
+      {{ ui.field("Mile", "race_mile", value=settings.race_mile, placeholder="5:18", maxlength=8) }}
+      {{ ui.field("3K", "race_3k", value=settings.race_3k, placeholder="10:05", maxlength=8) }}
+    </div>
+    <div class="cols">
+      {{ ui.field("5K", "race_5k", value=settings.race_5k, placeholder="17:39", maxlength=8) }}
+      {{ ui.field("10K", "race_10k", value=settings.race_10k, placeholder="36:40", maxlength=8) }}
+    </div>
     <div class="cols">
       {{ ui.field("Usual run time", "run_time", value=settings.run_time, type="time") }}
       {{ ui.field("Usual weights / Pilates time", "gym_time", value=settings.gym_time, type="time") }}
