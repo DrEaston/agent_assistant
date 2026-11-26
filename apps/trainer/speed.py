@@ -7,7 +7,8 @@ summary, not the streams:
 
 - fast stretches: bursts well above the run's usual speed, 6 s to 8 min, each with its distance, time and best
   5 seconds, named by length: a stride (under 150 m), a standard rep (200, 300, 400, 600, 800, 1K, 1200, mile) or "rep";
-- the run's best efforts at 400 m to 5K (fastest stretch of each distance anywhere in the run);
+- the run's best efforts at 400 m to 5K: the fastest steady stretch of each distance (no stop or jog inside it: a
+  "best mile" made of 400s and their recoveries isn't a mile effort and would drag critical speed down);
 - its best 5 seconds (his top speed);
 - a speed histogram: seconds and metres in each 0.05 m/s band above 3 m/s (the metres keep each band's exact speed). Scores that depend on his current critical speed
   are worked out from this, so when critical speed changes nothing has to be read from Strava again.
@@ -15,7 +16,8 @@ summary, not the streams:
 The measures (all estimates, labelled so on the page):
 
 - critical speed (CS) and D' from the critical speed model (Monod & Scherrer; Jones & Vanhatalo): the linear
-  distance-time fit d = CS x t + D' over his best efforts lasting 2-20 minutes in the 26 weeks up to that week.
+  distance-time fit d = CS x t + D' over his best efforts lasting 2-40 minutes: race and time-trial results he enters
+  on Usual week (his real maximal efforts), and steady efforts from runs in the 26 weeks up to that week when faster.
   CS is the fastest pace he could hold for a long time; D' is the metres he can run "above" it before he's spent;
 - speed work: D' used, sum of (speed - CS) x seconds over everything faster than CS, in metres and in "tanks"
   (multiples of his D'). The plain two-parameter model: it's least certain for near-sprint efforts, and the published
@@ -31,7 +33,7 @@ import json
 import statistics
 from datetime import date, timedelta
 
-VERSION = 2                         # bump when the summary changes: older rows are read again
+VERSION = 3                         # bump when the summary changes: older rows are read again
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS tr_run_speed (
         user_id INTEGER NOT NULL, external_id TEXT NOT NULL, day TEXT NOT NULL, version INTEGER DEFAULT 0,
@@ -151,21 +153,38 @@ def find_efforts(times, speeds, dists=None):
     return found, round(usual, 2)
 
 
-def best_efforts(times, dists):
-    """{metres: seconds} for the fastest stretch of each BEST_DISTANCES distance anywhere in the run."""
-    points = [(float(t), float(d)) for t, d in zip(times or [], dists or []) if t is not None and d is not None]
+STEADY = 0.8  # a best effort's slowest moment must be at least 80% of its average speed (no jog or stop inside)
+
+
+def best_efforts(times, dists, speeds=None):
+    """{metres: seconds} for the fastest steady stretch of each BEST_DISTANCES distance in the run."""
+    rows = [(float(t), float(d), None if v is None else float(v))
+            for t, d, v in zip(times or [], dists or [], speeds or [None] * len(times or []))
+            if t is not None and d is not None]
+    points = [(t, d) for t, d, _ in rows]
+    vs = [v for _, _, v in rows]
     out = {}
     if len(points) < 2:
         return out
+    from collections import deque
     for target in BEST_DISTANCES:
         if points[-1][1] - points[0][1] < target:
             break
-        best, j = None, 0
+        best, j, low = None, 0, deque()  # low: indices in [i, j] with rising speeds (sliding minimum)
         for i in range(len(points)):
+            while low and low[0] < i:
+                low.popleft()
             while j < len(points) and points[j][1] - points[i][1] < target:
+                if vs[j] is not None:
+                    while low and vs[low[-1]] >= vs[j]:
+                        low.pop()
+                    low.append(j)
                 j += 1
             if j == len(points):
                 break
+            span = points[j][0] - points[i][0]
+            if speeds and low and span and vs[low[0]] < STEADY * target / span:
+                continue  # a jog or a stop inside: not one steady effort
             # time to cover exactly `target` from point i, interpolating inside the last step
             (t0, d0), (t1, d1) = points[j - 1], points[j]
             need = points[i][1] + target
@@ -231,7 +250,7 @@ def summary(efforts):
 def fit_critical_speed(bests):
     """(CS m/s, D' m) from {metres: seconds} best efforts lasting 2-20 minutes (least squares on d = CS·t + D'),
     or (None, None) when there aren't two usable efforts or the fit isn't believable."""
-    points = [(t, float(d)) for d, t in bests.items() if t and 120 <= t <= 1200]
+    points = [(t, float(d)) for d, t in bests.items() if t and 120 <= t <= 2400]
     if len({d for _, d in points}) < 2:
         return None, None
     n = len(points)
@@ -285,7 +304,7 @@ def analyze(sync, user_id, external_id, day):
     row = {"user_id": user_id, "external_id": str(external_id), "day": str(day)[:10], "version": VERSION,
            "strides": len(strides), "efforts_json": json.dumps(efforts), "stride_mps": stride_speed(efforts),
            "usual_mps": usual, "best5_mps": top_speed(times, speeds), "hist_json": json.dumps(histogram(times, speeds)),
-           "bests_json": json.dumps(best_efforts(times, dists))}
+           "bests_json": json.dumps(best_efforts(times, dists, speeds))}
     conn = ensure(sync.db)
     conn.execute(f"INSERT OR REPLACE INTO tr_run_speed ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})",
                  list(row.values()))
@@ -350,21 +369,33 @@ def _rows(db, user_id, since):
     return out
 
 
-def model_at(runs, end):
-    """CS, D' and top speed from the FIT_WEEKS up to `end`."""
+def model_at(runs, end, races=None):
+    """CS, D' and top speed from his race times and the FIT_WEEKS of runs up to `end`."""
     start = end - timedelta(weeks=FIT_WEEKS)
     window = [r for r in runs if start < r["day"] <= end]
-    bests = {}
+    races = {d: t for d, t in (races or {}).items() if t}
+    race_cs, race_dp = fit_critical_speed(races)
+    bests = dict(races)
     for r in window:
         for d, t in r["bests"].items():
-            if t and (d not in bests or t < bests[d]):
+            if not t:
+                continue
+            if race_cs:
+                # With race times, a run's effort only counts if it beats what the races predict (he's got faster);
+                # an easy steady mile is a best effort of that run, not a maximal one.
+                predicted = (float(d) - race_dp) / race_cs
+                if t < predicted and (d not in bests or t < bests[d]):
+                    bests[d] = t
+            elif d not in bests or t < bests[d]:
                 bests[d] = t
     cs, d_prime = fit_critical_speed(bests)
+    if race_cs and not cs:
+        cs, d_prime = race_cs, race_dp
     vmax = max((r["best5"] or 0 for r in window), default=0) or None
     return {"cs": cs, "d_prime": d_prime, "vmax": vmax, "bests": bests}
 
 
-def weekly(db, user_id, week_starts):
+def weekly(db, user_id, week_starts, races=None):
     """Per week (Monday -> numbers): critical speed and D' as of that week, speed work (D' used, tanks), top-speed
     metres, strides and stride speed, and the fast stretches by kind."""
     if not week_starts:
@@ -374,7 +405,7 @@ def weekly(db, user_id, week_starts):
     out = {}
     for w in lead + list(week_starts):
         end = w + timedelta(days=6)
-        model = model_at(runs, end)
+        model = model_at(runs, end, races)
         week_runs = [r for r in runs if w <= r["day"] <= end]
         used = sum(d_prime_used(r["hist"], model["cs"]) for r in week_runs)
         near = sum(near_top_metres(r["hist"], model["vmax"]) for r in week_runs)
@@ -391,15 +422,20 @@ def weekly(db, user_id, week_starts):
                   "tanks": round(used / model["d_prime"], 1) if model["cs"] and model["d_prime"] else None,
                   "near_top": round(near), "strides": len(strides), "stride_mps": stride_mps,
                   "stride_pace": pace(stride_mps), "kinds": kinds, "read": len(week_runs)}
+    unread = {date.fromisoformat(r["day"]) for r in _waiting(db, user_id, 10000)}
     for w in week_starts:
         before = [out[w - timedelta(weeks=n)] for n in range(1, CHRONIC_WEEKS + 1)]
         week = out[w]
+        # The line needs the 4 weeks before (and this one) read; until then it would be wrongly low.
+        week["line_ready"] = not any(w - timedelta(weeks=CHRONIC_WEEKS) <= d <= w + timedelta(days=6) for d in unread)
         work_usual = sum(b["speed_work"] or 0 for b in before) / CHRONIC_WEEKS
         top_usual = sum(b["near_top"] for b in before) / CHRONIC_WEEKS
         week["work_line"] = (round(max(RATIO * work_usual, FLOOR_TANKS * week["d_prime"])) if week["d_prime"] else None)
         week["top_line"] = round(max(RATIO * top_usual, FLOOR_NEAR_TOP))
+        if not week["line_ready"]:
+            week["work_line"] = week["top_line"] = None
         week["work_over"] = bool(week["work_line"] and (week["speed_work"] or 0) > week["work_line"])
-        week["top_over"] = week["near_top"] > week["top_line"]
+        week["top_over"] = bool(week["top_line"] and week["near_top"] > week["top_line"])
     return {w: out[w] for w in week_starts}
 
 

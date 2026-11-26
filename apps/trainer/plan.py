@@ -45,7 +45,28 @@ DEFAULTS = {
     "water_goal": 8,         # glasses a day
     "run_time": "06:30",     # default calendar slot for runs
     "gym_time": "17:30",     # default slot for weights and Pilates
+    # Recent race or time-trial times ("m:ss"): his real maximal efforts, for critical speed (speed.py).
+    "race_mile": "", "race_3k": "", "race_5k": "", "race_10k": "",
 }
+RACES = {"race_mile": 1609, "race_3k": 3000, "race_5k": 5000, "race_10k": 10000}
+
+
+def race_seconds(text):
+    """"5:18" / "17:39" / "1:02:30" -> seconds, or None."""
+    parts = str(text or "").strip().split(":")
+    try:
+        nums = [float(p) for p in parts]
+    except ValueError:
+        return None
+    if not 2 <= len(nums) <= 3 or any(n < 0 for n in nums):
+        return None
+    seconds = sum(n * 60 ** i for i, n in enumerate(reversed(nums)))
+    return seconds if 60 <= seconds <= 4 * 3600 else None
+
+
+def race_bests(settings):
+    """{metres (str): seconds} from his entered race times."""
+    return {str(d): race_seconds(settings.get(key)) for key, d in RACES.items() if race_seconds(settings.get(key))}
 
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS tr_settings (
@@ -211,6 +232,11 @@ class PlanStore:
                 current[key] = value
             elif key.endswith("_time"):
                 current[key] = _clock(value, current[key])
+            elif key in RACES:
+                text = str(value).strip()
+                if text and race_seconds(text) is None:
+                    raise Invalid(f"{key.replace('race_', '').upper()} time is minutes:seconds, like 17:39.")
+                current[key] = text
             else:
                 current[key] = str(value)[:120]
         if current["workout_day"] == current["long_day"]:

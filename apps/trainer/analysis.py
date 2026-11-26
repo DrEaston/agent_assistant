@@ -56,7 +56,7 @@ def _week(day):
     return day - timedelta(days=day.weekday())
 
 
-def overview(db, user_id, miles_target=40.0, weeks=16, today=None):
+def overview(db, user_id, miles_target=40.0, weeks=16, today=None, races=None):
     today = today or date.today()
     this_monday = _week(today)
     first_week = this_monday - timedelta(weeks=weeks - 1)
@@ -103,7 +103,7 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None):
         seconds = METERS_PER_MILE / mps
         return f"{int(seconds // 60)}:{int(round(seconds % 60)):02d}"
 
-    strides = speed.weekly(db, user_id, week_starts)
+    strides = speed.weekly(db, user_id, week_starts, races)
     weekly = []
     for w in week_starts:
         top = max((r["max_speed_mps"] or 0 for r in by_week[w]), default=0)
@@ -160,8 +160,9 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None):
             "top_line": this_week["top_line"], "top_over": this_week["top_over"],
             "over_weeks": [w["label"] for w in weekly if w["work_over"] or w["top_over"]],
             "work_max": max([w["speed_work"] or 0 for w in weekly] + [w["work_line"] or 0 for w in weekly] + [1]),
-            "top_max": max([w["near_top"] for w in weekly] + [w["top_line"] for w in weekly] + [1]),
+            "top_max": max([w["near_top"] for w in weekly] + [w["top_line"] or 0 for w in weekly] + [1]),
             "latest": speed.latest(db, user_id), "waiting": speed.waiting_count(db, user_id),
+            "from_races": bool(races), "line_ready": this_week["line_ready"],
             "weeks": weekly,
         },
     }

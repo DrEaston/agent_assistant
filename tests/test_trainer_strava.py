@@ -396,3 +396,43 @@ class StrideTests(SyncTests):
         self.assertGreater(used[82], used[83])
         self.assertGreater(used[82], 2 * used[85])
         self.assertLess(used[87], 60)
+
+    def test_reps_with_jogs_are_not_a_best_mile(self):
+        """The 400s session's 'best mile' included its 30 s jogs and set critical speed at 6:47. Steady stretches only."""
+        from apps.trainer import speed
+        st = session_of(18, 82, 400 / 82, jog=30)
+        t, v, d = self.parts(st)
+        bests = speed.best_efforts(t, d, v)
+        self.assertIn("400", bests)                      # one rep is a steady 400
+        self.assertGreater(bests["1609"], 480)           # the only steady mile is the warm-up, not reps + jogs (~6:28)
+        self.assertNotIn("5000", bests)
+        steady = stream([(600, 2.8), (318, 1609.344 / 318), (600, 2.8)])
+        self.assertAlmostEqual(speed.best_efforts(*[steady[k]["data"] for k in ("time", "distance", "velocity_smooth")])["1609"], 318, delta=2)
+
+    def test_race_times_set_critical_speed_and_the_line_waits_for_the_weeks_before(self):
+        from apps.trainer import analysis, plan, speed
+        self.assertEqual(plan.race_seconds("17:39"), 1059)
+        self.assertIsNone(plan.race_seconds("fast"))
+        store = plan.PlanStore(self.db)
+        store.save_settings(race_mile="5:18", race_5k="17:39")
+        with self.assertRaises(plan.Invalid):
+            store.save_settings(race_5k="soon")
+        races = plan.race_bests(store.settings())
+        # Only this week's 400s are read (older runs still waiting): critical speed comes from the races, no line yet.
+        from datetime import date, timedelta
+        monday = date.today() - timedelta(days=date.today().weekday())
+        for n, (days_back, st) in enumerate(((0, session_of(18, 82, 400 / 82, jog=30)),
+                                             (10, easy_run_with_strides()), (17, easy_run_with_strides()))):
+            self.fake.activities[900 + n] = activity(900 + n, day=(monday - timedelta(days=days_back)).isoformat())
+            self.fake.streams[900 + n] = st
+            self.sync._store(self.user, self.fake.activities[900 + n])
+        speed.fill(self.sync, self.user, limit=1)
+        o = analysis.overview(self.db, self.user, races=races)["speed"]
+        self.assertEqual(o["cs_pace"], "5:52")
+        self.assertTrue(o["from_races"])
+        self.assertAlmostEqual(o["speed_work"], 450, delta=60)
+        self.assertIsNone(o["work_line"])
+        self.assertFalse(o["work_over"])
+        speed.fill(self.sync, self.user, limit=10)
+        o = analysis.overview(self.db, self.user, races=races)["speed"]
+        self.assertIsNotNone(o["work_line"])           # all read: the line is back
