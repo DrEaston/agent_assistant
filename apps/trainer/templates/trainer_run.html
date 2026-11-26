@@ -9,8 +9,8 @@
     <div class="stat-grid">
       <div class="stat"><span class="small muted">Distance</span><strong>{{ r.miles }} mi</strong><span class="small">{{ r.moving }}{% if r.pace %} · {{ r.pace }}/mi{% endif %}</span></div>
       {% if r.avg_hr %}<div class="stat"><span class="small muted">Heart rate</span><strong>{{ r.avg_hr }}</strong><span class="small">average{% if r.max_hr %} · max {{ r.max_hr }}{% endif %}</span></div>{% endif %}
-      <div class="stat"><span class="small muted">Speed work</span><strong>{{ ("{:,}".format(r.speed_work) ~ " m") if r.speed_work is not none else "–" }}</strong>
-        <span class="small">{% if r.tanks %}{{ r.tanks }} tanks of D′ · {% endif %}{% if r.cs_pace %}critical speed {{ r.cs_pace }}/mi{% endif %}</span></div>
+      <div class="stat"><span class="small muted">Speed points</span><strong>{{ "{:,}".format(r.speed_work) if r.speed_work is not none else "–" }}</strong>
+        <span class="small">{% if r.cs_pace %}threshold pace {{ r.cs_pace }}/mi{% endif %}</span></div>
       {% if r.top_pace %}<div class="stat"><span class="small muted">Top speed</span><strong>{{ r.top_pace }}</strong><span class="small">/mi, best 5 seconds</span></div>{% endif %}
     </div>
     {% if r.groups %}<p><strong>{% for g in r.groups %}{{ g.text }}{{ "; " if not loop.last }}{% endfor %}</strong></p>
@@ -40,7 +40,7 @@
       {% if r.chart.cs_y %}<line class="trace-cs" x1="0" x2="{{ r.chart.w }}" y1="{{ r.chart.cs_y }}" y2="{{ r.chart.cs_y }}"></line>{% endif %}
       <polyline class="trace-line" points="{{ r.chart.points }}"></polyline>
     </svg>
-    <figcaption class="chart-axis small muted"><span>Start</span><span>{% if r.chart.cs_y %}dashed: critical speed · {% endif %}shaded: fast stretches</span><span>{{ r.chart.minutes }} min</span></figcaption>
+    <figcaption class="chart-axis small muted"><span>Start</span><span>{% if r.chart.cs_y %}dashed: threshold pace · {% endif %}shaded: fast stretches</span><span>{{ r.chart.minutes }} min</span></figcaption>
   </figure>
   {% endcall %}
   {% endif %}

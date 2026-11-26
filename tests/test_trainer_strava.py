@@ -464,7 +464,7 @@ class StrideTests(SyncTests):
         o = analysis.overview(self.db, self.user)["speed"]
         self.assertIn(o["cs_pace"], ("5:55", "5:56", "5:57"))
         self.assertEqual(o["d_prime"], 150)
-        self.assertIn("with a typical D", o["cs_how"])
+        self.assertIn("from your 5K on", o["cs_how"])
 
     def real_like_race(self):
         """Like his Oct 25 5K: standing start with a GPS spike, a slow turn, a kick; 4,997 m in 1,076 s."""
@@ -572,3 +572,36 @@ class StrideTests(SyncTests):
             self.assertEqual(r["left"], 0)
             page = client.get("/apps/trainer").text
             self.assertNotIn('id="getting"', page)  # all in: no background reading
+
+
+    def test_easy_run_surges_are_not_strides(self):
+        """Surges just over the fast mark in an easy run (6:55-6:59/mi) aren't strides; real ones (5:00/mi) are."""
+        from apps.trainer import speed
+        surgy = stream([(600, 2.85), (20, 3.88), (300, 2.85), (20, 3.9), (600, 2.85)])
+        self.assertEqual(speed.find_efforts(*self.parts(surgy), easy=2.85)[0], [])
+        real = easy_run_with_strides(fast=5.3)
+        self.assertEqual(len(speed.find_efforts(*self.parts(real), easy=2.85)[0]), 5)
+
+    def test_a_week_page_lists_its_runs_with_speed_points(self):
+        from datetime import date, timedelta
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from apps.trainer import routes
+        monday = date.today() - timedelta(days=date.today().weekday())
+        self.load_weeks({1: [session_of(18, 82, 400 / 82, jog=30), easy_run_with_strides(fast=5.3)]})
+        saved = routes._state.get("db")
+        routes.configure(self.db)
+        self.addCleanup(lambda: routes._state.update(db=saved))
+        app = FastAPI()
+        app.include_router(routes.router)
+        client = TestClient(app)
+        last = (monday - timedelta(weeks=1)).isoformat()
+        page = client.get(f"/apps/trainer/speed/{last}").text
+        self.assertIn("18 × 400", page)
+        self.assertIn("points", page)
+        self.assertIn("Week before", page)
+        overview = client.get("/apps/trainer").text
+        self.assertIn("Speed points this week", overview)
+        self.assertIn(f'href="/apps/trainer/speed/{last}"', overview)
+        self.assertNotIn("tanks", overview)
+        self.assertEqual(client.get("/apps/trainer/speed/not-a-date").status_code, 404)
