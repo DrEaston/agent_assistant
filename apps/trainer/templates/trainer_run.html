@@ -42,6 +42,8 @@
     </svg>
     <figcaption class="chart-axis small muted"><span>Start</span><span>{% if r.chart.cs_y %}dashed: threshold pace · {% endif %}shaded: fast stretches</span><span>{{ r.chart.minutes }} min</span></figcaption>
   </figure>
+  <div class="row section"><a class="button primary" href="/apps/trainer/run/{{ r.id }}/explore">Explore this run</a>
+    <span class="small muted">Map and graph together; slide along to read any moment, and zoom in.</span></div>
   {% endcall %}
   {% endif %}
 

@@ -124,6 +124,18 @@ def run_page(external_id: str):
     return render("trainer_run.html", title=r["title"], r=r, current=BASE, page_url=f"{BASE}/run/{external_id}")
 
 
+@router.get(BASE + "/run/{external_id}/explore")
+def run_explore(external_id: str):
+    """A run on one screen: the route map and the speed graph together; slide along the graph to read any moment."""
+    if not external_id.isdigit():
+        raise HTTPException(status_code=404, detail="No such run.")
+    r = runpage.explore(_state["db"], get_current_user_id(), external_id, races=plan.race_bests(store().settings()))
+    if not r:
+        raise HTTPException(status_code=404, detail="That run isn't in your log.")
+    return render("trainer_run_explore.html", title=r["title"], r=r, current=BASE,
+                  page_url=f"{BASE}/run/{external_id}/explore")
+
+
 @router.get(BASE + "/speed/how")
 def speed_how():
     """How these numbers work: threshold pace, speed points, the safe limit, near-sprint running, in plain words."""
