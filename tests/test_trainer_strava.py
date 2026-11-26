@@ -605,3 +605,69 @@ class StrideTests(SyncTests):
         self.assertIn(f'href="/apps/trainer/speed/{last}"', overview)
         self.assertNotIn("tanks", overview)
         self.assertEqual(client.get("/apps/trainer/speed/not-a-date").status_code, 404)
+        self.assertIn('href="/apps/trainer/speed/how"', overview)
+        self.assertIn('href="/apps/trainer/speed/how"', page)
+
+    def test_how_these_numbers_work(self):
+        from apps.trainer import speed
+        self.load_weeks({1: [easy_run_with_strides(fast=5.3)]})
+        e = speed.explain(self.db, self.user, races={"5000": 17 * 60 + 10})
+        # A 17:10 5K: threshold pace near 5:40/mi; a 400 a little faster scores a few dozen points, a fast one ~140.
+        self.assertTrue(e["cs_pace"])
+        steady, fast = e["examples"]["steady"], e["examples"]["fast"]
+        self.assertEqual(steady["points"], 400 - steady["pacer"])
+        self.assertGreater(fast["points"], 3 * steady["points"])
+        self.assertTrue(2 <= e["examples"]["fast_reps"] <= 6)
+
+    def test_hard_stretches_of_any_length(self):
+        from datetime import date
+        from apps.trainer import speed
+        # A steady 25 minutes at 4.6 m/s inside an easy run: its best 24 minutes is about 4.6 x 1440 m.
+        t, v, d = self.parts(stream([(600, 2.9), (1500, 4.6), (600, 2.9)]))
+        best = speed.best_by_time(t, d)
+        self.assertAlmostEqual(best["1440"], 4.6 * 1440, delta=15)
+        self.assertNotIn("7200", best)                                   # the run is only 45 minutes
+        # 400s with jogs aren't one 20-minute effort; each rep is too short for 2 minutes
+        t, v, d = self.parts(session_of(16, 80, 5.0, jog=60))
+        reps = speed.best_by_time(t, d)
+        self.assertLess(reps.get("1200", 0) / 1200, 4.0)
+        # Holding nearly the same pace longer means a faster threshold pace (Curtis's 3 mi at 5:50 vs 4.5 mi at 5:52)
+        mi = speed.METERS_PER_MILE
+        three = {"m": 3 * mi, "t": 3 * 350, "day": date(2026, 11, 1), "src": "run"}
+        longer = {"m": 4.5 * mi, "t": 4.5 * 352, "day": date(2026, 11, 8), "src": "run"}
+        cs, _, how = speed.estimate([three, longer])
+        self.assertGreater(cs, speed.estimate([three])[0])
+        self.assertEqual(how, "from your 4.5 miles at 5:52/mi on Nov 8")
+        # Over 40 minutes (a half) counts through the race-time formula, a little slower than its own pace
+        half = {"m": 21097.5, "t": 4800, "day": date(2026, 3, 1), "src": "run"}
+        cs, _, how = speed.estimate([half])
+        self.assertTrue(21097.5 / 4800 < cs < 4.7)
+        self.assertIn("13.1 miles", how)
+
+    def test_a_short_course_race_keeps_its_measured_distance(self):
+        from apps.trainer import speed
+        # 4,855 m in 17:10, like his turkey trot: not "5K in 17:39"
+        self.assertEqual(speed.label(4855, 1030, 4855), "hard run")
+        self.assertEqual(speed.label(4997, 1076, 5000), "5K")
+        text = speed.describe({"kind": "hard run", "items": [{"metres": 4840, "seconds": 1025, "avg_mps": 4.72}],
+                               "rest": None})
+        self.assertEqual(text, "3 miles in 17:05 (5:41/mi)")
+
+    def test_the_trainer_tools_for_dieters_chat(self):
+        from datetime import date, timedelta
+        from apps.trainer import connector, routes
+        monday = date.today() - timedelta(days=date.today().weekday())
+        self.load_weeks({1: [session_of(18, 82, 400 / 82, jog=30), easy_run_with_strides(fast=5.3)]})
+        saved = routes._state.get("db")
+        routes.configure(self.db)
+        self.addCleanup(lambda: routes._state.update(db=saved))
+        picture = connector.speed_picture({"weeks": 8})
+        self.assertEqual(len(picture["weeks"]), 8)
+        self.assertTrue(picture["recent_runs"])
+        run_id = picture["recent_runs"][0]["run_id"]
+        one = connector.run({"run_id": run_id})
+        self.assertEqual(one["runs"][0]["run_id"], run_id)
+        self.assertIn("speed_points", one["that_week"])
+        day = one["runs"][0]["date"]
+        self.assertTrue(connector.run({"date": day})["runs"])
+        self.assertEqual(connector.run({"date": (monday + timedelta(days=30)).isoformat()})["runs"], [])

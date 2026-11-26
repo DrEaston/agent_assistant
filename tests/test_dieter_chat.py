@@ -247,10 +247,27 @@ class MainSiteChatTests(unittest.TestCase):
             self.assertFalse(self.api.dieter_chat_handles(msg))
         with mock.patch.object(self.api.claude_agent, "available", return_value=True):
             self.assertFalse(self.api.dieter_chat_handles(self.api.DieterActionMessage(content="hi",
-                                                                                       page_url="/apps/trainer")))
+                                                                                       page_url="/apps/music")))
             self.assertTrue(self.api.dieter_chat_handles(self.api.DieterActionMessage(
                 content="add milk to my list", page_url="/apps/recipes/grocery-lists/3")))
         self.assertEqual(claude.seen, [])
+
+    def test_trainer_questions_go_to_the_chat_and_notes_to_the_reflection(self):
+        claude = script([("trainer_run", {"date": "2026-11-26"})], "17:10 for 3 miles: your fastest pace this fall.")
+        data = self.ask("how did my race go today? legs felt good", "/apps/trainer/run/21133954975", claude)
+        self.assertEqual(data["model"], "claude")
+        self.assertIn("trainer_speed", claude.seen[0]["tools"])
+        self.assertIn("trainer.run (Run: run_id=21133954975)", claude.seen[0]["messages"][-1]["content"])
+        self.assertIn("speed points", claude.seen[0]["system"][0]["text"] if isinstance(claude.seen[0]["system"], list)
+                      else claude.seen[0]["system"])
+        self.assertTrue(self.api.is_trainer_question("What's my threshold pace"))
+        self.assertFalse(self.api.is_trainer_question("legs felt heavy today, rpe 7"))
+        notes = script("unused")
+        with mock.patch.object(self.api, "handle_trainer_reflection_request",
+                               return_value={"assistant_message": "Saved.", "changed_fields": []}) as reflect:
+            self.ask("legs felt heavy today, rpe 7", "/apps/trainer", notes)
+        reflect.assert_called_once()
+        self.assertEqual(notes.seen, [])
 
     def test_thanksgiving_chat_does_not_get_the_review_card_tools(self):
         # Signed calls need the services' shared key; CI has none set, so the test brings its own.

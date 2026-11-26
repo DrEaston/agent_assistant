@@ -10,7 +10,7 @@
       <div class="stat"><span class="small muted">Distance</span><strong>{{ r.miles }} mi</strong><span class="small">{{ r.moving }}{% if r.pace %} · {{ r.pace }}/mi{% endif %}</span></div>
       {% if r.avg_hr %}<div class="stat"><span class="small muted">Heart rate</span><strong>{{ r.avg_hr }}</strong><span class="small">average{% if r.max_hr %} · max {{ r.max_hr }}{% endif %}</span></div>{% endif %}
       <div class="stat"><span class="small muted">Speed points</span><strong>{{ "{:,}".format(r.speed_work) if r.speed_work is not none else "–" }}</strong>
-        <span class="small">{% if r.cs_pace %}threshold pace {{ r.cs_pace }}/mi{% endif %}</span></div>
+        <span class="small">{% if r.cs_pace %}threshold pace {{ r.cs_pace }}/mi · {% endif %}<a href="/apps/trainer/speed/how">how it works</a></span></div>
       {% if r.top_pace %}<div class="stat"><span class="small muted">Top speed</span><strong>{{ r.top_pace }}</strong><span class="small">/mi, best 5 seconds</span></div>{% endif %}
     </div>
     {% if r.groups %}<p><strong>{% for g in r.groups %}{{ g.text }}{{ "; " if not loop.last }}{% endfor %}</strong></p>
