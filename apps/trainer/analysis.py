@@ -162,7 +162,7 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None, races=None):
             "work_max": max([w["speed_work"] or 0 for w in weekly] + [w["work_line"] or 0 for w in weekly] + [1]),
             "top_max": max([w["near_top"] for w in weekly] + [w["top_line"] or 0 for w in weekly] + [1]),
             "latest": speed.latest(db, user_id), "waiting": speed.waiting_count(db, user_id),
-            "from_races": bool(races), "line_ready": this_week["line_ready"],
+            "from_races": bool(races), "line_ready": this_week["line_ready"], "cs_how": this_week["cs_how"],
             "weeks": weekly,
         },
     }

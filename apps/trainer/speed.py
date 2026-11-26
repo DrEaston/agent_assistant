@@ -15,9 +15,12 @@ summary, not the streams:
 
 The measures (all estimates, labelled so on the page):
 
-- critical speed (CS) and D' from the critical speed model (Monod & Scherrer; Jones & Vanhatalo): the linear
-  distance-time fit d = CS x t + D' over his best efforts lasting 2-40 minutes: race and time-trial results he enters
-  on Usual week (his real maximal efforts), and steady efforts from runs in the 26 weeks up to that week when faster.
+- critical speed (CS) and D' from the critical speed model (Monod & Scherrer; Jones & Vanhatalo), worked out by
+  itself from his runs in the 26 weeks up to that week: his best long effort (10-40 min, e.g. a 5K race; a run within
+  1% of a standard distance counts as it, since GPS often measures a 5K as 4,997 m) and, when he has one that's hard
+  enough, a short one (2-7 min). Two efforts: CS and D' from both. Only the long one (the usual case: training rarely
+  has a 3-minute all-out effort): D' is taken as a typical 150 m and CS follows from the long effort. Race times
+  entered on Usual week are used too, as an override.
   CS is the fastest pace he could hold for a long time; D' is the metres he can run "above" it before he's spent;
 - speed work: D' used, sum of (speed - CS) x seconds over everything faster than CS, in metres and in "tanks"
   (multiples of his D'). The plain two-parameter model: it's least certain for near-sprint efforts, and the published
@@ -33,7 +36,7 @@ import json
 import statistics
 from datetime import date, timedelta
 
-VERSION = 3                         # bump when the summary changes: older rows are read again
+VERSION = 4                         # bump when the summary changes: older rows are read again
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS tr_run_speed (
         user_id INTEGER NOT NULL, external_id TEXT NOT NULL, day TEXT NOT NULL, version INTEGER DEFAULT 0,
@@ -194,6 +197,16 @@ def best_efforts(times, dists, speeds=None):
                 best = took
         if best:
             out[str(target)] = round(best, 1)
+    # A race GPS measured a touch short (5K as 4,997 m): the whole run counts as that distance, time scaled up.
+    total = points[-1][1] - points[0][1]
+    for target in BEST_DISTANCES:
+        if str(target) not in out and 0.99 * target <= total <= 1.01 * target:
+            took = (points[-1][0] - points[0][0]) * target / total
+            settled = [v for (t, _), v in zip(points, vs)
+                       if points[0][0] + 15 <= t <= points[-1][0] - 5 and v is not None]
+            if speeds and settled and min(settled) < STEADY * target / took:
+                continue
+            out[str(target)] = round(took, 1)
     return out
 
 
@@ -369,30 +382,54 @@ def _rows(db, user_id, since):
     return out
 
 
+TYPICAL_D_PRIME = 150          # m: a trained distance runner's D' (used when there's no hard short effort)
+LONG, SHORT = (600, 2400), (120, 420)
+DISTANCE_NAMES = {"400": "400 m", "800": "800 m", "1000": "1K", "1609": "mile", "3000": "3K", "5000": "5K",
+                  "10000": "10K"}
+
+
+def _effort_name(e):
+    metres, _, day, source = e
+    what = DISTANCE_NAMES.get(str(int(metres)), f"{int(metres)} m")
+    return f"your {what} race time" if source == "race" else f"your {what} on {day:%b} {day.day}"
+
+
+def estimate(efforts):
+    """(CS, D', how) from {metres: (seconds, day, source)}; source is "race" (entered) or "run".
+
+    Long effort L (10-40 min): the one giving the highest CS with a typical D'. Short effort S (2-7 min): the one
+    furthest above that line (the most evidence of a bigger reserve). L and S together give both CS and D' when the
+    answer is believable (D' 80-400 m); otherwise CS from L with the typical D'. Without a long effort, the full fit
+    over whatever there is, if believable."""
+    longs = [(float(d), t, day, src) for d, (t, day, src) in efforts.items() if LONG[0] <= t <= LONG[1]]
+    shorts = [(float(d), t, day, src) for d, (t, day, src) in efforts.items() if SHORT[0] <= t <= SHORT[1]]
+    if longs:
+        long = max(longs, key=lambda e: (e[0] - TYPICAL_D_PRIME) / e[1])
+        cs = (long[0] - TYPICAL_D_PRIME) / long[1]
+        if shorts:
+            short = max(shorts, key=lambda e: e[0] - cs * e[1])
+            cs2 = (long[0] - short[0]) / (long[1] - short[1])
+            dp2 = short[0] - cs2 * short[1]
+            if 80 <= dp2 <= 400 and 2.5 <= cs2 <= 7.5:
+                return round(cs2, 3), round(dp2), f"from {_effort_name(long)} and {_effort_name(short)}"
+        if 2.5 <= cs <= 7.5:
+            return round(cs, 3), TYPICAL_D_PRIME, f"from {_effort_name(long)}, with a typical D′"
+    cs, dp = fit_critical_speed({d: t for d, (t, _, _) in efforts.items()})
+    return (cs, dp, "from your best efforts") if cs else (None, None, "")
+
+
 def model_at(runs, end, races=None):
-    """CS, D' and top speed from his race times and the FIT_WEEKS of runs up to `end`."""
+    """CS, D' and top speed from the FIT_WEEKS of runs up to `end`, and his race times if he entered any."""
     start = end - timedelta(weeks=FIT_WEEKS)
     window = [r for r in runs if start < r["day"] <= end]
-    races = {d: t for d, t in (races or {}).items() if t}
-    race_cs, race_dp = fit_critical_speed(races)
-    bests = dict(races)
+    efforts = {d: (t, end, "race") for d, t in (races or {}).items() if t}
     for r in window:
         for d, t in r["bests"].items():
-            if not t:
-                continue
-            if race_cs:
-                # With race times, a run's effort only counts if it beats what the races predict (he's got faster);
-                # an easy steady mile is a best effort of that run, not a maximal one.
-                predicted = (float(d) - race_dp) / race_cs
-                if t < predicted and (d not in bests or t < bests[d]):
-                    bests[d] = t
-            elif d not in bests or t < bests[d]:
-                bests[d] = t
-    cs, d_prime = fit_critical_speed(bests)
-    if race_cs and not cs:
-        cs, d_prime = race_cs, race_dp
+            if t and (d not in efforts or t < efforts[d][0]):
+                efforts[d] = (t, r["day"], "run")
+    cs, d_prime, how = estimate(efforts)
     vmax = max((r["best5"] or 0 for r in window), default=0) or None
-    return {"cs": cs, "d_prime": d_prime, "vmax": vmax, "bests": bests}
+    return {"cs": cs, "d_prime": d_prime, "vmax": vmax, "how": how}
 
 
 def weekly(db, user_id, week_starts, races=None):
@@ -418,6 +455,7 @@ def weekly(db, user_id, week_starts, races=None):
             k["metres"] += e["metres"]
         stride_mps = round(statistics.median(strides), 2) if strides else None
         out[w] = {"cs": model["cs"], "cs_pace": pace(model["cs"]), "d_prime": model["d_prime"],
+                  "cs_how": model["how"],
                   "vmax": model["vmax"], "speed_work": round(used) if model["cs"] else None,
                   "tanks": round(used / model["d_prime"], 1) if model["cs"] and model["d_prime"] else None,
                   "near_top": round(near), "strides": len(strides), "stride_mps": stride_mps,

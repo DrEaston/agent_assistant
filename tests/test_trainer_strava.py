@@ -436,3 +436,21 @@ class StrideTests(SyncTests):
         speed.fill(self.sync, self.user, limit=10)
         o = analysis.overview(self.db, self.user, races=races)["speed"]
         self.assertIsNotNone(o["work_line"])           # all read: the line is back
+
+    def test_critical_speed_works_itself_out_from_a_gps_short_5k(self):
+        """Oct 25: a 5K race GPS measured as 4,997 m in 17:52, warm-up and cool-down as separate runs."""
+        from datetime import date, timedelta
+        from apps.trainer import analysis, speed
+        race = stream([(5, 3.0), (1067, 4997.4 / 1067)])
+        t, v, d = self.parts(race)
+        self.assertAlmostEqual(speed.best_efforts(t, d, v)["5000"], 1073, delta=5)
+        monday = date.today() - timedelta(days=date.today().weekday())
+        for n, (days_back, st) in enumerate(((30, race), (2, session_of(18, 82, 400 / 82, jog=30)))):
+            self.fake.activities[950 + n] = activity(950 + n, day=(monday - timedelta(days=days_back)).isoformat())
+            self.fake.streams[950 + n] = st
+            self.sync._store(self.user, self.fake.activities[950 + n])
+        speed.fill(self.sync, self.user, limit=10)
+        o = analysis.overview(self.db, self.user)["speed"]
+        self.assertIn(o["cs_pace"], ("5:55", "5:56", "5:57"))
+        self.assertEqual(o["d_prime"], 150)
+        self.assertIn("with a typical D", o["cs_how"])

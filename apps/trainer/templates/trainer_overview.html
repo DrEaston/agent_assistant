@@ -56,7 +56,7 @@
     {% if sp.waiting %}<p class="small muted">Still reading {{ sp.waiting }} older run{{ "s" if sp.waiting != 1 }} from Strava (a few each visit; Sync now on the Log page does more). The numbers fill in as they're read.</p>{% endif %}
     <div class="stat-grid">
       <div class="stat"><span class="small muted">Critical speed</span><strong>{{ sp.cs_pace or "–" }}</strong>
-        <span class="small">{% if sp.cs_pace %}/mi{% if sp.cs_gain is not none %} · {% if sp.cs_gain > 0 %}{{ sp.cs_gain }} s/mi faster{% elif sp.cs_gain < 0 %}{{ -sp.cs_gain }} s/mi slower{% else %}same{% endif %} than 12 weeks ago{% endif %} · D′ {{ sp.d_prime }} m{% if not sp.from_races %} · <a href="/apps/trainer/usual">add race times</a> to sharpen it{% endif %}{% else %}<a href="/apps/trainer/usual">Add two race times</a> (mile, 5K…) to work it out{% endif %}</span></div>
+        <span class="small">{% if sp.cs_pace %}/mi{% if sp.cs_gain is not none %} · {% if sp.cs_gain > 0 %}{{ sp.cs_gain }} s/mi faster{% elif sp.cs_gain < 0 %}{{ -sp.cs_gain }} s/mi slower{% else %}same{% endif %} than 12 weeks ago{% endif %} · D′ {{ sp.d_prime }} m · {{ sp.cs_how }}{% else %}needs a hard 10–40 minute effort (a 5K race, a time trial) in the last 6 months{% endif %}</span></div>
       <div class="stat"><span class="small muted">Speed work this week</span><strong>{{ "{:,}".format(sp.speed_work) ~ " m" if sp.speed_work is not none else "–" }}</strong>
         <span class="small">{% if sp.work_over %}{{ ui.tag("Over the line", "warn") }} {% endif %}{% if sp.tanks is not none %}{{ sp.tanks }} tanks of D′{% endif %}{% if sp.work_line %} · line {{ "{:,}".format(sp.work_line) }} m{% elif not sp.line_ready %} · line once the 4 weeks before are read{% endif %}</span></div>
       <div class="stat"><span class="small muted">Top-speed running this week</span><strong>{{ "{:,}".format(sp.near_top) }} m</strong>
@@ -86,8 +86,9 @@
     </table></div>
     <p class="small muted">Estimates from each run's second-by-second data on Strava. <strong>Critical speed</strong> is the
       fastest pace you could hold for a long time, and <strong>D′</strong> the distance you can run "above" it before you're
-      spent; both come from your race times (Usual week) and steady efforts of 2–40 minutes in your runs from the last
-      6 months, whichever is faster (the critical speed model).
+      spent. Dieter works them out from your runs in the last 6 months: your best long effort (10–40 minutes, like a 5K
+      race) and, if you've done one hard enough, a short one (2–7 minutes); without a short one, D′ is taken as a typical
+      150 m. Race times on Usual week are used too if you add them (the critical speed model).
       <strong>Speed work</strong> adds up (speed − critical speed) × seconds over everything faster than critical speed: faster
       running counts more, by exactly how much faster, whatever your heart rate did. "Tanks" is that divided by your D′.
       <strong>Top-speed running</strong> is metres at 90% of your top speed or faster: the leg-stress side.
