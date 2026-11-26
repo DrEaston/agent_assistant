@@ -16,7 +16,8 @@ summary, not the streams:
 The measures (all estimates, labelled so on the page):
 
 - critical speed (CS) and D' from the critical speed model (Monod & Scherrer; Jones & Vanhatalo), worked out by
-  itself from his runs in the 26 weeks up to that week: his best long effort (10-40 min, e.g. a 5K race; a run within
+  itself from his runs in the 26 weeks up to that week. Only hard efforts count (at least 1.45 x his usual easy
+  speed): the fastest stretch of an easy run is that run's best, not an all-out effort. His best long effort (10-40 min, e.g. a 5K race; a run within
   1% of a standard distance counts as it, since GPS often measures a 5K as 4,997 m) and, when he has one that's hard
   enough, a short one (2-7 min). Two efforts: CS and D' from both. Only the long one (the usual case: training rarely
   has a 3-minute all-out effort): D' is taken as a typical 150 m and CS follows from the long effort. Race times
@@ -36,7 +37,7 @@ import json
 import statistics
 from datetime import date, timedelta
 
-VERSION = 4                         # bump when the summary changes: older rows are read again
+VERSION = 5                         # bump when the summary changes: older rows are read again
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS tr_run_speed (
         user_id INTEGER NOT NULL, external_id TEXT NOT NULL, day TEXT NOT NULL, version INTEGER DEFAULT 0,
@@ -156,7 +157,23 @@ def find_efforts(times, speeds, dists=None):
     return found, round(usual, 2)
 
 
-STEADY = 0.8  # a best effort's slowest moment must be at least 80% of its average speed (no jog or stop inside)
+STEADY = 0.75  # a best effort's slowest 15 seconds must be at least 75% of its average speed (no jog or stop inside;
+STEADY_SECONDS = 15  # a few slow seconds at a turn or a water stop are fine)
+
+
+def _rolling(times, speeds, seconds=STEADY_SECONDS):
+    """Average speed over the `seconds` before each sample (None where there's no speed)."""
+    out, window, total = [], [], 0.0
+    for t, v in zip(times, speeds):
+        if v is None:
+            out.append(None)
+            continue
+        window.append((t, v))
+        total += v
+        while window and window[0][0] <= t - seconds:
+            total -= window.pop(0)[1]
+        out.append(total / len(window))
+    return out
 
 
 def best_efforts(times, dists, speeds=None):
@@ -165,7 +182,7 @@ def best_efforts(times, dists, speeds=None):
             for t, d, v in zip(times or [], dists or [], speeds or [None] * len(times or []))
             if t is not None and d is not None]
     points = [(t, d) for t, d, _ in rows]
-    vs = [v for _, _, v in rows]
+    vs = _rolling([t for t, _, _ in rows], [v for _, _, v in rows])  # 15-second averages, for the steady check
     out = {}
     if len(points) < 2:
         return out
@@ -173,9 +190,13 @@ def best_efforts(times, dists, speeds=None):
     for target in BEST_DISTANCES:
         if points[-1][1] - points[0][1] < target:
             break
-        best, j, low = None, 0, deque()  # low: indices in [i, j] with rising speeds (sliding minimum)
+        # low: indices in [settled, j] with rising 15 s speeds (a sliding minimum). `settled` is 15 s into the
+        # window, so the average there doesn't reach back to before the effort (a jog, a standing start).
+        best, j, low, settled = None, 0, deque(), 0
         for i in range(len(points)):
-            while low and low[0] < i:
+            while settled < len(points) and points[settled][0] < points[i][0] + STEADY_SECONDS:
+                settled += 1
+            while low and low[0] < settled:
                 low.popleft()
             while j < len(points) and points[j][1] - points[i][1] < target:
                 if vs[j] is not None:
@@ -203,7 +224,7 @@ def best_efforts(times, dists, speeds=None):
         if str(target) not in out and 0.99 * target <= total <= 1.01 * target:
             took = (points[-1][0] - points[0][0]) * target / total
             settled = [v for (t, _), v in zip(points, vs)
-                       if points[0][0] + 15 <= t <= points[-1][0] - 5 and v is not None]
+                       if points[0][0] + 30 <= t <= points[-1][0] - 5 and v is not None]
             if speeds and settled and min(settled) < STEADY * target / took:
                 continue
             out[str(target)] = round(took, 1)
@@ -378,7 +399,7 @@ def _rows(db, user_id, since):
     for r in rows:
         out.append({"day": date.fromisoformat(r["day"]), "efforts": json.loads(r["efforts_json"] or "[]"),
                     "hist": json.loads(r["hist_json"] or "{}"), "bests": json.loads(r["bests_json"] or "{}"),
-                    "best5": r["best5_mps"]})
+                    "best5": r["best5_mps"], "usual": r["usual_mps"]})
     return out
 
 
@@ -392,6 +413,9 @@ def _effort_name(e):
     metres, _, day, source = e
     what = DISTANCE_NAMES.get(str(int(metres)), f"{int(metres)} m")
     return f"your {what} race time" if source == "race" else f"your {what} on {day:%b} {day.day}"
+
+
+HARD = 1.45   # an effort counts toward critical speed only at 1.45 x his usual easy speed or faster
 
 
 def estimate(efforts):
@@ -423,10 +447,16 @@ def model_at(runs, end, races=None):
     start = end - timedelta(weeks=FIT_WEEKS)
     window = [r for r in runs if start < r["day"] <= end]
     efforts = {d: (t, end, "race") for d, t in (races or {}).items() if t}
+    usual = sorted(r["usual"] for r in window if r.get("usual"))
+    # His easy speed: the middle of the slower half of his runs (a race's own "usual" is race pace).
+    easy = statistics.median(usual[:max(1, len(usual) // 2)]) if usual else None
     for r in window:
         for d, t in r["bests"].items():
-            if t and (d not in efforts or t < efforts[d][0]):
-                efforts[d] = (t, r["day"], "run")
+            if not t or (d in efforts and t >= efforts[d][0]):
+                continue
+            if easy and float(d) / t < HARD * easy:
+                continue  # not a hard effort: an easy or steady stretch
+            efforts[d] = (t, r["day"], "run")
     cs, d_prime, how = estimate(efforts)
     vmax = max((r["best5"] or 0 for r in window), default=0) or None
     return {"cs": cs, "d_prime": d_prime, "vmax": vmax, "how": how}

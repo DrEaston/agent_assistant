@@ -454,3 +454,34 @@ class StrideTests(SyncTests):
         self.assertIn(o["cs_pace"], ("5:55", "5:56", "5:57"))
         self.assertEqual(o["d_prime"], 150)
         self.assertIn("with a typical D", o["cs_how"])
+
+    def real_like_race(self):
+        """Like his Oct 25 5K: standing start with a GPS spike, a slow turn, a kick; 4,997 m in 1,076 s."""
+        segments = [(1, 0.0), (1, 0.6), (1, 1.3), (1, 2.1), (1, 3.0), (3, 6.9), (10, 5.5), (660, 4.65), (8, 3.7),
+                    (380, 4.62), (10, 5.6)]
+        st = stream(segments)
+        scale = 4997.4 / (st["distance"]["data"][-1] + st["velocity_smooth"]["data"][-1])
+        st["distance"]["data"] = [round(d * scale, 1) for d in st["distance"]["data"]]
+        st["velocity_smooth"]["data"] = [v * scale for v in st["velocity_smooth"]["data"]]
+        return st
+
+    def test_a_real_race_counts_and_an_easy_long_run_does_not(self):
+        from datetime import date, timedelta
+        from apps.trainer import analysis, speed
+        t, v, d = self.parts(self.real_like_race())
+        self.assertAlmostEqual(speed.best_efforts(t, d, v)["5000"], 1077, delta=6)   # the slow turn doesn't rule it out
+        monday = date.today() - timedelta(days=date.today().weekday())
+        long_run = stream([(5400, 3.38)])                                               # Nov 15: a steady 7:56/mi run
+        for n, (days_back, st) in enumerate(((10, long_run), (12, easy_run_with_strides()), (5, easy_run_with_strides()))):
+            self.fake.activities[980 + n] = activity(980 + n, day=(monday - timedelta(days=days_back)).isoformat())
+            self.fake.streams[980 + n] = st
+            self.sync._store(self.user, self.fake.activities[980 + n])
+        speed.fill(self.sync, self.user, limit=10)
+        o = analysis.overview(self.db, self.user)["speed"]
+        self.assertEqual(o["cs_pace"], "")                       # no hard effort yet: no number, not a wrong one
+        self.fake.activities[990] = activity(990, day=(monday - timedelta(days=31)).isoformat())
+        self.fake.streams[990] = self.real_like_race()
+        self.sync._store(self.user, self.fake.activities[990])
+        speed.fill(self.sync, self.user, limit=10)
+        o = analysis.overview(self.db, self.user)["speed"]
+        self.assertIn(o["cs_pace"], ("5:56", "5:57", "5:58"))
