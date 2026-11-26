@@ -124,6 +124,14 @@ def run_page(external_id: str):
     return render("trainer_run.html", title=r["title"], r=r, current=BASE, page_url=f"{BASE}/run/{external_id}")
 
 
+@router.get(BASE + "/speed/how")
+def speed_how():
+    """How these numbers work: threshold pace, speed points, the safe limit, near-sprint running, in plain words."""
+    e = speed.explain(_state["db"], get_current_user_id(), races=plan.race_bests(store().settings()))
+    return render("trainer_speed_how.html", title="How these numbers work", e=e, current=BASE,
+                  page_url=f"{BASE}/speed/how")
+
+
 @router.get(BASE + "/speed/{monday}")
 def speed_week(monday: str):
     """One week's runs with their speed points, the week's total and its safe limit."""

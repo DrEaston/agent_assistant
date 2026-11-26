@@ -8,7 +8,7 @@
   <div class="card stack">
     <div class="stat-grid">
       <div class="stat"><span class="small muted">Speed points</span><strong>{{ "{:,}".format(w.speed_work) if w.speed_work is not none else "–" }}</strong>
-        <span class="small">{% if w.work_line %}safe limit {{ "{:,}".format(w.work_line) }}{% else %}no safe limit yet{% endif %}</span></div>
+        <span class="small">{% if w.work_line %}safe limit {{ "{:,}".format(w.work_line) }}{% else %}no safe limit yet{% endif %} · <a href="/apps/trainer/speed/how">how it works</a></span></div>
       <div class="stat"><span class="small muted">Near-sprint running</span><strong>{{ "{:,}".format(w.near_top) }} m</strong>
         <span class="small">{% if w.top_line %}safe limit {{ "{:,}".format(w.top_line) }} m{% endif %}</span></div>
       <div class="stat"><span class="small muted">Threshold pace</span><strong>{{ w.cs_pace or "–" }}</strong><span class="small">/mi, that week</span></div>

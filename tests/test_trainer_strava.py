@@ -605,3 +605,16 @@ class StrideTests(SyncTests):
         self.assertIn(f'href="/apps/trainer/speed/{last}"', overview)
         self.assertNotIn("tanks", overview)
         self.assertEqual(client.get("/apps/trainer/speed/not-a-date").status_code, 404)
+        self.assertIn('href="/apps/trainer/speed/how"', overview)
+        self.assertIn('href="/apps/trainer/speed/how"', page)
+
+    def test_how_these_numbers_work(self):
+        from apps.trainer import speed
+        self.load_weeks({1: [easy_run_with_strides(fast=5.3)]})
+        e = speed.explain(self.db, self.user, races={"5000": 17 * 60 + 10})
+        # A 17:10 5K: threshold pace near 5:40/mi; a 400 a little faster scores a few dozen points, a fast one ~140.
+        self.assertTrue(e["cs_pace"])
+        steady, fast = e["examples"]["steady"], e["examples"]["fast"]
+        self.assertEqual(steady["points"], 400 - steady["pacer"])
+        self.assertGreater(fast["points"], 3 * steady["points"])
+        self.assertTrue(2 <= e["examples"]["fast_reps"] <= 6)

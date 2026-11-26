@@ -723,3 +723,26 @@ def week_runs(db, user_id, monday, races=None):
     week["runs"] = sorted([dict(r, title=names.get(r["id"], ("Run", 0))[0], miles=names.get(r["id"], ("Run", 0))[1])
                            for r in week["runs"]], key=lambda r: r["day"])
     return week
+
+
+def explain(db, user_id, races=None, today=None, weeks=16):
+    """The numbers for "How these numbers work": his threshold pace and where it came from, two worked 400 m examples
+    at his threshold pace, and his recent weeks over the safe limit."""
+    today = today or date.today()
+    monday = today - timedelta(days=today.weekday())
+    model = model_at(_rows(db, user_id, today - timedelta(weeks=FIT_WEEKS)), today, races)
+    cs = model["cs"]
+    examples = None
+    if cs:
+        # A 400 a little faster than threshold pace (8%), and a fast one (54% faster): for him, 81 s and 57 s.
+        def rep(factor):
+            seconds = round(400 / (cs * factor))
+            return {"seconds": seconds, "pacer": round(cs * seconds), "points": round(400 - cs * seconds)}
+        steady, fast = rep(1.08), rep(1.54)
+        examples = {"steady": steady, "fast": fast,
+                    "fast_reps": round(18 * steady["points"] / fast["points"]) if fast["points"] > 0 else None}
+    starts = [monday - timedelta(weeks=n) for n in range(weeks - 1, -1, -1)]
+    over = [{"week": w.isoformat(), "label": f"{w:%b} {w.day}", "times": v["times_line"], "how": v["how_over"]}
+            for w, v in weekly(db, user_id, starts, races).items() if v["how_over"]]
+    return {"cs_pace": pace(cs), "cs_how": model["how"], "examples": examples, "over": over[-3:][::-1],
+            "ratio": RATIO, "chronic_weeks": CHRONIC_WEEKS, "well_over": WELL_OVER}
