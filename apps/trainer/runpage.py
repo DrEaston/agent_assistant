@@ -54,22 +54,80 @@ def _projection(series):
     return w, h, {i: (round((x - min_x) * scale + 10, 1), round((y - min_y) * scale + 10, 1)) for i, x, y in xy}
 
 
-def route_map(series, efforts):
-    """{w, h, path, fast, start, finish} for the route, fast stretches drawn over it."""
+HEAT_STEPS = 9          # colours on the speed heatmap: cyan (easy) .. magenta (threshold pace) .. yellow (top speed)
+
+
+def heat_step(v, easy, cs, top):
+    """0..HEAT_STEPS-1 for a speed: easy pace or slower is 0, threshold pace the middle, top speed the last."""
+    last = HEAT_STEPS - 1
+    if not v or not easy or not top or top <= easy:
+        return 0
+    mid = cs if cs and easy < cs < top else (easy + top) / 2
+    if v <= mid:
+        f = max(0.0, (v - easy) / (mid - easy)) / 2
+    else:
+        f = 0.5 + min(1.0, (v - mid) / (top - mid)) / 2
+    return round(f * last)
+
+
+HEAT_TOP = 1.35         # yellow from about mile pace (1.35 x threshold speed): his all-out sprints would squash
+                        # reps and races into one colour
+
+
+def heat_top(cs, vmax):
+    """The heatmap's fast end: about mile pace, or his top speed if that's lower (or there's no threshold pace)."""
+    if cs and vmax:
+        return min(vmax, HEAT_TOP * cs)
+    return vmax or (HEAT_TOP * cs if cs else None)
+
+
+def heat_key(easy, cs, top):
+    """The key under the map: paces at the slow end, threshold pace (if known) and the fast end."""
+    if not easy or not top or top <= easy:
+        return None
+    return {"steps": list(range(HEAT_STEPS)), "easy": speed.pace(easy), "top": speed.pace(top) + "/mi and faster",
+            "threshold": speed.pace(cs) if cs and easy < cs < top else ""}
+
+
+def _heat(series, proj, easy, cs, top):
+    """[{step, points}]: the route in runs of one colour, each route point coloured by the speed since the last."""
+    times, speeds = series.get("t") or [], series.get("v") or []
+    keys = sorted(proj)
+    out, run, current = [], [], None
+    for a, b in zip(keys, keys[1:]):
+        vs = [v for v in speeds[a * speed.LL_STEP:b * speed.LL_STEP + 1] if v is not None]
+        step = heat_step(sum(vs) / len(vs) if vs else 0, easy, cs, top)
+        if step != current and run:
+            out.append({"step": current, "points": " ".join(f"{x},{y}" for x, y in run)})
+            run = [run[-1]]
+        if not run:
+            run = [proj[a]]
+        run.append(proj[b])
+        current = step
+    if len(run) > 1:
+        out.append({"step": current, "points": " ".join(f"{x},{y}" for x, y in run)})
+    return out
+
+
+def route_map(series, efforts, easy=None, cs=None, top=None):
+    """{w, h, path, fast, heat, key, start, finish} for the route: coloured by speed when his easy and top speeds
+    are known (heat, key), otherwise with the fast stretches drawn over it (fast)."""
     projected = _projection(series)
     if not projected:
         return None
     w, h, proj = projected
+    heat = _heat(series, proj, easy, cs, top) if heat_key(easy, cs, top) else []
     times = series.get("t") or []
     path = " ".join(f"{x},{y}" for x, y in proj.values())
     fast = []
-    for e in efforts:
+    for e in ([] if heat else efforts):
         seg = [proj[i] for i in proj
                if i * speed.LL_STEP < len(times) and e["at"] <= times[i * speed.LL_STEP] <= e["at"] + e["seconds"]]
         if len(seg) > 1:
             fast.append(" ".join(f"{x},{y}" for x, y in seg))
     first, last = list(proj.values())[0], list(proj.values())[-1]
-    return {"w": w, "h": h, "path": path, "fast": fast, "start": first, "finish": last}
+    return {"w": w, "h": h, "path": path, "fast": fast, "heat": heat,
+            "key": heat_key(easy, cs, top) if heat else None, "start": first, "finish": last}
 
 
 EXPLORE_POINTS = 2400    # samples sent to the Explore page at most (a 2-hour run: one every 3 seconds)
@@ -166,7 +224,8 @@ def detail(db, user_id, external_id, races=None):
         "bests": [{"name": speed.DISTANCE_NAMES.get(d, d), "time": speed.clock(t), "pace": speed.pace(float(d) / t)}
                   for d, t in sorted(bests.items(), key=lambda x: float(x[0]))],
         "chart": speed_chart(series, efforts, model["cs"]),
-        "map": route_map(series, efforts),
+        "map": route_map(series, efforts, easy=speed.easy_speed(db, user_id, day), cs=model["cs"],
+                         top=heat_top(model["cs"], model["vmax"] or row.get("best5_mps"))),
         "has_series": bool(series),
         "strava_url": f"https://www.strava.com/activities/{external_id}",
     }

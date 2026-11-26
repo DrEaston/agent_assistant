@@ -4,6 +4,17 @@
 
 /* ---------- Tokens ---------- */
 :root {
+  /* speed heatmap on Trainer's route maps: CMYK, cyan (easy) > magenta (threshold) > yellow (top speed) */
+  --heat-0: #00aeef;
+  --heat-1: #3b83d6;
+  --heat-2: #7657be;
+  --heat-3: #b12ca5;
+  --heat-4: #ec008c;
+  --heat-5: #f13d69;
+  --heat-6: #f67946;
+  --heat-7: #fab623;
+  --heat-8: #fff200;
+  --heat-casing: #1f2328;
   /* Neutral page, the same in every app */
   --bg: #f5f6f8;
   --panel: #ffffff;
@@ -289,6 +300,20 @@ textarea.short { min-height: 5rem; }
 .route-map svg { display: block; width: 100%; height: auto; max-height: 60vh; }
 .route-path { fill: none; stroke: var(--line-strong); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .route-fast { fill: none; stroke: var(--accent); stroke-width: 5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.route-casing { fill: none; stroke: var(--heat-casing); stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.route-heat { fill: none; stroke-width: 5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.route-heat.heat-0 { stroke: var(--heat-0); } .heat-swatch.heat-0 { background: var(--heat-0); }
+.route-heat.heat-1 { stroke: var(--heat-1); } .heat-swatch.heat-1 { background: var(--heat-1); }
+.route-heat.heat-2 { stroke: var(--heat-2); } .heat-swatch.heat-2 { background: var(--heat-2); }
+.route-heat.heat-3 { stroke: var(--heat-3); } .heat-swatch.heat-3 { background: var(--heat-3); }
+.route-heat.heat-4 { stroke: var(--heat-4); } .heat-swatch.heat-4 { background: var(--heat-4); }
+.route-heat.heat-5 { stroke: var(--heat-5); } .heat-swatch.heat-5 { background: var(--heat-5); }
+.route-heat.heat-6 { stroke: var(--heat-6); } .heat-swatch.heat-6 { background: var(--heat-6); }
+.route-heat.heat-7 { stroke: var(--heat-7); } .heat-swatch.heat-7 { background: var(--heat-7); }
+.route-heat.heat-8 { stroke: var(--heat-8); } .heat-swatch.heat-8 { background: var(--heat-8); }
+.heat-key { margin-top: var(--s2); }
+.heat-bar { display: flex; height: .55rem; border-radius: var(--r-pill); overflow: hidden; }
+.heat-swatch { flex: 1; }
 .route-start { fill: var(--ok); }
 .route-finish { fill: var(--panel); stroke: var(--ink); stroke-width: 2; }
 .speed-trace svg { display: block; width: 100%; height: 10rem; }

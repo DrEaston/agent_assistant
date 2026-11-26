@@ -11,13 +11,19 @@
   {% if r.map %}
   <figure class="card explore-map" aria-label="Route">
     <svg viewBox="0 0 {{ r.map.w }} {{ r.map.h }}" role="img" aria-label="Route of the run; the dot shows where you were">
-      <polyline class="route-path" points="{{ r.map.path }}"></polyline>
-      {% for f in r.map.fast %}<polyline class="route-fast" points="{{ f }}"></polyline>{% endfor %}
+      {% if r.map.heat %}<polyline class="route-casing" points="{{ r.map.path }}"></polyline>
+      {% for seg in r.map.heat %}<polyline class="route-heat heat-{{ seg.step }}" points="{{ seg.points }}"></polyline>{% endfor %}
+      {% else %}<polyline class="route-path" points="{{ r.map.path }}"></polyline>
+      {% for f in r.map.fast %}<polyline class="route-fast" points="{{ f }}"></polyline>{% endfor %}{% endif %}
       <polyline class="route-window" id="ex-window" points=""></polyline>
       <circle class="route-start" cx="{{ r.map.start[0] }}" cy="{{ r.map.start[1] }}" r="6"><title>Start</title></circle>
       <circle class="route-finish" cx="{{ r.map.finish[0] }}" cy="{{ r.map.finish[1] }}" r="6"><title>Finish</title></circle>
       <circle class="route-dot" id="ex-dot" cx="0" cy="0" r="9" visibility="hidden"></circle>
     </svg>
+    {% if r.map.key %}<figcaption class="heat-key" aria-label="Colour key: speed">
+      <div class="heat-bar">{% for s in r.map.key.steps %}<span class="heat-swatch heat-{{ s }}"></span>{% endfor %}</div>
+      <div class="chart-axis small muted"><span>{{ r.map.key.easy }}</span>{% if r.map.key.threshold %}<span>{{ r.map.key.threshold }} threshold</span>{% endif %}<span>{{ r.map.key.top }}</span></div>
+    </figcaption>{% endif %}
   </figure>
   {% endif %}
 

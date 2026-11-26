@@ -22,12 +22,18 @@
   {% call ui.section("Route") %}
   <figure class="card route-map" aria-label="Route">
     <svg viewBox="0 0 {{ r.map.w }} {{ r.map.h }}" role="img" aria-label="Route of the run, fast stretches highlighted">
-      <polyline class="route-path" points="{{ r.map.path }}"></polyline>
-      {% for f in r.map.fast %}<polyline class="route-fast" points="{{ f }}"></polyline>{% endfor %}
+      {% if r.map.heat %}<polyline class="route-casing" points="{{ r.map.path }}"></polyline>
+      {% for seg in r.map.heat %}<polyline class="route-heat heat-{{ seg.step }}" points="{{ seg.points }}"></polyline>{% endfor %}
+      {% else %}<polyline class="route-path" points="{{ r.map.path }}"></polyline>
+      {% for f in r.map.fast %}<polyline class="route-fast" points="{{ f }}"></polyline>{% endfor %}{% endif %}
       <circle class="route-start" cx="{{ r.map.start[0] }}" cy="{{ r.map.start[1] }}" r="6"><title>Start</title></circle>
       <circle class="route-finish" cx="{{ r.map.finish[0] }}" cy="{{ r.map.finish[1] }}" r="6"><title>Finish</title></circle>
     </svg>
-    <figcaption class="small muted">Fast stretches are highlighted; green dot is the start, the outlined dot the finish.</figcaption>
+    <figcaption class="small muted">{% if r.map.key %}Coloured by pace, from easy (cyan) through threshold pace (magenta) to your top speed (yellow). {% else %}Fast stretches are highlighted. {% endif %}Green dot is the start, the outlined dot the finish.
+    {% if r.map.key %}<div class="heat-key" aria-label="Colour key: speed">
+      <div class="heat-bar">{% for s in r.map.key.steps %}<span class="heat-swatch heat-{{ s }}"></span>{% endfor %}</div>
+      <div class="chart-axis small muted"><span>{{ r.map.key.easy }}</span>{% if r.map.key.threshold %}<span>{{ r.map.key.threshold }} threshold</span>{% endif %}<span>{{ r.map.key.top }}</span></div>
+    </div>{% endif %}</figcaption>
   </figure>
   {% endcall %}
   {% endif %}
