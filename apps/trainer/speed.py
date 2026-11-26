@@ -427,14 +427,24 @@ def _store(db, user_id, external_id, day, packed, easy):
     return conn, row
 
 
-def analyze(sync, user_id, external_id, day):
-    """Fetch one run's streams, keep them and their summary, tick planned strides. Returns the row."""
+AT_ONCE = 5   # runs asked of Strava at the same time (each takes about a second)
+
+
+def _fetch(sync, token, external_id):
     from .strava import API
 
-    data = sync.call(f"{API}/activities/{external_id}/streams?keys=time,velocity_smooth,distance,heartrate,latlng"
-                     "&key_by_type=true", token=sync._token(user_id))
-    conn, row = _store(sync.db, user_id, external_id, day, pack(data if isinstance(data, dict) else {}),
-                       easy_speed(sync.db, user_id))
+    return sync.call(f"{API}/activities/{external_id}/streams?keys=time,velocity_smooth,distance,heartrate,latlng"
+                     "&key_by_type=true", token=token)
+
+
+def analyze(sync, user_id, external_id, day):
+    """Fetch one run's streams, keep them and their summary, tick planned strides. Returns the row."""
+    return _keep(sync.db, user_id, external_id, day, _fetch(sync, sync._token(user_id), external_id),
+                 easy_speed(sync.db, user_id))
+
+
+def _keep(db, user_id, external_id, day, data, easy):
+    conn, row = _store(db, user_id, external_id, day, pack(data if isinstance(data, dict) else {}), easy)
     efforts = json.loads(row["efforts_json"])
     strides = [e for e in efforts if e["kind"] == "stride"]
     if strides:
@@ -444,7 +454,7 @@ def analyze(sync, user_id, external_id, day):
                          (user_id, row["day"]))
         except Exception:  # no plan yet: nothing to tick
             pass
-    sync.db._commit()
+    db._commit()
     return dict(row, efforts=efforts)
 
 
@@ -478,29 +488,51 @@ def refresh(db, user_id):
     return len(rows)
 
 
+class Filled(int):
+    """How many runs were read; .limited is True when Strava said "too many requests" (try again in a while)."""
+    limited = False
+
+
 def fill(sync, user_id, limit=5):
-    """Read a few runs not read yet, newest first. Stops quietly on Strava trouble (tries again next time)."""
+    """Read up to `limit` runs not read yet, newest first, AT_ONCE at a time. Stops quietly on Strava trouble (the
+    rest are tried next time)."""
+    from concurrent.futures import ThreadPoolExecutor
+
     from .strava import StravaError
 
     sync._conn()  # the log's extra columns
     refresh(sync.db, user_id)
-    done = 0
-    for row in _waiting(sync.db, user_id, limit):
+    rows = _waiting(sync.db, user_id, limit)
+    if not rows:
+        return Filled(0)
+    token = sync._token(user_id)  # once, before the parallel requests
+
+    def get(row):
         try:
-            analyze(sync, user_id, row["external_id"], row["day"])
+            return row, _fetch(sync, token, row["external_id"]), None
         except StravaError as exc:
-            if "429" in str(exc):
-                break
-            if "404" in str(exc):
-                # No streams to read (no GPS, or gone from Strava): mark it read with nothing in it, so it isn't
-                # asked for again on every visit and the weeks around it can get their line.
-                _save_empty(sync.db, user_id, row["external_id"], row["day"])
-                done += 1
-                continue
+            return row, None, exc
+
+    with ThreadPoolExecutor(max_workers=AT_ONCE) as pool:
+        results = list(pool.map(get, rows))
+    easy = easy_speed(sync.db, user_id)
+    done, limited = 0, False
+    for row, data, exc in results:  # saved one at a time, here (the database isn't shared across threads)
+        if exc is None:
+            _keep(sync.db, user_id, row["external_id"], row["day"], data, easy)
+            done += 1
+        elif "429" in str(exc):
+            limited = True
+        elif "404" in str(exc):
+            # No streams to read (no GPS, or gone from Strava): mark it read with nothing in it, so it isn't asked
+            # for again on every visit and the weeks around it can get their line.
+            _save_empty(sync.db, user_id, row["external_id"], row["day"])
+            done += 1
+        else:
             print(f"Warning: couldn't read speed for run {row['external_id']}: {exc}")
-            continue
-        done += 1
-    return done
+    out = Filled(done)
+    out.limited = limited
+    return out
 
 
 def _save_empty(db, user_id, external_id, day):

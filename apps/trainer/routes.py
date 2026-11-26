@@ -56,8 +56,6 @@ def catch_up(limit=5):
         s = sync()
         if s.status()["pending"]:
             s.process(limit)
-        if get_current_user_id():
-            speed.fill(s, get_current_user_id(), limit=5)  # older runs' strides, a few per visit
     except Exception as exc:
         print(f"Warning: Strava catch-up failed: {exc!r}")
 
@@ -103,8 +101,14 @@ def overview(request: Request, week: str = ""):
     view = s.week_view(date.today())
     numbers = analysis.overview(_state["db"], get_current_user_id(), miles_target=view["totals"]["miles_target"],
                                 races=plan.race_bests(s.settings()))
+    user = get_current_user_id()
+    profile = _state["db"].get_trainer_profile(user)
+    connected = bool(profile and dict(profile).get("strava_refresh_token"))
+    history_done = sync().history_state(user)[0] if connected else True
+    getting = {"on": connected and (not history_done or numbers["speed"]["waiting"] > 0),
+               "history_done": history_done, "left": numbers["speed"]["waiting"]}
     return render("trainer_overview.html", title="Trainer", current=BASE, page_url=BASE, view=view,
-                  guidance=analysis.week_guidance(view), o=numbers,
+                  guidance=analysis.week_guidance(view), o=numbers, getting=getting,
                   today=[s for d in view["days"] if d["is_today"] for s in d["sessions"]])
 
 
@@ -329,6 +333,26 @@ def import_history():
     return back(BASE + f"/log?history={stored}")
 
 
+@router.post(BASE + "/sync/step")
+def sync_step():
+    """One small step of getting someone's Strava history in, called over and over by the Overview while it's open
+    (so a page never waits on the whole thing): first the list of activities, then each run's details. Answers
+    {stage, done, left, wait}: wait > 0 means Strava's request limit was hit; try again after that many seconds."""
+    user = get_current_user_id()
+    s = sync()
+    try:
+        if not s.history_state(user)[0]:
+            stored = s.import_history(user, pages=1)
+            return JSONResponse({"stage": "history", "done": stored, "left": None, "wait": 0,
+                                 "imported": s.history_state(user)[1]})
+        read = speed.fill(s, user, limit=10)
+        return JSONResponse({"stage": "runs", "done": int(read), "left": speed.waiting_count(_state["db"], user),
+                             "wait": 90 if read.limited else 0})
+    except strava.StravaError as exc:
+        return JSONResponse({"stage": "error", "done": 0, "left": None, "wait": 90 if "429" in str(exc) else 0,
+                             "problem": str(exc)[:200]})
+
+
 @router.post(BASE + "/sync/now")
 def sync_now():
     user = get_current_user_id()
@@ -353,7 +377,7 @@ def log_page(request: Request, kind: str = "", year: str = "", live: int = 0, hi
     profile = _state["db"].get_trainer_profile(user)
     connected = bool(profile and dict(profile).get("strava_refresh_token"))
     return render("trainer_log.html", title="Training log", current=BASE + "/log", page_url=BASE + "/log",
-                  totals=totals, status=sync().status(), connected=connected,
+                  totals=totals, status=sync().status(get_current_user_id()), connected=connected,
                   is_admin=_is_admin(request), live=live, history=history, problem=problem,
                   today=date.today().isoformat())
 

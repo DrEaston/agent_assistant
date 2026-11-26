@@ -2,6 +2,7 @@
 
 import tempfile
 import unittest
+import unittest.mock
 import uuid
 import warnings
 from pathlib import Path
@@ -143,7 +144,11 @@ class SyncTests(unittest.TestCase):
                          activity(14, day="2026-11-20", name="Already here", with_detail=True))
         stored = self.sync.import_history(self.user, pages=5, per_page=2)
         self.assertEqual(stored, 4)  # the one already in the log isn't replaced by a summary
-        self.assertTrue(self.sync.status()["history_done"])
+        self.assertTrue(self.sync.status(self.user)["history_done"])
+        self.assertEqual(self.sync.status(self.user)["history_count"], 4)
+        # Someone else connecting later starts their own import (it used to be one flag for the whole site).
+        other = self.db.create_user("friend@example.com", "Friend", "x", "member")
+        self.assertEqual(self.sync.history_state(other), (False, 0))
         self.assertEqual(sum(1 for e in self.entries() if not e["has_detail"]), 4)
         self.assertEqual(self.sync.fill_details(self.user, limit=3), 3)
         self.assertEqual(sum(1 for e in self.entries() if not e["has_detail"]), 1)
@@ -539,3 +544,31 @@ class StrideTests(SyncTests):
         self.db.connect().execute("UPDATE tr_run_speed SET version = 0")
         self.assertEqual(speed.refresh(self.db, self.user), 1)
         self.assertEqual(len(self.fake.calls), calls)
+
+
+    def test_getting_someone_started_one_step_at_a_time(self):
+        """A new person: the Overview's background steps import the list first, then read each run's details."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from apps.trainer import routes
+        for n, day in enumerate(("2026-11-10", "2026-11-12", "2026-11-14"), start=1200):
+            self.fake.activities[n] = activity(n, day=day)
+            self.fake.streams[n] = easy_run_with_strides()
+        saved = routes._state.get("db")
+        routes.configure(self.db)
+        self.addCleanup(lambda: routes._state.update(db=saved))
+        with unittest.mock.patch.object(routes, "sync", lambda: self.sync):
+            app = FastAPI()
+            app.include_router(routes.router)
+            client = TestClient(app)
+            stages = []
+            for _ in range(10):
+                r = client.post("/apps/trainer/sync/step").json()
+                stages.append(r["stage"])
+                if r["stage"] == "runs" and r["left"] == 0:
+                    break
+            self.assertEqual(stages[0], "history")
+            self.assertEqual(stages[-1], "runs")
+            self.assertEqual(r["left"], 0)
+            page = client.get("/apps/trainer").text
+            self.assertNotIn('id="getting"', page)  # all in: no background reading

@@ -18,7 +18,7 @@ def _user():
 
 def sync_status(args):
     user = _user()
-    status = routes.sync().status()
+    status = routes.sync().status(get_current_user_id())
     profile = routes._state["db"].get_trainer_profile(user)
     profile = dict(profile) if profile else {}
     conn = routes._state["db"].connect()

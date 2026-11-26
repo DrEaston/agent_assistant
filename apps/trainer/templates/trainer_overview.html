@@ -53,7 +53,10 @@
   {% set sp = o.speed %}
   {% call ui.section("Speed") %}
   <div class="card stack">
-    {% if sp.waiting %}<p class="small muted">Still reading {{ sp.waiting }} older run{{ "s" if sp.waiting != 1 }} from Strava (a few each visit; Sync now on the Log page does more). The numbers fill in as they're read.</p>{% endif %}
+    {% if getting.on %}
+    <p class="small muted" id="getting" data-left="{{ getting.left }}" data-history="{{ 1 if getting.history_done else 0 }}" aria-live="polite">
+      {% if not getting.history_done %}Bringing in your Strava history…{% else %}Reading your runs from Strava: {{ getting.left }} left. Keep this page open; the numbers fill in as they're read.{% endif %}</p>
+    {% endif %}
     <div class="stat-grid">
       <div class="stat"><span class="small muted">Critical speed</span><strong>{{ sp.cs_pace or "–" }}</strong>
         <span class="small">{% if sp.cs_pace %}/mi{% if sp.cs_gain is not none %} · {% if sp.cs_gain > 0 %}{{ sp.cs_gain }} s/mi faster{% elif sp.cs_gain < 0 %}{{ -sp.cs_gain }} s/mi slower{% else %}same{% endif %} than 12 weeks ago{% endif %} · D′ {{ sp.d_prime }} m · {{ sp.cs_how }}{% else %}{% if sp.waiting %}still looking through your runs for a hard 10–40 minute effort (a 5K race, a time trial){% else %}needs a hard 10–40 minute effort (a 5K race, a time trial) in the last 6 months{% endif %}{% endif %}</span></div>
@@ -114,4 +117,46 @@
   {% endcall %}
 
 </main>
+{% if getting.on %}
+<script>
+// Getting someone's Strava history in, a small step at a time while this page is open: first the list of their
+// activities, then each run's details. Strava allows about 100 requests every 15 minutes, so when it says "too
+// many", wait and carry on. When everything is in, reload once so the numbers show.
+(function () {
+  const note = document.getElementById("getting");
+  let readSoFar = 0, stopped = false;
+  const say = (text) => { note.textContent = text; };
+  async function step() {
+    if (stopped || document.hidden) { setTimeout(step, 5000); return; }
+    let r;
+    try {
+      const res = await fetch("/apps/trainer/sync/step", { method: "POST", credentials: "same-origin" });
+      r = await res.json();
+    } catch (e) { say("Lost the connection; trying again in a minute."); setTimeout(step, 60000); return; }
+    if (r.stage === "history") {
+      say(`Bringing in your Strava history: ${r.imported} activities so far…`);
+      return setTimeout(step, 500);
+    }
+    if (r.wait) {
+      say(`Strava's limit for now${r.left != null ? ` (${r.left} runs left)` : ""}: carrying on in a minute or two. Keep this page open.`);
+      return setTimeout(step, r.wait * 1000);
+    }
+    if (r.stage === "error") { say("Strava had a problem: " + (r.problem || "unknown") + ". Trying again in a minute."); return setTimeout(step, 60000); }
+    readSoFar += r.done;
+    if (r.left > 0 && r.done === 0) {  // nothing read and no limit: something's stuck; go slowly
+      say(`Reading your runs from Strava: ${r.left} left. Some runs aren't coming through; trying again in a minute.`);
+      return setTimeout(step, 60000);
+    }
+    if (r.left > 0) {
+      say(`Reading your runs from Strava: ${r.left} left (${readSoFar} done). Keep this page open; it reloads when finished.`);
+      return setTimeout(step, 300);
+    }
+    stopped = true;
+    say("All your runs are in. Updating the page…");
+    setTimeout(() => location.reload(), 800);
+  }
+  setTimeout(step, 800);
+})();
+</script>
+{% endif %}
 {% endblock %}
