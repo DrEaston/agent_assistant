@@ -2,6 +2,7 @@
 
 import tempfile
 import unittest
+import unittest.mock
 import uuid
 import warnings
 from pathlib import Path
@@ -28,6 +29,7 @@ class FakeStrava:
 
     def __init__(self):
         self.calls, self.activities, self.subscriptions, self.fail, self.streams = [], {}, [], None, {}
+        self.no_streams = set()
 
     def __call__(self, url, method="GET", data=None, token=""):
         self.calls.append((method, url.split("?")[0], token))
@@ -50,7 +52,10 @@ class FakeStrava:
                      if datetime.fromisoformat(a["start_date"].replace("Z", "+00:00")).timestamp() > after]
             return sorted(items, key=lambda a: a["start_date"])[:2]  # small pages, so paging is exercised
         if "/streams" in url:
-            return self.streams.get(int(url.split("/activities/")[1].split("/")[0]), {})
+            activity_id = int(url.split("/activities/")[1].split("/")[0])
+            if activity_id in self.no_streams:
+                raise strava.StravaError("Strava said 404: Resource Not Found")
+            return self.streams.get(activity_id, {})
         if "/activities/" in url:
             found = self.activities.get(int(url.rsplit("/", 1)[1].split("?")[0]))
             if not found:
@@ -139,7 +144,11 @@ class SyncTests(unittest.TestCase):
                          activity(14, day="2026-11-20", name="Already here", with_detail=True))
         stored = self.sync.import_history(self.user, pages=5, per_page=2)
         self.assertEqual(stored, 4)  # the one already in the log isn't replaced by a summary
-        self.assertTrue(self.sync.status()["history_done"])
+        self.assertTrue(self.sync.status(self.user)["history_done"])
+        self.assertEqual(self.sync.status(self.user)["history_count"], 4)
+        # Someone else connecting later starts their own import (it used to be one flag for the whole site).
+        other = self.db.create_user("friend@example.com", "Friend", "x", "member")
+        self.assertEqual(self.sync.history_state(other), (False, 0))
         self.assertEqual(sum(1 for e in self.entries() if not e["has_detail"]), 4)
         self.assertEqual(self.sync.fill_details(self.user, limit=3), 3)
         self.assertEqual(sum(1 for e in self.entries() if not e["has_detail"]), 1)
@@ -263,14 +272,16 @@ class StrideTests(SyncTests):
         self.assertEqual([e["kind"] for e in two], ["200"] * 8)
         four = speed.find_efforts(*self.parts(session_of(8, 79, 400 / 79)))[0]
         self.assertEqual([e["kind"] for e in four], ["400"] * 8)
-        self.assertEqual(speed.summary(four), "8 × 400 (avg 1:19)")
+        self.assertEqual(speed.summary(four), "8 × 400 avg 1:19, 90 s rest")
         plain = easy_run_with_strides(strides=0)
         self.assertEqual(speed.find_efforts(*self.parts(plain))[0], [])
         t, v, d = self.parts(plain)
         spiky = list(v); spiky[500] = 9.0
         self.assertEqual(speed.find_efforts(t, spiky, d)[0], [])
-        tempo = stream([(600, 2.8), (1200, 4.3), (600, 2.8)])
-        self.assertEqual(speed.find_efforts(*self.parts(tempo))[0], [])
+        tempo = stream([(600, 2.8), (1200, 4.3), (600, 2.8)])          # a 20-minute tempo inside a longer run
+        self.assertEqual([e["kind"] for e in speed.find_efforts(*self.parts(tempo), easy=2.85)[0]], ["tempo"])
+        steady = stream([(5400, 3.38)])                                  # a steady long run isn't fast running
+        self.assertEqual(speed.find_efforts(*self.parts(steady), easy=2.85)[0], [])
 
     def test_the_two_sessions_by_the_critical_speed_model(self):
         """8 × 200 in 28 against 8 × 400 in 79, for a runner with a 5:18 mile and a 17:39 5K."""
@@ -374,7 +385,7 @@ class StrideTests(SyncTests):
         last = o["weeks"][-2]
         self.assertTrue(last["work_over"], last)
         self.assertGreater(last["speed_work"], last["work_line"])
-        self.assertIn(last["label"], o["over_weeks"])
+        self.assertIn(last["label"], [w["label"] for w in o["over_weeks"]])
         self.assertFalse(any(w["work_over"] for w in o["weeks"][-6:-2]))  # the strides weeks stay under
 
     def test_building_up_to_it_stays_under(self):
@@ -485,3 +496,79 @@ class StrideTests(SyncTests):
         speed.fill(self.sync, self.user, limit=10)
         o = analysis.overview(self.db, self.user)["speed"]
         self.assertIn(o["cs_pace"], ("5:56", "5:57", "5:58"))
+
+
+    def test_a_run_with_no_streams_is_marked_read_not_retried(self):
+        """The 0.5 mi trail run on Nov 16 had no GPS: Strava says 404 for its streams. It mustn't hold up the line."""
+        from apps.trainer import speed
+        self.fake.activities[1001] = activity(1001, day="2026-11-16")
+        self.fake.no_streams.add(1001)
+        self.sync._store(self.user, self.fake.activities[1001])
+        self.assertEqual(speed.waiting_count(self.db, self.user), 1)
+        speed.fill(self.sync, self.user, limit=5)
+        self.assertEqual(speed.waiting_count(self.db, self.user), 0)
+        calls = len(self.fake.calls)
+        speed.fill(self.sync, self.user, limit=5)
+        self.assertEqual(len(self.fake.calls), calls)      # not asked for again
+
+    def test_the_run_page_and_how_workouts_are_described(self):
+        """18 × 400 is named with its rest; its page has the route, the speed chart and the reps."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from apps.trainer import routes, runpage, speed
+        st = session_of(18, 82, 400 / 82, jog=30)
+        st["heartrate"] = {"data": [150] * len(st["time"]["data"])}
+        st["latlng"] = {"data": [[33.3 + i * 1e-5, -111.8 + (i % 400) * 1e-5] for i in range(len(st["time"]["data"]))]}
+        self.fake.activities[1100] = activity(1100, day="2026-11-18", name="Threshold")
+        self.fake.streams[1100] = st
+        self.sync._store(self.user, self.fake.activities[1100])
+        speed.fill(self.sync, self.user, limit=5)
+        self.assertEqual(speed.recent(self.db, self.user)[0]["summary"], "18 × 400 avg 1:22, 30 s rest")
+        r = runpage.detail(self.db, self.user, "1100")
+        self.assertEqual(len(r["efforts"]), 18)
+        self.assertEqual(r["efforts"][0]["rest_text"], "30 s")
+        self.assertTrue(r["map"]["fast"] and r["chart"]["marks"])
+        self.assertEqual(r["max_hr"], 150)
+        saved = routes._state.get("db")
+        routes.configure(self.db)
+        self.addCleanup(lambda: routes._state.update(db=saved))
+        app = FastAPI()
+        app.include_router(routes.router)
+        page = TestClient(app).get("/apps/trainer/run/1100")
+        self.assertEqual(page.status_code, 200, page.text[:300])
+        self.assertIn("18 × 400 avg 1:22, 30 s rest", page.text)
+        self.assertIn("route-fast", page.text)
+        self.assertEqual(TestClient(app).get("/apps/trainer/run/999999").status_code, 404)
+        # kept streams: a summary change is worked out again without asking Strava
+        calls = len(self.fake.calls)
+        self.db.connect().execute("UPDATE tr_run_speed SET version = 0")
+        self.assertEqual(speed.refresh(self.db, self.user), 1)
+        self.assertEqual(len(self.fake.calls), calls)
+
+
+    def test_getting_someone_started_one_step_at_a_time(self):
+        """A new person: the Overview's background steps import the list first, then read each run's details."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from apps.trainer import routes
+        for n, day in enumerate(("2026-11-10", "2026-11-12", "2026-11-14"), start=1200):
+            self.fake.activities[n] = activity(n, day=day)
+            self.fake.streams[n] = easy_run_with_strides()
+        saved = routes._state.get("db")
+        routes.configure(self.db)
+        self.addCleanup(lambda: routes._state.update(db=saved))
+        with unittest.mock.patch.object(routes, "sync", lambda: self.sync):
+            app = FastAPI()
+            app.include_router(routes.router)
+            client = TestClient(app)
+            stages = []
+            for _ in range(10):
+                r = client.post("/apps/trainer/sync/step").json()
+                stages.append(r["stage"])
+                if r["stage"] == "runs" and r["left"] == 0:
+                    break
+            self.assertEqual(stages[0], "history")
+            self.assertEqual(stages[-1], "runs")
+            self.assertEqual(r["left"], 0)
+            page = client.get("/apps/trainer").text
+            self.assertNotIn('id="getting"', page)  # all in: no background reading

@@ -158,7 +158,9 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None, races=None):
             "near_top": this_week["near_top"], "near_top_usual": round(near_usual) if near_usual is not None else None,
             "work_line": this_week["work_line"], "work_over": this_week["work_over"],
             "top_line": this_week["top_line"], "top_over": this_week["top_over"],
-            "over_weeks": [w["label"] for w in weekly if w["work_over"] or w["top_over"]],
+            "over_weeks": [{"label": w["label"], "times": w["times_line"], "how": w["how_over"], "cause": w["cause"]}
+                           for w in weekly if w["work_over"] or w["top_over"]],
+            "recent": speed.recent(db, user_id, limit=8),
             "work_max": max([w["speed_work"] or 0 for w in weekly] + [w["work_line"] or 0 for w in weekly] + [1]),
             "top_max": max([w["near_top"] for w in weekly] + [w["top_line"] or 0 for w in weekly] + [1]),
             "latest": speed.latest(db, user_id), "waiting": speed.waiting_count(db, user_id),

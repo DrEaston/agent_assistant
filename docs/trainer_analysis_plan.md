@@ -48,11 +48,16 @@ Derived numbers are labelled as estimates wherever they are (load score, 5K esti
   top-speed running (metres at >= 90% of best 5 s), stride speed. Why not heart rate or rTSS: HR lags short reps,
   and rTSS's squared weighting isn't derived; the critical speed model is the established basis for "faster counts
   more". The plain two-parameter model is used with no sprint correction (published corrections disagree). Planned
-  strides are ticked when found. Runs from the last 52 weeks are read a few per Trainer visit and 25 per Sync now.
+  strides are ticked when found. Runs from the last 52 weeks are read a few per Trainer visit and 40 per Sync now; a run Strava has no streams for (404) is marked read, empty.
   **Critical speed, by itself** (2026-11-25: the first version read 6:47 from reps-plus-jogs): best efforts must be
   steady; a run within 1% of a standard distance counts as it (GPS 5K = 4,997 m); CS from the best 10-40 min effort
   with a typical D' of 150 m, or from that plus a hard 2-7 min effort when the pair gives D' 80-400 m. Race times on
   Usual week are an optional override.
+  **Getting someone started** (2026-11-26): after connecting Strava, the Overview does it while open, one small
+  step at a time (POST /apps/trainer/sync/step): the activity list (import_history, one page per step) and then each
+  run's streams (10 per step, 5 at once), pausing ~90 s when Strava says "too many requests" (about 100 per 15 min).
+  It reloads once when everything is in. History-import state is per person (it was one flag for the whole site).
+  New runs are read as they arrive (webhook), so this is a one-time catch-up.
   **The line** (Curtis, after 18 x 400 in 81-83 s with 30 s rest hurt): each week's speed work and top-speed running
   against 1.5 x the average of the 4 weeks before (acute:chronic workload ratio; debated, shown as a guide), floors
   2 x D' and 500 m. A sudden block goes over; building up over a few weeks keeps under.

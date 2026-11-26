@@ -177,13 +177,22 @@ class Sync:
             self.put("verify_token", token)
         return token
 
-    def status(self):
+    def history_state(self, user_id):
+        """(done, count) of this person's whole-history import. (These were once kept for the whole site; for
+        someone who had started importing then, the old shared values still count.)"""
+        done, count = self.get(f"history_done_{user_id}"), self.get(f"history_count_{user_id}")
+        if not done and not count and self.get(f"history_after_{user_id}"):
+            done, count = self.get("history_done"), self.get("history_count")
+        return done == "1", int(count or 0)
+
+    def status(self, user_id=None):
         conn = self._conn()
         pending = conn.execute("SELECT COUNT(*) FROM tr_strava_events WHERE status = 'pending'").fetchone()[0]
         last = conn.execute("SELECT received_at FROM tr_strava_events ORDER BY id DESC LIMIT 1").fetchone()
+        done, count = self.history_state(user_id) if user_id else (False, 0)
         return {"live": bool(self.get("subscription_id")), "subscription_id": self.get("subscription_id"),
                 "pending": pending, "last_event": last["received_at"] if last else "",
-                "history_done": self.get("history_done") == "1", "history_count": int(self.get("history_count", "0") or 0)}
+                "history_done": done, "history_count": count}
 
     # ------------------------------------------------------------ the push subscription
 
@@ -317,12 +326,13 @@ class Sync:
         """Walk his history from oldest to newest, `pages` pages a call (summaries; details later). Resumable."""
         token = self._token(user_id)
         after = int(self.get(f"history_after_{user_id}", "0") or 0)
+        _, count = self.history_state(user_id)
         stored = 0
         for _ in range(pages):
             batch = self.call(f"{API}/athlete/activities?" + urlencode({"after": after, "per_page": per_page,
                                                                        "page": 1}), token=token)
             if not isinstance(batch, list) or not batch:
-                self.put("history_done", "1")
+                self.put(f"history_done_{user_id}", "1")
                 break
             batch.sort(key=lambda a: a.get("start_date") or "")
             for activity in batch:
@@ -340,9 +350,12 @@ class Sync:
                 break
             self.put(f"history_after_{user_id}", after)
             if len(batch) < per_page:
-                self.put("history_done", "1")
+                self.put(f"history_done_{user_id}", "1")
                 break
-        self.put("history_count", int(self.get("history_count", "0") or 0) + stored)
+        self.put(f"history_count_{user_id}", count + stored)
+        if self.get(f"history_done_{user_id}") != "1" and self.get("history_done") == "1" and not stored \
+                and count and self.get(f"history_after_{user_id}"):
+            self.put(f"history_done_{user_id}", "1")  # finished under the old shared flag
         return stored
 
     def fill_details(self, user_id, limit=DETAILS_PER_RUN):
