@@ -124,6 +124,20 @@ def run_page(external_id: str):
     return render("trainer_run.html", title=r["title"], r=r, current=BASE, page_url=f"{BASE}/run/{external_id}")
 
 
+@router.get(BASE + "/speed/{monday}")
+def speed_week(monday: str):
+    """One week's runs with their speed points, the week's total and its safe limit."""
+    try:
+        start = plan.week_start(date.fromisoformat(monday))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="No such week.") from None
+    week = speed.week_runs(_state["db"], get_current_user_id(), start, races=plan.race_bests(store().settings()))
+    label = f"Week of {start:%b} {start.day}"
+    return render("trainer_speed_week.html", title=label, label=label, w=week, start=start,
+                  prev=(start - timedelta(weeks=1)).isoformat(), next=(start + timedelta(weeks=1)).isoformat(),
+                  current=BASE, page_url=f"{BASE}/speed/{start.isoformat()}")
+
+
 @router.get(BASE + "/week")
 def this_week(request: Request, week: str = ""):
     catch_up()

@@ -42,7 +42,7 @@ import statistics
 import zlib
 from datetime import date, timedelta
 
-VERSION = 6                         # bump when the summary changes: older rows are read again
+VERSION = 7                         # bump when the summary changes: older rows are read again
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS tr_run_speed (
         user_id INTEGER NOT NULL, external_id TEXT NOT NULL, day TEXT NOT NULL, version INTEGER DEFAULT 0,
@@ -54,6 +54,8 @@ MIN_SECONDS, MAX_SECONDS = 6, 2400  # a stride is ~15-30 s; up to 40 minutes (a 
 MERGE_GAP = 3                       # a moment below the line inside one burst (GPS wobble) doesn't split it;
 MERGE_SHARE = 0.05                  # in a long effort, a dip up to 5% of its length so far (a turn) doesn't either
 FAST_RATIO, FAST_PLUS = 1.35, 1.0   # fast running: above max(1.35 x easy speed, easy + 1 m/s)
+STRIDE_TOP = 1.6                    # a short burst is a stride only if its best 5 s reach 1.6 x easy speed (about
+                                    # threshold pace): an easy run's 6:58/mi surge isn't a stride
 WINDOW = 5                          # top speed = best 5 seconds
 STRIDE_METRES = 150
 STANDARD = (200, 300, 400, 600, 800, 1000, 1200, 1609)
@@ -171,6 +173,8 @@ def find_efforts(times, speeds, dists=None, easy=None):
         else:
             metres = sum(v for _, v in b["points"]) * seconds / len(b["points"])
         top = _best_window(b["points"]) or max(v for _, v in b["points"])
+        if metres < STRIDE_METRES and top < STRIDE_TOP * base:
+            continue  # a surge in an easy run, not a stride
         found.append({"at": int(b["start"]), "seconds": int(seconds), "metres": round(metres),
                       "avg_mps": round(metres / seconds, 2), "top_mps": round(top, 2),
                       "kind": label(metres, seconds, run_metres)})
@@ -483,7 +487,10 @@ def refresh(db, user_id):
     easy = easy_speed(db, user_id)
     for r in rows:
         _store(db, user_id, r["external_id"], r["day"], r["series"], easy)
-    if rows:
+    # Runs Strava had nothing for (no GPS; saved empty since version 6) stay done: asking again wouldn't help.
+    empty = db.connect().execute("UPDATE tr_run_speed SET version = ? WHERE user_id = ? AND version >= 6 "
+                                 "AND version < ? AND series = ''", (VERSION, user_id, VERSION)).rowcount
+    if rows or empty:
         db._commit()
     return len(rows)
 
@@ -592,7 +599,7 @@ def estimate(efforts):
             if 80 <= dp2 <= 400 and 2.5 <= cs2 <= 7.5:
                 return round(cs2, 3), round(dp2), f"from {_effort_name(long)} and {_effort_name(short)}"
         if 2.5 <= cs <= 7.5:
-            return round(cs, 3), TYPICAL_D_PRIME, f"from {_effort_name(long)}, with a typical D′"
+            return round(cs, 3), TYPICAL_D_PRIME, f"from {_effort_name(long)}"
     cs, dp = fit_critical_speed({d: t for d, (t, _, _) in efforts.items()})
     return (cs, dp, "from your best efforts") if cs else (None, None, "")
 
@@ -632,6 +639,8 @@ def weekly(db, user_id, week_starts, races=None):
         per_run = [(d_prime_used(r["hist"], model["cs"]), r) for r in week_runs]
         used = sum(u for u, _ in per_run)
         top_run = max(per_run, key=lambda x: x[0], default=(0, None))[1]
+        run_points = [{"id": r["id"], "day": r["day"], "points": round(u) if model["cs"] else None,
+                       "summary": summary(r["efforts"])} for u, r in per_run]
         near = sum(near_top_metres(r["hist"], model["vmax"]) for r in week_runs)
         efforts = [e for r in week_runs for e in r["efforts"]]
         strides = [e["top_mps"] for e in efforts if e["kind"] == "stride"]
@@ -646,7 +655,7 @@ def weekly(db, user_id, week_starts, races=None):
                   "vmax": model["vmax"], "speed_work": round(used) if model["cs"] else None,
                   "tanks": round(used / model["d_prime"], 1) if model["cs"] and model["d_prime"] else None,
                   "near_top": round(near), "strides": len(strides), "stride_mps": stride_mps,
-                  "stride_pace": pace(stride_mps), "kinds": kinds, "read": len(week_runs),
+                  "stride_pace": pace(stride_mps), "kinds": kinds, "read": len(week_runs), "runs": run_points,
                   "cause": ({"day": top_run["day"], "id": top_run["id"], "summary": summary(top_run["efforts"])}
                             if top_run and top_run["efforts"] else None)}
     unread = {date.fromisoformat(r["day"]) for r in _waiting(db, user_id, 10000)}
@@ -677,15 +686,38 @@ def latest(db, user_id):
     return runs[0] if runs else None
 
 
-def recent(db, user_id, limit=10, fast_only=False):
-    """His latest runs with what was fast in them: [{id, day, title, miles, summary}]."""
-    ensure(db)
+def titles(db, user_id, ids):
+    """{strava id: (title, miles)} for runs in his log."""
+    if not ids:
+        return {}
     rows = db.connect().execute(
-        f"""SELECT s.external_id, s.day, s.efforts_json, w.title, w.distance_meters
+        f"SELECT external_id, title, distance_meters FROM trainer_imported_workouts WHERE user_id = ? AND "
+        f"source = 'strava' AND external_id IN ({', '.join('?' * len(ids))})", [user_id, *ids]).fetchall()
+    return {r["external_id"]: (r["title"] or "Run", round((r["distance_meters"] or 0) / METERS_PER_MILE, 1))
+            for r in rows}
+
+
+def recent(db, user_id, limit=10, fast_only=False, races=None):
+    """His latest runs with what was fast in them and their speed points (at today's threshold pace):
+    [{id, day, title, miles, summary, points}]."""
+    ensure(db)
+    cs = model_at(_rows(db, user_id, date.today() - timedelta(weeks=FIT_WEEKS)), date.today(), races)["cs"]
+    rows = db.connect().execute(
+        f"""SELECT s.external_id, s.day, s.efforts_json, s.hist_json, w.title, w.distance_meters
             FROM tr_run_speed s LEFT JOIN trainer_imported_workouts w
               ON w.user_id = s.user_id AND w.external_id = s.external_id AND w.source = 'strava'
             WHERE s.user_id = ? {"AND s.efforts_json NOT IN ('[]', '')" if fast_only else ""}
             ORDER BY s.day DESC LIMIT ?""", (user_id, limit)).fetchall()
     return [{"id": r["external_id"], "day": r["day"], "title": r["title"] or "Run",
              "miles": round((r["distance_meters"] or 0) / METERS_PER_MILE, 1),
-             "summary": summary(json.loads(r["efforts_json"] or "[]"))} for r in rows]
+             "summary": summary(json.loads(r["efforts_json"] or "[]")),
+             "points": round(d_prime_used(json.loads(r["hist_json"] or "{}"), cs)) if cs else None} for r in rows]
+
+
+def week_runs(db, user_id, monday, races=None):
+    """One week for its own page: the week's numbers and each run with its speed points."""
+    week = weekly(db, user_id, [monday], races)[monday]
+    names = titles(db, user_id, [r["id"] for r in week["runs"]])
+    week["runs"] = sorted([dict(r, title=names.get(r["id"], ("Run", 0))[0], miles=names.get(r["id"], ("Run", 0))[1])
+                           for r in week["runs"]], key=lambda r: r["day"])
+    return week
