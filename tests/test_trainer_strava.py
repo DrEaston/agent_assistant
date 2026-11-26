@@ -539,6 +539,20 @@ class StrideTests(SyncTests):
         self.assertIn("18 × 400 avg 1:22, 30 s rest", page.text)
         self.assertIn("route-fast", page.text)
         self.assertEqual(TestClient(app).get("/apps/trainer/run/999999").status_code, 404)
+        # Explore: the map and the graph together, with every moment's time, distance, pace, HR and map spot
+        self.assertIn('href="/apps/trainer/run/1100/explore"', page.text)
+        ex = runpage.explore(self.db, self.user, "1100")
+        samples = ex["samples"]
+        self.assertTrue(len(samples["t"]) == len(samples["v"]) == len(samples["x"]) == len(samples["hr"]))
+        self.assertLessEqual(len(samples["t"]), runpage.EXPLORE_POINTS)
+        rep = max(range(len(samples["t"])), key=lambda i: samples["v"][i])
+        self.assertAlmostEqual(samples["v"][rep], 400 / 82, delta=0.4)       # 5-second pace in a rep
+        self.assertEqual(len(ex["stretches"]), 18)
+        explore_page = TestClient(app).get("/apps/trainer/run/1100/explore")
+        self.assertEqual(explore_page.status_code, 200, explore_page.text[:300])
+        self.assertIn('id="ex-dot"', explore_page.text)
+        self.assertIn("Zoom in", explore_page.text)
+        self.assertEqual(TestClient(app).get("/apps/trainer/run/999999/explore").status_code, 404)
         # kept streams: a summary change is worked out again without asking Strava
         calls = len(self.fake.calls)
         self.db.connect().execute("UPDATE tr_run_speed SET version = 0")

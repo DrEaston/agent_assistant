@@ -37,11 +37,9 @@ def speed_chart(series, efforts, cs):
             "minutes": round(end / 60)}
 
 
-def route_map(series, efforts):
-    """{w, h, path, fast, start, finish} for the route, fast stretches drawn over it."""
-    ll = [p for p in (series.get("ll") or [])]
-    times = series.get("t") or []
-    pts = [(i, p) for i, p in enumerate(ll) if p]
+def _projection(series):
+    """(w, h, {route point index: (x, y)}) for the route, MAP_W wide, or None without a route."""
+    pts = [(i, p) for i, p in enumerate(series.get("ll") or []) if p]
     if len(pts) < 2:
         return None
     lat0 = statistics.fmean(p[0] for _, p in pts)
@@ -53,7 +51,16 @@ def route_map(series, efforts):
     scale = (MAP_W - 20) / span
     h = round((max_y - min_y) * scale + 20)
     w = round((max_x - min_x) * scale + 20)
-    proj = {i: (round((x - min_x) * scale + 10, 1), round((y - min_y) * scale + 10, 1)) for i, x, y in xy}
+    return w, h, {i: (round((x - min_x) * scale + 10, 1), round((y - min_y) * scale + 10, 1)) for i, x, y in xy}
+
+
+def route_map(series, efforts):
+    """{w, h, path, fast, start, finish} for the route, fast stretches drawn over it."""
+    projected = _projection(series)
+    if not projected:
+        return None
+    w, h, proj = projected
+    times = series.get("t") or []
     path = " ".join(f"{x},{y}" for x, y in proj.values())
     fast = []
     for e in efforts:
@@ -63,6 +70,61 @@ def route_map(series, efforts):
             fast.append(" ".join(f"{x},{y}" for x, y in seg))
     first, last = list(proj.values())[0], list(proj.values())[-1]
     return {"w": w, "h": h, "path": path, "fast": fast, "start": first, "finish": last}
+
+
+EXPLORE_POINTS = 2400    # samples sent to the Explore page at most (a 2-hour run: one every 3 seconds)
+SMOOTH = 5               # pace on the Explore page: averaged over 5 seconds (a single GPS reading jumps around)
+
+
+def explore(db, user_id, external_id, races=None):
+    """The Explore page's data: the run page's numbers plus, sample by sample, time, distance, 5-second speed,
+    heart rate and the spot on the map, for the page's script to draw and follow a finger along."""
+    r = detail(db, user_id, external_id, races)
+    if not r:
+        return None
+    row = db.connect().execute("SELECT series FROM tr_run_speed WHERE user_id = ? AND external_id = ?",
+                               (user_id, str(external_id))).fetchone()
+    series = speed.unpack(row["series"] if row else "")
+    times, speeds = series.get("t") or [], series.get("v") or []
+    dists, hrs = series.get("d") or [], series.get("hr") or []
+    n = len(times)
+    if n < 2:
+        return dict(r, samples=None)
+    # 5-second average speed at each sample (from the distance stream where there is one: steadier than speed)
+    smooth = []
+    j = 0
+    for i in range(n):
+        while times[i] - times[j] > SMOOTH:
+            j += 1
+        if i > j and dists[i] is not None and dists[j] is not None and times[i] > times[j]:
+            smooth.append((dists[i] - dists[j]) / (times[i] - times[j]))
+        else:
+            smooth.append(speeds[i] or 0.0)
+    projected = _projection(series)
+    proj = projected[2] if projected else {}
+    keys = sorted(proj)
+    step = max(1, math.ceil(n / EXPLORE_POINTS))
+    out = {"t": [], "d": [], "v": [], "hr": [], "x": [], "y": []}
+    k = 0
+    for i in range(0, n, step):
+        out["t"].append(times[i])
+        out["d"].append(round(dists[i], 1) if dists[i] is not None else None)
+        out["v"].append(round(min(smooth[i], 9.0), 2))
+        out["hr"].append(hrs[i] if i < len(hrs) else None)
+        if keys:
+            while k + 1 < len(keys) and keys[k + 1] * speed.LL_STEP <= i:
+                k += 1
+            x, y = proj[keys[k]]
+            out["x"].append(x)
+            out["y"].append(y)
+    cs = None
+    if r.get("cs_pace"):
+        minutes, seconds = r["cs_pace"].split(":")
+        cs = round(speed.METERS_PER_MILE / (int(minutes) * 60 + int(seconds)), 3)
+    stretches = [{"n": e["n"], "at": e["at"], "seconds": e["seconds"], "label": f"{e['metres']:,} m in {e['time']}"}
+                 for e in r["efforts"]]
+    return dict(r, samples=out, cs=cs, stretches=stretches,
+                map_size=[projected[0], projected[1]] if projected else None)
 
 
 def detail(db, user_id, external_id, races=None):
