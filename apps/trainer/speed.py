@@ -69,6 +69,8 @@ FIT_WEEKS = 26                      # critical speed and top speed come from thi
 CHRONIC_WEEKS, RATIO = 4, 1.5
 FLOOR_TANKS = 2                     # speed work line never below 2 x D' (a set of strides after a quiet month is fine)
 FLOOR_NEAR_TOP = 500                # top-speed running line never below 500 m
+WELL_OVER = 1.5                     # "well over" from 1.5 x the safe limit; below that "a little over" (Curtis: his
+                                    # 5K race week, 1.4x, wasn't that hard)
 LOOKBACK_WEEKS = 52                 # older runs are read back this far
 METERS_PER_MILE = 1609.344
 
@@ -675,7 +677,7 @@ def weekly(db, user_id, week_starts, races=None):
         ratios = [r for r in ((week["speed_work"] or 0) / week["work_line"] if week["work_line"] else 0,
                               week["near_top"] / week["top_line"] if week["top_line"] else 0)]
         week["times_line"] = round(max(ratios), 1)
-        week["how_over"] = ("well over" if week["times_line"] >= 1.3 else "a little over") \
+        week["how_over"] = ("well over" if week["times_line"] >= WELL_OVER else "a little over") \
             if (week["work_over"] or week["top_over"]) else ""
     return {w: out[w] for w in week_starts}
 
