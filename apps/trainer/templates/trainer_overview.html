@@ -64,11 +64,13 @@
       <div class="stat"><span class="small muted">Stride speed, last 4 weeks</span><strong>{{ sp.stride_pace_recent or "–" }}</strong>
         <span class="small">{% if sp.stride_gain is not none %}{% if sp.stride_gain > 0 %}{{ sp.stride_gain }} s/mi faster{% elif sp.stride_gain < 0 %}{{ -sp.stride_gain }} s/mi slower{% else %}same{% endif %} than the 8 weeks before{% elif sp.stride_pace_recent %}/mi · needs a few more weeks to compare{% else %}no strides found yet{% endif %}</span></div>
       <div class="stat"><span class="small muted">Strides this week</span><strong>{{ t.strides[0] }}/{{ t.strides[1] }}</strong>
-        <span class="small">{% if sp.latest %}last fast running: {{ sp.latest.summary }} ({{ sp.latest.day }}){% else %}ticked when Strava shows them{% endif %}</span></div>
+        <span class="small">{% if sp.latest %}last fast running: <a href="/apps/trainer/run/{{ sp.latest.id }}">{{ sp.latest.summary }}</a> ({{ sp.latest.day }}){% else %}ticked when Strava shows them{% endif %}</span></div>
       <div class="stat"><span class="small muted">Aerobic efficiency</span><strong>{{ sp.efficiency_recent or "–" }}</strong>
         <span class="small">{% if sp.efficiency_before %}{{ "up" if sp.efficiency_up else "down" }} from {{ sp.efficiency_before }}{% else %}easy runs, last 4 weeks{% endif %}</span></div>
     </div>
-    {% if sp.over_weeks %}{% call ui.banner("warn") %}Over the line: {{ sp.over_weeks | join(", ") }}. A jump like that is where injuries tend to come from; build up to it over a few weeks instead.{% endcall %}{% endif %}
+    {% for o in sp.over_weeks | reverse %}
+    {% call ui.banner("warn" if o.how == "well over" else "info") %}<strong>Week of {{ o.label }}: {{ o.times }}× the line, {{ o.how }}</strong>{% if o.cause %} ({% if o.cause.id %}<a href="/apps/trainer/run/{{ o.cause.id }}">{{ o.cause.summary }}</a>{% else %}{{ o.cause.summary }}{% endif %} on {{ o.cause.day.strftime("%b") }} {{ o.cause.day.day }}){% endif %}.{% if o.how == "well over" %} A jump like that is where injuries tend to come from; build up to it over a few weeks.{% endif %}{% endcall %}
+    {% endfor %}
     {% set bars = [] %}{% for w in sp.weeks %}{% set _ = bars.append({"label": w.label, "value": w.speed_work or 0, "current": loop.last, "limit": w.work_line}) %}{% endfor %}
     {{ ui.bar_chart(bars, sp.work_max, unit=" m", label="Speed work (D′ used) per week, last 16 weeks") }}
     <p class="small muted">Speed work per week: metres run "above" critical speed. The dashed mark over each week is that
@@ -84,6 +86,18 @@
         <td class="small">{% for kind, k in w.kinds.items() %}{% if kind in ("stride", "rep") %}{{ k.count }} {{ kind }}{{ "s" if k.count != 1 }}{% else %}{{ k.count }} × {{ kind }}{% endif %}{{ ", " if not loop.last }}{% endfor %}</td>
         <td class="num">{{ (w.stride_pace ~ "/mi") if w.stride_pace else "–" }}</td></tr>{% endif %}{% endfor %}
     </table></div>
+    {% if sp.recent %}
+    <h3 class="group-title">Recent runs</h3>
+    <div class="card flush">
+      {% for run in sp.recent %}
+      <a class="link-row" href="/apps/trainer/run/{{ run.id }}">
+        <span class="label-stack"><span class="title">{{ run.title }}{% if run.miles %} · {{ run.miles }} mi{% endif %}</span>
+          <span class="small muted">{{ run.day }}{% if run.summary %} · {{ run.summary }}{% endif %}</span></span>
+        <span class="chev" aria-hidden="true">›</span>
+      </a>
+      {% endfor %}
+    </div>
+    {% endif %}
     <p class="small muted">Estimates from each run's second-by-second data on Strava. <strong>Critical speed</strong> is the
       fastest pace you could hold for a long time, and <strong>D′</strong> the distance you can run "above" it before you're
       spent. Dieter works them out from your runs in the last 6 months: your best long effort (10–40 minutes, like a 5K

@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from core import ui
 from database import get_current_user_id, reset_current_user_id, set_current_user_id
 
-from . import analysis, plan, speed, strava
+from . import analysis, plan, runpage, speed, strava
 from .manifest import APP
 
 router = APIRouter()
@@ -106,6 +106,18 @@ def overview(request: Request, week: str = ""):
     return render("trainer_overview.html", title="Trainer", current=BASE, page_url=BASE, view=view,
                   guidance=analysis.week_guidance(view), o=numbers,
                   today=[s for d in view["days"] if d["is_today"] for s in d["sessions"]])
+
+
+@router.get(BASE + "/run/{external_id}")
+def run_page(external_id: str):
+    """One run in detail: what was fast, route, speed chart, speed work, best steady efforts."""
+    if not external_id.isdigit():
+        raise HTTPException(status_code=404, detail="No such run.")
+    s = store()
+    r = runpage.detail(_state["db"], get_current_user_id(), external_id, races=plan.race_bests(s.settings()))
+    if not r:
+        raise HTTPException(status_code=404, detail="That run isn't in your log.")
+    return render("trainer_run.html", title=r["title"], r=r, current=BASE, page_url=f"{BASE}/run/{external_id}")
 
 
 @router.get(BASE + "/week")
@@ -324,7 +336,7 @@ def sync_now():
     try:
         s.process(10)
         s.fill_details(user, limit=10)
-        speed.fill(s, user, limit=25)
+        speed.fill(s, user, limit=40)
     except strava.StravaError as exc:
         return back(BASE + "/log?problem=" + str(exc)[:200].replace("&", " "))
     return back(BASE + "/log")

@@ -2,11 +2,14 @@
 
 Strava's summary only has a run's average and its single fastest moment, so strides and short reps were invisible,
 and its heart-rate-based effort score barely sees a 28-second 200 (heart rate hasn't caught up before it's over).
-Each run's streams (time, speed, distance: one extra Strava request per run) are read once and kept as a compact
-summary, not the streams:
+Each run's streams (time, speed, distance, heart rate, route: one extra Strava request per run) are read once and
+kept compactly (zlib + base64 in tr_run_speed.series), so everything below can be worked out again without asking
+Strava. From them:
 
-- fast stretches: bursts well above the run's usual speed, 6 s to 8 min, each with its distance, time and best
-  5 seconds, named by length: a stride (under 150 m), a standard rep (200, 300, 400, 600, 800, 1K, 1200, mile) or "rep";
+- fast stretches: running well above his easy pace (max(1.35 x easy, easy + 1 m/s), easy being the middle of the
+  slower half of his runs), 6 s to 40 min, each with its distance, time and best 5 seconds, named by length: a stride
+  (under 150 m), a standard rep (200 ... mile), 3K / 5K / 10K, a "tempo" (8 min or more) or "rep". Measuring against
+  his easy pace, not the run's own average, is what finds races and threshold reps (a race's average is race pace);
 - the run's best efforts at 400 m to 5K: the fastest steady stretch of each distance (no stop or jog inside it: a
   "best mile" made of 400s and their recoveries isn't a mile effort and would drag critical speed down);
 - its best 5 seconds (his top speed);
@@ -33,11 +36,13 @@ The measures (all estimates, labelled so on the page):
 Planned strides that day are ticked when strides are found.
 """
 
+import base64
 import json
 import statistics
+import zlib
 from datetime import date, timedelta
 
-VERSION = 5                         # bump when the summary changes: older rows are read again
+VERSION = 6                         # bump when the summary changes: older rows are read again
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS tr_run_speed (
         user_id INTEGER NOT NULL, external_id TEXT NOT NULL, day TEXT NOT NULL, version INTEGER DEFAULT 0,
@@ -45,12 +50,15 @@ SCHEMA = (
         hist_json TEXT DEFAULT '{}', bests_json TEXT DEFAULT '{}', checked_at TEXT DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (user_id, external_id))""",
 )
-MIN_SECONDS, MAX_SECONDS = 6, 480   # a stride is ~15-30 s; reps up to 8 minutes (a mile or two kilometres)
-MERGE_GAP = 3                       # a moment below the line inside one burst (GPS wobble) doesn't split it
+MIN_SECONDS, MAX_SECONDS = 6, 2400  # a stride is ~15-30 s; up to 40 minutes (a 10K race)
+MERGE_GAP = 3                       # a moment below the line inside one burst (GPS wobble) doesn't split it;
+MERGE_SHARE = 0.05                  # in a long effort, a dip up to 5% of its length so far (a turn) doesn't either
+FAST_RATIO, FAST_PLUS = 1.35, 1.0   # fast running: above max(1.35 x easy speed, easy + 1 m/s)
 WINDOW = 5                          # top speed = best 5 seconds
 STRIDE_METRES = 150
 STANDARD = (200, 300, 400, 600, 800, 1000, 1200, 1609)
-NAMES = {1000: "1K", 1609: "mile"}
+RACES = (3000, 5000, 10000)
+NAMES = {1000: "1K", 1609: "mile", 3000: "3K", 5000: "5K", 10000: "10K"}
 BEST_DISTANCES = (400, 800, 1000, 1609, 3000, 5000)
 HIST_FROM = 3.0                     # m/s: the histogram starts here (slower running never counts as speed work)
 FIT_WEEKS = 26                      # critical speed and top speed come from this many weeks of best efforts
@@ -64,7 +72,7 @@ METERS_PER_MILE = 1609.344
 
 
 COLUMNS = (("version", "INTEGER DEFAULT 0"), ("efforts_json", "TEXT DEFAULT '[]'"), ("best5_mps", "REAL"),
-           ("hist_json", "TEXT DEFAULT '{}'"), ("bests_json", "TEXT DEFAULT '{}'"))
+           ("hist_json", "TEXT DEFAULT '{}'"), ("bests_json", "TEXT DEFAULT '{}'"), ("series", "TEXT DEFAULT ''"))
 
 
 def ensure(db):
@@ -114,28 +122,39 @@ def _best_window(points):
     return best
 
 
-def label(metres):
+def label(metres, seconds=0, run_metres=0):
+    """What a fast stretch was. A race distance (3K, 5K, 10K) only when the stretch is most of the run (he records
+    races as their own activity): a 5 km tempo inside a longer run is a tempo, not a 5K."""
     if metres < STRIDE_METRES:
         return "stride"
+    race = min(RACES, key=lambda d: abs(d - metres))
+    if abs(race - metres) <= race * 0.04 and metres >= 0.85 * run_metres:
+        return NAMES[race]
     near = min(STANDARD, key=lambda d: abs(d - metres))
-    return NAMES.get(near, str(near)) if abs(near - metres) <= near * 0.12 else "rep"
+    if abs(near - metres) <= near * 0.12:
+        return NAMES.get(near, str(near))
+    return "tempo" if seconds >= 480 else "rep"
 
 
-def find_efforts(times, speeds, dists=None):
+def find_efforts(times, speeds, dists=None, easy=None):
     """([{at, seconds, metres, avg_mps, top_mps, kind}], usual m/s) for each fast stretch in a run.
 
-    Usual speed is the median while moving; a stretch is time above max(1.4 x usual, usual + 1 m/s) lasting
-    MIN_SECONDS to MAX_SECONDS. Distance comes from the distance stream when there is one."""
+    Usual speed is the run's median while moving. A stretch is time above max(1.35 x easy, easy + 1 m/s), `easy`
+    being his easy speed across runs (the run's own usual when it isn't known yet), lasting MIN_SECONDS to
+    MAX_SECONDS. Distance comes from the distance stream when there is one."""
     samples = _samples(times, speeds, dists)
     moving = [v for _, v, _ in samples if v > 1.0]
     if len(moving) < 60:
         return [], None
     usual = statistics.median(moving)
-    line = max(usual * 1.4, usual + 1.0)
+    base = easy or usual
+    line = max(base * FAST_RATIO, base + FAST_PLUS)
+    known = [d for _, _, d in samples if d is not None]
+    run_metres = (known[-1] - known[0]) if len(known) > 1 else 0
     bursts, current = [], None
     for t, v, d in samples:
         if v >= line:
-            if current and t - current["end"] <= MERGE_GAP:
+            if current and t - current["end"] <= max(MERGE_GAP, MERGE_SHARE * (current["end"] - current["start"])):
                 current["end"], current["last_d"] = t, d
                 current["points"].append((t, v))
             else:
@@ -153,7 +172,8 @@ def find_efforts(times, speeds, dists=None):
             metres = sum(v for _, v in b["points"]) * seconds / len(b["points"])
         top = _best_window(b["points"]) or max(v for _, v in b["points"])
         found.append({"at": int(b["start"]), "seconds": int(seconds), "metres": round(metres),
-                      "avg_mps": round(metres / seconds, 2), "top_mps": round(top, 2), "kind": label(metres)})
+                      "avg_mps": round(metres / seconds, 2), "top_mps": round(top, 2),
+                      "kind": label(metres, seconds, run_metres)})
     return found, round(usual, 2)
 
 
@@ -260,22 +280,52 @@ def stride_speed(efforts):
     return round(statistics.median(tops), 2) if tops else None
 
 
-def summary(efforts):
-    """Short words for a run's fast stretches: "5 strides (4:58/mi)", "8 × 400 (avg 76 s)"."""
-    parts, groups = [], {}
+def _rest(gap):
+    return f"{round(gap)} s rest" if gap < 120 else f"{clock(gap)} rest"
+
+
+def groups(efforts):
+    """Fast stretches in order, runs of the same kind together: [{kind, items, rest (seconds, or None)}]."""
+    out = []
     for e in efforts:
-        groups.setdefault(e["kind"], []).append(e)
-    for kind, items in groups.items():
-        if kind == "stride":
-            parts.append(f"{len(items)} stride{'s' if len(items) != 1 else ''} "
-                         f"({pace(statistics.median(e['top_mps'] for e in items))}/mi)")
-        elif kind == "rep":
-            avg_pace = pace(sum(e["metres"] for e in items) / sum(e["seconds"] for e in items))
-            parts.append(f"{len(items)} fast rep{'s' if len(items) != 1 else ''} ({avg_pace}/mi)")
+        if out and out[-1]["kind"] == e["kind"]:
+            out[-1]["items"].append(e)
         else:
-            avg = sum(e["seconds"] for e in items) / len(items)
-            parts.append(f"{len(items)} × {kind} (avg {clock(avg)})")
-    return ", ".join(parts)
+            out.append({"kind": e["kind"], "items": [e]})
+    for g in out:
+        items = g["items"]
+        gaps = [b["at"] - (a["at"] + a["seconds"]) for a, b in zip(items, items[1:])]
+        g["rest"] = statistics.median(gaps) if gaps else None
+    return out
+
+
+def describe(group):
+    """One group as he'd write it: "18 × 400 avg 1:22, 30 s rest", "5K in 17:52", "5 strides (4:58/mi)"."""
+    kind, items, n = group["kind"], group["items"], len(group["items"])
+    rest = f", {_rest(group['rest'])}" if group["rest"] is not None else ""
+    if kind == "stride":
+        return f"{n} stride{'s' if n != 1 else ''} ({pace(statistics.median(e['top_mps'] for e in items))}/mi)"
+    if kind in ("3K", "5K", "10K"):
+        target = {"3K": 3000, "5K": 5000, "10K": 10000}[kind]
+        return "; ".join(f"{kind} in {clock(e['seconds'] * target / e['metres'])}" for e in items)
+    if kind == "tempo":
+        return "; ".join(f"tempo {e['metres'] / METERS_PER_MILE:.1f} mi at {pace(e['avg_mps'])}/mi" for e in items)
+    if kind == "rep":
+        metres = round(statistics.median(e["metres"] for e in items), -1)
+        speed = sum(e["metres"] for e in items) / sum(e["seconds"] for e in items)
+        if n == 1:
+            return f"{int(metres)} m at {pace(speed)}/mi"
+        return f"{n} × {int(metres)} m at {pace(speed)}/mi{rest}"
+    avg = sum(e["seconds"] for e in items) / n
+    distance = kind if kind in ("1K", "mile") else kind  # "400", "mile"
+    if n == 1:
+        return f"{distance} in {clock(avg)}"
+    return f"{n} × {distance} avg {clock(avg)}{rest}"
+
+
+def summary(efforts):
+    """Short words for a run's fast stretches, in order: "18 × 400 avg 1:22, 30 s rest; 5 strides (4:58/mi)"."""
+    return "; ".join(describe(g) for g in groups(efforts))
 
 
 # ---------------------------------------------------------------- the model
@@ -323,25 +373,70 @@ def near_top_metres(hist, vmax):
 # ---------------------------------------------------------------- reading runs from Strava
 
 
-def analyze(sync, user_id, external_id, day):
-    """Fetch one run's streams, summarise them, keep the result, tick planned strides. Returns the row."""
-    from .strava import API
+LL_STEP = 3   # route points kept: every 3rd sample
 
-    data = sync.call(f"{API}/activities/{external_id}/streams?keys=time,velocity_smooth,distance&key_by_type=true",
-                     token=sync._token(user_id))
-    streams = data if isinstance(data, dict) else {}
-    times = (streams.get("time") or {}).get("data") or []
-    speeds = (streams.get("velocity_smooth") or {}).get("data") or []
-    dists = (streams.get("distance") or {}).get("data") or []
-    efforts, usual = find_efforts(times, speeds, dists)
-    strides = [e for e in efforts if e["kind"] == "stride"]
+
+def pack(streams):
+    """Strava streams -> compact text: times (s), speed (cm/s), distance (dm), heart rate, route every LL_STEP."""
+    get = lambda k: (streams.get(k) or {}).get("data") or []
+    times, speeds, dists, hr, ll = get("time"), get("velocity_smooth"), get("distance"), get("heartrate"), get("latlng")
+    n = len(times)
+    series = {"t": [int(t) for t in times],
+              "v": [None if v is None else round(v * 100) for v in (speeds + [None] * n)[:n]],
+              "d": [None if d is None else round(d * 10) for d in (dists + [None] * n)[:n]],
+              "hr": [None if h is None else int(h) for h in (hr + [None] * n)[:n]] if hr else [],
+              "ll": [[round(p[0], 5), round(p[1], 5)] if p else None for p in ll[::LL_STEP]] if ll else []}
+    return base64.b64encode(zlib.compress(json.dumps(series, separators=(",", ":")).encode(), 9)).decode()
+
+
+def unpack(text):
+    """compact text -> {t, v (m/s), d (m), hr, ll} lists; {} when there's nothing."""
+    if not text:
+        return {}
+    s = json.loads(zlib.decompress(base64.b64decode(text)))
+    return {"t": s["t"], "v": [None if v is None else v / 100 for v in s["v"]],
+            "d": [None if d is None else d / 10 for d in s["d"]], "hr": s.get("hr") or [], "ll": s.get("ll") or []}
+
+
+def summarize(series, easy=None):
+    """Everything kept about one run, from its series."""
+    times, speeds, dists = series.get("t") or [], series.get("v") or [], series.get("d") or []
+    efforts, usual = find_efforts(times, speeds, dists, easy)
+    return {"strides": sum(1 for e in efforts if e["kind"] == "stride"), "efforts_json": json.dumps(efforts),
+            "stride_mps": stride_speed(efforts), "usual_mps": usual, "best5_mps": top_speed(times, speeds),
+            "hist_json": json.dumps(histogram(times, speeds)), "bests_json": json.dumps(best_efforts(times, dists, speeds))}
+
+
+def easy_speed(db, user_id, today=None):
+    """His easy speed: the middle of the slower half of his runs' usual speeds in the last FIT_WEEKS (None if fewer
+    than 5 runs are read)."""
+    ensure(db)
+    since = ((today or date.today()) - timedelta(weeks=FIT_WEEKS)).isoformat()
+    usual = sorted(r[0] for r in db.connect().execute(
+        "SELECT usual_mps FROM tr_run_speed WHERE user_id = ? AND day >= ? AND usual_mps > 0",
+        (user_id, since)).fetchall())
+    return statistics.median(usual[:max(1, len(usual) // 2)]) if len(usual) >= 5 else None
+
+
+def _store(db, user_id, external_id, day, packed, easy):
     row = {"user_id": user_id, "external_id": str(external_id), "day": str(day)[:10], "version": VERSION,
-           "strides": len(strides), "efforts_json": json.dumps(efforts), "stride_mps": stride_speed(efforts),
-           "usual_mps": usual, "best5_mps": top_speed(times, speeds), "hist_json": json.dumps(histogram(times, speeds)),
-           "bests_json": json.dumps(best_efforts(times, dists, speeds))}
-    conn = ensure(sync.db)
+           "series": packed, **summarize(unpack(packed), easy)}
+    conn = ensure(db)
     conn.execute(f"INSERT OR REPLACE INTO tr_run_speed ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})",
                  list(row.values()))
+    return conn, row
+
+
+def analyze(sync, user_id, external_id, day):
+    """Fetch one run's streams, keep them and their summary, tick planned strides. Returns the row."""
+    from .strava import API
+
+    data = sync.call(f"{API}/activities/{external_id}/streams?keys=time,velocity_smooth,distance,heartrate,latlng"
+                     "&key_by_type=true", token=sync._token(user_id))
+    conn, row = _store(sync.db, user_id, external_id, day, pack(data if isinstance(data, dict) else {}),
+                       easy_speed(sync.db, user_id))
+    efforts = json.loads(row["efforts_json"])
+    strides = [e for e in efforts if e["kind"] == "stride"]
     if strides:
         # Planned strides that day are done (only ticks; never unticks what he checked himself).
         try:
@@ -370,11 +465,25 @@ def waiting_count(db, user_id):
     return len(_waiting(db, user_id, 10000))
 
 
+def refresh(db, user_id):
+    """Work out again every run whose streams are kept but whose summary is older (no Strava needed)."""
+    ensure(db)
+    rows = db.connect().execute("SELECT external_id, day, series FROM tr_run_speed WHERE user_id = ? AND version < ? "
+                                "AND series != ''", (user_id, VERSION)).fetchall()
+    easy = easy_speed(db, user_id)
+    for r in rows:
+        _store(db, user_id, r["external_id"], r["day"], r["series"], easy)
+    if rows:
+        db._commit()
+    return len(rows)
+
+
 def fill(sync, user_id, limit=5):
     """Read a few runs not read yet, newest first. Stops quietly on Strava trouble (tries again next time)."""
     from .strava import StravaError
 
     sync._conn()  # the log's extra columns
+    refresh(sync.db, user_id)
     done = 0
     for row in _waiting(sync.db, user_id, limit):
         try:
@@ -382,10 +491,23 @@ def fill(sync, user_id, limit=5):
         except StravaError as exc:
             if "429" in str(exc):
                 break
+            if "404" in str(exc):
+                # No streams to read (no GPS, or gone from Strava): mark it read with nothing in it, so it isn't
+                # asked for again on every visit and the weeks around it can get their line.
+                _save_empty(sync.db, user_id, row["external_id"], row["day"])
+                done += 1
+                continue
             print(f"Warning: couldn't read speed for run {row['external_id']}: {exc}")
             continue
         done += 1
     return done
+
+
+def _save_empty(db, user_id, external_id, day):
+    conn = ensure(db)
+    conn.execute("INSERT OR REPLACE INTO tr_run_speed (user_id, external_id, day, version) VALUES (?, ?, ?, ?)",
+                 (user_id, str(external_id), str(day)[:10], VERSION))
+    db._commit()
 
 
 # ---------------------------------------------------------------- week by week
@@ -397,7 +519,8 @@ def _rows(db, user_id, since):
                                 (user_id, since.isoformat())).fetchall()
     out = []
     for r in rows:
-        out.append({"day": date.fromisoformat(r["day"]), "efforts": json.loads(r["efforts_json"] or "[]"),
+        out.append({"id": r["external_id"], "day": date.fromisoformat(r["day"]),
+                    "efforts": json.loads(r["efforts_json"] or "[]"),
                     "hist": json.loads(r["hist_json"] or "{}"), "bests": json.loads(r["bests_json"] or "{}"),
                     "best5": r["best5_mps"], "usual": r["usual_mps"]})
     return out
@@ -474,7 +597,9 @@ def weekly(db, user_id, week_starts, races=None):
         end = w + timedelta(days=6)
         model = model_at(runs, end, races)
         week_runs = [r for r in runs if w <= r["day"] <= end]
-        used = sum(d_prime_used(r["hist"], model["cs"]) for r in week_runs)
+        per_run = [(d_prime_used(r["hist"], model["cs"]), r) for r in week_runs]
+        used = sum(u for u, _ in per_run)
+        top_run = max(per_run, key=lambda x: x[0], default=(0, None))[1]
         near = sum(near_top_metres(r["hist"], model["vmax"]) for r in week_runs)
         efforts = [e for r in week_runs for e in r["efforts"]]
         strides = [e["top_mps"] for e in efforts if e["kind"] == "stride"]
@@ -489,7 +614,9 @@ def weekly(db, user_id, week_starts, races=None):
                   "vmax": model["vmax"], "speed_work": round(used) if model["cs"] else None,
                   "tanks": round(used / model["d_prime"], 1) if model["cs"] and model["d_prime"] else None,
                   "near_top": round(near), "strides": len(strides), "stride_mps": stride_mps,
-                  "stride_pace": pace(stride_mps), "kinds": kinds, "read": len(week_runs)}
+                  "stride_pace": pace(stride_mps), "kinds": kinds, "read": len(week_runs),
+                  "cause": ({"day": top_run["day"], "id": top_run["id"], "summary": summary(top_run["efforts"])}
+                            if top_run and top_run["efforts"] else None)}
     unread = {date.fromisoformat(r["day"]) for r in _waiting(db, user_id, 10000)}
     for w in week_starts:
         before = [out[w - timedelta(weeks=n)] for n in range(1, CHRONIC_WEEKS + 1)]
@@ -504,14 +631,29 @@ def weekly(db, user_id, week_starts, races=None):
             week["work_line"] = week["top_line"] = None
         week["work_over"] = bool(week["work_line"] and (week["speed_work"] or 0) > week["work_line"])
         week["top_over"] = bool(week["top_line"] and week["near_top"] > week["top_line"])
+        ratios = [r for r in ((week["speed_work"] or 0) / week["work_line"] if week["work_line"] else 0,
+                              week["near_top"] / week["top_line"] if week["top_line"] else 0)]
+        week["times_line"] = round(max(ratios), 1)
+        week["how_over"] = ("well over" if week["times_line"] >= 1.3 else "a little over") \
+            if (week["work_over"] or week["top_over"]) else ""
     return {w: out[w] for w in week_starts}
 
 
 def latest(db, user_id):
-    """The most recent run with fast stretches: {day, summary}, or None."""
+    """The most recent run with fast stretches: {day, id, summary}, or None."""
+    runs = recent(db, user_id, limit=1, fast_only=True)
+    return runs[0] if runs else None
+
+
+def recent(db, user_id, limit=10, fast_only=False):
+    """His latest runs with what was fast in them: [{id, day, title, miles, summary}]."""
     ensure(db)
-    row = db.connect().execute("SELECT day, efforts_json FROM tr_run_speed WHERE user_id = ? AND efforts_json != '[]' "
-                               "ORDER BY day DESC LIMIT 1", (user_id,)).fetchone()
-    if not row:
-        return None
-    return {"day": row["day"], "summary": summary(json.loads(row["efforts_json"]))}
+    rows = db.connect().execute(
+        f"""SELECT s.external_id, s.day, s.efforts_json, w.title, w.distance_meters
+            FROM tr_run_speed s LEFT JOIN trainer_imported_workouts w
+              ON w.user_id = s.user_id AND w.external_id = s.external_id AND w.source = 'strava'
+            WHERE s.user_id = ? {"AND s.efforts_json NOT IN ('[]', '')" if fast_only else ""}
+            ORDER BY s.day DESC LIMIT ?""", (user_id, limit)).fetchall()
+    return [{"id": r["external_id"], "day": r["day"], "title": r["title"] or "Run",
+             "miles": round((r["distance_meters"] or 0) / METERS_PER_MILE, 1),
+             "summary": summary(json.loads(r["efforts_json"] or "[]"))} for r in rows]

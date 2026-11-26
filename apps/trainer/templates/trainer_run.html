@@ -1,0 +1,72 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}{{ r.title }} · Trainer{% endblock %}
+{% block content %}
+{% call ui.page_header(r.title, crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs, current=current,
+    sub=(r.day.strftime("%A, %b ") ~ r.day.day ~ (" · " ~ r.time if r.time else ""))) %}{% endcall %}
+<main class="wrap">
+  <div class="card stack">
+    <div class="stat-grid">
+      <div class="stat"><span class="small muted">Distance</span><strong>{{ r.miles }} mi</strong><span class="small">{{ r.moving }}{% if r.pace %} · {{ r.pace }}/mi{% endif %}</span></div>
+      {% if r.avg_hr %}<div class="stat"><span class="small muted">Heart rate</span><strong>{{ r.avg_hr }}</strong><span class="small">average{% if r.max_hr %} · max {{ r.max_hr }}{% endif %}</span></div>{% endif %}
+      <div class="stat"><span class="small muted">Speed work</span><strong>{{ ("{:,}".format(r.speed_work) ~ " m") if r.speed_work is not none else "–" }}</strong>
+        <span class="small">{% if r.tanks %}{{ r.tanks }} tanks of D′ · {% endif %}{% if r.cs_pace %}critical speed {{ r.cs_pace }}/mi{% endif %}</span></div>
+      {% if r.top_pace %}<div class="stat"><span class="small muted">Top speed</span><strong>{{ r.top_pace }}</strong><span class="small">/mi, best 5 seconds</span></div>{% endif %}
+    </div>
+    {% if r.groups %}<p><strong>{% for g in r.groups %}{{ g.text }}{{ "; " if not loop.last }}{% endfor %}</strong></p>
+    {% elif r.has_series %}<p class="muted">An easy run: nothing faster than your fast-running line.</p>{% endif %}
+    {% if not r.has_series %}{% call ui.banner("info") %}The details for this run haven't been read from Strava yet. Tap Sync now on the Log page.{% endcall %}{% endif %}
+  </div>
+
+  {% if r.map %}
+  {% call ui.section("Route") %}
+  <figure class="card route-map" aria-label="Route">
+    <svg viewBox="0 0 {{ r.map.w }} {{ r.map.h }}" role="img" aria-label="Route of the run, fast stretches highlighted">
+      <polyline class="route-path" points="{{ r.map.path }}"></polyline>
+      {% for f in r.map.fast %}<polyline class="route-fast" points="{{ f }}"></polyline>{% endfor %}
+      <circle class="route-start" cx="{{ r.map.start[0] }}" cy="{{ r.map.start[1] }}" r="6"><title>Start</title></circle>
+      <circle class="route-finish" cx="{{ r.map.finish[0] }}" cy="{{ r.map.finish[1] }}" r="6"><title>Finish</title></circle>
+    </svg>
+    <figcaption class="small muted">Fast stretches are highlighted; green dot is the start, the outlined dot the finish.</figcaption>
+  </figure>
+  {% endcall %}
+  {% endif %}
+
+  {% if r.chart %}
+  {% call ui.section("Speed") %}
+  <figure class="card speed-trace" aria-label="Speed over the run">
+    <svg viewBox="0 0 {{ r.chart.w }} {{ r.chart.h }}" preserveAspectRatio="none" role="img" aria-label="Speed over the run">
+      {% for m in r.chart.marks %}<rect class="trace-mark" x="{{ m.x }}" y="0" width="{{ m.w }}" height="{{ r.chart.h }}"></rect>{% endfor %}
+      {% if r.chart.cs_y %}<line class="trace-cs" x1="0" x2="{{ r.chart.w }}" y1="{{ r.chart.cs_y }}" y2="{{ r.chart.cs_y }}"></line>{% endif %}
+      <polyline class="trace-line" points="{{ r.chart.points }}"></polyline>
+    </svg>
+    <figcaption class="chart-axis small muted"><span>Start</span><span>{% if r.chart.cs_y %}dashed: critical speed · {% endif %}shaded: fast stretches</span><span>{{ r.chart.minutes }} min</span></figcaption>
+  </figure>
+  {% endcall %}
+  {% endif %}
+
+  {% if r.efforts %}
+  {% call ui.section("Fast stretches") %}
+  <div class="table-scroll card"><table class="data-table">
+    <tr><th class="num">#</th><th>What</th><th class="num">Distance</th><th class="num">Time</th><th class="num">Pace</th><th class="num">Top</th><th class="num">Rest after</th></tr>
+    {% for e in r.efforts %}
+    <tr><td class="num">{{ e.n }}</td><td>{{ e.kind }}</td><td class="num">{{ e.metres }} m</td><td class="num">{{ e.time }}</td>
+      <td class="num">{{ e.pace }}/mi</td><td class="num">{{ e.top_pace }}</td><td class="num">{{ e.rest_text or "–" }}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% endcall %}
+  {% endif %}
+
+  {% if r.bests %}
+  {% call ui.section("Best steady efforts") %}
+  <div class="table-scroll card"><table class="data-table">
+    <tr><th>Distance</th><th class="num">Time</th><th class="num">Pace</th></tr>
+    {% for b in r.bests %}<tr><td>{{ b.name }}</td><td class="num">{{ b.time }}</td><td class="num">{{ b.pace }}/mi</td></tr>{% endfor %}
+  </table></div>
+  <p class="small muted">The fastest stretch of each distance in this run with no stop or jog inside it.</p>
+  {% endcall %}
+  {% endif %}
+
+  <div class="row section"><a class="button quiet" href="{{ r.strava_url }}">Open in Strava</a></div>
+</main>
+{% endblock %}
