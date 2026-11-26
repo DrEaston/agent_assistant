@@ -281,6 +281,12 @@ class Sync:
             return "marked deleted"
         detail = self.call(f"{API}/activities/{event['object_id']}?include_all_efforts=false", token=self._token(user))
         self._store(user, detail, detail)
+        if classify_strava_workout(detail.get("sport_type") or detail.get("type"), detail.get("name")).startswith("run"):
+            from . import speed  # strides: read the run's speed stream now, while it's new
+            try:
+                speed.analyze(self, user, event["object_id"], detail.get("start_date_local") or detail.get("start_date"))
+            except StravaError as exc:
+                print(f"Warning: couldn't read speed for run {event['object_id']}: {exc}")
         return "stored"
 
     def process(self, limit=10):

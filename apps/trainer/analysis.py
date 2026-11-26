@@ -8,11 +8,15 @@ Everything here is an estimate from Strava's numbers and is labelled that way on
   Banister / "performance management" model;
 - aerobic efficiency: easy-run speed per heartbeat (metres per minute ÷ average HR), week by week;
 - top speed: the fastest moment Strava saw on each week's runs (GPS max speed: noisy, so the best of several weeks
-  matters more than one number).
+  matters more than one number);
+- speed (speed.py): critical speed and D', speed work (D' used), top-speed running and stride speed, week by week,
+  from each run's second-by-second data.
 """
 
 import math
 from datetime import date, timedelta
+
+from . import speed
 
 METERS_PER_MILE = 1609.344
 FITNESS_DAYS, FATIGUE_DAYS = 42, 7
@@ -99,13 +103,14 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None):
         seconds = METERS_PER_MILE / mps
         return f"{int(seconds // 60)}:{int(round(seconds % 60)):02d}"
 
+    strides = speed.weekly(db, user_id, week_starts)
     weekly = []
     for w in week_starts:
         top = max((r["max_speed_mps"] or 0 for r in by_week[w]), default=0)
         f = series.get(min(w + timedelta(days=6), today), (0.0, 0.0))
         weekly.append({"week": w.isoformat(), "label": f"{w.strftime('%b')} {w.day}",
                        "efficiency": efficiency(by_week[w]), "top_mps": top or None, "top_pace": pace(top),
-                       "fitness": round(f[0], 1)})
+                       "fitness": round(f[0], 1), **strides[w]})
 
     now_fit, now_fat = series.get(today, (0.0, 0.0))
     form = now_fit - now_fat
@@ -115,6 +120,18 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None):
     eff_recent = [w["efficiency"] for w in weekly[-4:] if w["efficiency"]]
     eff_before = [w["efficiency"] for w in weekly[-12:-4] if w["efficiency"]]
     avg = lambda xs: sum(xs) / len(xs) if xs else None
+    stride_recent = [w["stride_mps"] for w in weekly[-4:] if w["stride_mps"]]
+    stride_before = [w["stride_mps"] for w in weekly[-12:-4] if w["stride_mps"]]
+    s_recent, s_before = avg(stride_recent), avg(stride_before)
+
+    def gain(now, then):
+        """Seconds per mile faster (+) or slower (-)."""
+        return round(METERS_PER_MILE / then - METERS_PER_MILE / now) if now and then else None
+
+    this_week, past4 = weekly[-1], weekly[-5:-1]
+    cs_then = weekly[-13]["cs"] if len(weekly) >= 13 else None  # 12 weeks before this one
+    work_usual = avg([w["speed_work"] for w in past4 if w["speed_work"] is not None])
+    near_usual = avg([w["near_top"] for w in past4])
 
     return {
         "miles": miles, "miles_target": miles_target, "chart_max": max([m["miles"] for m in miles] + [miles_target]) or 1,
@@ -132,6 +149,19 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None):
             "efficiency_recent": round(avg(eff_recent), 3) if eff_recent else None,
             "efficiency_before": round(avg(eff_before), 3) if eff_before else None,
             "efficiency_up": bool(eff_recent and eff_before and avg(eff_recent) > avg(eff_before)),
+            "stride_pace_recent": pace(s_recent), "stride_pace_before": pace(s_before),
+            "stride_gain": gain(s_recent, s_before),
+            "cs_pace": this_week["cs_pace"], "d_prime": this_week["d_prime"], "cs_then_pace": pace(cs_then),
+            "cs_gain": gain(this_week["cs"], cs_then),
+            "speed_work": this_week["speed_work"], "tanks": this_week["tanks"],
+            "speed_work_usual": round(work_usual) if work_usual is not None else None,
+            "near_top": this_week["near_top"], "near_top_usual": round(near_usual) if near_usual is not None else None,
+            "work_line": this_week["work_line"], "work_over": this_week["work_over"],
+            "top_line": this_week["top_line"], "top_over": this_week["top_over"],
+            "over_weeks": [w["label"] for w in weekly if w["work_over"] or w["top_over"]],
+            "work_max": max([w["speed_work"] or 0 for w in weekly] + [w["work_line"] or 0 for w in weekly] + [1]),
+            "top_max": max([w["near_top"] for w in weekly] + [w["top_line"] for w in weekly] + [1]),
+            "latest": speed.latest(db, user_id), "waiting": speed.waiting_count(db, user_id),
             "weeks": weekly,
         },
     }

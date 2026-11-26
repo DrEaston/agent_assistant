@@ -407,12 +407,18 @@ class PlanStore:
     # ------------------------------------------------------------ Strava (read-only)
 
     def strava(self, first, last):
-        """Imported activities in [first, last]: {day: [{title, kind, miles, minutes}]}."""
+        """Imported activities in [first, last]: {day: [{title, kind, miles, minutes, strides, stride_pace}]}."""
+        from . import speed
+
         try:
+            speed.ensure(self.db)
             rows = self._conn().execute(
-                """SELECT title, activity_type, started_at, distance_meters, moving_time_seconds
-                   FROM trainer_imported_workouts WHERE user_id = ? AND substr(started_at, 1, 10) BETWEEN ? AND ?
-                   ORDER BY started_at""", (self._user(), first.isoformat(), last.isoformat())).fetchall()
+                """SELECT w.title, w.activity_type, w.started_at, w.distance_meters, w.moving_time_seconds,
+                          s.strides, s.efforts_json
+                   FROM trainer_imported_workouts w
+                   LEFT JOIN tr_run_speed s ON s.user_id = w.user_id AND s.external_id = w.external_id
+                   WHERE w.user_id = ? AND substr(w.started_at, 1, 10) BETWEEN ? AND ?
+                   ORDER BY w.started_at""", (self._user(), first.isoformat(), last.isoformat())).fetchall()
         except Exception:  # the Strava table only exists once the old Trainer has run on this database
             return {}
         out = {}
@@ -422,7 +428,9 @@ class PlanStore:
                 "title": r["title"] or r["activity_type"] or "Activity", "kind": kind,
                 "is_run": "run" in kind,
                 "miles": round((r["distance_meters"] or 0) / METERS_PER_MILE, 1),
-                "minutes": round((r["moving_time_seconds"] or 0) / 60)})
+                "minutes": round((r["moving_time_seconds"] or 0) / 60),
+                "strides": r["strides"] or 0,
+                "speed": speed.summary(json.loads(r["efforts_json"])) if r["efforts_json"] else ""})
         return out
 
     def today(self, day=None):

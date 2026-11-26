@@ -55,7 +55,7 @@
         <div class="list-row small muted">Nothing planned.</div>
       {% endfor %}
       {% for a in d.strava %}
-        <div class="list-row small"><span class="grow">Strava: {{ a.title }}</span><span class="num">{% if a.miles %}{{ a.miles }} mi · {% endif %}{{ a.minutes }} min</span></div>
+        <div class="list-row small"><span class="grow">Strava: {{ a.title }}</span><span class="num">{% if a.miles %}{{ a.miles }} mi · {% endif %}{{ a.minutes }} min{% if a.speed %} · {{ a.speed }}{% endif %}</span></div>
       {% endfor %}
       {% if d.is_today or (d.is_past and (d.habits.water or d.habits.fueled)) %}
       <div class="list-row">

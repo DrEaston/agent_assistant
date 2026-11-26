@@ -40,6 +40,19 @@ Derived numbers are labelled as estimates wherever they are (load score, 5K esti
 
 ## Speed progression
 
+- **Speed measures (built 2026-11-25, `apps/trainer/speed.py`).** Each run's streams (time, speed, distance) are read
+  once from Strava and kept as a summary in `tr_run_speed`: fast stretches (6 s-8 min above the run's usual speed,
+  named stride / 200 / 400 / ... / mile / rep), best efforts 400 m-5K, best 5 s, and a 0.1 m/s speed histogram so
+  scores can be recomputed when critical speed changes. Weekly: critical speed and D' (linear distance-time fit over
+  2-20 min bests in the last 26 weeks), speed work = D' used (sum of (v - CS) x t above CS, also in "tanks"),
+  top-speed running (metres at >= 90% of best 5 s), stride speed. Why not heart rate or rTSS: HR lags short reps,
+  and rTSS's squared weighting isn't derived; the critical speed model is the established basis for "faster counts
+  more". The plain two-parameter model is used with no sprint correction (published corrections disagree). Planned
+  strides are ticked when found. Runs from the last 52 weeks are read a few per Trainer visit and 25 per Sync now.
+  **The line** (Curtis, after 18 x 400 in 81-83 s with 30 s rest hurt): each week's speed work and top-speed running
+  against 1.5 x the average of the 4 weeks before (acute:chronic workload ratio; debated, shown as a guide), floors
+  2 x D' and 500 m. A sudden block goes over; building up over a few weeks keeps under.
+
 - Threshold pace from Tuesday's workout laps toward 5:40/mi.
 - Best efforts over time (400 m, 1 km, mile, 5K) from Strava best efforts and races.
 - Rep pace vs. HR for the same session type.

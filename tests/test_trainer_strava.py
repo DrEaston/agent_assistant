@@ -27,7 +27,7 @@ class FakeStrava:
     """Strava's API, in memory: records calls, serves activities, and can be told to fail."""
 
     def __init__(self):
-        self.calls, self.activities, self.subscriptions, self.fail = [], {}, [], None
+        self.calls, self.activities, self.subscriptions, self.fail, self.streams = [], {}, [], None, {}
 
     def __call__(self, url, method="GET", data=None, token=""):
         self.calls.append((method, url.split("?")[0], token))
@@ -49,6 +49,8 @@ class FakeStrava:
             items = [a for a in self.activities.values()
                      if datetime.fromisoformat(a["start_date"].replace("Z", "+00:00")).timestamp() > after]
             return sorted(items, key=lambda a: a["start_date"])[:2]  # small pages, so paging is exercised
+        if "/streams" in url:
+            return self.streams.get(int(url.split("/activities/")[1].split("/")[0]), {})
         if "/activities/" in url:
             found = self.activities.get(int(url.rsplit("/", 1)[1].split("?")[0]))
             if not found:
@@ -221,3 +223,176 @@ class WebhookPageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def stream(segments):
+    """Strava streams (time, speed, distance) from [(seconds, m/s), ...], one sample a second, with a little wobble."""
+    times, speeds, dists, t, d = [], [], [], 0, 0.0
+    for seconds, mps in segments:
+        for i in range(int(seconds)):
+            v = mps + (0.1 if i % 7 < 3 else -0.1) if mps < 4 else mps
+            times.append(t); speeds.append(v); dists.append(round(d, 1)); t += 1; d += v
+    return {"time": {"data": times}, "velocity_smooth": {"data": speeds}, "distance": {"data": dists}}
+
+
+def easy_run_with_strides(strides=5, easy=2.8, fast=5.3, minutes=50):
+    """An easy run that ends with strides: 20 s fast, 60 s easy jog between."""
+    return stream([(minutes * 60, easy)] + [(20, fast), (60, 2.2)] * strides)
+
+
+def session_of(reps, rep_seconds, rep_mps, jog=90):
+    """Warm up 15 min, reps with jogs, cool down 10 min."""
+    return stream([(900, 2.9)] + [(rep_seconds, rep_mps), (jog, 2.2)] * reps + [(600, 2.8)])
+
+
+class StrideTests(SyncTests):
+    """Fast running found in each run's streams, ticked on the plan, and the speed measures week by week."""
+
+    def parts(self, st):
+        return st["time"]["data"], st["velocity_smooth"]["data"], st["distance"]["data"]
+
+    def test_finding_strides_and_reps(self):
+        from apps.trainer import speed
+        found, usual = speed.find_efforts(*self.parts(easy_run_with_strides()))
+        self.assertEqual([e["kind"] for e in found], ["stride"] * 5)
+        self.assertAlmostEqual(usual, 2.8, delta=0.2)
+        self.assertAlmostEqual(found[0]["top_mps"], 5.3, delta=0.05)
+        self.assertEqual(speed.summary(found), "5 strides (5:04/mi)")
+        # 200s and 400s are named; a plain easy run, one GPS spike and a long tempo stretch aren't fast running.
+        two = speed.find_efforts(*self.parts(session_of(8, 28, 200 / 28)))[0]
+        self.assertEqual([e["kind"] for e in two], ["200"] * 8)
+        four = speed.find_efforts(*self.parts(session_of(8, 79, 400 / 79)))[0]
+        self.assertEqual([e["kind"] for e in four], ["400"] * 8)
+        self.assertEqual(speed.summary(four), "8 × 400 (avg 1:19)")
+        plain = easy_run_with_strides(strides=0)
+        self.assertEqual(speed.find_efforts(*self.parts(plain))[0], [])
+        t, v, d = self.parts(plain)
+        spiky = list(v); spiky[500] = 9.0
+        self.assertEqual(speed.find_efforts(t, spiky, d)[0], [])
+        tempo = stream([(600, 2.8), (1200, 4.3), (600, 2.8)])
+        self.assertEqual(speed.find_efforts(*self.parts(tempo))[0], [])
+
+    def test_the_two_sessions_by_the_critical_speed_model(self):
+        """8 × 200 in 28 against 8 × 400 in 79, for a runner with a 5:18 mile and a 17:39 5K."""
+        from apps.trainer import speed
+        cs, d_prime = speed.fit_critical_speed({"1609": 318, "5000": 1059})
+        self.assertAlmostEqual(cs, 4.576, delta=0.01)
+        self.assertAlmostEqual(d_prime, 154, delta=3)
+        self.assertEqual(speed.pace(cs), "5:52")
+        used = {}
+        for name, (reps, secs, mps) in {"200s": (8, 28, 200 / 28), "400s": (8, 79, 400 / 79)}.items():
+            t, v, _ = self.parts(session_of(reps, secs, mps))
+            used[name] = speed.d_prime_used(speed.histogram(t, v), cs)
+        self.assertAlmostEqual(used["200s"], 570, delta=40)
+        self.assertAlmostEqual(used["400s"], 310, delta=40)
+        self.assertEqual(speed.fit_critical_speed({"400": 60}), (None, None))  # one short effort isn't enough
+
+    def test_best_efforts_in_a_run(self):
+        from apps.trainer import speed
+        t, v, d = self.parts(stream([(600, 2.8), (318, 1609.344 / 318), (600, 2.8)]))
+        bests = speed.best_efforts(t, d)
+        self.assertAlmostEqual(bests["1609"], 318, delta=2)
+        self.assertLess(bests["400"], 80)
+        self.assertNotIn("5000", bests)
+
+    def test_a_new_run_with_strides_ticks_the_plan(self):
+        from apps.trainer import plan, speed
+        store = plan.PlanStore(self.db)
+        session = store.add_session("2026-11-24", "easy", "Easy run", 6, strides=6)
+        self.fake.activities[501] = activity(501)
+        self.fake.streams[501] = easy_run_with_strides()
+        self.sync.receive({"object_type": "activity", "object_id": 501, "aspect_type": "create", "owner_id": ATHLETE})
+        self.sync.process()
+        self.assertTrue(store.session(session["id"])["strides_done"])
+        week = store.week_view(__import__("datetime").date(2026, 11, 24))
+        run = next(a for d in week["days"] for a in d["strava"] if a["is_run"])
+        self.assertEqual((run["strides"], run["speed"]), (5, "5 strides (5:04/mi)"))
+
+    def test_older_runs_are_read_a_few_at_a_time_and_the_weekly_measures(self):
+        from datetime import date, timedelta
+        from apps.trainer import analysis, speed
+        today = date.today()
+        runs = [(84, stream([(600, 2.8), (318, 1609.344 / 318), (600, 2.8)])),          # a hard mile
+                (77, stream([(600, 2.8), (1059, 5000 / 1059), (600, 2.8)])),            # a hard 5K
+                (70, easy_run_with_strides(fast=4.9)), (63, easy_run_with_strides(fast=4.9)),
+                (21, easy_run_with_strides(fast=5.3)), (14, easy_run_with_strides(fast=5.35)),
+                (7, session_of(8, 79, 400 / 79)), (0, session_of(8, 28, 200 / 28))]
+        for i, (days_ago, st) in enumerate(runs):
+            day = (today - timedelta(days=days_ago)).isoformat()
+            self.fake.activities[600 + i] = activity(600 + i, day=day)
+            self.fake.streams[600 + i] = st
+            self.sync._store(self.user, self.fake.activities[600 + i])
+        self.assertEqual(speed.waiting_count(self.db, self.user), 8)
+        self.assertEqual(speed.fill(self.sync, self.user, limit=3), 3)
+        self.assertEqual(speed.fill(self.sync, self.user, limit=10), 5)
+        self.assertEqual(speed.fill(self.sync, self.user, limit=10), 0)  # each run is read once
+        o = analysis.overview(self.db, self.user)["speed"]
+        self.assertEqual(o["waiting"], 0)
+        self.assertAlmostEqual(o["weeks"][-1]["cs"], 4.58, delta=0.08)    # about 5:52/mi, from all the bests found
+        self.assertTrue(80 <= o["d_prime"] <= 250, o["d_prime"])
+        self.assertAlmostEqual(o["speed_work"], 570, delta=60)         # this week: the 200s
+        self.assertGreater(o["near_top"], 1000)                         # 200s at near top speed
+        self.assertTrue(o["stride_pace_recent"] < o["stride_pace_before"], o)
+        self.assertIn("200", o["latest"]["summary"])
+
+    def test_a_table_from_an_earlier_version_gets_the_new_columns(self):
+        from apps.trainer import speed
+        conn = self.db.connect()
+        conn.execute("CREATE TABLE tr_run_speed (user_id INTEGER NOT NULL, external_id TEXT NOT NULL, day TEXT NOT NULL, "
+                     "strides INTEGER DEFAULT 0, strides_json TEXT DEFAULT '[]', stride_mps REAL, usual_mps REAL, "
+                     "checked_at TEXT, PRIMARY KEY (user_id, external_id))")
+        conn.execute("INSERT INTO tr_run_speed (user_id, external_id, day) VALUES (?, 'old', '2026-11-20')", (self.user,))
+        conn.commit()
+        speed.ensure(self.db)
+        row = conn.execute("SELECT version, efforts_json FROM tr_run_speed WHERE external_id = 'old'").fetchone()
+        self.assertEqual((row["version"], row["efforts_json"]), (0, "[]"))  # read again (version 0 < VERSION)
+
+    def load_weeks(self, weekly_runs):
+        """weekly_runs: {weeks_ago: [stream, ...]}, plus a hard mile and 5K 10 weeks ago for critical speed."""
+        from datetime import date, timedelta
+        monday = date.today() - timedelta(days=date.today().weekday())
+        weekly_runs = dict(weekly_runs)
+        weekly_runs.setdefault(10, []).extend([stream([(600, 2.8), (318, 1609.344 / 318), (600, 2.8)]),
+                                               stream([(600, 2.8), (1059, 5000 / 1059), (600, 2.8)])])
+        n = 700
+        for weeks_ago, streams in weekly_runs.items():
+            for i, st in enumerate(streams):
+                day = (monday - timedelta(weeks=weeks_ago) + timedelta(days=i)).isoformat()
+                self.fake.activities[n] = activity(n, day=day)
+                self.fake.streams[n] = st
+                self.sync._store(self.user, self.fake.activities[n])
+                n += 1
+        from apps.trainer import speed
+        speed.fill(self.sync, self.user, limit=100)
+
+    def test_a_sudden_block_of_400s_goes_over_the_line(self):
+        from apps.trainer import analysis
+        quiet = {w: [easy_run_with_strides(strides=4, fast=5.0)] for w in (2, 3, 4, 5)}
+        quiet[1] = [session_of(18, 82, 400 / 82, jog=30), easy_run_with_strides(strides=4, fast=5.0)]
+        self.load_weeks(quiet)
+        o = analysis.overview(self.db, self.user)["speed"]
+        last = o["weeks"][-2]
+        self.assertTrue(last["work_over"], last)
+        self.assertGreater(last["speed_work"], last["work_line"])
+        self.assertIn(last["label"], o["over_weeks"])
+        self.assertFalse(any(w["work_over"] for w in o["weeks"][-6:-2]))  # the strides weeks stay under
+
+    def test_building_up_to_it_stays_under(self):
+        from apps.trainer import analysis
+        build = {6: [session_of(8, 82, 400 / 82, jog=60)], 5: [session_of(10, 82, 400 / 82, jog=60)],
+                 4: [session_of(12, 82, 400 / 82, jog=45)], 3: [session_of(14, 82, 400 / 82, jog=45)],
+                 2: [session_of(16, 82, 400 / 82, jog=30)], 1: [session_of(18, 82, 400 / 82, jog=30)]}
+        self.load_weeks(build)
+        o = analysis.overview(self.db, self.user)["speed"]
+        self.assertFalse(o["weeks"][-2]["work_over"], o["weeks"][-2])
+
+    def test_a_few_seconds_slower_per_rep_counts_much_less(self):
+        """18 x 400: at 82 s it's about twice the speed work of 85 s; at critical speed (~87 s) almost none."""
+        from apps.trainer import speed
+        used = {}
+        for secs in (82, 83, 85, 87):
+            st = session_of(18, secs, 400 / secs, jog=30)
+            used[secs] = speed.d_prime_used(speed.histogram(st["time"]["data"], st["velocity_smooth"]["data"]), 4.576)
+        self.assertGreater(used[82], used[83])
+        self.assertGreater(used[82], 2 * used[85])
+        self.assertLess(used[87], 60)

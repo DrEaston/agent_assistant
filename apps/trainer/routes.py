@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from core import ui
 from database import get_current_user_id, reset_current_user_id, set_current_user_id
 
-from . import analysis, plan, strava
+from . import analysis, plan, speed, strava
 from .manifest import APP
 
 router = APIRouter()
@@ -56,6 +56,8 @@ def catch_up(limit=5):
         s = sync()
         if s.status()["pending"]:
             s.process(limit)
+        if get_current_user_id():
+            speed.fill(s, get_current_user_id(), limit=5)  # older runs' strides, a few per visit
     except Exception as exc:
         print(f"Warning: Strava catch-up failed: {exc!r}")
 
@@ -319,6 +321,7 @@ def sync_now():
     try:
         s.process(10)
         s.fill_details(user, limit=10)
+        speed.fill(s, user, limit=25)
     except strava.StravaError as exc:
         return back(BASE + "/log?problem=" + str(exc)[:200].replace("&", " "))
     return back(BASE + "/log")
