@@ -199,6 +199,7 @@ from core.connector import oauth as connector_oauth, server as connector_server 
 from core.connector.pages import open_page_tool  # noqa: E402
 from core.connector.tools import RemoteToolSet, ToolSet  # noqa: E402
 from apps.kitchen import nav as kitchen_nav  # noqa: E402
+from apps.trainer import nav as trainer_nav  # noqa: E402
 from apps.kitchen.thanksgiving import nav as thanksgiving_nav  # noqa: E402
 
 connector_auth = connector_oauth.OAuth(db, lambda user_id: dict(db.get_user_by_id(user_id) or {}) or None)
@@ -237,17 +238,18 @@ from core.mascot import routes as mascot_routes  # noqa: E402  (the animation la
 app.include_router(mascot_routes.router)
 app.include_router(media_routes.router)
 media_routes.configure_api(lambda request: connector_auth.authenticate(request))
+TRAINER_TOOLS = trainer_connector.tools()  # this week, the log, Strava sync, a run, the speed picture
 CONNECTOR_TOOLSETS = [
     KITCHEN_TOOLS,
     THANKSGIVING_TOOLS,
     # Every app's pages (apps/<app>/nav.py): links Claude can hand over. Dieter's own chat opens them instead.
     ToolSet("dieter", [open_page_tool([kitchen_nav.PAGES, thanksgiving_nav.PAGES, assistant_nav.PAGES,
-                                       logbook_connector.PAGES, media_connector.PAGES])]),
+                                       logbook_connector.PAGES, media_connector.PAGES, trainer_nav.PAGES])]),
     studio_connector.tools(),  # Studio reports, for the admin
     ASSISTANT_TOOLS,
     LOGBOOK_TOOLS,
     media_connector.tools(),
-    trainer_connector.tools(),  # Trainer: this week, the log's totals, whether Strava is syncing
+    TRAINER_TOOLS,
 ]
 
 
@@ -279,9 +281,11 @@ from apps.kitchen import recipe_changes as kitchen_recipe_changes  # noqa: E402
 
 SITE_PAGES = [Page("today.home", "Today", "Dieter's home page: today across every app.", "/")]
 DIETER_CHAT = dieter_chat.ChatSetup(
-    toolsets=[KITCHEN_TOOLS, THANKSGIVING_TOOLS, ASSISTANT_TOOLS, LOGBOOK_TOOLS],
-    page_lists=[SITE_PAGES, kitchen_nav.PAGES, thanksgiving_nav.PAGES, assistant_nav.PAGES, logbook_connector.PAGES],
-    notes=[kitchen_connector.CHAT_NOTES, assistant_connector.CHAT_NOTES, logbook_connector.CHAT_NOTES],
+    toolsets=[KITCHEN_TOOLS, THANKSGIVING_TOOLS, ASSISTANT_TOOLS, LOGBOOK_TOOLS, TRAINER_TOOLS],
+    page_lists=[SITE_PAGES, kitchen_nav.PAGES, thanksgiving_nav.PAGES, assistant_nav.PAGES, logbook_connector.PAGES,
+                trainer_nav.PAGES],
+    notes=[kitchen_connector.CHAT_NOTES, assistant_connector.CHAT_NOTES, logbook_connector.CHAT_NOTES,
+           trainer_connector.CHAT_NOTES],
     savers=kitchen_connector.savers(),
     pending=kitchen_connector.pending,
     offer=lambda schema: not schema["name"].startswith("thanksgiving_")
@@ -297,7 +301,7 @@ def dieter_chat_log(summary, said, page_url):
 
 DIETER_CHAT.log_for_later = dieter_chat_log
 # Pages whose Ask Dieter goes to Dieter's chat (the rest still use the older handlers in api_dieter_action).
-DIETER_CHAT_PATHS = ("/apps/recipes", "/apps/assistant", "/projects")
+DIETER_CHAT_PATHS = ("/apps/recipes", "/apps/assistant", "/projects", "/apps/trainer")
 app.include_router(connector_auth.router())
 app.include_router(connector_server.make_router(CONNECTOR_TOOLSETS, connector_auth.authenticate, connector_run_as,
                                                 signer=core_proxy.signer_user))
@@ -4555,14 +4559,18 @@ def api_dieter_action(message: DieterActionMessage):
     if music_routes.message_requests_playlist_action(message.content, page_url):
         return music_routes.handle_playlist_action_request(message, page_url)
 
+    # On Trainer pages the older shoe-log and run-reflection handlers (they save things) take statements ("legs felt
+    # heavy, RPE 7"); questions ("how did my race go?") go to Dieter's chat with the trainer_ tools.
+    trainer_question = is_trainer_question(message.content) and dieter_chat_handles(message)
+    if message_requests_trainer_shoe_log(message.content, page_url) and not trainer_question:
+        return handle_trainer_shoe_log_request(message, page_url)
+
+    if message_requests_trainer_reflection(message.content, page_url) and not trainer_question:
+        return handle_trainer_reflection_request(message, page_url)
+
     if dieter_chat_handles(message):
         return dieter_chat_reply(message)
 
-    if message_requests_trainer_shoe_log(message.content, page_url):
-        return handle_trainer_shoe_log_request(message, page_url)
-
-    if message_requests_trainer_reflection(message.content, page_url):
-        return handle_trainer_reflection_request(message, page_url)
 
     planner_loop_active = bool((message.previous_action_plan or "").strip()) or message_requests_planner_action(message.content)
     if planner_loop_active:
@@ -6021,6 +6029,16 @@ def handle_trainer_shoe_log_request(message, page_url):
         "redirect_url": f"/apps/trainer/imports?shoe_workout_id={workout['id']}",
         "redirect_label": "Open Shoe Log",
     }
+
+
+QUESTION_WORDS = ("how", "what", "why", "when", "where", "which", "who", "did", "do", "does", "is", "am", "are",
+                  "was", "were", "can", "could", "should", "would", "will", "compare", "tell", "explain", "show")
+
+
+def is_trainer_question(text):
+    """A question for Dieter ("how did my race go?") rather than a note to save ("legs felt heavy, RPE 7")."""
+    words = re.findall(r"[a-z']+", (text or "").lower())
+    return "?" in (text or "") or bool(words and words[0].split("'")[0] in QUESTION_WORDS)
 
 
 def message_requests_trainer_reflection(text, page_url=""):
