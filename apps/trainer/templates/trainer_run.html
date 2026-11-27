@@ -1,5 +1,6 @@
 {% extends "layout.html" %}
 {% import "components.html" as ui %}
+{% import "trainer_after_run.html" as after %}
 {% block title %}{{ r.title }} · Trainer{% endblock %}
 {% block content %}
 {% call ui.page_header(r.title, crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs, current=current,
@@ -17,6 +18,18 @@
     {% elif r.has_series %}<p class="muted">An easy run: nothing faster than your fast-running line.</p>{% endif %}
     {% if not r.has_series %}{% call ui.banner("info") %}The details for this run haven't been read from Strava yet. Tap Sync now on the Log page.{% endcall %}{% endif %}
   </div>
+
+  {% if checkin_run and not trainer_viewing %}
+  {% call ui.section("After the run") %}
+  {% if saved.shoe or saved.feel or saved.note %}
+  <div class="card stack">
+    <p>{% if saved.shoe %}Shoes: <strong>{{ saved.shoe }}</strong>{% endif %}{% if saved.feel %}{{ " · " if saved.shoe }}Felt: <strong>{{ saved.feel }}/10{% if saved.feel_label %} ({{ saved.feel_label }}){% endif %}</strong>{% endif %}</p>
+    {% if saved.note %}<p class="small">{{ saved.note }}</p>{% endif %}
+    <details><summary class="small">Change</summary>{{ after.checkin(checkin_run, shoe_list, feels, page_url, saved) }}</details>
+  </div>
+  {% else %}{{ after.checkin(checkin_run, shoe_list, feels, page_url) }}{% endif %}
+  {% endcall %}
+  {% endif %}
 
   {% if r.map %}
   {% call ui.section("Route") %}

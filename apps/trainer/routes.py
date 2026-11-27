@@ -1,8 +1,8 @@
 """Trainer's new pages (docs/trainer_plan.md): This week, the Sunday check-in, his usual week, a session, and the
 calendar feed his phone subscribes to.
 
-The older Trainer pages (history, Strava imports, workouts, coaching, settings) are still in api.py with the old
-look; they move here when they're rebuilt.
+The older Trainer pages (history, Strava imports, workout library, upcoming/past, settings, the old coach mode)
+were removed in Nov 2026; Strava's connect/callback/disconnect endpoints are still in api.py.
 """
 
 import csv
@@ -21,7 +21,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from core import ui
 from database import get_current_user_id, reset_current_user_id, set_current_user_id
 
-from . import analysis, coach, plan, runpage, speed, strava
+from . import analysis, coach, plan, runpage, shoes, speed, strava
 from .manifest import APP
 
 _state = {"db": None}
@@ -59,8 +59,7 @@ TABS = (
     ("Sunday check-in", BASE + "/checkin"),
     ("Usual week", BASE + "/usual"),
     ("Log", BASE + "/log"),
-    ("History", BASE + "/history"),
-    ("Strava", BASE + "/imports"),
+    ("Shoes", BASE + "/shoes"),
 )
 
 
@@ -70,6 +69,21 @@ def configure(db):
 
 def store():
     return plan.PlanStore(_state["db"])
+
+
+def shoe_store():
+    return shoes.ShoeStore(_state["db"])
+
+
+def today():
+    """Trainer's Today card: today's sessions, and runs waiting for the after-run check-in."""
+    card = store().today()
+    try:
+        card["after_run"] = shoe_store().count_waiting()
+    except Exception as exc:   # the card must never break Today
+        print(f"Warning: after-run count failed: {exc!r}")
+        card["after_run"] = 0
+    return card
 
 
 def sync():
@@ -134,8 +148,10 @@ def overview(request: Request, week: str = ""):
     history_done = sync().history_state(user)[0] if connected else True
     getting = {"on": connected and (not history_done or numbers["speed"]["waiting"] > 0),
                "history_done": history_done, "left": numbers["speed"]["waiting"]}
+    sh = shoe_store()
     return render("trainer_overview.html", title="Trainer", current=BASE, page_url=BASE, view=view,
-                  guidance=analysis.week_guidance(view), o=numbers, getting=getting,
+                  guidance=analysis.week_guidance(view), o=numbers, getting=getting, after_run=sh.waiting(),
+                  shoe_list=sh.shoes(include_retired=False), feels=shoes.FEELS,
                   today=[s for d in view["days"] if d["is_today"] for s in d["sessions"]])
 
 
@@ -148,7 +164,13 @@ def run_page(external_id: str):
     r = runpage.detail(_state["db"], get_current_user_id(), external_id, races=plan.race_bests(s.settings()))
     if not r:
         raise HTTPException(status_code=404, detail="That run isn't in your log.")
-    return render("trainer_run.html", title=r["title"], r=r, current=BASE, page_url=f"{BASE}/run/{external_id}")
+    sh = shoe_store()
+    workout_id = sh.workout_id(external_id)
+    checkin_run = sh._run(_state["db"].connect().execute("SELECT * FROM trainer_imported_workouts WHERE id = ?",
+                                                         (workout_id,)).fetchone()) if workout_id else None
+    return render("trainer_run.html", title=r["title"], r=r, current=BASE, page_url=f"{BASE}/run/{external_id}",
+                  checkin_run=checkin_run, saved=sh.for_run(workout_id) if workout_id else None,
+                  shoe_list=sh.shoes(include_retired=False), feels=shoes.FEELS)
 
 
 @router.get(BASE + "/run/{external_id}/explore")
@@ -251,6 +273,49 @@ def delete_session(session_id: int):
     session = _guard(store().session, session_id)
     store().delete_session(session_id)
     return back(f"{BASE}?week={plan.week_start(session['day']).isoformat()}")
+
+
+# ---------------------------------------------------------------- Shoes and the after-run check-in (shoes.py)
+
+
+def _shoes(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except shoes.Invalid as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+@router.get(BASE + "/shoes")
+def shoes_page(request: Request):
+    sh = shoe_store()
+    _shoes(sh._user)
+    return render("trainer_shoes.html", title="Shoes", current=BASE + "/shoes", page_url=BASE + "/shoes",
+                  shoes=sh.shoes(), active=sh.shoes(include_retired=False), waiting=sh.waiting(limit=10),
+                  feels=shoes.FEELS)
+
+
+@router.post(BASE + "/shoes/add")
+def add_shoe(name: str = Form(""), brand: str = Form(""), model: str = Form(""), start_miles: str = Form("0")):
+    _shoes(shoe_store().add, name, brand, model, start_miles)
+    return back(BASE + "/shoes")
+
+
+@router.post(BASE + "/shoes/{shoe_id}/retire")
+def retire_shoe(shoe_id: int, retired: str = Form("")):
+    _shoes(shoe_store().retire, shoe_id, bool(retired))
+    return back(BASE + "/shoes")
+
+
+@router.post(BASE + "/after-run/{workout_id}")
+def after_run(workout_id: int, shoe_id: str = Form(""), feel: str = Form(""), note: str = Form(""),
+              skip: str = Form(""), next: str = Form("")):
+    """The after-run check-in: a tap on a pair saves it with how it felt and the note; Skip stops asking."""
+    sh = shoe_store()
+    if skip:
+        _shoes(sh.skip, workout_id)
+    else:
+        _shoes(sh.save, workout_id, int(shoe_id) if shoe_id.isdigit() else None, feel, note)
+    return back(next, BASE)
 
 
 # ---------------------------------------------------------------- Coach mode (apps/trainer/coach.py)

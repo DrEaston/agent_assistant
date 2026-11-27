@@ -1,0 +1,41 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% import "trainer_after_run.html" as after %}
+{% block title %}Shoes · Trainer{% endblock %}
+{% block content %}
+{% call ui.page_header("Shoes", crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs, current=current,
+    sub="Miles on each pair. After each new run Dieter asks which pair you wore.") %}{% endcall %}
+<main class="wrap">
+  {% if waiting %}
+  {% call ui.section("Runs waiting") %}
+  <div class="stack">{% for run in waiting %}{{ after.checkin(run, active, feels, "/apps/trainer/shoes") }}{% endfor %}</div>
+  {% endcall %}
+  {% endif %}
+
+  {% call ui.section("Your shoes") %}
+  {% if shoes %}
+  <div class="card">
+    {% for s in shoes %}
+    <div class="list-row">
+      <span class="grow"><strong>{{ s.name }}</strong>{% if s.retired %} {{ ui.tag("Retired") }}{% elif s.replace %} {{ ui.tag(s.miles|round|int ~ " mi: time for a new pair?", "warn") }}{% endif %}<br>
+        <span class="small muted num">{{ s.miles }} mi · {{ s.runs }} run{{ "" if s.runs == 1 else "s" }}{% if s.last_used %} · last {{ s.last_used }}{% endif %}{% if s.start_miles %} · started at {{ s.start_miles|round(1) }}{% endif %}</span></span>
+      <form method="post" action="/apps/trainer/shoes/{{ s.id }}/retire">{% if s.retired %}<button type="submit" class="quiet">Back in use</button>{% else %}<input type="hidden" name="retired" value="1"><button type="submit" class="quiet">Retire</button>{% endif %}</form>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}{{ ui.empty("No shoes yet. Add the pairs you run in.") }}{% endif %}
+  {% endcall %}
+
+  {% call ui.section("Add a pair") %}
+  <form method="post" action="/apps/trainer/shoes/add" class="card stack">
+    {{ ui.field("Name", "name", placeholder="Pegasus 41 (blue)", maxlength=60, required=True) }}
+    <div class="cols">
+      {{ ui.field("Brand", "brand", placeholder="Nike", maxlength=60) }}
+      {{ ui.field("Model", "model", placeholder="Pegasus 41", maxlength=60) }}
+    </div>
+    {{ ui.field("Miles already on them", "start_miles", value="0", type="number") }}
+    <button type="submit" class="primary">Add</button>
+  </form>
+  {% endcall %}
+</main>
+{% endblock %}

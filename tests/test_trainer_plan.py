@@ -177,7 +177,7 @@ class PageTests(unittest.TestCase):
         self.client.post("/apps/trainer/usual", data={"miles": "40", "workout_day": "tue", "workout_time": "16:00",
                                                       "long_day": "sat", "weights": "2", "pilates": "2",
                                                       "strides": "2", "water_goal": "8"})
-        self.assertEqual(self.client.get("/apps/trainer/history").status_code, 200)  # the older home, kept
+        self.assertEqual(self.client.get("/apps/trainer/history").status_code, 404)  # the older pages are gone
 
     def test_calendar_feed_needs_only_the_link(self):
         self.client.get("/apps/trainer/usual")

@@ -33,6 +33,9 @@
         <form method="post" action="/apps/trainer/sync/now"><button type="submit" class="quiet">Sync now</button></form>
       </div>
       {% if status.history_count %}<p class="small muted">{{ status.history_count }} older activities imported{% if status.history_done %}, all done{% endif %}. Laps and splits fill in a few at a time.</p>{% endif %}
+      {% call ui.confirm("Disconnect Strava", danger=True) %}
+        <form method="post" action="/apps/trainer/strava/disconnect" class="stack"><p class="small">New runs stop arriving. Runs already in your log stay.</p><button type="submit" class="danger">Disconnect</button></form>
+      {% endcall %}
     {% endif %}
   </div>
   {% endcall %}
