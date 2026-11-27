@@ -162,16 +162,21 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None, races=None):
             "stride_gain": gain(s_recent, s_before),
             "cs_pace": this_week["cs_pace"], "d_prime": this_week["d_prime"], "cs_then_pace": pace(cs_then),
             "cs_gain": gain(this_week["cs"], cs_then),
-            # Aerobic vs anaerobic: threshold pace (critical speed) and speed reserve (D', metres you can run above it)
+            # Aerobic: threshold pace (critical speed). Speed: speed fitness (average weekly speed load, 4 weeks
+            # before) against this week's speed load; and speed advantage (D': the ground he can gain on threshold
+            # pace in one all-out effort, which sets race predictions and the coach's paces).
             "aerobic_spark": spark([w["cs"] for w in weekly]),
-            "anaerobic_spark": spark([w["d_prime"] for w in weekly]),
-            "d_prime_m": round(this_week["d_prime"]) if this_week["d_prime"] else None,
-            # D' shown as a head start: predicted time = (distance - D') / CS, so in any race his speed is worth
-            # D' metres, or D'/CS seconds, over running it all at threshold pace.
-            "head_start_s": (round(this_week["d_prime"] / this_week["cs"])
-                             if this_week["d_prime"] and this_week["cs"] else None),
+            "speed_fitness": this_week.get("speed_fitness"),
+            "speed_fitness_spark": spark([w.get("speed_fitness") for w in weekly]),
+            "speed_fitness_gain": ((this_week["speed_fitness"] - weekly[-13]["speed_fitness"])
+                                   if len(weekly) >= 13 and this_week.get("speed_fitness") is not None
+                                   and weekly[-13].get("speed_fitness") is not None else None),
+            "load_status": this_week.get("load_status", ""),
+            "figure": speed_figure(this_week["speed_work"], this_week.get("speed_fitness"), this_week["work_line"],
+                                   this_week["d_prime"]),
+            "advantage_m": round(this_week["d_prime"]) if this_week["d_prime"] else None,
             "predictions": predictions(this_week["cs"], this_week["d_prime"]),
-            "d_prime_gain": (round(this_week["d_prime"] - weekly[-13]["d_prime"])
+            "advantage_gain": (round(this_week["d_prime"] - weekly[-13]["d_prime"])
                              if len(weekly) >= 13 and this_week["d_prime"] and weekly[-13]["d_prime"] else None),
             "speed_work": this_week["speed_work"], "tanks": this_week["tanks"],
             "speed_work_usual": round(work_usual) if work_usual is not None else None,
@@ -189,6 +194,21 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None, races=None):
             "weeks": weekly,
         },
     }
+
+
+def speed_figure(load, fitness, limit, advantage, width=300):
+    """x positions (0..width) for the small Speed figure: this week's load as a bar, speed fitness and the safe
+    limit as ticks, and speed advantage as a bracket from 0. All four are metres gained on threshold pace, so they
+    share one scale. None with nothing to draw."""
+    values = [v for v in (load, fitness, limit, advantage) if v]
+    if not values:
+        return None
+    top = max(values) * 1.08
+
+    def x(v):
+        return round(v / top * width, 1) if v else None
+    return {"load": x(load) or 0, "fitness": x(fitness), "limit": x(limit), "advantage": x(advantage),
+            "width": width}
 
 
 PREDICT = ((800, "800 m"), (1609, "Mile"), (3000, "3K"), (5000, "5K"), (10000, "10K"))

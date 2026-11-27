@@ -14,9 +14,11 @@ CHAT_NOTES = """Trainer: Curtis's running (trainer_ tools; read-only). trainer_r
 date: a race day often has a warm-up, the race and a cool-down), trainer_speed his speed picture over the weeks. Use
 the words his pages use (explain them only if he asks; the explainer page is trainer.speed_how): threshold pace = about
 the fastest pace he could hold for half an hour, worked out from his hardest efforts in the last 6 months (sports
-scientists call it critical speed); speed points = metres he got ahead of a pacer running at threshold pace (faster
-running scores more per second; slower than threshold scores nothing); safe limit = 1.5 x his average weekly speed
-points over the 4 weeks before; "a little over" up to 1.5x the limit, "well over" past that; near-sprint running =
+scientists call it critical speed); speed load = speed points = metres he got ahead of a pacer running at threshold
+pace (faster running scores more per second; slower than threshold scores nothing); speed fitness = his average
+weekly speed load over the 4 weeks before (what his legs are used to); speed advantage = the ground he can gain on
+threshold pace in one all-out effort (D', in metres; sets race predictions and coach paces); safe limit = 1.5 x
+speed fitness, never below 2 x speed advantage; "a little over" up to 1.5x the limit, "well over" past that; near-sprint running =
 metres at 90% of top speed or faster. Distances are what his watch measured: trust them (a race reading 3.0 miles was
 a short course). For "how did my race go" or "am I getting faster": compare it with his earlier hard efforts
 (trainer_speed hard_efforts_last_year; pace for pace, and holding a pace longer is better), say where its speed points
