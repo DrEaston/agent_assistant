@@ -115,9 +115,9 @@
     {% call ui.banner("warn" if o.how == "well over" else "info") %}<strong><a href="/apps/trainer/speed/{{ o.week }}">Week of {{ o.label }}</a>: {{ o.times }}× the safe limit, {{ o.how }}</strong>{% if o.cause %} ({% if o.cause.id %}<a href="/apps/trainer/run/{{ o.cause.id }}">{{ o.cause.summary }}</a>{% else %}{{ o.cause.summary }}{% endif %} on {{ o.cause.day.strftime("%b") }} {{ o.cause.day.day }}){% endif %}.{% if o.how == "well over" %} A jump like that is where injuries tend to come from; build up to it over a few weeks.{% endif %}{% endcall %}
     {% endfor %}
   <div class="card stack">
-    <div class="spread"><span class="small muted">Head start</span><strong class="stat-big">{{ "{:,}".format(sp.d_prime_m) ~ " m" if sp.d_prime_m else "–" }}</strong></div>
-    {% if sp.anaerobic_spark %}{{ ui.sparkline(sp.anaerobic_spark, "Head start, last 16 weeks") }}{% endif %}
-    <span class="small">{% if sp.head_start_s %}About {{ sp.head_start_s }} s in any race, vs running it all at threshold pace.{% else %}What your speed is worth in a race, vs running it all at threshold pace.{% endif %}{% if sp.d_prime_gain is not none %} {{ "+" if sp.d_prime_gain >= 0 }}{{ sp.d_prime_gain }} m vs 12 weeks ago.{% endif %}</span>
+    <div class="spread"><span class="small muted">Speed head start</span><strong class="stat-big">{{ "{:,}".format(sp.d_prime_m) ~ " m" if sp.d_prime_m else "–" }}</strong></div>
+    {% if sp.anaerobic_spark %}{{ ui.sparkline(sp.anaerobic_spark, "Speed head start, last 16 weeks") }}{% endif %}
+    <span class="small">What your speed is worth in a race: you finish as if you'd started this far ahead of yourself running it all at threshold pace{% if sp.head_start_s %} (about {{ sp.head_start_s }} s){% endif %}. More speed, bigger head start.{% if sp.d_prime_gain is not none %} {{ "+" if sp.d_prime_gain >= 0 }}{{ sp.d_prime_gain }} m vs 12 weeks ago.{% endif %}</span>
     <div class="stat-grid">
       <div class="stat"><span class="small muted">Top speed</span><strong>{{ sp.top_pace_recent or "–" }}</strong>
         <span class="small">{% if sp.top_pace_recent %}/mi, best 5 seconds, last 4 weeks{% if sp.top_pace_before %} · {{ "faster" if sp.faster else "not faster" }} than before ({{ sp.top_pace_before }}){% endif %}{% else %}no fast running yet{% endif %}</span></div>
@@ -158,7 +158,7 @@
     {{ ui.bar_chart(tbars, sp.top_max, unit=" m", label="Near-sprint running per week, last 16 weeks") }}
     <p class="small muted">Near-sprint running per week (metres), with its safe limit.</p>
 
-    <p class="small muted">Head start is D′ in your speed model: race time = (distance − head start) ÷ threshold speed, so your speed lets you finish as if you'd started that far ahead. Estimates from each run's second-by-second data on Strava. <a href="/apps/trainer/speed/how">How these numbers work</a></p>
+    <p class="small muted">Speed head start is D′ in your speed model: race time = (distance − head start) ÷ threshold speed, so your speed lets you finish as if you'd started that far ahead. Estimates from each run's second-by-second data on Strava. <a href="/apps/trainer/speed/how">How these numbers work</a></p>
   </div>
   {% endcall %}
 
@@ -169,7 +169,7 @@
     <select id="predict-distance">{% for p in sp.predictions %}<option value="{{ p.time }}"{% if p.name == "5K" %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
     <strong class="stat-big" id="predict-time" aria-live="polite">{% for p in sp.predictions %}{% if p.name == "5K" %}{{ p.time }}{% endif %}{% endfor %}</strong>
   </div>
-  <p class="small muted">From your threshold pace and head start, as of this week. Best for races of about 2 to 30 minutes.</p>
+  <p class="small muted">From your threshold pace and speed head start, as of this week. Best for races of about 2 to 30 minutes.</p>
   <script>
   (() => { const pick = document.getElementById("predict-distance"), out = document.getElementById("predict-time");
     if (!out.textContent.trim()) out.textContent = pick.value;
