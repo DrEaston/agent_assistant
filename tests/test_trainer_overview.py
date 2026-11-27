@@ -80,5 +80,15 @@ class PredictionTests(unittest.TestCase):
         self.assertEqual(analysis.predictions(None, 200), [])
 
 
+class LoadStatusTests(unittest.TestCase):
+    def test_this_weeks_load_against_speed_fitness(self):
+        from apps.trainer import speed
+        self.assertEqual(speed.load_status(100, 200, False), "easing off")
+        self.assertEqual(speed.load_status(220, 200, False), "holding")
+        self.assertEqual(speed.load_status(290, 200, False), "building")
+        self.assertEqual(speed.load_status(500, 200, True), "over the limit")
+        self.assertEqual(speed.load_status(50, 0, False), "starting")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -162,16 +162,19 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None, races=None):
             "stride_gain": gain(s_recent, s_before),
             "cs_pace": this_week["cs_pace"], "d_prime": this_week["d_prime"], "cs_then_pace": pace(cs_then),
             "cs_gain": gain(this_week["cs"], cs_then),
-            # Aerobic vs anaerobic: threshold pace (critical speed) and speed reserve (D', metres you can run above it)
+            # Aerobic: threshold pace (critical speed). Speed: speed fitness (average weekly speed load, 6 weeks
+            # before) against this week's speed load; and kick (D': the ground he can gain on threshold pace in one
+            # all-out effort, which sets race predictions and the coach's paces).
             "aerobic_spark": spark([w["cs"] for w in weekly]),
-            "anaerobic_spark": spark([w["d_prime"] for w in weekly]),
-            "d_prime_m": round(this_week["d_prime"]) if this_week["d_prime"] else None,
-            # D' shown as a head start: predicted time = (distance - D') / CS, so in any race his speed is worth
-            # D' metres, or D'/CS seconds, over running it all at threshold pace.
-            "head_start_s": (round(this_week["d_prime"] / this_week["cs"])
-                             if this_week["d_prime"] and this_week["cs"] else None),
+            "speed_fitness": this_week.get("speed_fitness"),
+            "speed_fitness_spark": spark([w.get("speed_fitness") for w in weekly]),
+            "speed_fitness_gain": ((this_week["speed_fitness"] - weekly[-13]["speed_fitness"])
+                                   if len(weekly) >= 13 and this_week.get("speed_fitness") is not None
+                                   and weekly[-13].get("speed_fitness") is not None else None),
+            "load_status": this_week.get("load_status", ""),
+            "kick_m": round(this_week["d_prime"]) if this_week["d_prime"] else None,
             "predictions": predictions(this_week["cs"], this_week["d_prime"]),
-            "d_prime_gain": (round(this_week["d_prime"] - weekly[-13]["d_prime"])
+            "kick_gain": (round(this_week["d_prime"] - weekly[-13]["d_prime"])
                              if len(weekly) >= 13 and this_week["d_prime"] and weekly[-13]["d_prime"] else None),
             "speed_work": this_week["speed_work"], "tanks": this_week["tanks"],
             "speed_work_usual": round(work_usual) if work_usual is not None else None,

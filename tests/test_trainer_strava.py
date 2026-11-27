@@ -650,7 +650,8 @@ class StrideTests(SyncTests):
         self.assertIn("points", page)
         self.assertIn("Week before", page)
         overview = client.get("/apps/trainer").text
-        self.assertIn("Speed points this week", overview)
+        self.assertIn("Speed load this week", overview)
+        self.assertIn("Kick", overview)
         self.assertIn(f'href="/apps/trainer/speed/{last}"', overview)
         self.assertNotIn("tanks", overview)
         self.assertEqual(client.get("/apps/trainer/speed/not-a-date").status_code, 404)

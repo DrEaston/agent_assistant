@@ -17,10 +17,10 @@
   </div>
   {% endcall %}
 
-  {% call ui.section("Speed points") %}
+  {% call ui.section("Speed load") %}
   <div class="card stack">
-    <p>Picture a pacer running beside you at threshold pace for the whole run. Every metre you get ahead of them is
-      one point. Running slower than the pacer doesn't cost points; it just scores nothing.</p>
+    <p>How much fast running a run (or a week) had, counted in points. Picture a pacer running beside you at threshold
+      pace for the whole run. Every metre you get ahead of them is one point. Running slower than the pacer doesn't cost points; it just scores nothing.</p>
     {% if e.examples %}{% set a = e.examples.steady %}{% set b = e.examples.fast %}
     <ul class="stack">
       <li>One 400 in {{ a.seconds }} s: the pacer covers {{ a.pacer }} m, so you're {{ a.points }} m ahead =
@@ -34,11 +34,31 @@
   </div>
   {% endcall %}
 
+  {% call ui.section("Speed fitness") %}
+  <div class="card stack">
+    <p>Your average weekly speed load over the {{ e.chronic_weeks }} weeks before this one: the speed work your legs
+      are used to. Keep speed work up and it rises; stop and it falls.</p>
+    <p>This week's speed load is read against it: under {{ e.easing }}× is easing off, up to {{ e.holding }}× holding,
+      up to {{ e.ratio }}× building.</p>
+  </div>
+  {% endcall %}
+
+  {% call ui.section("Kick") %}
+  <div class="card stack">
+    <p>The ground you can gain on your threshold pace in one all-out effort before you have to slow down. Run 3
+      minutes all out and you'd cover about that much more than 3 minutes at threshold pace.{% if e.kick_m %}
+      <strong>Yours is about {{ e.kick_m }} m.</strong>{% endif %}</p>
+    <p>Hard reps faster than threshold, like 200s to 800s, grow it. Together with threshold pace it sets your race
+      predictions and the paces for a coach's workouts.</p>
+    <p class="small muted">Sports scientists call this D′ ("D prime").</p>
+  </div>
+  {% endcall %}
+
   {% call ui.section("Safe limit") %}
   <div class="card stack">
-    <p>Your weekly speed points averaged over the {{ e.chronic_weeks }} weeks before, × {{ e.ratio }}. Injury research
-      finds that jumping more than about half again over what you've been doing is when injuries pile up. Building
-      gradually raises the limit with you.</p>
+    <p>{{ e.ratio }} × your speed fitness, and never below {{ e.floor }} × your kick (so a few strides after a quiet
+      stretch are always fine). Injury research finds that jumping more than about half again over what you've been
+      doing is when injuries pile up. Building gradually raises the limit with you.</p>
     <p>Up to {{ e.well_over }}× the limit is "a little over"; past that is "well over".</p>
     {% if e.over %}<ul class="stack">
       {% for w in e.over %}<li><a href="/apps/trainer/speed/{{ w.week }}">Week of {{ w.label }}</a>: {{ w.times }}×, {{ w.how }}</li>{% endfor %}

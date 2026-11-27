@@ -3,11 +3,11 @@
 {% block title %}{{ label }} · Trainer{% endblock %}
 {% block content %}
 {% call ui.page_header(label, crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs, current=current,
-    sub="Speed points for each run this week") %}{% endcall %}
+    sub="Speed load for each run this week") %}{% endcall %}
 <main class="wrap">
   <div class="card stack">
     <div class="stat-grid">
-      <div class="stat"><span class="small muted">Speed points</span><strong>{{ "{:,}".format(w.speed_work) if w.speed_work is not none else "–" }}</strong>
+      <div class="stat"><span class="small muted">Speed load</span><strong>{{ "{:,}".format(w.speed_work) if w.speed_work is not none else "–" }}</strong>
         <span class="small">{% if w.work_line %}safe limit {{ "{:,}".format(w.work_line) }}{% else %}no safe limit yet{% endif %} · <a href="/apps/trainer/speed/how">how it works</a></span></div>
       <div class="stat"><span class="small muted">Near-sprint running</span><strong>{{ "{:,}".format(w.near_top) }} m</strong>
         <span class="small">{% if w.top_line %}safe limit {{ "{:,}".format(w.top_line) }} m{% endif %}</span></div>
