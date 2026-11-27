@@ -9,6 +9,9 @@ PAGES = [
          "(run_id from trainer_speed or trainer_run).", "/apps/trainer/run/{run_id}", {"run_id": "number"}),
     Page("trainer.speed_how", "How these numbers work", "Plain-words explainer of threshold pace, speed load, the "
          "safe limit and near-sprint running.", "/apps/trainer/speed/how"),
+    Page("trainer.speed_math", "The math", "The formulas behind the Speed section (critical speed model, race "
+         "predictions, speed load, speed fitness, safe limits) with his values and the sources.",
+         "/apps/trainer/speed/how/math"),
     Page("trainer.speed_week", "Speed week", "One week's runs with their speed load and the week's safe limit "
          "(monday: that week's Monday).", "/apps/trainer/speed/{monday}", {"monday": "date"}),
     Page("trainer.week", "This week", "The planned week day by day: runs, strides, weights, Pilates.", "/apps/trainer/week"),

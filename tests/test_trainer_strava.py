@@ -657,6 +657,13 @@ class StrideTests(SyncTests):
         self.assertEqual(client.get("/apps/trainer/speed/not-a-date").status_code, 404)
         self.assertIn('href="/apps/trainer/speed/how"', overview)
         self.assertIn('href="/apps/trainer/speed/how"', page)
+        how = client.get("/apps/trainer/speed/how").text
+        self.assertIn('href="/apps/trainer/speed/how/math"', how)               # the math is its own page
+        self.assertNotIn("d = CS × t + D′", how)
+        math = client.get("/apps/trainer/speed/how/math")
+        self.assertEqual(math.status_code, 200)
+        self.assertIn("d = CS × t + D′", math.text)
+        self.assertIn("doi.org/10.1136/bjsports-2015-095788", math.text)
 
     def test_how_these_numbers_work(self):
         from apps.trainer import speed

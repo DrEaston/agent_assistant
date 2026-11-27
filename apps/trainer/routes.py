@@ -205,6 +205,13 @@ def speed_how():
                   page_url=f"{BASE}/speed/how")
 
 
+@router.get(BASE + "/speed/how/math")
+def speed_math():
+    """The math behind the Speed section: formulas, his own values, and the sources."""
+    e = speed.explain(_state["db"], get_current_user_id(), races=plan.race_bests(store().settings()))
+    return render("trainer_speed_math.html", title="The math", e=e, current=BASE, page_url=f"{BASE}/speed/how/math")
+
+
 @router.get(BASE + "/speed/{monday}")
 def speed_week(monday: str):
     """One week's runs with their speed points, the week's total and its safe limit."""

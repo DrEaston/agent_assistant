@@ -3,7 +3,7 @@
 {% block title %}How these numbers work · Trainer{% endblock %}
 {% block content %}
 {% call ui.page_header("How these numbers work", crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs,
-    current=current, sub="The Speed section in plain words, then the actual math and its sources") %}{% endcall %}
+    current=current, sub="The math behind the Speed section, in plain words") %}{% endcall %}
 <main class="wrap">
   {% call ui.section("Threshold pace") %}
   <div class="card stack">
@@ -80,68 +80,12 @@
   </div>
   {% endcall %}
 
-  {% call ui.section("The math", id="math") %}
-  <div class="card stack">
-    <h3 class="group-title">1. Threshold pace and speed advantage: the critical speed model</h3>
-    <p>For all-out efforts lasting about 2 to 15 minutes, the distance you can cover in time <var>t</var> is close to a
-      straight line:</p>
-    <p><code>d = CS × t + D′</code></p>
-    <p><strong>CS</strong> (critical speed, your threshold pace) is the slope: the speed you could keep adding distance
-      at for a long time. <strong>D′</strong> (your speed advantage) is the intercept: a fixed amount of distance you can
-      cover faster than CS before you're spent (Monod &amp; Scherrer 1965; in running, Hughson et al. 1984; review:
-      Jones &amp; Vanhatalo 2017).</p>
-    <p>Dieter fits it from your hardest efforts in the last 26 weeks. It takes a long one <var>L</var> (10–40 min) and a
-      short one <var>S</var> (2–7 min), then solves the two equations:</p>
-    <p><code>CS = (d<sub>L</sub> − d<sub>S</sub>) ÷ (t<sub>L</sub> − t<sub>S</sub>)</code> and
-      <code>D′ = d<sub>S</sub> − CS × t<sub>S</sub></code></p>
-    <p>It keeps the answer if it's believable (D′ between 80 and 400 m). Without a usable short effort it assumes a
-      typical trained runner's D′ = {{ e.typical_m }} m and takes <code>CS = (d<sub>L</sub> − {{ e.typical_m }}) ÷ t<sub>L</sub></code>.</p>
-    {% if e.cs %}<p><strong>Yours now:</strong> CS = {{ "%.2f" | format(e.cs) }} m/s ({{ e.cs_pace }}/mi), D′ = {{ e.d_prime }} m{% if e.advantage_typical %} (the typical value: no usable 2–7 minute all-out effort yet){% endif %}, {{ e.cs_how }}.</p>{% endif %}
-
-    <h3 class="group-title">2. Race predictions</h3>
-    <p>Rearranging the same line gives the time for a race of distance <var>d</var>:</p>
-    <p><code>t = (d − D′) ÷ CS</code></p>
-    <p>It's only as good as D′ and is meant for races of about 2 to 30 minutes. With the typical D′, short races (800 m,
-      mile) are the least reliable.</p>
-
-    <h3 class="group-title">3. Speed load (speed points)</h3>
-    <p>For every moment of a run faster than CS, add up how far ahead of a threshold-pace runner you got:</p>
-    <p><code>load = Σ (v − CS) × Δt</code>, over all moments where <code>v &gt; CS</code></p>
-    <p>It's measured in metres: the same units as D′. This is the distance version of the "W′ used above critical
-      power" idea (Jones &amp; Vanhatalo 2017). It doesn't subtract recovery: it's the total running above threshold.
-      Dieter computes it from each run's second-by-second speeds, grouped into 0.05 m/s bands.</p>
-
-    <h3 class="group-title">4. Speed fitness and this week's status</h3>
-    <p><code>speed fitness = average weekly speed load over the {{ e.chronic_weeks }} weeks before this one</code></p>
-    <p><code>ratio = this week's speed load ÷ speed fitness</code>: under {{ e.easing }} easing off, up to {{ e.holding }}
-      holding, up to {{ e.ratio }} building.</p>
-
-    <h3 class="group-title">5. Safe limits</h3>
-    <p><code>speed load limit = max({{ e.ratio }} × speed fitness, {{ e.floor }} × D′)</code></p>
-    <p>This is the acute:chronic workload ratio: injury rates rose in team-sport data when a week's load went past
-      about 1.5 times the recent average (Gabbett 2016). It's debated: the ratio has statistical problems and hasn't been
-      shown to cause injuries (Impellizzeri et al. 2020), so treat it as a guide, not a rule. "Well over" starts at
-      {{ e.well_over }} × the limit.</p>
-    <p><code>near-sprint metres = Σ distance run at v ≥ 0.9 × v<sub>max</sub></code>, where v<sub>max</sub> is your
-      fastest 5 seconds in 26 weeks{% if e.vmax_pace %} ({{ e.vmax_pace }}/mi, so near-sprint starts at {{ e.near_top_pace }}/mi){% endif %}. Its limit is
-      {{ e.ratio }} × the 4-week average, never below 500 m.</p>
-
-    <h3 class="group-title">Sources</h3>
-    <ul class="stack small">
-      <li>Monod H, Scherrer J. The work capacity of a synergic muscular group. <em>Ergonomics</em>. 1965;8:329–338.</li>
-      <li>Hughson RL, Orok CJ, Staudt LE. A high velocity treadmill running test to assess endurance running potential.
-        <em>Int J Sports Med</em>. 1984;5(1):23–25. <a href="https://doi.org/10.1055/s-2008-1025875">doi:10.1055/s-2008-1025875</a></li>
-      <li>Vanhatalo A, Doust JH, Burnley M. Determination of critical power using a 3-min all-out cycling test.
-        <em>Med Sci Sports Exerc</em>. 2007;39:548–555.</li>
-      <li>Jones AM, Vanhatalo A. The "critical power" concept: applications to sports performance with a focus on
-        intermittent high-intensity exercise. <em>Sports Med</em>. 2017;47(Suppl 1):65–78.
-        <a href="https://doi.org/10.1007/s40279-017-0688-0">doi:10.1007/s40279-017-0688-0</a></li>
-      <li>Gabbett TJ. The training–injury prevention paradox: should athletes be training smarter and harder?
-        <em>Br J Sports Med</em>. 2016;50(5):273–280. <a href="https://doi.org/10.1136/bjsports-2015-095788">doi:10.1136/bjsports-2015-095788</a></li>
-      <li>Impellizzeri FM, Tenan MS, Kempton T, et al. Acute:chronic workload ratio: conceptual issues and fundamental
-        pitfalls. <em>Int J Sports Physiol Perform</em>. 2020;15(6):907–913.</li>
-    </ul>
-  </div>
+  {% call ui.section("The math") %}
+  <a class="card link-row" href="/apps/trainer/speed/how/math">
+    <span class="label-stack"><span class="title">The math and its sources</span>
+      <span class="small muted">The formulas behind every number here, with your own values and the research they come from.</span></span>
+    <span class="chev" aria-hidden="true">›</span>
+  </a>
   {% endcall %}
 
   <p class="small muted section">These are estimates from Strava's second-by-second data, not lab tests.</p>
