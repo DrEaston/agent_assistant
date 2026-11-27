@@ -8,7 +8,6 @@
   <form method="post" action="/apps/trainer/usual" class="card stack">
     <div class="cols">
       {{ ui.field("Miles per week", "miles", value=(settings.miles | round(1)), type="number", required=True) }}
-      {{ ui.field("Water goal (glasses a day)", "water_goal", value=settings.water_goal, type="number") }}
     </div>
     <div class="cols">
       <div class="field"><label for="workout_day">Hard workout day</label>

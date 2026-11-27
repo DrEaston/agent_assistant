@@ -124,6 +124,15 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None, races=None):
     stride_before = [w["stride_mps"] for w in weekly[-12:-4] if w["stride_mps"]]
     s_recent, s_before = avg(stride_recent), avg(stride_before)
 
+    def spark(values, w=120, h=32):
+        """Polyline points for a small trend line (gaps skipped), higher = better; "" with under 2 points."""
+        pts = [(i, v) for i, v in enumerate(values) if v]
+        if len(pts) < 2:
+            return ""
+        lo, hi = min(v for _, v in pts), max(v for _, v in pts)
+        span, last = (hi - lo) or 1, (len(values) - 1) or 1
+        return " ".join(f"{round(i / last * w, 1)},{round(h - 3 - (v - lo) / span * (h - 6), 1)}" for i, v in pts)
+
     def gain(now, then):
         """Seconds per mile faster (+) or slower (-)."""
         return round(METERS_PER_MILE / then - METERS_PER_MILE / now) if now and then else None
@@ -153,6 +162,12 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None, races=None):
             "stride_gain": gain(s_recent, s_before),
             "cs_pace": this_week["cs_pace"], "d_prime": this_week["d_prime"], "cs_then_pace": pace(cs_then),
             "cs_gain": gain(this_week["cs"], cs_then),
+            # Aerobic vs anaerobic: threshold pace (critical speed) and speed reserve (D', metres you can run above it)
+            "aerobic_spark": spark([w["cs"] for w in weekly]),
+            "anaerobic_spark": spark([w["d_prime"] for w in weekly]),
+            "d_prime_m": round(this_week["d_prime"]) if this_week["d_prime"] else None,
+            "d_prime_gain": (round(this_week["d_prime"] - weekly[-13]["d_prime"])
+                             if len(weekly) >= 13 and this_week["d_prime"] and weekly[-13]["d_prime"] else None),
             "speed_work": this_week["speed_work"], "tanks": this_week["tanks"],
             "speed_work_usual": round(work_usual) if work_usual is not None else None,
             "near_top": this_week["near_top"], "near_top_usual": round(near_usual) if near_usual is not None else None,
@@ -161,7 +176,7 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None, races=None):
             "over_weeks": [{"week": w["week"], "label": w["label"], "times": w["times_line"], "how": w["how_over"],
                             "cause": w["cause"]}
                            for w in weekly if w["work_over"] or w["top_over"]],
-            "recent": speed.recent(db, user_id, limit=8, races=races),
+            "recent": speed.recent(db, user_id, limit=15, races=races),
             "work_max": max([w["speed_work"] or 0 for w in weekly] + [w["work_line"] or 0 for w in weekly] + [1]),
             "top_max": max([w["near_top"] for w in weekly] + [w["top_line"] or 0 for w in weekly] + [1]),
             "latest": speed.latest(db, user_id), "waiting": speed.waiting_count(db, user_id),
@@ -204,6 +219,4 @@ def week_guidance(view, today=None):
         done, planned = t[kind]
         if planned and done < planned:
             lines.append(f"{label} {done} of {planned} this week.")
-    if t["water_days"] < sum(1 for d in view["days"] if d["is_past"] or d["is_today"]):
-        lines.append("Water: tap +1 on This week as you go, so hydration shows in the Sunday check-in.")
     return lines

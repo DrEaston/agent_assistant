@@ -1,0 +1,16 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Coach{% endblock %}
+{% block dock %}{% endblock %}
+{% block content %}
+{% call ui.page_header("Coach", sub="Enter the passcode to open the coach page.") %}{% endcall %}
+<main class="wrap">
+  {% if signed_in_as %}{% call ui.banner("info") %}You're signed in as {{ signed_in_as }}. Entering the passcode switches this browser to the coach; to stay signed in as you, open this page in a private window.{% endcall %}{% endif %}
+  {% if error %}{% call ui.banner("warn") %}{{ error }}{% endcall %}{% endif %}
+  <form method="post" action="/coach" class="card stack">
+    <div class="field"><label for="passcode">Passcode</label>
+      <input type="password" id="passcode" name="passcode" required autocomplete="off" autofocus></div>
+    <button type="submit" class="primary">Open coach page</button>
+  </form>
+</main>
+{% endblock %}

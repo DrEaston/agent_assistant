@@ -8,10 +8,56 @@ from pathlib import Path
 
 from database import Database, reset_current_user_id, set_current_user_id
 
-from apps.trainer import coach, plan, speed
+from apps.trainer import coach, coach_reader, plan, speed
 
 
 MODEL = {"cs": 4.5, "d_prime": 200, "vmax": 8.0, "easy": 3.4}   # threshold 5:58/mi, top speed 8 m/s
+
+
+TEST_PASSCODE_HASH = coach._hash("test-passcode")   # tests use their own passcode, never the real one
+
+
+def setUpModule():
+    global _real_hash
+    _real_hash, coach.PASSCODE_HASH = coach.PASSCODE_HASH, TEST_PASSCODE_HASH
+
+
+def tearDownModule():
+    coach.PASSCODE_HASH = _real_hash
+
+
+class FakeAI:
+    """Stands in for the AI model: returns one fixed reply."""
+
+    def __init__(self, reply):
+        self.reply = reply
+
+    def chat(self, messages, system_prompt, max_completion_tokens=1024):
+        return self.reply
+
+
+class ReaderTests(unittest.TestCase):
+    """coach_reader: the AI's reply is checked like any coach's input; it never sets paces."""
+
+    def test_reads_sets_and_keeps_the_rest_as_notes(self):
+        out = coach_reader.read("2 mi wu. 6x mile @ T, 90s jog; 8x200 fast", provider=FakeAI(
+            'Here you go: {"title": "Miles and 200s", "sets": [{"reps": 6, "metres": 1609, "intensity": "threshold", '
+            '"rest": "90 s jog"}, {"reps": "8", "metres": "200", "intensity": "sprint", "rest": ""}], '
+            '"notes": "2 mile warm-up"}'))
+        self.assertEqual(out["title"], "Miles and 200s")
+        self.assertEqual([coach.describe_set(x) for x in out["sets"]][0], "6 × 1 mile at threshold, 90 s jog")
+        self.assertEqual(out["sets"][1]["reps"], 8)
+        self.assertEqual(out["notes"], "2 mile warm-up")
+
+    def test_unknown_efforts_become_by_feel_and_nonsense_is_refused(self):
+        out = coach_reader.read("4x400 at goal pace", provider=FakeAI(
+            '{"sets": [{"reps": 4, "metres": 400, "intensity": "goal pace"}]}'))
+        self.assertEqual(out["sets"][0]["intensity"], "feel")
+        for reply in ("no json here", '{"sets": []}', '{"sets": [{"reps": 4, "metres": 5}]}'):
+            with self.assertRaises(coach.Invalid):
+                coach_reader.read("whatever", provider=FakeAI(reply))
+        with self.assertRaises(coach.Invalid):
+            coach_reader.read("   ", provider=FakeAI("{}"))
 
 
 class As:
@@ -173,6 +219,29 @@ class FullViewTests(CoachStoreTests):
             self.assertFalse(self.store.full_view(self.athlete))     # stopping coaching ends it at once
 
 
+class CoachPasscodeTests(CoachStoreTests):
+    """/coach: one shared passcode opens a coach account linked to Dieter's owner, with full view."""
+
+    def test_passcode_links_the_coach_to_the_owner_with_full_view(self):
+        conn = self.db.connect()
+        conn.execute("UPDATE users SET role = 'admin' WHERE id = ?", (self.athlete,))
+        conn.commit()
+        self.assertIsNone(self.store.passcode_sign_in("test-passcodex"))
+        self.assertIsNone(self.store.passcode_sign_in(""))
+        coach_id = self.store.passcode_sign_in("test-passcode")
+        self.assertEqual(self.db.get_user_by_id(coach_id)["role"], coach.PASSCODE_ROLE)
+        self.assertEqual(self.store.passcode_sign_in(" test-passcode "), coach_id)      # same account every time
+        with As(coach_id):
+            athletes = self.store.my_athletes()
+            self.assertEqual([a["athlete_id"] for a in athletes], [self.athlete])
+            self.assertTrue(self.store.full_view(self.athlete))
+            self.assertEqual(self.store.send_to_all("2026-12-01", "Miles", [{"reps": 6, "metres": 1609,
+                                                                             "intensity": "threshold"}]), 1)
+            self.assertEqual(self.store.sent_by_me()[0]["athlete"], "Curtis")
+        with As(self.athlete):
+            self.assertEqual(self.store.new_for_me()[0]["title"], "Miles")
+
+
 class CoachPageTests(unittest.TestCase):
     """The pages: the athlete sees their times, the coach doesn't."""
 
@@ -246,6 +315,15 @@ class CoachPageTests(unittest.TestCase):
         link_id = page.split("/apps/trainer/coaching-links/")[1].split("/")[0]
         owner.post(f"/apps/trainer/coaching-links/{link_id}/full-view", data={"on": "1"})
         self.assertIn("View Owner", daniel.get(f"/apps/trainer/athletes/{athlete}").text)
+        # while full view is on (temporary), the coach's athlete page shows the paces Dieter picked
+        from unittest import mock
+        with mock.patch.object(coach, "athlete_model", return_value=dict(MODEL)):
+            daniel.post(f"/apps/trainer/athletes/{athlete}/prescribe",
+                        data={"day": "2026-12-01", "title": "Miles", "reps_0": "6", "metres_0": "1609",
+                              "intensity_0": "threshold"})
+            profile = daniel.get(f"/apps/trainer/athletes/{athlete}").text
+        self.assertIn(f"{speed.pace(4.5)}/mi", profile)                     # threshold in the pace table
+        self.assertIn(speed.clock(round(1609 / 4.5)), profile)              # the rep time on the sent workout
         daniel.post(f"/apps/trainer/athletes/{athlete}/view")
         week = daniel.get("/apps/trainer/week")
         self.assertEqual(week.status_code, 200)
@@ -259,8 +337,89 @@ class CoachPageTests(unittest.TestCase):
         self.assertNotIn("read-only", daniel.get("/apps/trainer/week").text)
         # Turned off: the cookie alone does nothing
         owner.post(f"/apps/trainer/coaching-links/{link_id}/full-view")
+        self.assertNotIn(speed.clock(round(1609 / 4.5)), daniel.get(f"/apps/trainer/athletes/{athlete}").text)
         daniel.cookies.set("trainer_view_as", str(athlete))
         self.assertNotIn("Viewing Owner", daniel.get("/apps/trainer/week").text)
+
+
+    def test_coach_page_behind_the_passcode(self):
+        from unittest import mock
+        from fastapi.testclient import TestClient
+        athlete = self.make_user("Curtis")
+        conn = self.api.db.connect()
+        conn.execute("UPDATE users SET role = 'admin' WHERE id = ?", (athlete,))
+        conn.commit()
+        runner = self.client_for(athlete)
+        self.assertIn("switches this browser to the coach", runner.get("/coach").text)   # signed in as himself
+        self.api._coach_tries.clear()
+        visitor = TestClient(self.api.app)
+        with mock.patch.object(coach.CoachStore, "_owner", return_value=athlete), \
+                mock.patch.object(coach, "athlete_model", return_value=dict(MODEL)):
+            self.assertIn("Passcode", visitor.get("/coach").text)
+            self.assertIn("passcode wasn&#39;t recognized", visitor.post("/coach", data={"passcode": "nope-nope"}).text)
+            signed_in = visitor.post("/coach", data={"passcode": "test-passcode"}, follow_redirects=False)
+            self.assertEqual((signed_in.status_code, signed_in.headers["location"]), (303, "/coach"))
+            page = visitor.get("/coach").text                      # the coach page, at its own address
+            self.assertIn("View athlete page", page)
+            self.assertIn(f'<option value="{athlete}">Curtis</option>', page)
+            self.assertIn("Send to all athletes (1)", page)
+            self.assertIn('id="talk"', page)                                   # voice for the workout box
+            with mock.patch.object(self.api, "transcribe_upload", return_value={"text": "6 x mile at threshold"}):
+                said = visitor.post("/coach/transcribe", files={"audio": ("w.webm", b"audio", "audio/webm")})
+            self.assertEqual(said.json()["text"], "6 x mile at threshold")
+            # only the coach page: everything else sends it back, and other forms are refused
+            for path in ("/", "/apps/trainer/week", "/apps/recipes", "/apps/trainer/my-coach"):
+                moved = visitor.get(path, follow_redirects=False)
+                self.assertEqual((moved.status_code, moved.headers.get("location")), (303, "/coach"), path)
+            self.assertEqual(visitor.post("/apps/trainer/sessions/add", data={"day": "2026-12-01", "kind": "easy"},
+                                          follow_redirects=False).status_code, 403)
+            # write a workout for all athletes
+            day = (__import__("datetime").date.today() + __import__("datetime").timedelta(days=1)).isoformat()
+            reply = ('{"title": "Threshold miles", "sets": [{"reps": 6, "metres": 1609, "intensity": "threshold", '
+                     '"rest": "90 s jog"}], "notes": "2 mile warm-up"}')
+            with mock.patch.object(coach_reader, "get_llm_provider", return_value=FakeAI(reply)):
+                sent = visitor.post("/coach/send", follow_redirects=False,
+                                    data={"day": day, "workout": "2 mi wu, 6x mile @ T w/ 90s jog"})
+            self.assertEqual(sent.headers["location"], "/coach?sent=1#sent")
+            sent_page = visitor.get("/coach?sent=1").text
+            self.assertIn("Sent to 1 athlete", sent_page)
+            self.assertIn("Dieter read it as: 6 × 1 mile at threshold, 90 s jog", sent_page)
+            self.assertNotIn(speed.clock(round(1609 / 4.5)), sent_page)          # no paces on the coach page
+            with mock.patch.object(coach_reader, "get_llm_provider", return_value=FakeAI("sorry, no idea")):
+                failed = visitor.post("/coach/send", data={"day": day, "workout": "something odd"})
+            self.assertIn("read that workout just now", failed.text)
+            self.assertIn("something odd", failed.text)                           # what they typed is kept
+            # the athlete gets it with his own times
+            home = runner.get("/apps/trainer").text
+            self.assertIn("New from your coach", home)
+            self.assertIn(speed.clock(round(1609 / 4.5)), home)
+            # the coach opens his athlete page (read-only) and sees the pace Dieter picked
+            visitor.post("/coach/view", data={"athlete_id": str(athlete)})
+            viewing = visitor.get("/apps/trainer")
+            self.assertEqual(viewing.status_code, 200)
+            self.assertIn("Viewing Curtis's Trainer, read-only", viewing.text)
+            self.assertIn("Coming up from the coach", viewing.text)
+            self.assertIn(speed.clock(round(1609 / 4.5)), viewing.text)
+            self.assertNotIn("Put it on my plan", viewing.text)
+            # while still viewing, the coach page's forms keep working (they're the coach's own)
+            with mock.patch.object(coach_reader, "get_llm_provider", return_value=FakeAI(reply)):
+                again = visitor.post("/coach/send", follow_redirects=False,
+                                     data={"day": day, "workout": "6x mile @ T w/ 90s jog"})
+            self.assertEqual(again.status_code, 303, again.text[:200])
+            self.assertEqual(visitor.post("/coach/view", data={"athlete_id": str(athlete)},
+                                          follow_redirects=False).status_code, 303)
+            stopped = visitor.post("/apps/trainer/view-as/stop", follow_redirects=False)
+            self.assertEqual(stopped.headers["location"], "/coach")
+        self.assertIn("New from Coach", runner.get("/").text)
+
+    def test_passcode_tries_are_limited(self):
+        from fastapi.testclient import TestClient
+        self.api._coach_tries.clear()
+        visitor = TestClient(self.api.app)
+        for _ in range(self.api.COACH_TRIES):
+            visitor.post("/coach", data={"passcode": "guess-guess"})
+        self.assertIn("Too many tries", visitor.post("/coach", data={"passcode": "guess-guess"}).text)
+        self.api._coach_tries.clear()
 
 
 if __name__ == "__main__":

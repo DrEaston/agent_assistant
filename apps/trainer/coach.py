@@ -14,9 +14,18 @@ Tables (additive, created on first use):
   and full_view_until: a temporary exception (see FULL_VIEW_DAYS).
 - tr_prescriptions: one prescribed workout: athlete, coach, day, title, sets (JSON), coach's notes, status
   sent/accepted/declined/done, the plan session it became, the athlete's note back.
+
+The coach page at /coach (temporary, for showing coach mode): one shared passcode opens it, with no email or account.
+Signing in makes (or reuses) one shared coach account, links it to Dieter's owner as their coach, and gives it full
+view, so the coach can open the owner's Trainer read-only and see the paces Dieter picked. The account only gets the
+coach pages (api.py keeps role "coach" there). Only a hash of the passcode is in the code
+(DIETER_COACH_PASSCODE_HASH overrides it; an empty value turns /coach off).
 """
 
+import hashlib
+import hmac
 import json
+import os
 import secrets
 from datetime import date, timedelta
 
@@ -36,6 +45,29 @@ SCHEMA = (
         status TEXT NOT NULL DEFAULT 'sent', session_id INTEGER, athlete_note TEXT DEFAULT '',
         created_at TEXT DEFAULT CURRENT_TIMESTAMP, answered_at TEXT DEFAULT '')""",
 )
+PASSCODE_ROLE = "coach"          # the shared passcode account: api.py lets it use the coach pages only
+PASSCODE_EMAIL = "coach-passcode@askdieter.local"
+PASSCODE_HASH = os.getenv("DIETER_COACH_PASSCODE_HASH",
+                          "pbkdf2_sha256$210000$7e3f1a9c5b2d8e4f6a1c3b5d7e9f0a2c$"
+                          "7a30bc772cb73e197e21ddb3c9a55d88a5ad5ce69f488077bd791eb9659f134e")
+PBKDF2_ITERATIONS = 210_000      # same format as api.py's hash_password
+
+
+def _hash(passcode):
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", passcode.encode("utf-8"), salt, PBKDF2_ITERATIONS)
+    return f"pbkdf2_sha256${PBKDF2_ITERATIONS}${salt.hex()}${digest.hex()}"
+
+
+def _matches(passcode, stored):
+    try:
+        algorithm, iterations, salt_hex, digest_hex = (stored or "").split("$", 3)
+        if algorithm != "pbkdf2_sha256":
+            return False
+        actual = hashlib.pbkdf2_hmac("sha256", passcode.encode("utf-8"), bytes.fromhex(salt_hex), int(iterations))
+        return hmac.compare_digest(actual, bytes.fromhex(digest_hex))
+    except Exception:
+        return False
 
 INTENSITIES = {
     "easy": "easy",
@@ -133,6 +165,22 @@ def target_speed(intensity, model):
     if intensity == "easy":
         return model.get("easy")
     return None
+
+
+PROFILE_EFFORTS = (("easy", None), ("threshold", 1609), ("10k", 1609), ("5k", 1609), ("3k", 1609), ("mile", 400),
+                   ("sprint", 200))
+
+
+def pace_profile(model):
+    """The paces Dieter would pick for each effort: [{effort, pace, rep}] (rep: time for a typical rep length)."""
+    out = []
+    for intensity, metres in PROFILE_EFFORTS:
+        v = target_speed(intensity, model)
+        if not v:
+            continue
+        out.append({"effort": INTENSITIES[intensity].capitalize(), "pace": f"{speed.pace(v)}/mi",
+                    "rep": f"{distance_name(metres)} in {speed.clock(round(metres / v))}" if metres else ""})
+    return out
 
 
 def targets(sets, model):
@@ -353,6 +401,12 @@ class CoachStore:
                                     (self._user(),)).fetchall()
         return [self._view(r, for_athlete=True) for r in rows]
 
+    def new_for_me(self):
+        """Workouts coaches sent the signed-in athlete that they haven't answered yet, soonest day first."""
+        rows = self._conn().execute("SELECT * FROM tr_prescriptions WHERE athlete_id = ? AND status = 'sent' "
+                                    "ORDER BY day, id", (self._user(),)).fetchall()
+        return [self._view(r, for_athlete=True) for r in rows]
+
     def _mine(self, prescription_id):
         row = self._conn().execute("SELECT * FROM tr_prescriptions WHERE id = ? AND athlete_id = ?",
                                    (prescription_id, self._user())).fetchone()
@@ -393,3 +447,51 @@ class CoachStore:
         self._conn().execute("UPDATE tr_prescriptions SET status = ?, athlete_note = ?, answered_at = CURRENT_TIMESTAMP "
                              "WHERE id = ?", (status, " ".join(str(note or "").split())[:500], prescription_id))
         self._commit()
+
+    # -------------------------------------------------------- the /coach passcode (no email)
+
+    def _owner(self):
+        rows = self.db.get_users_by_role("admin")
+        return rows[0]["id"] if rows else None
+
+    def passcode_sign_in(self, passcode):
+        """The shared coach account, ready to use, if the passcode is right; else None. On each sign-in the account
+        is linked to Dieter's owner as their coach, with full view for FULL_VIEW_DAYS from now."""
+        passcode = str(passcode or "").strip()
+        owner = self._owner()
+        if not passcode or not PASSCODE_HASH or not owner or not _matches(passcode, PASSCODE_HASH):
+            return None
+        user = self.db.get_user_by_email(PASSCODE_EMAIL)
+        if user:
+            coach_id = user["id"]
+        else:
+            coach_id = self.db.create_user(PASSCODE_EMAIL, "Coach", _hash(secrets.token_urlsafe(32)), PASSCODE_ROLE)
+        conn = self._conn()
+        conn.execute("UPDATE users SET status = 'active', role = ? WHERE id = ?", (PASSCODE_ROLE, coach_id))
+        until = (date.today() + timedelta(days=FULL_VIEW_DAYS)).isoformat()
+        if conn.execute("SELECT 1 FROM tr_coach_links WHERE athlete_id = ? AND coach_id = ? AND status = 'active'",
+                        (owner, coach_id)).fetchone():
+            conn.execute("UPDATE tr_coach_links SET full_view_until = ? WHERE athlete_id = ? AND coach_id = ? "
+                         "AND status = 'active'", (until, owner, coach_id))
+        else:
+            conn.execute("INSERT INTO tr_coach_links (athlete_id, coach_id, token, status, accepted_at, full_view_until) "
+                         "VALUES (?, ?, ?, 'active', CURRENT_TIMESTAMP, ?)",
+                         (owner, coach_id, secrets.token_urlsafe(18), until))
+        self._commit()
+        return coach_id
+
+    def send_to_all(self, day, title, sets, notes=""):
+        """The coach sends one workout to every athlete they coach. Returns how many it went to."""
+        athletes = self.my_athletes()
+        if not athletes:
+            raise Invalid("No athletes to send to yet.")
+        for a in athletes:
+            self.prescribe(a["athlete_id"], day, title, sets, notes)
+        return len(athletes)
+
+    def sent_by_me(self, limit=20):
+        """What the signed-in coach sent lately, to everyone: day, title, sets, who, status, their note."""
+        rows = self._conn().execute("SELECT * FROM tr_prescriptions WHERE coach_id = ? ORDER BY day DESC, id DESC "
+                                    "LIMIT ?", (self._user(), limit)).fetchall()
+        return [dict(self._view(r, for_athlete=False), athlete=self._name(r["athlete_id"]),
+                     athlete_id=r["athlete_id"]) for r in rows]

@@ -167,7 +167,7 @@ class PageTests(unittest.TestCase):
     def test_overview_is_the_landing_page(self):
         page = self.client.get("/apps/trainer")
         self.assertEqual(page.status_code, 200)
-        for part in ("Weekly mileage", "Fitness", "Speed", "This week"):
+        for part in ("Aerobic fitness", "Speed fitness", "Miles per week", "This week"):
             self.assertIn(part, page.text)
         self.assertEqual(self.client.get("/apps/trainer/week").status_code, 200)
 

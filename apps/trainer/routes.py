@@ -21,7 +21,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from core import ui
 from database import get_current_user_id, reset_current_user_id, set_current_user_id
 
-from . import analysis, coach, plan, runpage, shoes, speed, strava
+from . import analysis, coach, coach_reader, plan, runpage, shoes, speed, strava
 from .manifest import APP
 
 _state = {"db": None}
@@ -29,7 +29,8 @@ VIEW_COOKIE = "trainer_view_as"
 _viewing = contextvars.ContextVar("trainer_viewing", default=None)
 # Pages that always belong to the person signed in, even while a coach is viewing an athlete's Trainer.
 OWN_PAGES = ("/apps/trainer/athletes", "/apps/trainer/my-coach", "/apps/trainer/coach-invite",
-             "/apps/trainer/coaching-links", "/apps/trainer/view-as", "/strava/", "/trainer-calendar/")
+             "/apps/trainer/coaching-links", "/apps/trainer/view-as", "/strava/", "/trainer-calendar/",
+             "/coach")   # the coach page and its forms: sending a workout works while viewing an athlete
 
 
 async def view_as(request: Request):
@@ -83,6 +84,12 @@ def today():
     except Exception as exc:   # the card must never break Today
         print(f"Warning: after-run count failed: {exc!r}")
         card["after_run"] = 0
+    try:
+        new = coaching().new_for_me()
+        card["coach_new"] = {"count": len(new), "first": new[0]} if new else None
+    except Exception as exc:
+        print(f"Warning: coach workouts for Today failed: {exc!r}")
+        card["coach_new"] = None
     return card
 
 
@@ -149,7 +156,15 @@ def overview(request: Request, week: str = ""):
     getting = {"on": connected and (not history_done or numbers["speed"]["waiting"] > 0),
                "history_done": history_done, "left": numbers["speed"]["waiting"]}
     sh = shoe_store()
-    return render("trainer_overview.html", title="Trainer", current=BASE, page_url=BASE, view=view,
+    # Coach workouts with the paces Dieter picked: new ones for the athlete; for a coach in full view (temporary),
+    # the ones coming up, so they can see the paces.
+    model = _my_model()
+    c = coaching()
+    coach_new = (c.new_for_me() if not _viewing.get()
+                 else [w for w in c.for_me() if w["day"] >= date.today().isoformat()][:5])
+    for w in coach_new:
+        w["sets"] = coach.targets(w["sets"], model)
+    return render("trainer_overview.html", title="Trainer", current=BASE, page_url=BASE, view=view, coach_new=coach_new,
                   guidance=analysis.week_guidance(view), o=numbers, getting=getting, after_run=sh.waiting(),
                   shoe_list=sh.shoes(include_retired=False), feels=shoes.FEELS,
                   today=[s for d in view["days"] if d["is_today"] for s in d["sessions"]])
@@ -157,11 +172,12 @@ def overview(request: Request, week: str = ""):
 
 @router.get(BASE + "/run/{external_id}")
 def run_page(external_id: str):
-    """One run in detail: what was fast, route, speed chart, speed work, best steady efforts."""
+    """One run in detail: what was fast, the route map and speed graph together (slide along the graph to read any
+    moment, zoom in), speed work, best steady efforts."""
     if not external_id.isdigit():
         raise HTTPException(status_code=404, detail="No such run.")
     s = store()
-    r = runpage.detail(_state["db"], get_current_user_id(), external_id, races=plan.race_bests(s.settings()))
+    r = runpage.explore(_state["db"], get_current_user_id(), external_id, races=plan.race_bests(s.settings()))
     if not r:
         raise HTTPException(status_code=404, detail="That run isn't in your log.")
     sh = shoe_store()
@@ -175,14 +191,10 @@ def run_page(external_id: str):
 
 @router.get(BASE + "/run/{external_id}/explore")
 def run_explore(external_id: str):
-    """A run on one screen: the route map and the speed graph together; slide along the graph to read any moment."""
+    """The old Explore page: its map and graph are on the run page now, so old links land there."""
     if not external_id.isdigit():
         raise HTTPException(status_code=404, detail="No such run.")
-    r = runpage.explore(_state["db"], get_current_user_id(), external_id, races=plan.race_bests(store().settings()))
-    if not r:
-        raise HTTPException(status_code=404, detail="That run isn't in your log.")
-    return render("trainer_run_explore.html", title=r["title"], r=r, current=BASE,
-                  page_url=f"{BASE}/run/{external_id}/explore")
+    return RedirectResponse(f"{BASE}/run/{external_id}#explore", status_code=301)
 
 
 @router.get(BASE + "/speed/how")
@@ -236,9 +248,7 @@ def check(key: str = Form(...), done: str = Form(""), week: str = Form("")):
 
 
 @router.post(BASE + "/habits")
-def habits(day: str = Form(...), water: str = Form(""), fueled: str = Form(""), week: str = Form("")):
-    if water in ("+1", "-1"):
-        _guard(store().set_habit, day, add_water=int(water))
+def habits(day: str = Form(...), fueled: str = Form(""), week: str = Form("")):
     if fueled in ("yes", "no"):
         _guard(store().set_habit, day, fueled=fueled == "yes")
     return back(f"{BASE}?week={week}#day-{day}" if week else BASE)
@@ -403,26 +413,111 @@ def coach_invite_accept(token: str):
     return back(f"{BASE}/athletes/{info['athlete_id']}")
 
 
+def _coach_home():
+    """Where the Coach page lives for whoever is signed in: /coach for the passcode coach account."""
+    row = _state["db"].get_user_by_id(get_current_user_id())
+    return "/coach" if row and row["role"] == coach.PASSCODE_ROLE else BASE + "/athletes"
+
+
+def _athlete_model(athlete_id):
+    """The athlete's speed model, worked out for a coach. Only called while the athlete has full view on for
+    this coach (temporary; to be blocked for Strava-sourced data before Trainer is shared more widely)."""
+    token = set_current_user_id(athlete_id)
+    try:
+        return coach.athlete_model(_state["db"], athlete_id, races=plan.race_bests(store().settings()))
+    finally:
+        reset_current_user_id(token)
+
+
 @router.get(BASE + "/athletes")
-def my_athletes(request: Request):
+def my_athletes(request: Request, athlete: int = 0):
+    """The coach's landing page: pick an athlete to open their profile, and send a workout."""
     c = coaching()
     _coach(c._user)
-    return render("trainer_athletes.html", title="My athletes", current=BASE + "/athletes", page_url=BASE + "/athletes",
-                  athletes=c.my_athletes())
-
-
-@router.get(BASE + "/athletes/{athlete_id}")
-def athlete_page(request: Request, athlete_id: int, sent: str = ""):
-    link, workouts = _coach(coaching().sent_to, athlete_id)
-    return render("trainer_athlete.html", title=link["name"], current=BASE + "/athletes",
-                  page_url=f"{BASE}/athletes/{athlete_id}", athlete=link, workouts=workouts, sent=bool(sent),
+    athletes = c.my_athletes()
+    chosen = athlete if any(a["athlete_id"] == athlete for a in athletes) else (
+        athletes[0]["athlete_id"] if athletes else 0)
+    return render("trainer_athletes.html", title="Coach", current=BASE + "/athletes", page_url=_coach_home(),
+                  athletes=athletes, chosen=chosen, coach_home=_coach_home(),
                   intensities=coach.INTENSITIES, distances=[(m, coach.distance_name(m)) for m in coach.DISTANCES],
                   set_rows=range(3), tomorrow=(date.today() + timedelta(days=1)).isoformat())
 
 
+def coach_page(request: Request, sent: int = 0, error: str = "", workout: str = "", day: str = ""):
+    """/coach (api.py serves it there for the passcode coach): pick an athlete and open their Trainer, read-only;
+    write a workout and send it to all athletes; what was sent lately."""
+    c = coaching()
+    return render("trainer_coach.html", title="Coach", current="/coach", page_url="/coach",
+                  athletes=c.my_athletes(), recent=c.sent_by_me(), sent=sent, coach_home="/coach", report_url=None,
+                  error=error, workout=workout, tomorrow=day or (date.today() + timedelta(days=1)).isoformat())
+
+
+def coach_sign_in_page(error="", signed_in_as=""):
+    """The passcode box at /coach (api.py serves it to anyone not signed in as the coach)."""
+    return render("trainer_coach_signin.html", title="Coach", error=error, signed_in_as=signed_in_as,
+                  page_url="/coach", report_url=None)
+
+
+@router.post("/coach/send")
+async def coach_send(request: Request):
+    """The coach's words -> AI reads them into sets -> sent to every athlete, whose pages work out the paces."""
+    form = await request.form()
+    text, day = str(form.get("workout") or ""), str(form.get("day") or "")
+    try:
+        workout = await run_in_threadpool(coach_reader.read, text)
+        count = coaching().send_to_all(day, workout["title"], workout["sets"], workout["notes"])
+    except (coach.Invalid, PermissionError) as exc:
+        return coach_page(request, error=str(exc), workout=text, day=day)
+    return back(f"/coach?sent={count}#sent")
+
+
+@router.post("/coach/view")
+def coach_view(request: Request, athlete_id: str = Form("")):
+    """Open the chosen athlete's Trainer, read-only (their full view for this coach)."""
+    if not athlete_id.isdigit() or not coaching().full_view(int(athlete_id)):
+        return coach_page(request, error="That athlete's page isn't open to you right now. Sign out and in again "
+                                         "with the passcode to renew it.")
+    response = back(BASE)
+    response.set_cookie(VIEW_COOKIE, athlete_id, max_age=12 * 3600, httponly=True, samesite="lax",
+                        secure=request.url.scheme == "https")
+    return response
+
+
+@router.get(BASE + "/athletes/open")
+def open_athlete(athlete: int = 0):
+    return back(f"{BASE}/athletes/{athlete}" if athlete else _coach_home())
+
+
+@router.post(BASE + "/athletes/send")
+async def send_workout(request: Request):
+    form = await request.form()
+    raw = str(form.get("athlete_id") or "")
+    if not raw.isdigit():
+        raise HTTPException(status_code=400, detail="Pick an athlete.")
+    return await _prescribe(form, int(raw))
+
+
+@router.get(BASE + "/athletes/{athlete_id}")
+def athlete_page(request: Request, athlete_id: int, sent: str = ""):
+    c = coaching()
+    link, workouts = _coach(c.sent_to, athlete_id)
+    paces = []
+    if c.full_view(athlete_id):   # temporary: the athlete's own switch on My coach
+        model = _athlete_model(athlete_id)
+        paces = coach.pace_profile(model)
+        for w in workouts:
+            w["sets"] = coach.targets(w["sets"], model)
+    return render("trainer_athlete.html", title=link["name"], current=BASE + "/athletes",
+                  page_url=f"{BASE}/athletes/{athlete_id}", athlete=link, workouts=workouts, sent=bool(sent),
+                  paces=paces, show_paces=bool(link["full_view_until"]), coach_home=_coach_home())
+
+
 @router.post(BASE + "/athletes/{athlete_id}/prescribe")
 async def prescribe(request: Request, athlete_id: int):
-    form = await request.form()
+    return await _prescribe(await request.form(), athlete_id)
+
+
+async def _prescribe(form, athlete_id):
     sets = [{"reps": form.get(f"reps_{i}"), "metres": form.get(f"metres_{i}"),
              "intensity": form.get(f"intensity_{i}"), "rest": form.get(f"rest_{i}")} for i in range(coach.MAX_SETS)]
     _coach(coaching().prescribe, athlete_id, form.get("day"), form.get("title"), sets, form.get("notes"))
@@ -433,7 +528,8 @@ async def prescribe(request: Request, athlete_id: int):
 def withdraw_workout(athlete_id: int, prescription_id: int):
     _coach(coaching().coaches_athlete, athlete_id)
     _coach(coaching().withdraw, prescription_id)
-    return back(f"{BASE}/athletes/{athlete_id}")
+    home = _coach_home()
+    return back(home + "#sent" if home == "/coach" else f"{BASE}/athletes/{athlete_id}")
 
 
 @router.post(BASE + "/coaching-links/{link_id}/full-view")
@@ -456,7 +552,7 @@ def start_viewing(request: Request, athlete_id: int):
 
 @router.post(BASE + "/view-as/stop")
 def stop_viewing():
-    response = back(BASE + "/athletes")
+    response = back(_coach_home())
     response.delete_cookie(VIEW_COOKIE)
     return response
 

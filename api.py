@@ -48,7 +48,7 @@ from apps.kitchen.import_images import UnsupportedRecipeImage, is_heic, normaliz
 from apps.kitchen.thanksgiving.router import configure as configure_thanksgiving, router as thanksgiving_router
 from core import internal as core_internal, proxy as core_proxy, ui as core_ui
 from apps.kitchen.shopping import router as shopping
-from apps.trainer import connector as trainer_connector, routes as trainer_routes
+from apps.trainer import coach as trainer_coach, connector as trainer_connector, routes as trainer_routes
 from apps.trainer.strava import (  # noqa: E402
     classify_strava_workout, strava_activity_import_payload, strava_first_present)
 from apps.kitchen import pages as kitchen_pages
@@ -473,6 +473,36 @@ def guest_read_only_response(request):
     )
 
 
+def is_passcode_coach(user):
+    """The shared coach account a passcode opens (apps/trainer/coach.py): coach pages only."""
+    return bool(user and user["role"] == trainer_coach.PASSCODE_ROLE)
+
+
+# What the passcode coach account may open. Anything else sends it back to its athletes.
+PASSCODE_COACH_PATHS = ("/apps/trainer/athletes", "/apps/trainer/view-as", "/apps/trainer/coaching-links",
+                        "/logout", "/coach", "/static/", "/favicon.ico")
+
+
+def passcode_coach_allowed(request):
+    path = request.url.path
+    if path.startswith(PASSCODE_COACH_PATHS):
+        return True
+    # Full view (the athlete's switch on My coach): their Trainer pages, read-only (apps/trainer/routes.py view_as).
+    return (path.startswith("/apps/trainer") and request.method in READ_ONLY_METHODS
+            and request.cookies.get(trainer_routes.VIEW_COOKIE, "").isdigit())
+
+
+_coach_tries = {}   # client address -> [failed passcode times]; a short, shared passcode needs a brake
+COACH_TRIES, COACH_TRIES_WINDOW = 8, 15 * 60
+
+
+def _coach_tries_left(client):
+    now = time.time()
+    recent = [t for t in _coach_tries.get(client, []) if now - t < COACH_TRIES_WINDOW]
+    _coach_tries[client] = recent
+    return COACH_TRIES - len(recent)
+
+
 def get_or_create_guest_user_id():
     """Create the shared guest user on demand and expose the recipe catalogue to it."""
     user = db.get_user_by_email(GUEST_EMAIL)
@@ -524,6 +554,7 @@ async def load_authenticated_user(request: Request, call_next):
         finally:
             reset_current_user_id(user_token)
     public_exact_paths = {"/cct-roadmap", "/thanksgiving/menu",  # the shareable Thanksgiving menu
+                          "/coach",  # coach sign-in with a passcode (apps/trainer/coach.py)
                           "/strava/webhook"}  # Strava pushes new activities here (apps/trainer/strava.py)
     if DEMO_MODE:
         public_exact_paths.update({"/", "/demo"})
@@ -550,6 +581,10 @@ async def load_authenticated_user(request: Request, call_next):
             and path != "/api/dieter/action"
         ):
             return guest_read_only_response(request)
+        if is_passcode_coach(user) and not passcode_coach_allowed(request):
+            if request.url.path.startswith("/api/") or request.method not in READ_ONLY_METHODS:
+                return JSONResponse({"detail": "This coach sign-in only opens the coach pages."}, status_code=403)
+            return RedirectResponse(url="/coach", status_code=303)
         response = await call_next(request)
         return response
     finally:
@@ -4416,6 +4451,22 @@ def api_recipe_edit(message: RecipeEditMessage):
 @app.post("/api/dieter/transcribe")
 async def api_dieter_transcribe(audio: UploadFile = File(...)):
     """Transcribe dictated Ask Dieter audio using the server-side LLM provider."""
+    return await transcribe_upload(audio, (
+        "This is a short Ask Dieter command for a planner or scheduler app. "
+        "Prefer words like context, bullets, action item, hygiene, Pilates, AC, tomorrow, today. "
+        "Preserve list items clearly."))
+
+
+@app.post("/coach/transcribe")
+async def coach_transcribe(audio: UploadFile = File(...)):
+    """The coach page's Talk button: a dictated workout, as text for the workout box."""
+    return await transcribe_upload(audio, (
+        "A running coach dictating a workout, e.g. 2 mile warm-up, 6 x 1 mile at threshold with 90 seconds jog, "
+        "8 x 200 meters fast, strides, tempo, 5K pace, 400s, 800s, cool-down."))
+
+
+async def transcribe_upload(audio, prompt):
+    """Text from an uploaded voice recording (OpenAI transcription)."""
     api_key = os.getenv("OPENAI_API_KEY", "")
     if not api_key:
         raise HTTPException(status_code=503, detail="Voice transcription is not configured.")
@@ -4430,11 +4481,7 @@ async def api_dieter_transcribe(audio: UploadFile = File(...)):
             transcript = client.audio.transcriptions.create(
                 model=OPENAI_TRANSCRIPTION_MODEL,
                 file=audio_file,
-                prompt=(
-                    "This is a short Ask Dieter command for a planner or scheduler app. "
-                    "Prefer words like context, bullets, action item, hygiene, Pilates, AC, tomorrow, today. "
-                    "Preserve list items clearly."
-                ),
+                prompt=prompt,
             )
         text = getattr(transcript, "text", "") or ""
         return {"text": text.strip(), "model": OPENAI_TRANSCRIPTION_MODEL}
@@ -5357,6 +5404,28 @@ def guest_login_form(next: str = Form("")):
     user_id = get_or_create_guest_user_id()
     fallback = "/apps" if DEMO_MODE else "/apps/recipes"
     return create_login_response(user_id, safe_internal_redirect_target(next or fallback, fallback))
+
+
+@app.get("/coach")
+def coach_passcode_page(request: Request):
+    """The coach's own address: the Coach page once signed in with a passcode, otherwise the passcode box."""
+    if is_passcode_coach(request.state.current_user):
+        raw = request.query_params.get("sent", "")
+        return trainer_routes.coach_page(request, int(raw) if raw.isdigit() else 0)
+    user = request.state.current_user
+    return trainer_routes.coach_sign_in_page(signed_in_as=(user.get("display_name") or "someone") if user else "")
+
+
+@app.post("/coach")
+def coach_passcode_form(request: Request, passcode: str = Form("")):
+    client = request.client.host if request.client else "?"
+    if _coach_tries_left(client) <= 0:
+        return trainer_routes.coach_sign_in_page("Too many tries. Wait 15 minutes and try again.")
+    coach_id = trainer_coach.CoachStore(db).passcode_sign_in(passcode)
+    if not coach_id:
+        _coach_tries[client].append(time.time())
+        return trainer_routes.coach_sign_in_page("That passcode wasn't recognized.")
+    return create_login_response(coach_id, "/coach")
 
 
 @app.get("/register")

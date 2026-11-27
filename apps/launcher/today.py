@@ -93,7 +93,7 @@ def render(*, user_name, now, thanksgiving=None, planned_meals=(), shopping=None
         # Media (core/media): pictures ChatGPT or Claude sent, waiting for his OK.
         "media": media,
         # Trainer (apps/trainer/plan.py): today's planned sessions, if any.
-        "training": training if training and training.get("lines") else None,
+        "training": training if training and (training.get("lines") or training.get("coach_new")) else None,
         "page_url": "/",
     }
     return HTMLResponse(_templates.get_template("today.html").render(**context))

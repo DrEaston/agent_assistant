@@ -1,0 +1,101 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Coach{% endblock %}
+{% block dock %}{% endblock %}
+{% block content %}
+{% call ui.page_header("Coach", sub="Look at an athlete's Trainer, or write a workout for all your athletes. Dieter turns it into each athlete's own paces.") %}{% endcall %}
+<main class="wrap">
+  {% if not athletes %}
+  {{ ui.empty("No athletes yet.") }}
+  {% else %}
+
+  {% if error and not workout %}{% call ui.banner("warn") %}{{ error }}{% endcall %}{% endif %}
+  {% call ui.section("Athlete page", id="athlete") %}
+  <form method="post" action="/coach/view" class="card stack">
+    <div class="field"><label for="athlete-pick">Athlete</label>
+      <select id="athlete-pick" name="athlete_id">{% for a in athletes %}<option value="{{ a.athlete_id }}">{{ a.name }}</option>{% endfor %}</select></div>
+    <button type="submit" class="primary">View athlete page</button>
+    <p class="small muted">Opens their Trainer, read-only: their week, runs, and the paces Dieter picked for your workouts.</p>
+  </form>
+  {% endcall %}
+
+  {% call ui.section("Write a workout", id="write") %}
+  {% if error and workout %}{% call ui.banner("warn") %}{{ error }}{% endcall %}{% endif %}
+  <form method="post" action="/coach/send" class="card stack">
+    {{ ui.field("Day", "day", value=tomorrow, type="date", required=True) }}
+    <div class="field"><label for="workout">Workout</label>
+      <textarea id="workout" name="workout" required maxlength="1500" placeholder="2 mile warm-up with drills. 6 x mile at threshold, 90 s jog. Then 8 x 200 fast, full recovery. 1 mile cool-down.">{{ workout }}</textarea></div>
+    <div class="row">
+      <button type="button" id="talk" aria-pressed="false">🎤 <span id="talk-label">Talk</span></button>
+      <span class="small muted" id="talk-status" aria-live="polite"></span>
+    </div>
+    <p class="small muted">Write or say it the way you'd tell them. Dieter reads it into sets and works out each athlete's own paces from their runs.</p>
+    <button type="submit" class="primary">Send to all athletes ({{ athletes | length }})</button>
+  </form>
+  {% endcall %}
+
+  {% call ui.section("Sent", id="sent") %}
+  {% if sent %}{% call ui.banner("ok") %}Sent to {{ sent }} athlete{{ "s" if sent > 1 }}. Open their athlete page to see the paces Dieter picked.{% endcall %}{% endif %}
+  {% if not recent %}{{ ui.empty("Nothing sent yet.") }}{% else %}
+  <div class="card">
+    {% for w in recent %}
+    <div class="list-row"><div class="grow stack">
+      <div class="row spread">
+        <strong>{{ w.day }} · {{ w.title }}</strong>
+        {% if w.status == "sent" %}{{ ui.tag("Waiting") }}{% elif w.status == "accepted" %}{{ ui.tag("On their plan", "info") }}{% elif w.status == "done" %}{{ ui.tag("Done", "ok") }}{% else %}{{ ui.tag("Declined", "warn") }}{% endif %}
+      </div>
+      <span class="small">Dieter read it as: {{ w.summary }}</span>
+      {% if w.notes %}<span class="small muted">Notes: {{ w.notes }}</span>{% endif %}
+      <span class="small muted">To {{ w.athlete }}</span>
+      {% if w.athlete_note %}<span class="small muted">{{ w.athlete }}: “{{ w.athlete_note }}”</span>{% endif %}
+      {% if w.status == "sent" %}<form method="post" action="/apps/trainer/athletes/{{ w.athlete_id }}/workouts/{{ w.id }}/withdraw"><button type="submit" class="quiet">Take it back</button></form>{% endif %}
+    </div></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endcall %}
+  {% endif %}
+
+  <form method="post" action="/logout" class="section"><button type="submit" class="quiet">Sign out</button></form>
+</main>
+{% endblock %}
+{% block after %}
+<script>
+(() => {
+  const btn = document.getElementById("talk"), label = document.getElementById("talk-label");
+  const status = document.getElementById("talk-status"), box = document.getElementById("workout");
+  if (!btn || !box) return;
+  if (!navigator.mediaDevices || !window.MediaRecorder) { btn.hidden = true; return; }
+  let recorder = null, chunks = [], stream = null;
+  const idle = (msg) => { recorder = null; btn.setAttribute("aria-pressed", "false"); label.textContent = "Talk"; status.textContent = msg || ""; };
+  btn.addEventListener("click", async () => {
+    if (recorder) { recorder.stop(); return; }
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e) { status.textContent = "Can't use the microphone here. Type it instead?"; return; }
+    chunks = [];
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    recorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+      idle("Writing it down…");
+      if (!blob.size) { idle(); return; }
+      const body = new FormData();
+      body.append("audio", blob, "workout." + (blob.type.includes("mp4") ? "mp4" : "webm"));
+      try {
+        const r = await fetch("/coach/transcribe", { method: "POST", body });
+        const data = await r.json();
+        const text = (data.text || "").trim();
+        if (!r.ok || !text) { idle("Didn't catch that. Try again?"); return; }
+        box.value = box.value.trim() ? box.value.trim() + " " + text : text;
+        idle("Added. Check it, then send.");
+        box.focus();
+      } catch (e) { idle("Couldn't hear that. Try again?"); }
+    };
+    recorder.start();
+    btn.setAttribute("aria-pressed", "true"); label.textContent = "Stop";
+    status.textContent = "Listening… tap Stop when you're done.";
+  });
+})();
+</script>
+{% endblock %}
