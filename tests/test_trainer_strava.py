@@ -527,7 +527,22 @@ class StrideTests(SyncTests):
         r = runpage.detail(self.db, self.user, "1100")
         self.assertEqual(len(r["efforts"]), 18)
         self.assertEqual(r["efforts"][0]["rest_text"], "30 s")
-        self.assertTrue(r["map"]["fast"] and r["chart"]["marks"])
+        self.assertTrue(r["map"]["fast"] and r["chart"]["marks"])  # one run read: no easy pace yet, so no heatmap
+        self.assertEqual(r["map"]["heat"], [])
+        # The speed heatmap: cyan at easy pace, magenta at threshold pace, yellow from about mile pace
+        last = runpage.HEAT_STEPS - 1
+        self.assertEqual(runpage.heat_step(2.9, 2.9, 4.5, 6.1), 0)
+        self.assertEqual(runpage.heat_step(4.5, 2.9, 4.5, 6.1), last // 2)
+        self.assertEqual(runpage.heat_step(7.5, 2.9, 4.5, 6.1), last)
+        self.assertAlmostEqual(runpage.heat_top(4.5, 7.7), 4.5 * runpage.HEAT_TOP)   # a sprint doesn't stretch it
+        series = speed.unpack(self.db.connect().execute(
+            "SELECT series FROM tr_run_speed WHERE external_id = '1100'").fetchone()[0])
+        heated = runpage.route_map(series, r["efforts"], easy=2.9, cs=4.5, top=6.1)
+        steps = {seg["step"] for seg in heated["heat"]}
+        self.assertIn(0, steps)                                    # the warm-up
+        self.assertTrue(any(s > last // 2 for s in steps))         # the reps, faster than threshold
+        self.assertEqual(heated["fast"], [])
+        self.assertEqual(heated["key"]["threshold"], speed.pace(4.5))
         self.assertEqual(r["max_hr"], 150)
         saved = routes._state.get("db")
         routes.configure(self.db)
