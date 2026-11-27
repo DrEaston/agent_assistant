@@ -166,6 +166,11 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None, races=None):
             "aerobic_spark": spark([w["cs"] for w in weekly]),
             "anaerobic_spark": spark([w["d_prime"] for w in weekly]),
             "d_prime_m": round(this_week["d_prime"]) if this_week["d_prime"] else None,
+            # D' shown as a head start: predicted time = (distance - D') / CS, so in any race his speed is worth
+            # D' metres, or D'/CS seconds, over running it all at threshold pace.
+            "head_start_s": (round(this_week["d_prime"] / this_week["cs"])
+                             if this_week["d_prime"] and this_week["cs"] else None),
+            "predictions": predictions(this_week["cs"], this_week["d_prime"]),
             "d_prime_gain": (round(this_week["d_prime"] - weekly[-13]["d_prime"])
                              if len(weekly) >= 13 and this_week["d_prime"] and weekly[-13]["d_prime"] else None),
             "speed_work": this_week["speed_work"], "tanks": this_week["tanks"],
@@ -184,6 +189,17 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None, races=None):
             "weeks": weekly,
         },
     }
+
+
+PREDICT = ((800, "800 m"), (1609, "Mile"), (3000, "3K"), (5000, "5K"), (10000, "10K"))
+
+
+def predictions(cs, d_prime):
+    """[{name, time}] race predictions from the speed model: t = (d - D') / CS. Empty without a model."""
+    if not cs or d_prime is None:
+        return []
+    return [{"name": name, "metres": d, "time": speed.clock((d - d_prime) / cs)}
+            for d, name in PREDICT if d > d_prime * 2]
 
 
 def week_guidance(view, today=None):

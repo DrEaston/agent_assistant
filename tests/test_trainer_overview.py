@@ -71,5 +71,14 @@ class OverviewTests(unittest.TestCase):
         self.assertTrue(any(l.startswith("Strides 0 of 2") for l in lines))
 
 
+class PredictionTests(unittest.TestCase):
+    def test_predictions_use_threshold_and_head_start(self):
+        from apps.trainer import analysis
+        p = {x["name"]: x["time"] for x in analysis.predictions(4.5, 200)}
+        self.assertEqual(p["5K"], analysis.speed.clock((5000 - 200) / 4.5))      # (distance - head start) / threshold speed
+        self.assertEqual(list(p), ["800 m", "Mile", "3K", "5K", "10K"])
+        self.assertEqual(analysis.predictions(None, 200), [])
+
+
 if __name__ == "__main__":
     unittest.main()
