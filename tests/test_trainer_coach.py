@@ -344,7 +344,7 @@ class CoachPageTests(unittest.TestCase):
         with mock.patch.object(coach.CoachStore, "_owner", return_value=athlete), \
                 mock.patch.object(coach, "athlete_model", return_value=dict(MODEL)):
             self.assertIn("Passcode", visitor.get("/coach").text)
-            self.assertIn("wasn't recognized", visitor.post("/coach", data={"passcode": "nope-nope"}).text)
+            self.assertIn("passcode wasn&#39;t recognized", visitor.post("/coach", data={"passcode": "nope-nope"}).text)
             signed_in = visitor.post("/coach", data={"passcode": "phxrun"}, follow_redirects=False)
             self.assertEqual((signed_in.status_code, signed_in.headers["location"]), (303, "/coach"))
             page = visitor.get("/coach").text                      # the coach page, at its own address
@@ -371,7 +371,7 @@ class CoachPageTests(unittest.TestCase):
             self.assertNotIn(speed.clock(round(1609 / 4.5)), sent_page)          # no paces on the coach page
             with mock.patch.object(coach_reader, "get_llm_provider", return_value=FakeAI("sorry, no idea")):
                 failed = visitor.post("/coach/send", data={"day": day, "workout": "something odd"})
-            self.assertIn("couldn't read that workout", failed.text)
+            self.assertIn("read that workout just now", failed.text)
             self.assertIn("something odd", failed.text)                           # what they typed is kept
             # the athlete gets it with his own times
             home = runner.get("/apps/trainer").text
