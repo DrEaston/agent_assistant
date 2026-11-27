@@ -19,10 +19,9 @@
         <span class="chip">Strides {{ t.strides[0] }}/{{ t.strides[1] }}</span>
         <span class="chip">Weights {{ t.weights[0] }}/{{ t.weights[1] }}</span>
         <span class="chip">Pilates {{ t.pilates[0] }}/{{ t.pilates[1] }}</span>
-        <span class="chip">Water goal {{ t.water_days }}/7 days</span>
       </div>
       {% if last.week.goals %}<div class="small muted">Goals were: {{ last.week.goals | join("; ") }}</div>{% endif %}
-      <div class="field"><label for="review">How did it go? Fueling, hydration, anything sore</label>
+      <div class="field"><label for="review">How did it go? Fueling, anything sore</label>
         <textarea id="review" name="review" class="short">{{ last.week.review }}</textarea></div>
     </div>
     {% endcall %}

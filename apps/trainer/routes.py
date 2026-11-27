@@ -171,11 +171,12 @@ def overview(request: Request, week: str = ""):
 
 @router.get(BASE + "/run/{external_id}")
 def run_page(external_id: str):
-    """One run in detail: what was fast, route, speed chart, speed work, best steady efforts."""
+    """One run in detail: what was fast, the route map and speed graph together (slide along the graph to read any
+    moment, zoom in), speed work, best steady efforts."""
     if not external_id.isdigit():
         raise HTTPException(status_code=404, detail="No such run.")
     s = store()
-    r = runpage.detail(_state["db"], get_current_user_id(), external_id, races=plan.race_bests(s.settings()))
+    r = runpage.explore(_state["db"], get_current_user_id(), external_id, races=plan.race_bests(s.settings()))
     if not r:
         raise HTTPException(status_code=404, detail="That run isn't in your log.")
     sh = shoe_store()
@@ -189,14 +190,10 @@ def run_page(external_id: str):
 
 @router.get(BASE + "/run/{external_id}/explore")
 def run_explore(external_id: str):
-    """A run on one screen: the route map and the speed graph together; slide along the graph to read any moment."""
+    """The old Explore page: its map and graph are on the run page now, so old links land there."""
     if not external_id.isdigit():
         raise HTTPException(status_code=404, detail="No such run.")
-    r = runpage.explore(_state["db"], get_current_user_id(), external_id, races=plan.race_bests(store().settings()))
-    if not r:
-        raise HTTPException(status_code=404, detail="That run isn't in your log.")
-    return render("trainer_run_explore.html", title=r["title"], r=r, current=BASE,
-                  page_url=f"{BASE}/run/{external_id}/explore")
+    return RedirectResponse(f"{BASE}/run/{external_id}#explore", status_code=301)
 
 
 @router.get(BASE + "/speed/how")
@@ -250,9 +247,7 @@ def check(key: str = Form(...), done: str = Form(""), week: str = Form("")):
 
 
 @router.post(BASE + "/habits")
-def habits(day: str = Form(...), water: str = Form(""), fueled: str = Form(""), week: str = Form("")):
-    if water in ("+1", "-1"):
-        _guard(store().set_habit, day, add_water=int(water))
+def habits(day: str = Form(...), fueled: str = Form(""), week: str = Form("")):
     if fueled in ("yes", "no"):
         _guard(store().set_habit, day, fueled=fueled == "yes")
     return back(f"{BASE}?week={week}#day-{day}" if week else BASE)
