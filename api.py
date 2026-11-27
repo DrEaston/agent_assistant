@@ -5398,8 +5398,8 @@ def guest_login_form(next: str = Form("")):
 def coach_passcode_page(request: Request):
     """The coach's own address: the Coach page once signed in with a passcode, otherwise the passcode box."""
     if is_passcode_coach(request.state.current_user):
-        raw = request.query_params.get("athlete", "")
-        return trainer_routes.my_athletes(request, int(raw) if raw.isdigit() else 0)
+        raw = request.query_params.get("sent", "")
+        return trainer_routes.coach_page(request, int(raw) if raw.isdigit() else 0)
     return render_auth_page(request, "coach")
 
 

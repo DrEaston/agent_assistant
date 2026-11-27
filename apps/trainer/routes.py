@@ -155,12 +155,14 @@ def overview(request: Request, week: str = ""):
     getting = {"on": connected and (not history_done or numbers["speed"]["waiting"] > 0),
                "history_done": history_done, "left": numbers["speed"]["waiting"]}
     sh = shoe_store()
-    coach_new = []
-    if not _viewing.get():   # a coach in full view never sees the athlete's target times
-        model = _my_model()
-        coach_new = coaching().new_for_me()
-        for w in coach_new:
-            w["sets"] = coach.targets(w["sets"], model)
+    # Coach workouts with the paces Dieter picked: new ones for the athlete; for a coach in full view (temporary),
+    # the ones coming up, so they can see the paces.
+    model = _my_model()
+    c = coaching()
+    coach_new = (c.new_for_me() if not _viewing.get()
+                 else [w for w in c.for_me() if w["day"] >= date.today().isoformat()][:5])
+    for w in coach_new:
+        w["sets"] = coach.targets(w["sets"], model)
     return render("trainer_overview.html", title="Trainer", current=BASE, page_url=BASE, view=view, coach_new=coach_new,
                   guidance=analysis.week_guidance(view), o=numbers, getting=getting, after_run=sh.waiting(),
                   shoe_list=sh.shoes(include_retired=False), feels=shoes.FEELS,
@@ -364,7 +366,6 @@ def my_coach(request: Request):
     invite_url = f"{str(request.base_url).rstrip('/')}{BASE}/coach-invite/{invite['token']}" if invite else ""
     return render("trainer_my_coach.html", title="My coach", current=BASE + "/my-coach", page_url=BASE + "/my-coach",
                   coaches=c.my_coaches(), workouts=workouts, invite=invite, invite_url=invite_url,
-                  passcode=c.passcode_status(), coach_url=f"{str(request.base_url).rstrip('/')}/coach",
                   has_model=bool(model.get("cs")), is_owner=c.is_owner(), full_view_days=coach.FULL_VIEW_DAYS)
 
 
@@ -372,19 +373,6 @@ def my_coach(request: Request):
 def my_coach_invite():
     _coach(coaching().invite)
     return back(BASE + "/my-coach#invite")
-
-
-@router.post(BASE + "/my-coach/passcode")
-def my_coach_passcode(passcode: str = Form(""), coach_name: str = Form("")):
-    """Turn on (or change) the coach passcode: a coach signs in at /coach with it, no email needed."""
-    _coach(coaching().set_passcode, passcode, coach_name)
-    return back(BASE + "/my-coach#passcode")
-
-
-@router.post(BASE + "/my-coach/passcode/off")
-def my_coach_passcode_off():
-    _coach(coaching().passcode_off)
-    return back(BASE + "/my-coach#passcode")
 
 
 @router.post(BASE + "/coaching-links/{link_id}/end")
@@ -459,6 +447,36 @@ def my_athletes(request: Request, athlete: int = 0):
                   set_rows=range(3), tomorrow=(date.today() + timedelta(days=1)).isoformat())
 
 
+def coach_page(request: Request, sent: int = 0):
+    """/coach (api.py serves it there for the passcode coach): pick an athlete and open their Trainer, read-only;
+    write a workout and send it to all athletes; what was sent lately."""
+    c = coaching()
+    return render("trainer_coach.html", title="Coach", current="/coach", page_url="/coach",
+                  athletes=c.my_athletes(), recent=c.sent_by_me(), sent=sent, coach_home="/coach",
+                  intensities=coach.INTENSITIES, distances=[(m, coach.distance_name(m)) for m in coach.DISTANCES],
+                  set_rows=range(3), tomorrow=(date.today() + timedelta(days=1)).isoformat())
+
+
+@router.post("/coach/send")
+async def coach_send(request: Request):
+    form = await request.form()
+    sets = [{"reps": form.get(f"reps_{i}"), "metres": form.get(f"metres_{i}"),
+             "intensity": form.get(f"intensity_{i}"), "rest": form.get(f"rest_{i}")} for i in range(coach.MAX_SETS)]
+    count = _coach(coaching().send_to_all, form.get("day"), form.get("title"), sets, form.get("notes"))
+    return back(f"/coach?sent={count}#sent")
+
+
+@router.post("/coach/view")
+def coach_view(request: Request, athlete_id: str = Form("")):
+    """Open the chosen athlete's Trainer, read-only (their full view for this coach)."""
+    if not athlete_id.isdigit() or not coaching().full_view(int(athlete_id)):
+        raise HTTPException(status_code=403, detail="This athlete's Trainer isn't open to you.")
+    response = back(BASE)
+    response.set_cookie(VIEW_COOKIE, athlete_id, max_age=12 * 3600, httponly=True, samesite="lax",
+                        secure=request.url.scheme == "https")
+    return response
+
+
 @router.get(BASE + "/athletes/open")
 def open_athlete(athlete: int = 0):
     return back(f"{BASE}/athletes/{athlete}" if athlete else _coach_home())
@@ -527,7 +545,7 @@ def start_viewing(request: Request, athlete_id: int):
 
 @router.post(BASE + "/view-as/stop")
 def stop_viewing():
-    response = back(BASE + "/athletes")
+    response = back(_coach_home())
     response.delete_cookie(VIEW_COOKIE)
     return response
 

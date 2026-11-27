@@ -1,0 +1,67 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Coach · Dieter{% endblock %}
+{% block content %}
+{% call ui.page_header("Coach", sub="Look at an athlete's Trainer, or write a workout for all your athletes. Dieter turns it into each athlete's own paces.") %}{% endcall %}
+<main class="wrap">
+  {% if not athletes %}
+  {{ ui.empty("No athletes yet.") }}
+  {% else %}
+
+  {% call ui.section("Athlete page", id="athlete") %}
+  <form method="post" action="/coach/view" class="card stack">
+    <div class="field"><label for="athlete-pick">Athlete</label>
+      <select id="athlete-pick" name="athlete_id">{% for a in athletes %}<option value="{{ a.athlete_id }}">{{ a.name }}</option>{% endfor %}</select></div>
+    <button type="submit" class="primary">View athlete page</button>
+    <p class="small muted">Opens their Trainer, read-only: their week, runs, and the paces Dieter picked for your workouts.</p>
+  </form>
+  {% endcall %}
+
+  {% call ui.section("Write a workout", id="write") %}
+  <form method="post" action="/coach/send" class="card stack">
+    <div class="cols">
+      {{ ui.field("Day", "day", value=tomorrow, type="date", required=True) }}
+      {{ ui.field("Title", "title", placeholder="Threshold miles + 200s", maxlength=120) }}
+    </div>
+    {% for i in set_rows %}
+    <fieldset class="plain-set stack">
+      <legend class="small muted">Set {{ i + 1 }}{% if i > 0 %} (optional){% endif %}</legend>
+      <div class="cols">
+        {{ ui.field("Reps", "reps_" ~ i, type="number", placeholder=("6" if i == 0 else "")) }}
+        <div class="field"><label for="metres_{{ i }}">Distance</label>
+          <select id="metres_{{ i }}" name="metres_{{ i }}"><option value="">—</option>{% for m, name in distances %}<option value="{{ m }}">{{ name }}</option>{% endfor %}</select></div>
+      </div>
+      <div class="cols">
+        <div class="field"><label for="intensity_{{ i }}">Effort</label>
+          <select id="intensity_{{ i }}" name="intensity_{{ i }}">{% for key, name in intensities.items() %}<option value="{{ key }}"{% if key == "threshold" %} selected{% endif %}>{{ name | capitalize }}</option>{% endfor %}</select></div>
+        {{ ui.field("Rest", "rest_" ~ i, placeholder="90 s jog", maxlength=40) }}
+      </div>
+    </fieldset>
+    {% endfor %}
+    {{ ui.field("Notes", "notes", placeholder="Warm up 2 miles with drills; cool down 1 mile", maxlength=500) }}
+    <button type="submit" class="primary">Send to all athletes ({{ athletes | length }})</button>
+  </form>
+  {% endcall %}
+
+  {% call ui.section("Sent", id="sent") %}
+  {% if sent %}{% call ui.banner("ok") %}Sent to {{ sent }} athlete{{ "s" if sent > 1 }}. Open their athlete page to see the paces Dieter picked.{% endcall %}{% endif %}
+  {% if not recent %}{{ ui.empty("Nothing sent yet.") }}{% else %}
+  <div class="card">
+    {% for w in recent %}
+    <div class="list-row"><div class="grow stack">
+      <div class="row spread">
+        <strong>{{ w.day }} · {{ w.title }}</strong>
+        {% if w.status == "sent" %}{{ ui.tag("Waiting") }}{% elif w.status == "accepted" %}{{ ui.tag("On their plan", "info") }}{% elif w.status == "done" %}{{ ui.tag("Done", "ok") }}{% else %}{{ ui.tag("Declined", "warn") }}{% endif %}
+      </div>
+      <span class="small">{{ w.athlete }}: {{ w.summary }}</span>
+      {% if w.athlete_note %}<span class="small muted">{{ w.athlete }}: “{{ w.athlete_note }}”</span>{% endif %}
+    </div></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endcall %}
+  {% endif %}
+
+  <form method="post" action="/logout" class="section"><button type="submit" class="quiet">Sign out</button></form>
+</main>
+{% endblock %}

@@ -174,34 +174,26 @@ class FullViewTests(CoachStoreTests):
 
 
 class CoachPasscodeTests(CoachStoreTests):
-    """A coach sign-in with no email: the athlete sets a passcode; it opens one shared coach account."""
+    """/coach: one shared passcode opens a coach account linked to Dieter's owner, with full view."""
 
-    def test_on_change_and_off(self):
-        with As(self.athlete):
-            self.assertFalse(self.store.passcode_status()["on"])
-            with self.assertRaises(coach.Invalid):
-                self.store.set_passcode("abc")                       # too short
-            coach_id = self.store.set_passcode("phxrun", "Daniel")
-            status = self.store.passcode_status()
-            self.assertTrue(status["on"])
-            self.assertEqual(status["coach_name"], "Daniel")
-        self.assertEqual(self.db.get_user_by_id(coach_id)["role"], coach.PASSCODE_ROLE)
-        self.assertNotIn("phxrun", self.db.get_user_by_id(coach_id)["password_hash"])   # stored only as a hash
-        self.assertEqual(self.store.passcode_sign_in("phxrun"), coach_id)
+    def test_passcode_links_the_coach_to_the_owner_with_full_view(self):
+        conn = self.db.connect()
+        conn.execute("UPDATE users SET role = 'admin' WHERE id = ?", (self.athlete,))
+        conn.commit()
         self.assertIsNone(self.store.passcode_sign_in("phxrunn"))
         self.assertIsNone(self.store.passcode_sign_in(""))
-        with As(coach_id):                                            # linked as the athlete's coach
-            self.assertEqual([a["athlete_id"] for a in self.store.my_athletes()], [self.athlete])
+        coach_id = self.store.passcode_sign_in("phxrun")
+        self.assertEqual(self.db.get_user_by_id(coach_id)["role"], coach.PASSCODE_ROLE)
+        self.assertEqual(self.store.passcode_sign_in(" phxrun "), coach_id)      # same account every time
+        with As(coach_id):
+            athletes = self.store.my_athletes()
+            self.assertEqual([a["athlete_id"] for a in athletes], [self.athlete])
+            self.assertTrue(self.store.full_view(self.athlete))
+            self.assertEqual(self.store.send_to_all("2026-12-01", "Miles", [{"reps": 6, "metres": 1609,
+                                                                             "intensity": "threshold"}]), 1)
+            self.assertEqual(self.store.sent_by_me()[0]["athlete"], "Curtis")
         with As(self.athlete):
-            self.assertEqual(self.store.set_passcode("tempe5k", "Daniel"), coach_id)   # same account, new passcode
-        self.assertIsNone(self.store.passcode_sign_in("phxrun"))
-        self.assertEqual(self.store.passcode_sign_in("tempe5k"), coach_id)
-        with As(self.athlete):
-            self.assertEqual(len(self.store.my_coaches()), 1)        # still one link
-            self.store.passcode_off()
-            self.assertFalse(self.store.passcode_status()["on"])
-            self.assertEqual(self.store.my_coaches(), [])
-        self.assertIsNone(self.store.passcode_sign_in("tempe5k"))
+            self.assertEqual(self.store.new_for_me()[0]["title"], "Miles")
 
 
 class CoachPageTests(unittest.TestCase):
@@ -304,55 +296,55 @@ class CoachPageTests(unittest.TestCase):
         self.assertNotIn("Viewing Owner", daniel.get("/apps/trainer/week").text)
 
 
-    def test_passcode_coach_signs_in_without_email_and_only_gets_coach_pages(self):
+    def test_coach_page_behind_the_passcode(self):
         from unittest import mock
         from fastapi.testclient import TestClient
         athlete = self.make_user("Curtis")
+        conn = self.api.db.connect()
+        conn.execute("UPDATE users SET role = 'admin' WHERE id = ?", (athlete,))
+        conn.commit()
         runner = self.client_for(athlete)
-        self.assertIn("Turn on the coach passcode", runner.get("/apps/trainer/my-coach").text)
         self.assertIn("switches this browser to the coach", runner.get("/coach").text)   # signed in as himself
-        runner.post("/apps/trainer/my-coach/passcode", data={"passcode": "phxrun", "coach_name": "Daniel"})
-        self.assertIn("On since", runner.get("/apps/trainer/my-coach").text)
         self.api._coach_tries.clear()
         visitor = TestClient(self.api.app)
-        self.assertIn("Passcode", visitor.get("/coach").text)
-        wrong = visitor.post("/coach", data={"passcode": "nope-nope"})
-        self.assertIn("wasn't recognized", wrong.text)
-        signed_in = visitor.post("/coach", data={"passcode": "phxrun"}, follow_redirects=False)
-        self.assertEqual(signed_in.status_code, 303)
-        self.assertEqual(signed_in.headers["location"], "/coach")
-        landing = visitor.get("/coach").text                          # the coach's own address
-        self.assertIn("Athlete profile", landing)
-        self.assertIn(f'<option value="{athlete}" selected>Curtis</option>', landing)
-        self.assertIn("New workout", landing)
-        opened = visitor.get(f"/apps/trainer/athletes/open?athlete={athlete}", follow_redirects=False)
-        self.assertEqual(opened.headers["location"], f"/apps/trainer/athletes/{athlete}")
-        page = visitor.get(f"/apps/trainer/athletes/{athlete}")
-        self.assertEqual(page.status_code, 200)
-        self.assertIn("Curtis", page.text)
-        # only the coach pages: everything else sends it back, and other forms are refused
-        for path in ("/", "/apps/trainer/week", "/apps/recipes", "/apps/trainer/my-coach"):
-            moved = visitor.get(path, follow_redirects=False)
-            self.assertEqual((moved.status_code, moved.headers.get("location")), (303, "/coach"), path)
-        self.assertEqual(visitor.post("/apps/trainer/sessions/add", data={"day": "2026-12-01", "kind": "easy"},
-                                      follow_redirects=False).status_code, 403)
-        # it can send a workout, and the athlete sees it with their own times on Trainer home and Today
-        with mock.patch.object(coach, "athlete_model", return_value=dict(MODEL)):
-            sent = visitor.post("/apps/trainer/athletes/send", follow_redirects=False,
-                                data={"athlete_id": str(athlete), "day": "2026-12-01", "title": "Threshold miles",
-                                      "reps_0": "6", "metres_0": "1609", "intensity_0": "threshold",
-                                      "rest_0": "90 s jog"})
-            self.assertEqual(sent.headers["location"], f"/apps/trainer/athletes/{athlete}?sent=1")
+        with mock.patch.object(coach.CoachStore, "_owner", return_value=athlete), \
+                mock.patch.object(coach, "athlete_model", return_value=dict(MODEL)):
+            self.assertIn("Passcode", visitor.get("/coach").text)
+            self.assertIn("wasn't recognized", visitor.post("/coach", data={"passcode": "nope-nope"}).text)
+            signed_in = visitor.post("/coach", data={"passcode": "phxrun"}, follow_redirects=False)
+            self.assertEqual((signed_in.status_code, signed_in.headers["location"]), (303, "/coach"))
+            page = visitor.get("/coach").text                      # the coach page, at its own address
+            self.assertIn("View athlete page", page)
+            self.assertIn(f'<option value="{athlete}">Curtis</option>', page)
+            self.assertIn("Send to all athletes (1)", page)
+            # only the coach page: everything else sends it back, and other forms are refused
+            for path in ("/", "/apps/trainer/week", "/apps/recipes", "/apps/trainer/my-coach"):
+                moved = visitor.get(path, follow_redirects=False)
+                self.assertEqual((moved.status_code, moved.headers.get("location")), (303, "/coach"), path)
+            self.assertEqual(visitor.post("/apps/trainer/sessions/add", data={"day": "2026-12-01", "kind": "easy"},
+                                          follow_redirects=False).status_code, 403)
+            # write a workout for all athletes
+            day = (__import__("datetime").date.today() + __import__("datetime").timedelta(days=1)).isoformat()
+            sent = visitor.post("/coach/send", follow_redirects=False,
+                                data={"day": day, "title": "Threshold miles", "reps_0": "6", "metres_0": "1609",
+                                      "intensity_0": "threshold", "rest_0": "90 s jog"})
+            self.assertEqual(sent.headers["location"], "/coach?sent=1#sent")
+            self.assertIn("Sent to 1 athlete", visitor.get("/coach?sent=1").text)
+            # the athlete gets it with his own times
             home = runner.get("/apps/trainer").text
             self.assertIn("New from your coach", home)
-            self.assertIn("6 × 1 mile at threshold, 90 s jog", home)
             self.assertIn(speed.clock(round(1609 / 4.5)), home)
-            self.assertNotIn(speed.clock(round(1609 / 4.5)), visitor.get(f"/apps/trainer/athletes/{athlete}").text)
-        self.assertIn("New from Daniel", runner.get("/").text)
-        # turned off: signed out, and the passcode stops working
-        runner.post("/apps/trainer/my-coach/passcode/off")
-        self.assertNotEqual(visitor.get(f"/apps/trainer/athletes/{athlete}", follow_redirects=False).status_code, 200)
-        self.assertIn("wasn't recognized", TestClient(self.api.app).post("/coach", data={"passcode": "phxrun"}).text)
+            # the coach opens his athlete page (read-only) and sees the pace Dieter picked
+            visitor.post("/coach/view", data={"athlete_id": str(athlete)})
+            viewing = visitor.get("/apps/trainer")
+            self.assertEqual(viewing.status_code, 200)
+            self.assertIn("Viewing Curtis's Trainer, read-only", viewing.text)
+            self.assertIn("Coming up from the coach", viewing.text)
+            self.assertIn(speed.clock(round(1609 / 4.5)), viewing.text)
+            self.assertNotIn("Put it on my plan", viewing.text)
+            stopped = visitor.post("/apps/trainer/view-as/stop", follow_redirects=False)
+            self.assertEqual(stopped.headers["location"], "/coach")
+        self.assertIn("New from Coach", runner.get("/").text)
 
     def test_passcode_tries_are_limited(self):
         from fastapi.testclient import TestClient

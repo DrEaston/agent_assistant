@@ -6,21 +6,23 @@
 {% set t = view.totals %}
 {% call ui.page_header("Trainer", crumbs=(("Dieter", "/"),), tabs=tabs, current=current, sub=view.label) %}{% endcall %}
 <main class="wrap">
-  {% if coach_new and not trainer_viewing %}
-  {% call ui.section("New from your coach") %}
+  {% if coach_new %}
+  {% call ui.section("Coming up from the coach" if trainer_viewing else "New from your coach") %}
   <div class="stack">
   {% for w in coach_new %}
     <article class="card stack">
-      <div class="row spread"><strong>{{ w.title or "Workout" }}</strong>{{ ui.tag("New", "info") }}</div>
+      <div class="row spread"><strong>{{ w.title or "Workout" }}</strong>{% if w.status == "sent" %}{{ ui.tag("New", "info") }}{% elif w.status == "accepted" %}{{ ui.tag("On the plan", "ok") }}{% elif w.status == "done" %}{{ ui.tag("Done", "ok") }}{% else %}{{ ui.tag("Declined") }}{% endif %}</div>
       <p class="small muted">{{ w.day }} · from {{ w.coach }}</p>
       <ul class="steps">
         {% for s in w.sets %}<li><span>{{ s.text }}</span>{% if s.target %}<br><strong class="num">{{ s.target }}</strong>{% endif %}</li>{% endfor %}
       </ul>
       {% if w.notes %}<p class="small">Coach: {{ w.notes }}</p>{% endif %}
+      {% if not trainer_viewing %}
       <div class="row">
         <form method="post" action="/apps/trainer/my-coach/workouts/{{ w.id }}/take"><button type="submit" class="primary">Put it on my plan</button></form>
         <a class="button quiet" href="/apps/trainer/my-coach#workout-{{ w.id }}">Decline or more</a>
       </div>
+      {% endif %}
     </article>
   {% endfor %}
   </div>
