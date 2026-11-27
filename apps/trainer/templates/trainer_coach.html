@@ -24,7 +24,11 @@
     {{ ui.field("Day", "day", value=tomorrow, type="date", required=True) }}
     <div class="field"><label for="workout">Workout</label>
       <textarea id="workout" name="workout" required maxlength="1500" placeholder="2 mile warm-up with drills. 6 x mile at threshold, 90 s jog. Then 8 x 200 fast, full recovery. 1 mile cool-down.">{{ workout }}</textarea></div>
-    <p class="small muted">Write it the way you'd tell them. Dieter reads it into sets and works out each athlete's own paces from their runs.</p>
+    <div class="row">
+      <button type="button" id="talk" aria-pressed="false">🎤 <span id="talk-label">Talk</span></button>
+      <span class="small muted" id="talk-status" aria-live="polite"></span>
+    </div>
+    <p class="small muted">Write or say it the way you'd tell them. Dieter reads it into sets and works out each athlete's own paces from their runs.</p>
     <button type="submit" class="primary">Send to all athletes ({{ athletes | length }})</button>
   </form>
   {% endcall %}
@@ -53,4 +57,44 @@
 
   <form method="post" action="/logout" class="section"><button type="submit" class="quiet">Sign out</button></form>
 </main>
+{% endblock %}
+{% block after %}
+<script>
+(() => {
+  const btn = document.getElementById("talk"), label = document.getElementById("talk-label");
+  const status = document.getElementById("talk-status"), box = document.getElementById("workout");
+  if (!btn || !box) return;
+  if (!navigator.mediaDevices || !window.MediaRecorder) { btn.hidden = true; return; }
+  let recorder = null, chunks = [], stream = null;
+  const idle = (msg) => { recorder = null; btn.setAttribute("aria-pressed", "false"); label.textContent = "Talk"; status.textContent = msg || ""; };
+  btn.addEventListener("click", async () => {
+    if (recorder) { recorder.stop(); return; }
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e) { status.textContent = "Can't use the microphone here. Type it instead?"; return; }
+    chunks = [];
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    recorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+      idle("Writing it down…");
+      if (!blob.size) { idle(); return; }
+      const body = new FormData();
+      body.append("audio", blob, "workout." + (blob.type.includes("mp4") ? "mp4" : "webm"));
+      try {
+        const r = await fetch("/coach/transcribe", { method: "POST", body });
+        const data = await r.json();
+        const text = (data.text || "").trim();
+        if (!r.ok || !text) { idle("Didn't catch that. Try again?"); return; }
+        box.value = box.value.trim() ? box.value.trim() + " " + text : text;
+        idle("Added. Check it, then send.");
+        box.focus();
+      } catch (e) { idle("Couldn't hear that. Try again?"); }
+    };
+    recorder.start();
+    btn.setAttribute("aria-pressed", "true"); label.textContent = "Stop";
+    status.textContent = "Listening… tap Stop when you're done.";
+  });
+})();
+</script>
 {% endblock %}

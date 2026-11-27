@@ -4451,6 +4451,22 @@ def api_recipe_edit(message: RecipeEditMessage):
 @app.post("/api/dieter/transcribe")
 async def api_dieter_transcribe(audio: UploadFile = File(...)):
     """Transcribe dictated Ask Dieter audio using the server-side LLM provider."""
+    return await transcribe_upload(audio, (
+        "This is a short Ask Dieter command for a planner or scheduler app. "
+        "Prefer words like context, bullets, action item, hygiene, Pilates, AC, tomorrow, today. "
+        "Preserve list items clearly."))
+
+
+@app.post("/coach/transcribe")
+async def coach_transcribe(audio: UploadFile = File(...)):
+    """The coach page's Talk button: a dictated workout, as text for the workout box."""
+    return await transcribe_upload(audio, (
+        "A running coach dictating a workout, e.g. 2 mile warm-up, 6 x 1 mile at threshold with 90 seconds jog, "
+        "8 x 200 meters fast, strides, tempo, 5K pace, 400s, 800s, cool-down."))
+
+
+async def transcribe_upload(audio, prompt):
+    """Text from an uploaded voice recording (OpenAI transcription)."""
     api_key = os.getenv("OPENAI_API_KEY", "")
     if not api_key:
         raise HTTPException(status_code=503, detail="Voice transcription is not configured.")
@@ -4465,11 +4481,7 @@ async def api_dieter_transcribe(audio: UploadFile = File(...)):
             transcript = client.audio.transcriptions.create(
                 model=OPENAI_TRANSCRIPTION_MODEL,
                 file=audio_file,
-                prompt=(
-                    "This is a short Ask Dieter command for a planner or scheduler app. "
-                    "Prefer words like context, bullets, action item, hygiene, Pilates, AC, tomorrow, today. "
-                    "Preserve list items clearly."
-                ),
+                prompt=prompt,
             )
         text = getattr(transcript, "text", "") or ""
         return {"text": text.strip(), "model": OPENAI_TRANSCRIPTION_MODEL}

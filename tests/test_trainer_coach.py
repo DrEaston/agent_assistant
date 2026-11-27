@@ -363,6 +363,10 @@ class CoachPageTests(unittest.TestCase):
             self.assertIn("View athlete page", page)
             self.assertIn(f'<option value="{athlete}">Curtis</option>', page)
             self.assertIn("Send to all athletes (1)", page)
+            self.assertIn('id="talk"', page)                                   # voice for the workout box
+            with mock.patch.object(self.api, "transcribe_upload", return_value={"text": "6 x mile at threshold"}):
+                said = visitor.post("/coach/transcribe", files={"audio": ("w.webm", b"audio", "audio/webm")})
+            self.assertEqual(said.json()["text"], "6 x mile at threshold")
             # only the coach page: everything else sends it back, and other forms are refused
             for path in ("/", "/apps/trainer/week", "/apps/recipes", "/apps/trainer/my-coach"):
                 moved = visitor.get(path, follow_redirects=False)
