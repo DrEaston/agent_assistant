@@ -14,6 +14,18 @@ from apps.trainer import coach, coach_reader, plan, speed
 MODEL = {"cs": 4.5, "d_prime": 200, "vmax": 8.0, "easy": 3.4}   # threshold 5:58/mi, top speed 8 m/s
 
 
+TEST_PASSCODE_HASH = coach._hash("test-passcode")   # tests use their own passcode, never the real one
+
+
+def setUpModule():
+    global _real_hash
+    _real_hash, coach.PASSCODE_HASH = coach.PASSCODE_HASH, TEST_PASSCODE_HASH
+
+
+def tearDownModule():
+    coach.PASSCODE_HASH = _real_hash
+
+
 class FakeAI:
     """Stands in for the AI model: returns one fixed reply."""
 
@@ -214,11 +226,11 @@ class CoachPasscodeTests(CoachStoreTests):
         conn = self.db.connect()
         conn.execute("UPDATE users SET role = 'admin' WHERE id = ?", (self.athlete,))
         conn.commit()
-        self.assertIsNone(self.store.passcode_sign_in("phxrunn"))
+        self.assertIsNone(self.store.passcode_sign_in("test-passcodex"))
         self.assertIsNone(self.store.passcode_sign_in(""))
-        coach_id = self.store.passcode_sign_in("phxrun")
+        coach_id = self.store.passcode_sign_in("test-passcode")
         self.assertEqual(self.db.get_user_by_id(coach_id)["role"], coach.PASSCODE_ROLE)
-        self.assertEqual(self.store.passcode_sign_in(" phxrun "), coach_id)      # same account every time
+        self.assertEqual(self.store.passcode_sign_in(" test-passcode "), coach_id)      # same account every time
         with As(coach_id):
             athletes = self.store.my_athletes()
             self.assertEqual([a["athlete_id"] for a in athletes], [self.athlete])
@@ -345,7 +357,7 @@ class CoachPageTests(unittest.TestCase):
                 mock.patch.object(coach, "athlete_model", return_value=dict(MODEL)):
             self.assertIn("Passcode", visitor.get("/coach").text)
             self.assertIn("passcode wasn&#39;t recognized", visitor.post("/coach", data={"passcode": "nope-nope"}).text)
-            signed_in = visitor.post("/coach", data={"passcode": "phxrun"}, follow_redirects=False)
+            signed_in = visitor.post("/coach", data={"passcode": "test-passcode"}, follow_redirects=False)
             self.assertEqual((signed_in.status_code, signed_in.headers["location"]), (303, "/coach"))
             page = visitor.get("/coach").text                      # the coach page, at its own address
             self.assertIn("View athlete page", page)
