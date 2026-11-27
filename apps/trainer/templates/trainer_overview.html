@@ -132,15 +132,6 @@
       <div class="stat"><span class="small muted">Near-sprint running this week</span><strong>{{ "{:,}".format(sp.near_top) }} m</strong>
         <span class="small">{% if sp.top_over %}{{ ui.tag("Over the safe limit", "warn") }} {% endif %}{% if sp.top_line %}safe limit {{ "{:,}".format(sp.top_line) }} m{% else %}safe limit once the 4 weeks before are read{% endif %}</span></div>
     </div>
-    <details><summary class="small">More</summary>
-      <div class="stack gap-above">
-    {% set bars = [] %}{% for w in sp.weeks %}{% set _ = bars.append({"label": w.label, "value": w.speed_work or 0, "current": loop.last, "limit": w.work_line}) %}{% endfor %}
-    {{ ui.bar_chart(bars, sp.work_max, unit=" points", label="Speed points per week, last 16 weeks") }}
-    <p class="small muted">Speed points per week. The dashed mark over each week is its safe limit; bars past it are marked.</p>
-    {% set tbars = [] %}{% for w in sp.weeks %}{% set _ = tbars.append({"label": w.label, "value": w.near_top, "current": loop.last, "limit": w.top_line}) %}{% endfor %}
-    {{ ui.bar_chart(tbars, sp.top_max, unit=" m", label="Near-sprint running per week, last 16 weeks") }}
-    <p class="small muted">Near-sprint running per week (metres), with its safe limit.</p>
-
     <h3 class="group-title">Week by week</h3>
     <p class="small muted">Tap a week to see its runs and their speed points.</p>
     {% set read_weeks = sp.weeks | selectattr("read") | list | reverse | list %}
@@ -160,6 +151,14 @@
       <div class="table-scroll"><table class="data-table">{{ week_rows(read_weeks[4:]) }}</table></div>
     </details>
     {% endif %}
+    <details><summary class="small">Weekly charts</summary>
+      <div class="stack gap-above">
+    {% set bars = [] %}{% for w in sp.weeks %}{% set _ = bars.append({"label": w.label, "value": w.speed_work or 0, "current": loop.last, "limit": w.work_line}) %}{% endfor %}
+    {{ ui.bar_chart(bars, sp.work_max, unit=" points", label="Speed points per week, last 16 weeks") }}
+    <p class="small muted">Speed points per week. The dashed mark over each week is its safe limit; bars past it are marked.</p>
+    {% set tbars = [] %}{% for w in sp.weeks %}{% set _ = tbars.append({"label": w.label, "value": w.near_top, "current": loop.last, "limit": w.top_line}) %}{% endfor %}
+    {{ ui.bar_chart(tbars, sp.top_max, unit=" m", label="Near-sprint running per week, last 16 weeks") }}
+    <p class="small muted">Near-sprint running per week (metres), with its safe limit.</p>
 
         <p class="small muted">Speed reserve is D′ in your speed model. Estimates from each run's second-by-second data on Strava. <a href="/apps/trainer/speed/how">How these numbers work</a></p>
       </div>
