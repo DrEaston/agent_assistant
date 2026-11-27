@@ -20,10 +20,7 @@
       <circle class="route-finish" cx="{{ r.map.finish[0] }}" cy="{{ r.map.finish[1] }}" r="6"><title>Finish</title></circle>
       <circle class="route-dot" id="ex-dot" cx="0" cy="0" r="9" visibility="hidden"></circle>
     </svg>
-    {% if r.map.key %}<figcaption class="heat-key" aria-label="Colour key: speed">
-      <div class="heat-bar">{% for s in r.map.key.steps %}<span class="heat-swatch heat-{{ s }}"></span>{% endfor %}</div>
-      <div class="chart-axis small muted"><span>{{ r.map.key.easy }}</span>{% if r.map.key.threshold %}<span>{{ r.map.key.threshold }} threshold</span>{% endif %}<span>{{ r.map.key.top }}</span></div>
-    </figcaption>{% endif %}
+    {% if r.map.key %}{{ ui.heat_key(r.map.key, tag="figcaption") }}{% endif %}
   </figure>
   {% endif %}
 

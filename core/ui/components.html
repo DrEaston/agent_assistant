@@ -127,3 +127,13 @@
   <figcaption class="chart-axis small muted"><span>{{ bars[0].label if bars }}</span><span>{{ bars[-1].label if bars }}</span></figcaption>
 </figure>
 {%- endmacro %}
+
+{# A colour key for a stepped heatmap: a title with the slow/fast ends, the bar, and a label under every other colour.
+   key = {"steps": [...], "ticks": [{"step", "label", "note"}]} (Trainer's runpage.heat_key). #}
+{% macro heat_key(key, title="Pace per mile", slow="Slower", fast="Faster", tag="div") -%}
+<{{ tag }} class="heat-key" aria-label="Colour key: {{ title|lower }}, from {{ key.ticks[0].label }} ({{ slow|lower }}) to {{ key.ticks[-1].label }} ({{ fast|lower }})">
+  <div class="heat-head small"><span class="muted">◀ {{ slow }}</span><strong>{{ title }}</strong><span class="muted">{{ fast }} ▶</span></div>
+  <div class="heat-bar">{% for s in key.steps %}<span class="heat-swatch heat-{{ s }}"></span>{% endfor %}</div>
+  <div class="heat-ticks">{% for t in key.ticks %}<span class="heat-tick{% if t.label %} labelled{% endif %}">{% if t.label %}<span class="heat-pace">{{ t.label }}</span>{% if t.note %}<span class="heat-note">{{ t.note }}</span>{% endif %}{% endif %}</span>{% endfor %}</div>
+</{{ tag }}>
+{%- endmacro %}
