@@ -204,6 +204,4 @@ def week_guidance(view, today=None):
         done, planned = t[kind]
         if planned and done < planned:
             lines.append(f"{label} {done} of {planned} this week.")
-    if t["water_days"] < sum(1 for d in view["days"] if d["is_past"] or d["is_today"]):
-        lines.append("Water: tap +1 on This week as you go, so hydration shows in the Sunday check-in.")
     return lines

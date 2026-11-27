@@ -151,12 +151,12 @@ def route_map(series, efforts, easy=None, cs=None, top=None):
             "key": heat_key(easy, cs, top) if heat else None, "start": first, "finish": last}
 
 
-EXPLORE_POINTS = 2400    # samples sent to the Explore page at most (a 2-hour run: one every 3 seconds)
-SMOOTH = 5               # pace on the Explore page: averaged over 5 seconds (a single GPS reading jumps around)
+EXPLORE_POINTS = 2400    # samples sent to the run page's graph at most (a 2-hour run: one every 3 seconds)
+SMOOTH = 5               # pace on the run page's graph: averaged over 5 seconds (a single GPS reading jumps around)
 
 
 def explore(db, user_id, external_id, races=None):
-    """The Explore page's data: the run page's numbers plus, sample by sample, time, distance, 5-second speed,
+    """The run page's data: its numbers plus, sample by sample, time, distance, 5-second speed,
     heart rate and the spot on the map, for the page's script to draw and follow a finger along."""
     r = detail(db, user_id, external_id, races)
     if not r:
