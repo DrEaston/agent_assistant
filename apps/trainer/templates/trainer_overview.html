@@ -84,24 +84,31 @@
   {% endcall %}
 
   {% set sp = o.speed %}
-  {% call ui.section("Speed") %}
-  <div class="card stack">
-    {% for o in sp.over_weeks | reverse %}
-    {% call ui.banner("warn" if o.how == "well over" else "info") %}<strong><a href="/apps/trainer/speed/{{ o.week }}">Week of {{ o.label }}</a>: {{ o.times }}× the safe limit, {{ o.how }}</strong>{% if o.cause %} ({% if o.cause.id %}<a href="/apps/trainer/run/{{ o.cause.id }}">{{ o.cause.summary }}</a>{% else %}{{ o.cause.summary }}{% endif %} on {{ o.cause.day.strftime("%b") }} {{ o.cause.day.day }}){% endif %}.{% if o.how == "well over" %} A jump like that is where injuries tend to come from; build up to it over a few weeks.{% endif %}{% endcall %}
-    {% endfor %}
-
-    {% if sp.recent %}
-    <h3 class="group-title">Recent runs</h3>
-    <div class="card flush">
-      {% for run in sp.recent %}
+  {% if sp.recent %}
+  {% macro run_row(run) %}
       <a class="link-row" href="/apps/trainer/run/{{ run.id }}">
         <span class="label-stack"><span class="title">{{ run.title }}{% if run.miles %} · {{ run.miles }} mi{% endif %}</span>
           <span class="small muted">{{ run.day }} · {{ run.summary or "easy" }}{% if run.points %} · {{ run.points }} speed points{% endif %}</span></span>
         <span class="chev" aria-hidden="true">›</span>
       </a>
-      {% endfor %}
-    </div>
-    {% endif %}
+  {% endmacro %}
+  {% call ui.section("Recent runs") %}
+  <div class="card flush">
+    {% for run in sp.recent[:4] %}{{ run_row(run) }}{% endfor %}
+  </div>
+  {% if sp.recent | length > 4 %}
+  <details class="gap-above"><summary class="small">{{ sp.recent | length - 4 }} more run{{ "s" if sp.recent | length > 5 }}</summary>
+    <div class="card flush">{% for run in sp.recent[4:] %}{{ run_row(run) }}{% endfor %}</div>
+  </details>
+  {% endif %}
+  {% endcall %}
+  {% endif %}
+
+  {% call ui.section("Speed") %}
+  <div class="card stack">
+    {% for o in sp.over_weeks | reverse %}
+    {% call ui.banner("warn" if o.how == "well over" else "info") %}<strong><a href="/apps/trainer/speed/{{ o.week }}">Week of {{ o.label }}</a>: {{ o.times }}× the safe limit, {{ o.how }}</strong>{% if o.cause %} ({% if o.cause.id %}<a href="/apps/trainer/run/{{ o.cause.id }}">{{ o.cause.summary }}</a>{% else %}{{ o.cause.summary }}{% endif %} on {{ o.cause.day.strftime("%b") }} {{ o.cause.day.day }}){% endif %}.{% if o.how == "well over" %} A jump like that is where injuries tend to come from; build up to it over a few weeks.{% endif %}{% endcall %}
+    {% endfor %}
 
     <div class="stat-grid">
       <div class="stat"><span class="small muted">Speed points this week</span><strong>{{ "{:,}".format(sp.speed_work) if sp.speed_work is not none else "–" }}</strong>
@@ -127,16 +134,23 @@
 
     <h3 class="group-title">Week by week</h3>
     <p class="small muted">Tap a week to see its runs and their speed points.</p>
-    <div class="table-scroll"><table class="data-table">
+    {% set read_weeks = sp.weeks | selectattr("read") | list | reverse | list %}
+    {% macro week_rows(weeks) %}
       <tr><th>Week</th><th class="num">Speed points</th><th class="num">Safe limit</th><th>Biggest session</th><th class="num">Near-sprint</th><th class="num">Threshold pace</th></tr>
-      {% for w in sp.weeks | reverse %}{% if w.read %}<tr>
+      {% for w in weeks %}<tr>
         <td><a href="/apps/trainer/speed/{{ w.week }}">{{ w.label }}</a></td>
         <td class="num">{{ "{:,}".format(w.speed_work) if w.speed_work is not none else "–" }}{% if w.work_over %} {{ ui.tag("Over", "warn") }}{% endif %}</td>
         <td class="num">{{ "{:,}".format(w.work_line) if w.work_line else "–" }}</td>
         <td class="small">{% if w.cause %}<a href="/apps/trainer/run/{{ w.cause.id }}">{{ w.cause.summary }}</a>{% else %}–{% endif %}</td>
         <td class="num">{{ "{:,}".format(w.near_top) }} m{% if w.top_over %} {{ ui.tag("Over", "warn") }}{% endif %}</td>
-        <td class="num">{{ w.cs_pace or "–" }}</td></tr>{% endif %}{% endfor %}
-    </table></div>
+        <td class="num">{{ w.cs_pace or "–" }}</td></tr>{% endfor %}
+    {% endmacro %}
+    <div class="table-scroll"><table class="data-table">{{ week_rows(read_weeks[:4]) }}</table></div>
+    {% if read_weeks | length > 4 %}
+    <details><summary class="small">{{ read_weeks | length - 4 }} earlier weeks</summary>
+      <div class="table-scroll"><table class="data-table">{{ week_rows(read_weeks[4:]) }}</table></div>
+    </details>
+    {% endif %}
 
     <p class="small muted">Estimates from each run's second-by-second data on Strava.
       <a href="/apps/trainer/speed/how">How these numbers work</a></p>
