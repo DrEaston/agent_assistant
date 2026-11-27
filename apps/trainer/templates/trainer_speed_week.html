@@ -22,7 +22,7 @@
     {% for run in w.runs %}
     <a class="link-row" href="/apps/trainer/run/{{ run.id }}">
       <span class="label-stack"><span class="title">{{ run.day.strftime("%a %b") }} {{ run.day.day }} · {{ run.title }}{% if run.miles %} · {{ run.miles }} mi{% endif %}</span>
-        <span class="small muted">{{ run.summary or "easy" }}</span></span>
+        <span class="small">{% if run.summary %}<span class="accent-text">{{ run.summary }}</span>{% else %}<span class="muted">easy</span>{% endif %}</span></span>
       <span class="num"><strong>{{ run.points if run.points is not none else "–" }}</strong> <span class="small muted">points</span></span>
       <span class="chev" aria-hidden="true">›</span>
     </a>
