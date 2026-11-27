@@ -1,0 +1,22 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}My athletes · Trainer{% endblock %}
+{% block content %}
+{% call ui.page_header("My athletes", crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs, current=current,
+    sub="People who shared Trainer with you. Send them workouts in plain terms; Dieter turns them into each athlete's own times.") %}{% endcall %}
+<main class="wrap">
+  {% if athletes %}
+  <div class="card">
+    {% for a in athletes %}
+    <div class="list-row row spread">
+      <span><a class="title" href="/apps/trainer/athletes/{{ a.athlete_id }}">{{ a.name }}</a><br>
+        <span class="small muted">{{ a.counts.sent }} waiting · {{ a.counts.accepted }} planned · {{ a.counts.done }} done{% if a.full_view_until %} · full view until {{ a.full_view_until }}{% endif %}</span></span>
+      <span class="chev" aria-hidden="true">›</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  {{ ui.empty("No one has shared Trainer with you yet. An athlete makes an invite link on their My coach page and sends it to you.") }}
+  {% endif %}
+</main>
+{% endblock %}

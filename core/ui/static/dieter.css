@@ -521,6 +521,9 @@ a.link-row:hover { background: var(--hover); }
 .ingredients .ing .name { flex: 1; }
 .ingredients .ing .amount { font-weight: 700; color: var(--accent); text-align: right; }
 .ingredients .ing:has(input:checked) .name, .ingredients .ing:has(input:checked) .amount { color: var(--muted); text-decoration: line-through; }
+/* a group of form fields without the browser's fieldset box */
+.plain-set { border: 0; margin: 0; padding: 0; min-width: 0; }
+.plain-set > legend { padding: 0; margin-bottom: var(--s1); }
 .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s3); }
 .steps li { display: flex; gap: var(--s3); background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-card); padding: var(--s3) var(--s4); line-height: 1.55; }
 .step-num { flex: none; width: 30px; height: 30px; border-radius: var(--r-pill); background: var(--accent-soft); color: var(--accent); font-weight: 800; display: inline-flex; align-items: center; justify-content: center; }

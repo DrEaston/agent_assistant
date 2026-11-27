@@ -1,0 +1,395 @@
+"""Coach mode (docs/trainer_sharing_plan.md, "Coach mode").
+
+An athlete invites a coach with a link. The coach prescribes workouts in plain terms ("6 x 1 mile at threshold,
+90 s jog; 8 x 200 m sprint"). Dieter turns each set into the athlete's own target times from the athlete's speed
+model (threshold pace = critical speed; race paces from critical speed and D'; sprint = near-sprint speed) - plain
+formulas, no AI.
+
+The coach never sees the athlete's runs, paces or target times: only what the coach wrote, whether the athlete took
+it, and the note the athlete chose to write. Nothing here reads Strava data for a coach. Target times are worked
+out only when the athlete is the one signed in (`targets()` is called from the athlete's pages only).
+
+Tables (additive, created on first use):
+- tr_coach_links: athlete, coach (empty until the invite is accepted), invite token, status invited/active/ended,
+  and full_view_until: a temporary exception (see FULL_VIEW_DAYS).
+- tr_prescriptions: one prescribed workout: athlete, coach, day, title, sets (JSON), coach's notes, status
+  sent/accepted/declined/done, the plan session it became, the athlete's note back.
+"""
+
+import json
+import secrets
+from datetime import date, timedelta
+
+from database import get_current_user_id
+
+from . import plan, speed
+
+SCHEMA = (
+    """CREATE TABLE IF NOT EXISTS tr_coach_links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, athlete_id INTEGER NOT NULL, coach_id INTEGER,
+        token TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'invited',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP, accepted_at TEXT DEFAULT '', ended_at TEXT DEFAULT '',
+        full_view_until TEXT DEFAULT '')""",
+    """CREATE TABLE IF NOT EXISTS tr_prescriptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, athlete_id INTEGER NOT NULL, coach_id INTEGER NOT NULL,
+        day TEXT NOT NULL, title TEXT DEFAULT '', sets_json TEXT DEFAULT '[]', notes TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'sent', session_id INTEGER, athlete_note TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP, answered_at TEXT DEFAULT '')""",
+)
+
+INTENSITIES = {
+    "easy": "easy",
+    "threshold": "threshold",
+    "10k": "10K pace",
+    "5k": "5K pace",
+    "3k": "3K pace",
+    "mile": "mile pace",
+    "sprint": "sprint",
+    "feel": "by feel",
+}
+RACE_METRES = {"10k": 10000, "5k": 5000, "3k": 3000, "mile": 1609}
+DISTANCES = (100, 150, 200, 300, 400, 600, 800, 1000, 1200, 1609, 2000, 3218)
+DISTANCE_NAMES = {1609: "1 mile", 3218: "2 miles", 1000: "1 km", 2000: "2 km"}
+SPRINT_SHARE = 0.9      # "sprint" = Dieter's near-sprint line: 90% of his top speed (best 5 seconds)
+SPREAD = 0.015          # target range: +/- 1.5% of the target speed
+MAX_SETS = 6
+STATUSES = ("sent", "accepted", "declined", "done")
+FULL_VIEW_DAYS = 30     # Temporary, for building coach mode with a real coach: Dieter's owner (admin) can let one
+                        # coach see all of their Trainer pages read-only. It switches itself off after this many days.
+                        # This shows the owner's Strava-sourced runs to another person, which Strava's API terms
+                        # restrict; it is the owner's own call about their own data, and it is never offered to
+                        # other accounts.
+
+
+class Invalid(ValueError):
+    pass
+
+
+def distance_name(metres):
+    return DISTANCE_NAMES.get(metres) or f"{metres} m"
+
+
+def describe_set(s):
+    """'6 × 1 mile at threshold, 90 s jog' - what the coach wrote, with no times."""
+    text = f"{s['reps']} × {distance_name(s['metres'])}"
+    if s["intensity"] in ("sprint", "easy", "feel"):
+        text += f" {INTENSITIES[s['intensity']]}"
+    else:
+        text += f" at {INTENSITIES[s['intensity']]}"
+    if s.get("rest"):
+        text += f", {s['rest']}"
+    return text
+
+
+def clean_sets(raw):
+    """[{reps, metres, intensity, rest}] from form rows; empty rows are skipped."""
+    sets = []
+    for row in raw or []:
+        reps, metres = str(row.get("reps") or "").strip(), str(row.get("metres") or "").strip()
+        if not reps and not metres:
+            continue
+        try:
+            reps, metres = int(reps), int(float(metres))
+        except ValueError:
+            raise Invalid("Each set needs a number of reps and a distance.") from None
+        if not 1 <= reps <= 50:
+            raise Invalid("Reps are between 1 and 50.")
+        if not 50 <= metres <= 20000:
+            raise Invalid("A rep is between 50 m and 20 km.")
+        intensity = row.get("intensity") or "feel"
+        if intensity not in INTENSITIES:
+            raise Invalid(f"Effort is one of: {', '.join(INTENSITIES.values())}.")
+        sets.append({"reps": reps, "metres": metres, "intensity": intensity,
+                     "rest": " ".join(str(row.get("rest") or "").split())[:40]})
+    if not sets:
+        raise Invalid("Add at least one set, like 6 × 1 mile at threshold.")
+    return sets[:MAX_SETS]
+
+
+# ------------------------------------------------------------ the athlete's times (athlete only)
+
+
+def athlete_model(db, user_id, today=None, races=None):
+    """{cs, d_prime, vmax, easy} for the athlete from their own runs (and race times they entered)."""
+    today = today or date.today()
+    runs = speed._rows(db, user_id, today - timedelta(weeks=speed.FIT_WEEKS))
+    model = speed.model_at(runs, today, races)
+    model["easy"] = speed.easy_speed(db, user_id, today)
+    return model
+
+
+def target_speed(intensity, model):
+    """m/s for an effort from the athlete's model, or None when Dieter can't tell yet."""
+    cs, d_prime = model.get("cs"), model.get("d_prime")
+    if intensity == "threshold":
+        return cs
+    if intensity in RACE_METRES:
+        metres = RACE_METRES[intensity]
+        if cs and d_prime is not None and metres > d_prime:
+            return metres / ((metres - d_prime) / cs)   # race time from d = CS·t + D'
+        return None
+    if intensity == "sprint":
+        return SPRINT_SHARE * model["vmax"] if model.get("vmax") else None
+    if intensity == "easy":
+        return model.get("easy")
+    return None
+
+
+def targets(sets, model):
+    """Each set with the athlete's target: per-rep time and range, and pace per mile for longer reps."""
+    out = []
+    for s in sets:
+        v = target_speed(s["intensity"], model)
+        row = dict(s, text=describe_set(s), target="")
+        if v:
+            rep = s["metres"] / v
+            if s["intensity"] == "easy":
+                row["target"] = f"about {speed.pace(v)}/mi"
+            elif s["metres"] < 400 or s["intensity"] == "sprint":
+                row["target"] = f"about {speed.clock(rep)} each"
+            else:
+                fast, slow = s["metres"] / (v * (1 + SPREAD)), s["metres"] / (v * (1 - SPREAD))
+                row["target"] = f"{speed.clock(rep)} each ({speed.clock(fast)}–{speed.clock(slow)})"
+                if s["metres"] >= 800 and s["metres"] != 1609:
+                    row["target"] += f", {speed.pace(v)}/mi"
+        elif s["intensity"] != "feel":
+            row["target"] = "Dieter needs a few more hard runs (or a race time on Usual week) to set this."
+        out.append(row)
+    return out
+
+
+def _live(until, today=None):
+    """The full-view end date if it hasn't passed, else ""."""
+    return until if until and until >= (today or date.today()).isoformat() else ""
+
+
+# ------------------------------------------------------------ store
+
+
+class CoachStore:
+    def __init__(self, db):
+        self.db, self._ready = db, False
+
+    def _conn(self):
+        conn = self.db.connect()
+        if not self._ready:
+            for statement in SCHEMA:
+                conn.execute(statement)
+            conn.commit()
+            self._ready = True
+        return conn
+
+    def _user(self):
+        user = get_current_user_id()
+        if not user:
+            raise Invalid("Sign in first.")
+        return user
+
+    def _commit(self):
+        self.db._commit()
+
+    def _name(self, user_id):
+        row = self.db.get_user_by_id(user_id) if user_id else None
+        row = dict(row) if row else {}
+        return row.get("display_name") or (row.get("email") or "").split("@")[0] or "Someone"
+
+    # -------------------------------------------------------- links
+
+    def invite(self):
+        """The athlete's open invite link token (one at a time; made on first ask)."""
+        me = self._user()
+        row = self._conn().execute("SELECT token FROM tr_coach_links WHERE athlete_id = ? AND status = 'invited'",
+                                   (me,)).fetchone()
+        if row:
+            return row["token"]
+        token = secrets.token_urlsafe(18)
+        self._conn().execute("INSERT INTO tr_coach_links (athlete_id, token) VALUES (?, ?)", (me, token))
+        self._commit()
+        return token
+
+    def open_invite(self):
+        """{link_id, token} of the athlete's unused invite, or None (doesn't make one)."""
+        row = self._conn().execute("SELECT id, token FROM tr_coach_links WHERE athlete_id = ? AND status = 'invited'",
+                                   (self._user(),)).fetchone()
+        return {"link_id": row["id"], "token": row["token"]} if row else None
+
+    def invite_info(self, token):
+        row = self._conn().execute("SELECT * FROM tr_coach_links WHERE token = ?", (token,)).fetchone()
+        if not row or row["status"] != "invited":
+            raise Invalid("This invite link has been used or cancelled. Ask for a new one.")
+        return {"athlete": self._name(row["athlete_id"]), "athlete_id": row["athlete_id"]}
+
+    def accept(self, token):
+        """The signed-in person becomes the coach on this invite."""
+        me = self._user()
+        info = self.invite_info(token)
+        if info["athlete_id"] == me:
+            raise Invalid("That's your own invite link: send it to your coach.")
+        conn = self._conn()
+        if conn.execute("SELECT 1 FROM tr_coach_links WHERE athlete_id = ? AND coach_id = ? AND status = 'active'",
+                        (info["athlete_id"], me)).fetchone():
+            conn.execute("UPDATE tr_coach_links SET status = 'ended', ended_at = CURRENT_TIMESTAMP WHERE token = ?",
+                         (token,))
+        else:
+            conn.execute("UPDATE tr_coach_links SET coach_id = ?, status = 'active', accepted_at = CURRENT_TIMESTAMP "
+                         "WHERE token = ?", (me, token))
+        self._commit()
+        return info
+
+    def end(self, link_id):
+        """Either side can stop coaching; it ends at once. An open invite can be cancelled the same way."""
+        me = self._user()
+        cur = self._conn().execute(
+            "UPDATE tr_coach_links SET status = 'ended', ended_at = CURRENT_TIMESTAMP "
+            "WHERE id = ? AND status IN ('invited', 'active') AND (athlete_id = ? OR coach_id = ?)",
+            (link_id, me, me))
+        self._commit()
+        if not cur.rowcount:
+            raise Invalid("Nothing to stop.")
+
+    def my_coaches(self):
+        rows = self._conn().execute("SELECT * FROM tr_coach_links WHERE athlete_id = ? AND status = 'active' "
+                                    "ORDER BY accepted_at", (self._user(),)).fetchall()
+        return [{"link_id": r["id"], "coach_id": r["coach_id"], "name": self._name(r["coach_id"]),
+                 "since": (r["accepted_at"] or "")[:10], "full_view_until": _live(r["full_view_until"])}
+                for r in rows]
+
+    def is_owner(self, user_id=None):
+        row = self.db.get_user_by_id(user_id or self._user())
+        row = dict(row) if row else {}
+        return row.get("role") == "admin" and row.get("status", "active") == "active"
+
+    def set_full_view(self, link_id, on, today=None):
+        """The owner lets one of their coaches see all their Trainer pages, read-only, for FULL_VIEW_DAYS (or stops it)."""
+        me = self._user()
+        if not self.is_owner(me):
+            raise PermissionError("Full view is only for Dieter's owner, for now.")
+        until = ((today or date.today()) + timedelta(days=FULL_VIEW_DAYS)).isoformat() if on else ""
+        cur = self._conn().execute("UPDATE tr_coach_links SET full_view_until = ? WHERE id = ? AND athlete_id = ? "
+                                   "AND status = 'active'", (until, link_id, me))
+        self._commit()
+        if not cur.rowcount:
+            raise Invalid("That coach isn't linked to you.")
+        return until
+
+    def full_view(self, athlete_id, today=None):
+        """Whether the signed-in coach may see this athlete's whole Trainer right now (read-only)."""
+        me = get_current_user_id()
+        if not me or me == athlete_id:
+            return False
+        row = self._conn().execute("SELECT full_view_until FROM tr_coach_links WHERE athlete_id = ? AND coach_id = ? "
+                                   "AND status = 'active'", (athlete_id, me)).fetchone()
+        return bool(row and _live(row["full_view_until"], today) and self.is_owner(athlete_id))
+
+    def my_athletes(self):
+        rows = self._conn().execute("SELECT * FROM tr_coach_links WHERE coach_id = ? AND status = 'active' "
+                                    "ORDER BY accepted_at", (self._user(),)).fetchall()
+        out = []
+        for r in rows:
+            counts = {s: 0 for s in STATUSES}
+            for p in self._conn().execute("SELECT status FROM tr_prescriptions WHERE athlete_id = ? AND coach_id = ?",
+                                          (r["athlete_id"], r["coach_id"])).fetchall():
+                counts[p["status"]] = counts.get(p["status"], 0) + 1
+            out.append({"link_id": r["id"], "athlete_id": r["athlete_id"], "name": self._name(r["athlete_id"]),
+                        "since": (r["accepted_at"] or "")[:10], "counts": counts,
+                        "full_view_until": _live(r["full_view_until"]) if self.is_owner(r["athlete_id"]) else ""})
+        return out
+
+    def coaches_athlete(self, athlete_id):
+        """The signed-in coach's active link to this athlete (raises if there isn't one)."""
+        me = self._user()
+        row = self._conn().execute("SELECT * FROM tr_coach_links WHERE athlete_id = ? AND coach_id = ? "
+                                   "AND status = 'active'", (athlete_id, me)).fetchone()
+        if not row:
+            raise PermissionError("This athlete hasn't shared Trainer with you (or stopped sharing).")
+        return {"link_id": row["id"], "athlete_id": athlete_id, "name": self._name(athlete_id),
+                "full_view_until": _live(row["full_view_until"]) if self.is_owner(athlete_id) else ""}
+
+    # -------------------------------------------------------- prescriptions
+
+    def _view(self, row, for_athlete):
+        sets = json.loads(row["sets_json"] or "[]")
+        p = {"id": row["id"], "day": row["day"], "title": row["title"], "notes": row["notes"],
+             "status": row["status"], "athlete_note": row["athlete_note"], "session_id": row["session_id"],
+             "sets": [dict(s, text=describe_set(s)) for s in sets],
+             "coach": self._name(row["coach_id"]) if for_athlete else "",
+             "summary": "; ".join(describe_set(s) for s in sets)}
+        return p
+
+    def prescribe(self, athlete_id, day, title, sets, notes=""):
+        """A coach sends a workout. It waits for the athlete to take it; nothing changes on their plan until then."""
+        link = self.coaches_athlete(athlete_id)
+        try:
+            day = date.fromisoformat(str(day)[:10]).isoformat()
+        except ValueError:
+            raise Invalid("Pick a day for the workout.") from None
+        sets = clean_sets(sets)
+        title = " ".join(str(title or "").split())[:120] or "Workout from your coach"
+        cur = self._conn().execute(
+            "INSERT INTO tr_prescriptions (athlete_id, coach_id, day, title, sets_json, notes) VALUES (?, ?, ?, ?, ?, ?)",
+            (link["athlete_id"], self._user(), day, title, json.dumps(sets), " ".join(str(notes or "").split())[:500]))
+        self._commit()
+        return cur.lastrowid
+
+    def withdraw(self, prescription_id):
+        """The coach takes back a workout the athlete hasn't answered yet."""
+        cur = self._conn().execute("DELETE FROM tr_prescriptions WHERE id = ? AND coach_id = ? AND status = 'sent'",
+                                   (prescription_id, self._user()))
+        self._commit()
+        if not cur.rowcount:
+            raise Invalid("Only a workout your athlete hasn't answered yet can be taken back.")
+
+    def sent_to(self, athlete_id):
+        """What the coach sees for one athlete: their own prescriptions, status and the athlete's notes. No times."""
+        link = self.coaches_athlete(athlete_id)
+        rows = self._conn().execute("SELECT * FROM tr_prescriptions WHERE athlete_id = ? AND coach_id = ? "
+                                    "ORDER BY day DESC, id DESC LIMIT 60", (athlete_id, self._user())).fetchall()
+        return link, [self._view(r, for_athlete=False) for r in rows]
+
+    def for_me(self):
+        """The athlete's prescriptions from every coach, newest day first."""
+        rows = self._conn().execute("SELECT * FROM tr_prescriptions WHERE athlete_id = ? ORDER BY "
+                                    "CASE status WHEN 'sent' THEN 0 ELSE 1 END, day DESC, id DESC LIMIT 60",
+                                    (self._user(),)).fetchall()
+        return [self._view(r, for_athlete=True) for r in rows]
+
+    def _mine(self, prescription_id):
+        row = self._conn().execute("SELECT * FROM tr_prescriptions WHERE id = ? AND athlete_id = ?",
+                                   (prescription_id, self._user())).fetchone()
+        if not row:
+            raise Invalid("That workout isn't yours.")
+        return row
+
+    def take(self, prescription_id, model):
+        """The athlete takes the workout: it goes on their plan with their own target times in the details."""
+        row = self._mine(prescription_id)
+        if row["status"] != "sent":
+            raise Invalid("You've already answered this one.")
+        sets = targets(json.loads(row["sets_json"] or "[]"), model)
+        details = "; ".join(s["text"] + (f" ({s['target']})" if s["target"] and not s["target"].startswith("Dieter")
+                                          else "") for s in sets)
+        if row["notes"]:
+            details += f". Coach: {row['notes']}"
+        session = plan.PlanStore(self.db).add_session(row["day"], "workout", row["title"], details=details)
+        self._conn().execute("UPDATE tr_prescriptions SET status = 'accepted', session_id = ?, "
+                             "answered_at = CURRENT_TIMESTAMP WHERE id = ?", (session["id"], prescription_id))
+        self._commit()
+        return session
+
+    def decline(self, prescription_id, note=""):
+        row = self._mine(prescription_id)
+        if row["status"] != "sent":
+            raise Invalid("You've already answered this one.")
+        self._answer(prescription_id, "declined", note)
+
+    def done(self, prescription_id, note=""):
+        """The athlete says it's done, with an optional note for the coach (all the coach hears about how it went)."""
+        row = self._mine(prescription_id)
+        if row["status"] not in ("sent", "accepted", "done"):
+            raise Invalid("This one was declined.")
+        self._answer(prescription_id, "done", note)
+
+    def _answer(self, prescription_id, status, note):
+        self._conn().execute("UPDATE tr_prescriptions SET status = ?, athlete_note = ?, answered_at = CURRENT_TIMESTAMP "
+                             "WHERE id = ?", (status, " ".join(str(note or "").split())[:500], prescription_id))
+        self._commit()

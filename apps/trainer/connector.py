@@ -24,10 +24,26 @@ sit against that week's safe limit, and how his threshold pace has moved. Use th
 invent numbers."""
 
 
+AI_OFF_FOR_SHARED = ("Trainer's AI tools are only on for Dieter's owner for now. Runs here come from Strava, and "
+                     "Strava's API terms don't allow its data to be used with AI, so for shared accounts Trainer "
+                     "shows its numbers on its own pages instead (docs/trainer_sharing_plan.md).")
+
+
+def ai_allowed(user_id):
+    """Guardrail (docs/trainer_sharing_plan.md): Strava-sourced runs only reach an AI (Claude, ChatGPT, Dieter's chat)
+    for the owner's own account. Friends and coaches see Trainer's formulas on its pages, never through these tools."""
+    db = routes._state.get("db")
+    row = db.get_user_by_id(user_id) if db and user_id else None
+    row = dict(row) if row else {}
+    return row.get("role") == "admin" and row.get("status", "active") == "active"
+
+
 def _user():
     user = get_current_user_id()
     if not user:
         raise ToolError("Sign in first.")
+    if not ai_allowed(user):
+        raise ToolError(AI_OFF_FOR_SHARED)
     return user
 
 
