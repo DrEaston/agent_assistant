@@ -45,18 +45,24 @@ def _json(text):
     return json.loads(match.group(0))
 
 
-def read(text, provider=None):
-    """{title, sets, notes} from the coach's words. Raises coach.Invalid with a plain message when it can't."""
-    text = " ".join(str(text or "").split())[:MAX_TEXT]
-    if not text:
-        raise coach.Invalid("Write the workout first, like: 6 x 1 mile at threshold, 90 s jog; 8 x 200 m fast.")
+FIX_PROMPT = PROMPT + """
+
+You are now changing a workout you already read. The user message has the workout as JSON and the coach's change.
+Apply only that change and keep everything else exactly as it is. Reply with the whole updated workout as JSON in
+the same shape."""
+
+
+def _ask(system, content, provider, what):
     try:
         provider = provider or get_llm_provider(model=os.getenv("TRAINER_READER_MODEL") or None)
-        reply = provider.chat([{"role": "user", "content": text}], PROMPT, max_completion_tokens=800)
-        data = _json(reply)
+        return _json(provider.chat([{"role": "user", "content": content}], system, max_completion_tokens=800))
     except Exception as exc:
-        print(f"Warning: the workout reader failed: {exc!r}")
-        raise coach.Invalid("Dieter couldn't read that workout just now. Try again in a minute.") from None
+        print(f"Warning: the workout reader failed ({what}): {exc!r}")
+        raise coach.Invalid("Dieter couldn't read that just now. Try again in a minute.") from None
+
+
+def _checked(data):
+    """The AI's JSON, checked like anything a coach typed: {title, sets, notes}."""
     raw_sets = data.get("sets") if isinstance(data.get("sets"), list) else []
     rows = [dict(s, intensity=s.get("intensity") if s.get("intensity") in coach.INTENSITIES else "feel")
             for s in raw_sets if isinstance(s, dict)][:coach.MAX_SETS]
@@ -66,3 +72,21 @@ def read(text, provider=None):
     title = " ".join(str(data.get("title") or "").split())[:120]
     notes = " ".join(str(data.get("notes") or "").split())[:500]
     return {"title": title, "sets": sets, "notes": notes}
+
+
+def read(text, provider=None):
+    """{title, sets, notes} from the coach's words. Raises coach.Invalid with a plain message when it can't."""
+    text = " ".join(str(text or "").split())[:MAX_TEXT]
+    if not text:
+        raise coach.Invalid("Write the workout first, like: 6 x 1 mile at threshold, 90 s jog; 8 x 200 m fast.")
+    return _checked(_ask(PROMPT, text, provider, "read"))
+
+
+def revise(workout, change, provider=None):
+    """The workout on screen with the coach's spoken or typed change applied ("make the rest 60 seconds")."""
+    change = " ".join(str(change or "").split())[:500]
+    if not change:
+        raise coach.Invalid("Say or type what to change, like: make the rest 60 seconds.")
+    content = json.dumps({"workout": {"title": workout.get("title", ""), "sets": workout.get("sets", []),
+                                      "notes": workout.get("notes", "")}, "change": change})
+    return _checked(_ask(FIX_PROMPT, content, provider, "fix"))

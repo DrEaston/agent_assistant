@@ -39,7 +39,13 @@
         <tbody id="preview-sets"></tbody>
       </table></div>
       <p class="small" id="preview-notes"></p>
-      <p class="small muted">Not right? Change the words above and read it again.</p>
+      <div class="field"><label for="fix">Fix it</label>
+        <textarea id="fix" rows="2" maxlength="500" placeholder="Make the rest 60 seconds. The 200s are at mile pace."></textarea></div>
+      <div class="row">
+        <button type="button" id="fix-talk" aria-pressed="false">🎤 <span id="fix-talk-label">Talk</span></button>
+        <button type="button" id="fix-apply">Apply change</button>
+        <span class="small muted" id="fix-status" aria-live="polite"></span>
+      </div>
     </div>
     <input type="hidden" name="parsed" id="parsed" value="">
     <button type="submit" class="primary" id="send-workout">Send to all athletes ({{ athletes | length }})</button>
@@ -74,58 +80,51 @@
 {% block after %}
 <script>
 (() => {
-  const btn = document.getElementById("talk"), label = document.getElementById("talk-label");
-  const status = document.getElementById("talk-status"), box = document.getElementById("workout");
-  if (!btn || !box) return;
-  if (!navigator.mediaDevices || !window.MediaRecorder) { btn.hidden = true; return; }
-  let recorder = null, chunks = [], stream = null;
-  const idle = (msg) => { recorder = null; btn.setAttribute("aria-pressed", "false"); label.textContent = "Talk"; status.textContent = msg || ""; };
-  btn.addEventListener("click", async () => {
-    if (recorder) { recorder.stop(); return; }
-    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-    catch (e) { status.textContent = "Can't use the microphone here. Type it instead?"; return; }
-    chunks = [];
-    recorder = new MediaRecorder(stream);
-    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-    recorder.onstop = async () => {
-      stream.getTracks().forEach((t) => t.stop());
-      const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
-      idle("Writing it down…");
-      if (!blob.size) { idle(); return; }
-      const body = new FormData();
-      body.append("audio", blob, "workout." + (blob.type.includes("mp4") ? "mp4" : "webm"));
-      try {
-        const r = await fetch("/coach/transcribe", { method: "POST", body });
-        const data = await r.json();
-        const text = (data.text || "").trim();
-        if (!r.ok || !text) { idle("Didn't catch that. Try again?"); return; }
-        box.value = box.value.trim() ? box.value.trim() + " " + text : text;
-        idle("");
-        readWorkout();
-      } catch (e) { idle("Couldn't hear that. Try again?"); }
-    };
-    recorder.start();
-    btn.setAttribute("aria-pressed", "true"); label.textContent = "Stop";
-    status.textContent = "Listening… tap Stop when you're done.";
-  });
-})();
+  const $ = (id) => document.getElementById(id);
+  const words = $("workout"), preview = $("preview"), parsed = $("parsed"), sendBtn = $("send-workout");
+  const readBtn = $("read-workout"), readStatus = $("read-status"), fixBox = $("fix"), fixStatus = $("fix-status");
+  if (!words || !readBtn) return;
 
-// Read the words into the standard layout; Send then sends exactly what was shown.
-const readBtn = document.getElementById("read-workout"), readStatus = document.getElementById("read-status");
-const preview = document.getElementById("preview"), parsed = document.getElementById("parsed");
-const sendBtn = document.getElementById("send-workout"), words = document.getElementById("workout");
-function clearReading() { preview.hidden = true; parsed.value = ""; sendBtn.hidden = true; }
-async function readWorkout() {
-  const text = words.value.trim();
-  if (!text) { readStatus.textContent = "Say or write the workout first."; return; }
-  readStatus.textContent = "Reading it…"; readBtn.disabled = true;
-  try {
-    const body = new FormData(); body.append("workout", text);
-    const r = await fetch("/coach/read", { method: "POST", body });
-    const data = await r.json();
-    if (!r.ok) { clearReading(); readStatus.textContent = data.error || "Couldn't read that. Try again?"; return; }
-    document.getElementById("preview-title").textContent = data.title || "Workout";
-    const rows = document.getElementById("preview-sets"); rows.replaceChildren();
+  // Talk: record, transcribe (/coach/transcribe), add the words to a box, then run done().
+  function talk(btn, label, status, box, done) {
+    if (!btn) return;
+    if (!navigator.mediaDevices || !window.MediaRecorder) { btn.hidden = true; return; }
+    let recorder = null, chunks = [], stream = null;
+    const idle = (msg) => { recorder = null; btn.setAttribute("aria-pressed", "false"); label.textContent = "Talk"; status.textContent = msg || ""; };
+    btn.addEventListener("click", async () => {
+      if (recorder) { recorder.stop(); return; }
+      try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+      catch (e) { status.textContent = "Can't use the microphone here. Type it instead?"; return; }
+      chunks = [];
+      recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        idle("Writing it down…");
+        if (!blob.size) { idle(); return; }
+        const body = new FormData();
+        body.append("audio", blob, "talk." + (blob.type.includes("mp4") ? "mp4" : "webm"));
+        try {
+          const r = await fetch("/coach/transcribe", { method: "POST", body });
+          const data = await r.json();
+          const text = (data.text || "").trim();
+          if (!r.ok || !text) { idle("Didn't catch that. Try again?"); return; }
+          box.value = box.value.trim() ? box.value.trim() + " " + text : text;
+          idle("");
+          done();
+        } catch (e) { idle("Couldn't hear that. Try again?"); }
+      };
+      recorder.start();
+      btn.setAttribute("aria-pressed", "true"); label.textContent = "Stop";
+      status.textContent = "Listening… tap Stop when you're done.";
+    });
+  }
+
+  function clearReading() { preview.hidden = true; parsed.value = ""; sendBtn.hidden = true; }
+  function show(data) {
+    $("preview-title").textContent = data.title || "Workout";
+    const rows = $("preview-sets"); rows.replaceChildren();
     data.sets.forEach((s, i) => {
       const tr = document.createElement("tr");
       [String(i + 1), String(s.reps), s.distance, s.effort, s.rest || "–"].forEach((v, j) => {
@@ -133,15 +132,39 @@ async function readWorkout() {
       });
       rows.append(tr);
     });
-    document.getElementById("preview-notes").textContent = data.notes ? "Notes: " + data.notes : "";
-    parsed.value = data.parsed; preview.hidden = false; sendBtn.hidden = false; readStatus.textContent = "";
-  } catch (e) { clearReading(); readStatus.textContent = "Couldn't reach Dieter. Try again?"; }
-  finally { readBtn.disabled = false; }
-}
-if (readBtn && words) {
+    $("preview-notes").textContent = data.notes ? "Notes: " + data.notes : "";
+    parsed.value = data.parsed; preview.hidden = false; sendBtn.hidden = false;
+  }
+  async function ask(url, fields, status, busy) {
+    const body = new FormData(); Object.entries(fields).forEach(([k, v]) => body.append(k, v));
+    status.textContent = busy; readBtn.disabled = true;
+    try {
+      const r = await fetch(url, { method: "POST", body });
+      const data = await r.json();
+      if (!r.ok) { status.textContent = data.error || "Couldn't do that. Try again?"; return false; }
+      show(data); status.textContent = ""; return true;
+    } catch (e) { status.textContent = "Couldn't reach Dieter. Try again?"; return false; }
+    finally { readBtn.disabled = false; }
+  }
+  async function readWorkout() {
+    const text = words.value.trim();
+    if (!text) { readStatus.textContent = "Say or write the workout first."; return; }
+    if (!(await ask("/coach/read", { workout: text }, readStatus, "Reading it…"))) clearReading();
+  }
+  async function applyFix() {
+    const change = fixBox.value.trim();
+    if (!change) { fixStatus.textContent = "Say or type what to change."; return; }
+    if (await ask("/coach/fix", { parsed: parsed.value, change }, fixStatus, "Changing it…")) {
+      fixBox.value = ""; fixStatus.textContent = "Changed. Anything else?";
+    }
+  }
+
   clearReading();
   readBtn.addEventListener("click", readWorkout);
+  $("fix-apply").addEventListener("click", applyFix);
   words.addEventListener("input", () => { if (parsed.value) { clearReading(); readStatus.textContent = "Changed: read it again before sending."; } });
-}
+  talk($("talk"), $("talk-label"), $("talk-status"), words, readWorkout);
+  talk($("fix-talk"), $("fix-talk-label"), fixStatus, fixBox, applyFix);
+})();
 </script>
 {% endblock %}

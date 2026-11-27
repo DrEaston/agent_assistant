@@ -486,6 +486,21 @@ async def coach_read(request: Request):
     return _workout_view(workout)
 
 
+@router.post("/coach/fix")
+async def coach_fix(request: Request):
+    """Apply the coach's change ("make the rest 60 s") to the workout on screen and show it again."""
+    form = await request.form()
+    try:
+        try:
+            current = _checked_workout(str(form.get("parsed") or ""))
+        except (ValueError, TypeError):
+            raise coach.Invalid("Read the workout first, then say what to change.")
+        workout = await run_in_threadpool(coach_reader.revise, current, str(form.get("change") or ""))
+    except coach.Invalid as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return _workout_view(workout)
+
+
 def _checked_workout(raw):
     """The workout the coach checked (from /coach/read), validated again like any input."""
     data = json.loads(raw)
