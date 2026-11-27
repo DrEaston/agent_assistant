@@ -5400,18 +5400,19 @@ def coach_passcode_page(request: Request):
     if is_passcode_coach(request.state.current_user):
         raw = request.query_params.get("sent", "")
         return trainer_routes.coach_page(request, int(raw) if raw.isdigit() else 0)
-    return render_auth_page(request, "coach")
+    user = request.state.current_user
+    return trainer_routes.coach_sign_in_page(signed_in_as=(user.get("display_name") or "someone") if user else "")
 
 
 @app.post("/coach")
 def coach_passcode_form(request: Request, passcode: str = Form("")):
     client = request.client.host if request.client else "?"
     if _coach_tries_left(client) <= 0:
-        return render_auth_page(request, "coach", "Too many tries. Wait 15 minutes and try again.")
+        return trainer_routes.coach_sign_in_page("Too many tries. Wait 15 minutes and try again.")
     coach_id = trainer_coach.CoachStore(db).passcode_sign_in(passcode)
     if not coach_id:
         _coach_tries[client].append(time.time())
-        return render_auth_page(request, "coach", "That passcode wasn't recognized.")
+        return trainer_routes.coach_sign_in_page("That passcode wasn't recognized.")
     return create_login_response(coach_id, "/coach")
 
 

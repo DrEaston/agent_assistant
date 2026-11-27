@@ -8,10 +8,44 @@ from pathlib import Path
 
 from database import Database, reset_current_user_id, set_current_user_id
 
-from apps.trainer import coach, plan, speed
+from apps.trainer import coach, coach_reader, plan, speed
 
 
 MODEL = {"cs": 4.5, "d_prime": 200, "vmax": 8.0, "easy": 3.4}   # threshold 5:58/mi, top speed 8 m/s
+
+
+class FakeAI:
+    """Stands in for the AI model: returns one fixed reply."""
+
+    def __init__(self, reply):
+        self.reply = reply
+
+    def chat(self, messages, system_prompt, max_completion_tokens=1024):
+        return self.reply
+
+
+class ReaderTests(unittest.TestCase):
+    """coach_reader: the AI's reply is checked like any coach's input; it never sets paces."""
+
+    def test_reads_sets_and_keeps_the_rest_as_notes(self):
+        out = coach_reader.read("2 mi wu. 6x mile @ T, 90s jog; 8x200 fast", provider=FakeAI(
+            'Here you go: {"title": "Miles and 200s", "sets": [{"reps": 6, "metres": 1609, "intensity": "threshold", '
+            '"rest": "90 s jog"}, {"reps": "8", "metres": "200", "intensity": "sprint", "rest": ""}], '
+            '"notes": "2 mile warm-up"}'))
+        self.assertEqual(out["title"], "Miles and 200s")
+        self.assertEqual([coach.describe_set(x) for x in out["sets"]][0], "6 × 1 mile at threshold, 90 s jog")
+        self.assertEqual(out["sets"][1]["reps"], 8)
+        self.assertEqual(out["notes"], "2 mile warm-up")
+
+    def test_unknown_efforts_become_by_feel_and_nonsense_is_refused(self):
+        out = coach_reader.read("4x400 at goal pace", provider=FakeAI(
+            '{"sets": [{"reps": 4, "metres": 400, "intensity": "goal pace"}]}'))
+        self.assertEqual(out["sets"][0]["intensity"], "feel")
+        for reply in ("no json here", '{"sets": []}', '{"sets": [{"reps": 4, "metres": 5}]}'):
+            with self.assertRaises(coach.Invalid):
+                coach_reader.read("whatever", provider=FakeAI(reply))
+        with self.assertRaises(coach.Invalid):
+            coach_reader.read("   ", provider=FakeAI("{}"))
 
 
 class As:
@@ -325,11 +359,20 @@ class CoachPageTests(unittest.TestCase):
                                           follow_redirects=False).status_code, 403)
             # write a workout for all athletes
             day = (__import__("datetime").date.today() + __import__("datetime").timedelta(days=1)).isoformat()
-            sent = visitor.post("/coach/send", follow_redirects=False,
-                                data={"day": day, "title": "Threshold miles", "reps_0": "6", "metres_0": "1609",
-                                      "intensity_0": "threshold", "rest_0": "90 s jog"})
+            reply = ('{"title": "Threshold miles", "sets": [{"reps": 6, "metres": 1609, "intensity": "threshold", '
+                     '"rest": "90 s jog"}], "notes": "2 mile warm-up"}')
+            with mock.patch.object(coach_reader, "get_llm_provider", return_value=FakeAI(reply)):
+                sent = visitor.post("/coach/send", follow_redirects=False,
+                                    data={"day": day, "workout": "2 mi wu, 6x mile @ T w/ 90s jog"})
             self.assertEqual(sent.headers["location"], "/coach?sent=1#sent")
-            self.assertIn("Sent to 1 athlete", visitor.get("/coach?sent=1").text)
+            sent_page = visitor.get("/coach?sent=1").text
+            self.assertIn("Sent to 1 athlete", sent_page)
+            self.assertIn("Dieter read it as: 6 × 1 mile at threshold, 90 s jog", sent_page)
+            self.assertNotIn(speed.clock(round(1609 / 4.5)), sent_page)          # no paces on the coach page
+            with mock.patch.object(coach_reader, "get_llm_provider", return_value=FakeAI("sorry, no idea")):
+                failed = visitor.post("/coach/send", data={"day": day, "workout": "something odd"})
+            self.assertIn("couldn't read that workout", failed.text)
+            self.assertIn("something odd", failed.text)                           # what they typed is kept
             # the athlete gets it with his own times
             home = runner.get("/apps/trainer").text
             self.assertIn("New from your coach", home)

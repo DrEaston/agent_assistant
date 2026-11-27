@@ -21,7 +21,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from core import ui
 from database import get_current_user_id, reset_current_user_id, set_current_user_id
 
-from . import analysis, coach, plan, runpage, shoes, speed, strava
+from . import analysis, coach, coach_reader, plan, runpage, shoes, speed, strava
 from .manifest import APP
 
 _state = {"db": None}
@@ -447,22 +447,31 @@ def my_athletes(request: Request, athlete: int = 0):
                   set_rows=range(3), tomorrow=(date.today() + timedelta(days=1)).isoformat())
 
 
-def coach_page(request: Request, sent: int = 0):
+def coach_page(request: Request, sent: int = 0, error: str = "", workout: str = "", day: str = ""):
     """/coach (api.py serves it there for the passcode coach): pick an athlete and open their Trainer, read-only;
     write a workout and send it to all athletes; what was sent lately."""
     c = coaching()
     return render("trainer_coach.html", title="Coach", current="/coach", page_url="/coach",
-                  athletes=c.my_athletes(), recent=c.sent_by_me(), sent=sent, coach_home="/coach",
-                  intensities=coach.INTENSITIES, distances=[(m, coach.distance_name(m)) for m in coach.DISTANCES],
-                  set_rows=range(3), tomorrow=(date.today() + timedelta(days=1)).isoformat())
+                  athletes=c.my_athletes(), recent=c.sent_by_me(), sent=sent, coach_home="/coach", report_url=None,
+                  error=error, workout=workout, tomorrow=day or (date.today() + timedelta(days=1)).isoformat())
+
+
+def coach_sign_in_page(error="", signed_in_as=""):
+    """The passcode box at /coach (api.py serves it to anyone not signed in as the coach)."""
+    return render("trainer_coach_signin.html", title="Coach", error=error, signed_in_as=signed_in_as,
+                  page_url="/coach", report_url=None)
 
 
 @router.post("/coach/send")
 async def coach_send(request: Request):
+    """The coach's words -> AI reads them into sets -> sent to every athlete, whose pages work out the paces."""
     form = await request.form()
-    sets = [{"reps": form.get(f"reps_{i}"), "metres": form.get(f"metres_{i}"),
-             "intensity": form.get(f"intensity_{i}"), "rest": form.get(f"rest_{i}")} for i in range(coach.MAX_SETS)]
-    count = _coach(coaching().send_to_all, form.get("day"), form.get("title"), sets, form.get("notes"))
+    text, day = str(form.get("workout") or ""), str(form.get("day") or "")
+    try:
+        workout = await run_in_threadpool(coach_reader.read, text)
+        count = coaching().send_to_all(day, workout["title"], workout["sets"], workout["notes"])
+    except coach.Invalid as exc:
+        return coach_page(request, error=str(exc), workout=text, day=day)
     return back(f"/coach?sent={count}#sent")
 
 
@@ -522,7 +531,8 @@ async def _prescribe(form, athlete_id):
 def withdraw_workout(athlete_id: int, prescription_id: int):
     _coach(coaching().coaches_athlete, athlete_id)
     _coach(coaching().withdraw, prescription_id)
-    return back(f"{BASE}/athletes/{athlete_id}")
+    home = _coach_home()
+    return back(home + "#sent" if home == "/coach" else f"{BASE}/athletes/{athlete_id}")
 
 
 @router.post(BASE + "/coaching-links/{link_id}/full-view")
