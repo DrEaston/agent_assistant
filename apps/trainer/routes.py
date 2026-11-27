@@ -465,13 +465,64 @@ def coach_sign_in_page(error="", signed_in_as=""):
                   page_url="/coach", report_url=None)
 
 
+def _workout_view(workout):
+    """The read workout in the standard layout: one row per set (reps, distance, effort, rest), title and notes,
+    plus the exact sets to send back with Send (so what's sent is what the coach checked)."""
+    rows = [{"reps": s["reps"], "distance": coach.distance_name(s["metres"]),
+             "effort": coach.INTENSITIES[s["intensity"]], "rest": s.get("rest") or "", "text": coach.describe_set(s)}
+            for s in workout["sets"]]
+    return {"title": workout["title"], "notes": workout["notes"], "sets": rows,
+            "parsed": json.dumps({"title": workout["title"], "notes": workout["notes"], "sets": workout["sets"]})}
+
+
+@router.post("/coach/read")
+async def coach_read(request: Request):
+    """Read the coach's words (typed or dictated) into the standard layout, for them to check before sending."""
+    form = await request.form()
+    try:
+        workout = await run_in_threadpool(coach_reader.read, str(form.get("workout") or ""))
+    except coach.Invalid as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return _workout_view(workout)
+
+
+@router.post("/coach/fix")
+async def coach_fix(request: Request):
+    """Apply the coach's change ("make the rest 60 s") to the workout on screen and show it again."""
+    form = await request.form()
+    try:
+        try:
+            current = _checked_workout(str(form.get("parsed") or ""))
+        except (ValueError, TypeError):
+            raise coach.Invalid("Read the workout first, then say what to change.")
+        workout = await run_in_threadpool(coach_reader.revise, current, str(form.get("change") or ""))
+    except coach.Invalid as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return _workout_view(workout)
+
+
+def _checked_workout(raw):
+    """The workout the coach checked (from /coach/read), validated again like any input."""
+    data = json.loads(raw)
+    sets = coach.clean_sets([s for s in data.get("sets") or [] if isinstance(s, dict)])
+    return {"title": " ".join(str(data.get("title") or "").split())[:120], "sets": sets,
+            "notes": " ".join(str(data.get("notes") or "").split())[:500]}
+
+
 @router.post("/coach/send")
 async def coach_send(request: Request):
-    """The coach's words -> AI reads them into sets -> sent to every athlete, whose pages work out the paces."""
+    """The coach's words -> AI reads them into sets -> sent to every athlete, whose pages work out the paces.
+    With JavaScript the coach has already checked the reading (/coach/read) and that exact workout is sent."""
     form = await request.form()
     text, day = str(form.get("workout") or ""), str(form.get("day") or "")
     try:
-        workout = await run_in_threadpool(coach_reader.read, text)
+        parsed = str(form.get("parsed") or "")
+        try:
+            workout = _checked_workout(parsed) if parsed else None
+        except (ValueError, TypeError):
+            workout = None
+        if workout is None:
+            workout = await run_in_threadpool(coach_reader.read, text)
         count = coaching().send_to_all(day, workout["title"], workout["sets"], workout["notes"])
     except (coach.Invalid, PermissionError) as exc:
         return coach_page(request, error=str(exc), workout=text, day=day)
