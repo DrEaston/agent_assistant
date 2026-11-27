@@ -127,7 +127,7 @@
         {% if g.limit %}<line class="sf-limit" x1="{{ g.limit }}" x2="{{ g.limit }}" y1="18" y2="42"></line>
         <text class="sf-label" x="{{ g.limit }}" y="13" text-anchor="{{ 'end' if g.limit > 240 else 'start' }}">safe limit</text>{% endif %}
         {% if g.advantage %}<path class="sf-advantage" d="M0.5 48 V54 H{{ g.advantage }} V48"></path>
-        <text class="sf-label" x="0" y="67">one all-out effort</text>{% endif %}
+        <text class="sf-label" x="0" y="67">one all-out effort{% if sp.advantage_typical %} (typical value){% endif %}</text>{% endif %}
       </svg>
       <figcaption class="small muted">All in metres gained on your threshold pace. <strong>Bar:</strong> this week's speed load. <strong>Solid tick:</strong> speed fitness, what a usual week holds. <strong>Dashed:</strong> safe limit, 1.5 × fitness. <strong>Bracket:</strong> speed advantage, the most one all-out effort can gain; a workout adds up more because you recover between reps.</figcaption>
     </figure>
@@ -136,7 +136,7 @@
       <div class="stat"><span class="small muted">Speed load this week</span><strong>{{ "{:,}".format(sp.speed_work) if sp.speed_work is not none else "–" }}</strong>
         <span class="small">points{% if sp.work_line %} · safe up to {{ "{:,}".format(sp.work_line) }}{% elif not sp.line_ready %} · safe limit once the 4 weeks before are read{% endif %}</span></div>
       <div class="stat"><span class="small muted">Near-sprint running this week</span><strong>{{ "{:,}".format(sp.near_top) }} m</strong>
-        <span class="small">{% if sp.top_over %}{{ ui.tag("Over the safe limit", "warn") }} {% endif %}{% if sp.top_line %}safe limit {{ "{:,}".format(sp.top_line) }} m{% else %}safe limit once the 4 weeks before are read{% endif %}</span></div>
+        <span class="small">{% if sp.top_over %}{{ ui.tag("Over the safe limit", "warn") }} {% endif %}{% if sp.top_line %}safe limit {{ "{:,}".format(sp.top_line) }} m{% else %}safe limit once the 4 weeks before are read{% endif %}{% if sp.near_top_pace %} · counts running faster than {{ sp.near_top_pace }}/mi (90% of your top speed){% endif %}</span></div>
       </div>
     </div>
 
@@ -148,7 +148,12 @@
 
     <div class="card stack">
       <div class="spread"><h3 class="group-title">Speed advantage</h3><strong class="stat-big">{{ "{:,}".format(sp.advantage_m) ~ " m" if sp.advantage_m else "–" }}</strong></div>
-        <span class="small">The ground you can gain on your threshold pace in one all-out effort{% if sp.advantage_gain is not none %} · {{ "+" if sp.advantage_gain >= 0 }}{{ sp.advantage_gain }} m vs 12 weeks ago{% endif %}</span>
+      {% if sp.advantage_typical %}
+      <span>{{ ui.tag("Typical value, not yours yet") }}</span>
+      <span class="small">Dieter hasn't measured yours: it needs a hard, all-out effort of 2–7 minutes (a mile race, a hard 800–1600 m time trial) as well as a longer race. Until then it uses a typical trained runner's {{ sp.advantage_m }} m, so the mile and 800 predictions are rough.</span>
+      {% else %}
+      <span class="small">The ground you can gain on your threshold pace in one all-out effort{% if sp.advantage_gain is not none %} · {{ "+" if sp.advantage_gain >= 0 }}{{ sp.advantage_gain }} m vs 12 weeks ago{% endif %}.</span>
+      {% endif %}
       <span class="small muted">Run 3 minutes all out and you'd cover about this much more than 3 minutes at threshold pace. It sets your race predictions and the coach's paces; hard reps faster than threshold grow it.</span>
     </div>
 
@@ -203,7 +208,7 @@
     <select id="predict-distance">{% for p in sp.predictions %}<option value="{{ p.time }}"{% if p.name == "5K" %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
     <strong class="stat-big" id="predict-time" aria-live="polite">{% for p in sp.predictions %}{% if p.name == "5K" %}{{ p.time }}{% endif %}{% endfor %}</strong>
   </div>
-  <p class="small muted">From your threshold pace plus your speed advantage, as of this week. Best for races of about 2 to 30 minutes.</p>
+  <p class="small muted">From your threshold pace plus your speed advantage, as of this week.{% if sp.advantage_typical %} Your speed advantage isn't measured yet, so the mile and 800 are rough: a recent mile race time entered on Usual week fixes that.{% endif %} Best for races of about 2 to 30 minutes.</p>
   <script>
   (() => { const pick = document.getElementById("predict-distance"), out = document.getElementById("predict-time");
     if (!out.textContent.trim()) out.textContent = pick.value;

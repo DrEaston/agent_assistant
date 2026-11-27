@@ -27,6 +27,7 @@ from datetime import date, datetime
 from urllib.parse import urlencode
 
 from database import reset_current_user_id, set_current_user_id
+from . import clock
 
 API = "https://www.strava.com/api/v3"
 TOKEN_URL = "https://www.strava.com/oauth/token"
@@ -429,7 +430,7 @@ def summary(db, user_id, weeks=12, today=None):
     """Totals instead of a list: the last `weeks` weeks and the last 12 months, by kind of session."""
     from datetime import timedelta
 
-    today = today or date.today()
+    today = today or clock.today()
     monday = today - timedelta(days=today.weekday())
     first = monday - timedelta(weeks=weeks - 1)
     year_ago = date(today.year - 1, today.month, 1)

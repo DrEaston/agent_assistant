@@ -7,7 +7,7 @@ import math
 import statistics
 from datetime import date, timedelta
 
-from . import speed
+from . import clock, speed
 
 W, H = 600, 170          # speed chart
 MAP_W = 600              # route map width (height follows the route's shape)
@@ -219,7 +219,7 @@ def detail(db, user_id, external_id, races=None):
     efforts = json.loads(row.get("efforts_json") or "[]")
     for a, b in zip(efforts, efforts[1:]):
         a["rest"] = b["at"] - (a["at"] + a["seconds"])
-    day = date.fromisoformat(row.get("day") or str(workout.get("started_at") or "")[:10] or date.today().isoformat())
+    day = date.fromisoformat(row.get("day") or str(workout.get("started_at") or "")[:10] or clock.today().isoformat())
     runs = speed._rows(db, user_id, day - timedelta(weeks=speed.FIT_WEEKS))
     model = speed.model_at(runs, day, races)
     hist = json.loads(row.get("hist_json") or "{}")

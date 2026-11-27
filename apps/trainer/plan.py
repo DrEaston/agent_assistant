@@ -16,6 +16,7 @@ import secrets
 from datetime import date, datetime, time, timedelta
 
 from database import get_current_user_id
+from . import clock
 
 KINDS = {
     "easy": "Easy run",
@@ -97,13 +98,13 @@ def week_start(day=None):
     """The Monday of the week `day` (a date or ISO string) falls in."""
     if isinstance(day, str):
         day = date.fromisoformat(day[:10])
-    day = day or date.today()
+    day = day or clock.today()
     return day - timedelta(days=day.weekday())
 
 
 def next_week_start(today=None):
     """The week a Sunday check-in plans: next Monday (on any day, the coming Monday)."""
-    today = today or date.today()
+    today = today or clock.today()
     return week_start(today) + timedelta(days=7)
 
 
@@ -463,7 +464,7 @@ class PlanStore:
 
     def today(self, day=None):
         """For the Today page: today's sessions as short lines, and what's left to do."""
-        day = day or date.today()
+        day = day or clock.today()
         sessions = [s for s in self.sessions(day, days=1) if s["kind"] != "rest"]
         lines = []
         for s in sessions:
@@ -480,7 +481,7 @@ class PlanStore:
     # ------------------------------------------------------------ the week, put together
 
     def week_view(self, start, today=None):
-        today = today or date.today()
+        today = today or clock.today()
         start = week_start(start)
         end = start + timedelta(days=6)
         sessions = self.sessions(start)

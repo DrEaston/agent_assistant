@@ -47,6 +47,7 @@ import json
 import statistics
 import zlib
 from datetime import date, timedelta
+from . import clock
 
 VERSION = 8                         # bump when the summary changes: older rows are read again
 SCHEMA = (
@@ -494,7 +495,7 @@ def easy_speed(db, user_id, today=None):
     """His easy speed: the middle of the slower half of his runs' usual speeds in the last FIT_WEEKS (None if fewer
     than 5 runs are read)."""
     ensure(db)
-    since = ((today or date.today()) - timedelta(weeks=FIT_WEEKS)).isoformat()
+    since = ((today or clock.today()) - timedelta(weeks=FIT_WEEKS)).isoformat()
     usual = sorted(r[0] for r in db.connect().execute(
         "SELECT usual_mps FROM tr_run_speed WHERE user_id = ? AND day >= ? AND usual_mps > 0",
         (user_id, since)).fetchall())
@@ -542,7 +543,7 @@ def _keep(db, user_id, external_id, day, data, easy):
 
 
 def _waiting(db, user_id, limit, today=None):
-    since = ((today or date.today()) - timedelta(weeks=LOOKBACK_WEEKS)).isoformat()
+    since = ((today or clock.today()) - timedelta(weeks=LOOKBACK_WEEKS)).isoformat()
     ensure(db)
     return db.connect().execute(
         """SELECT w.external_id, substr(COALESCE(NULLIF(w.started_at_local, ''), w.started_at), 1, 10) AS day
@@ -742,7 +743,9 @@ def model_at(runs, end, races=None):
             efforts.append({"m": m, "t": t, "day": r["day"], "src": "run"})
     cs, d_prime, how = estimate(efforts)
     vmax = max((r["best5"] or 0 for r in window), default=0) or None
-    return {"cs": cs, "d_prime": d_prime, "vmax": vmax, "how": how}
+    # D' is only measured with a short hard effort (2-7 min) beside the long one; otherwise it's the typical value.
+    typical = bool(cs and d_prime == TYPICAL_D_PRIME and " and " not in how)
+    return {"cs": cs, "d_prime": d_prime, "vmax": vmax, "how": how, "d_prime_typical": typical}
 
 
 def load_status(load, fitness, over):
@@ -782,6 +785,8 @@ def weekly(db, user_id, week_starts, races=None):
             k["metres"] += e["metres"]
         stride_mps = round(statistics.median(strides), 2) if strides else None
         out[w] = {"cs": model["cs"], "cs_pace": pace(model["cs"]), "d_prime": model["d_prime"],
+                  "d_prime_typical": model.get("d_prime_typical", False),
+                  "near_top_pace": pace(0.9 * model["vmax"]) if model["vmax"] else None,
                   "cs_how": model["how"],
                   "vmax": model["vmax"], "speed_work": round(used) if model["cs"] else None,
                   "tanks": round(used / model["d_prime"], 1) if model["cs"] and model["d_prime"] else None,
@@ -834,7 +839,7 @@ def recent(db, user_id, limit=10, fast_only=False, races=None):
     """His latest runs with what was fast in them and their speed points (at today's threshold pace):
     [{id, day, title, miles, summary, points}]."""
     ensure(db)
-    cs = model_at(_rows(db, user_id, date.today() - timedelta(weeks=FIT_WEEKS)), date.today(), races)["cs"]
+    cs = model_at(_rows(db, user_id, clock.today() - timedelta(weeks=FIT_WEEKS)), clock.today(), races)["cs"]
     rows = db.connect().execute(
         f"""SELECT s.external_id, s.day, s.efforts_json, s.hist_json, w.title, w.distance_meters
             FROM tr_run_speed s LEFT JOIN trainer_imported_workouts w
@@ -859,7 +864,7 @@ def week_runs(db, user_id, monday, races=None):
 def explain(db, user_id, races=None, today=None, weeks=16):
     """The numbers for "How these numbers work": his threshold pace and where it came from, two worked 400 m examples
     at his threshold pace, and his recent weeks over the safe limit."""
-    today = today or date.today()
+    today = today or clock.today()
     monday = today - timedelta(days=today.weekday())
     model = model_at(_rows(db, user_id, today - timedelta(weeks=FIT_WEEKS)), today, races)
     cs = model["cs"]
@@ -877,6 +882,10 @@ def explain(db, user_id, races=None, today=None, weeks=16):
             for w, v in weekly(db, user_id, starts, races).items() if v["how_over"]]
     return {"cs_pace": pace(cs), "cs_how": model["how"], "examples": examples, "over": over[-3:][::-1],
             "advantage_m": round(model["d_prime"]) if model["d_prime"] else None,
+            "advantage_typical": model.get("d_prime_typical", False), "typical_m": TYPICAL_D_PRIME,
+            "cs": cs, "d_prime": model["d_prime"], "vmax": model["vmax"],
+            "vmax_pace": pace(model["vmax"]) if model["vmax"] else None,
+            "near_top_pace": pace(0.9 * model["vmax"]) if model["vmax"] else None,
             "ratio": RATIO, "chronic_weeks": CHRONIC_WEEKS, "well_over": WELL_OVER, "easing": EASING,
             "holding": HOLDING, "floor": FLOOR_ADVANTAGE}
 
@@ -884,7 +893,7 @@ def explain(db, user_id, races=None, today=None, weeks=16):
 def hard_efforts(db, user_id, weeks=52, today=None, limit=12, races=None):
     """His hardest long efforts (10 minutes or more, any length) in the last `weeks`: per run its best one, the
     `limit` strongest by the threshold pace each implies, oldest first. For "how am I progressing" questions."""
-    today = today or date.today()
+    today = today or clock.today()
     runs = _rows(db, user_id, today - timedelta(weeks=weeks))
     easy = easy_speed(db, user_id, today)
     found = []
