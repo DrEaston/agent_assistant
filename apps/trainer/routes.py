@@ -21,7 +21,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from core import ui
 from database import get_current_user_id, reset_current_user_id, set_current_user_id
 
-from . import analysis, coach, coach_reader, plan, runpage, shoes, speed, strava
+from . import analysis, clock, coach, coach_reader, plan, runpage, shoes, speed, strava
 from .manifest import APP
 
 _state = {"db": None}
@@ -124,9 +124,9 @@ def back(url, fallback=BASE):
 
 def _start(week):
     try:
-        return plan.week_start(week) if week else plan.week_start(date.today())
+        return plan.week_start(week) if week else plan.week_start(clock.today())
     except ValueError:
-        return plan.week_start(date.today())
+        return plan.week_start(clock.today())
 
 
 def _guard(fn, *args, **kwargs):
@@ -146,7 +146,7 @@ def overview(request: Request, week: str = ""):
         return this_week(request, week)
     catch_up()
     s = store()
-    view = s.week_view(date.today())
+    view = s.week_view(clock.today())
     numbers = analysis.overview(_state["db"], get_current_user_id(), miles_target=view["totals"]["miles_target"],
                                 races=plan.race_bests(s.settings()))
     user = get_current_user_id()
@@ -161,7 +161,7 @@ def overview(request: Request, week: str = ""):
     model = _my_model()
     c = coaching()
     coach_new = (c.new_for_me() if not _viewing.get()
-                 else [w for w in c.for_me() if w["day"] >= date.today().isoformat()][:5])
+                 else [w for w in c.for_me() if w["day"] >= clock.today().isoformat()][:5])
     for w in coach_new:
         w["sets"] = coach.targets(w["sets"], model)
     return render("trainer_overview.html", title="Trainer", current=BASE, page_url=BASE, view=view, coach_new=coach_new,
@@ -205,6 +205,13 @@ def speed_how():
                   page_url=f"{BASE}/speed/how")
 
 
+@router.get(BASE + "/speed/how/math")
+def speed_math():
+    """The math behind the Speed section: formulas, his own values, and the sources."""
+    e = speed.explain(_state["db"], get_current_user_id(), races=plan.race_bests(store().settings()))
+    return render("trainer_speed_math.html", title="The math", e=e, current=BASE, page_url=f"{BASE}/speed/how/math")
+
+
 @router.get(BASE + "/speed/{monday}")
 def speed_week(monday: str):
     """One week's runs with their speed points, the week's total and its safe limit."""
@@ -225,7 +232,7 @@ def this_week(request: Request, week: str = ""):
     start = _start(week)
     view = store().week_view(start)
     return render("trainer_week.html", title="This week", view=view, current=BASE + "/week",
-                  page_url=f"{BASE}?week={view['start']}", this_monday=plan.week_start(date.today()).isoformat())
+                  page_url=f"{BASE}?week={view['start']}", this_monday=plan.week_start(clock.today()).isoformat())
 
 
 @router.post(BASE + "/week/fill")
@@ -440,7 +447,7 @@ def my_athletes(request: Request, athlete: int = 0):
     return render("trainer_athletes.html", title="Coach", current=BASE + "/athletes", page_url=_coach_home(),
                   athletes=athletes, chosen=chosen, coach_home=_coach_home(),
                   intensities=coach.INTENSITIES, distances=[(m, coach.distance_name(m)) for m in coach.DISTANCES],
-                  set_rows=range(3), tomorrow=(date.today() + timedelta(days=1)).isoformat())
+                  set_rows=range(3), tomorrow=(clock.today() + timedelta(days=1)).isoformat())
 
 
 def coach_page(request: Request, sent: int = 0, error: str = "", workout: str = "", day: str = ""):
@@ -449,7 +456,7 @@ def coach_page(request: Request, sent: int = 0, error: str = "", workout: str = 
     c = coaching()
     return render("trainer_coach.html", title="Coach", current="/coach", page_url="/coach",
                   athletes=c.my_athletes(), recent=c.sent_by_me(), sent=sent, coach_home="/coach", report_url=None,
-                  error=error, workout=workout, tomorrow=day or (date.today() + timedelta(days=1)).isoformat())
+                  error=error, workout=workout, tomorrow=day or (clock.today() + timedelta(days=1)).isoformat())
 
 
 def coach_sign_in_page(error="", signed_in_as=""):
@@ -562,7 +569,7 @@ def stop_viewing():
 
 @router.get(BASE + "/checkin")
 def checkin_page(request: Request, saved: int = 0):
-    today = date.today()
+    today = clock.today()
     coming = plan.next_week_start(today) if today.weekday() >= 4 else plan.week_start(today)  # Fri-Sun: plan next week
     last = coming - timedelta(days=7)
     return render("trainer_checkin.html", title="Sunday check-in", current=BASE + "/checkin",
@@ -623,7 +630,7 @@ def calendar_feed(request: Request, token: str):
     reset = set_current_user_id(user)
     try:
         s = store()
-        today = date.today()
+        today = clock.today()
         first, last = plan.week_start(today) - timedelta(days=14), plan.week_start(today) + timedelta(days=27)
         sessions = s.sessions_between(first, last)
         weeks = [(plan.week_start(today) + timedelta(days=7 * n)).isoformat() for n in range(0, 3)]
@@ -744,7 +751,7 @@ def log_page(request: Request, kind: str = "", year: str = "", live: int = 0, hi
     return render("trainer_log.html", title="Training log", current=BASE + "/log", page_url=BASE + "/log",
                   totals=totals, status=sync().status(get_current_user_id()), connected=connected,
                   is_admin=_is_admin(request), live=live, history=history, problem=problem,
-                  today=date.today().isoformat())
+                  today=clock.today().isoformat())
 
 
 @router.post(BASE + "/log/add")

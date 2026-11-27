@@ -31,7 +31,7 @@ from datetime import date, timedelta
 
 from database import get_current_user_id
 
-from . import plan, speed
+from . import clock, plan, speed
 
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS tr_coach_links (
@@ -143,7 +143,7 @@ def clean_sets(raw):
 
 def athlete_model(db, user_id, today=None, races=None):
     """{cs, d_prime, vmax, easy} for the athlete from their own runs (and race times they entered)."""
-    today = today or date.today()
+    today = today or clock.today()
     runs = speed._rows(db, user_id, today - timedelta(weeks=speed.FIT_WEEKS))
     model = speed.model_at(runs, today, races)
     model["easy"] = speed.easy_speed(db, user_id, today)
@@ -208,7 +208,7 @@ def targets(sets, model):
 
 def _live(until, today=None):
     """The full-view end date if it hasn't passed, else ""."""
-    return until if until and until >= (today or date.today()).isoformat() else ""
+    return until if until and until >= (today or clock.today()).isoformat() else ""
 
 
 # ------------------------------------------------------------ store
@@ -312,7 +312,7 @@ class CoachStore:
         me = self._user()
         if not self.is_owner(me):
             raise PermissionError("Full view is only for Dieter's owner, for now.")
-        until = ((today or date.today()) + timedelta(days=FULL_VIEW_DAYS)).isoformat() if on else ""
+        until = ((today or clock.today()) + timedelta(days=FULL_VIEW_DAYS)).isoformat() if on else ""
         cur = self._conn().execute("UPDATE tr_coach_links SET full_view_until = ? WHERE id = ? AND athlete_id = ? "
                                    "AND status = 'active'", (until, link_id, me))
         self._commit()
@@ -468,7 +468,7 @@ class CoachStore:
             coach_id = self.db.create_user(PASSCODE_EMAIL, "Coach", _hash(secrets.token_urlsafe(32)), PASSCODE_ROLE)
         conn = self._conn()
         conn.execute("UPDATE users SET status = 'active', role = ? WHERE id = ?", (PASSCODE_ROLE, coach_id))
-        until = (date.today() + timedelta(days=FULL_VIEW_DAYS)).isoformat()
+        until = (clock.today() + timedelta(days=FULL_VIEW_DAYS)).isoformat()
         if conn.execute("SELECT 1 FROM tr_coach_links WHERE athlete_id = ? AND coach_id = ? AND status = 'active'",
                         (owner, coach_id)).fetchone():
             conn.execute("UPDATE tr_coach_links SET full_view_until = ? WHERE athlete_id = ? AND coach_id = ? "

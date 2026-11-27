@@ -13,7 +13,7 @@ from datetime import date, timedelta
 
 from database import get_current_user_id
 
-from . import speed, strava
+from . import clock, speed, strava
 
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS tr_run_checkin_skips (
@@ -124,7 +124,7 @@ class ShoeStore:
 
     def waiting(self, limit=3, today=None):
         """Recent runs with no shoes logged and not skipped, newest first, with the pair to suggest."""
-        since = ((today or date.today()) - timedelta(days=ASK_DAYS)).isoformat()
+        since = ((today or clock.today()) - timedelta(days=ASK_DAYS)).isoformat()
         rows = self._conn().execute(
             f"""SELECT w.* FROM trainer_imported_workouts w
                 WHERE w.user_id = ? AND lower(w.activity_type) IN ({",".join("?" * len(RUN_TYPES))})

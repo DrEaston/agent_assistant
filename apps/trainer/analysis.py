@@ -16,7 +16,7 @@ Everything here is an estimate from Strava's numbers and is labelled that way on
 import math
 from datetime import date, timedelta
 
-from . import speed
+from . import clock, speed
 
 METERS_PER_MILE = 1609.344
 FITNESS_DAYS, FATIGUE_DAYS = 42, 7
@@ -57,7 +57,7 @@ def _week(day):
 
 
 def overview(db, user_id, miles_target=40.0, weeks=16, today=None, races=None):
-    today = today or date.today()
+    today = today or clock.today()
     this_monday = _week(today)
     first_week = this_monday - timedelta(weeks=weeks - 1)
     since = first_week - timedelta(days=FITNESS_DAYS * 3)  # enough lead-in for the averages to settle
@@ -175,6 +175,8 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None, races=None):
             "figure": speed_figure(this_week["speed_work"], this_week.get("speed_fitness"), this_week["work_line"],
                                    this_week["d_prime"]),
             "advantage_m": round(this_week["d_prime"]) if this_week["d_prime"] else None,
+            "advantage_typical": this_week.get("d_prime_typical", False),
+            "near_top_pace": this_week.get("near_top_pace"),
             "predictions": predictions(this_week["cs"], this_week["d_prime"]),
             "advantage_gain": (round(this_week["d_prime"] - weekly[-13]["d_prime"])
                              if len(weekly) >= 13 and this_week["d_prime"] and weekly[-13]["d_prime"] else None),
@@ -224,7 +226,7 @@ def predictions(cs, d_prime):
 
 def week_guidance(view, today=None):
     """Plain-English lines about this week: what's done, what's left, and what to fit in."""
-    today = today or date.today()
+    today = today or clock.today()
     t = view["totals"]
     lines = []
     target, run = t["miles_target"] or 0, t["miles_run"]

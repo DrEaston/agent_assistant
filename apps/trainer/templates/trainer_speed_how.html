@@ -47,7 +47,7 @@
   <div class="card stack">
     <p>The ground you can gain on your threshold pace in one all-out effort before you have to slow down. Run 3
       minutes all out and you'd cover about that much more than 3 minutes at threshold pace.{% if e.advantage_m %}
-      <strong>Yours is about {{ e.advantage_m }} m.</strong>{% endif %}</p>
+      <strong>{% if e.advantage_typical %}Yours isn't measured yet: Dieter is using a typical runner's {{ e.advantage_m }} m until it sees an all-out 2–7 minute effort (like a mile race).{% else %}Yours is about {{ e.advantage_m }} m.{% endif %}</strong>{% endif %}</p>
     <p>Hard reps faster than threshold, like 200s to 800s, grow it. Together with threshold pace it sets your race
       predictions and the paces for a coach's workouts.</p>
     <p class="small muted">Sports scientists call this D′ ("D prime").</p>
@@ -78,6 +78,14 @@
     <p>Anything at least about a third faster than your easy pace for 6 seconds or more. Short bursts count as strides
       only if they get close to threshold pace.</p>
   </div>
+  {% endcall %}
+
+  {% call ui.section("The math") %}
+  <a class="card link-row" href="/apps/trainer/speed/how/math">
+    <span class="label-stack"><span class="title">The math and its sources</span>
+      <span class="small muted">The formulas behind every number here, with your own values and the research they come from.</span></span>
+    <span class="chev" aria-hidden="true">›</span>
+  </a>
   {% endcall %}
 
   <p class="small muted section">These are estimates from Strava's second-by-second data, not lab tests.</p>

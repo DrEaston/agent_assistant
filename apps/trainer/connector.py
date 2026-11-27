@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from core.connector.tools import Tool, ToolError, ToolSet, site_url
 from database import get_current_user_id
 
-from . import plan, routes, runpage, speed, strava
+from . import clock, plan, routes, runpage, speed, strava
 
 CHAT_NOTES = """Trainer: Curtis's running (trainer_ tools; read-only). trainer_run is one run (by run_id, or every run on a
 date: a race day often has a warm-up, the race and a cool-down), trainer_speed his speed picture over the weeks. Use
@@ -75,7 +75,7 @@ def log_totals(args):
 
 def this_week(args):
     _user()
-    view = routes.store().week_view(args.get("week") or date.today())
+    view = routes.store().week_view(args.get("week") or clock.today())
     return {"week": view["label"], "totals": view["totals"], "goals": view["week"]["goals"],
             "days": [{"date": d["date"], "sessions": [{"id": s["id"], "kind": s["kind"], "title": s["title"],
                                                        "miles": s["miles"], "time": s["slot"], "status": s["status"],
@@ -119,7 +119,7 @@ def run(args):
         runs = [one]
     else:
         try:
-            on = date.fromisoformat(day) if day else date.today()
+            on = date.fromisoformat(day) if day else clock.today()
         except ValueError:
             raise ToolError("date should look like 2026-11-26.") from None
         ids = [r[0] for r in db.connect().execute(
@@ -144,7 +144,7 @@ def speed_picture(args):
     user = _user()
     db, races = routes._state["db"], _races()
     weeks = max(4, min(int(args.get("weeks") or 16), 52))
-    monday = date.today() - timedelta(days=date.today().weekday())
+    monday = clock.today() - timedelta(days=clock.today().weekday())
     starts = [monday - timedelta(weeks=n) for n in range(weeks - 1, -1, -1)]
     by_week = speed.weekly(db, user, starts, races)
     now = by_week[monday]

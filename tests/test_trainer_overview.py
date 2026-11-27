@@ -100,5 +100,26 @@ class LoadStatusTests(unittest.TestCase):
         self.assertEqual(speed.load_status(50, 0, False), "starting")
 
 
+class ClockTests(unittest.TestCase):
+    def test_trainer_today_is_in_his_time_zone(self):
+        import os
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from unittest import mock
+        from apps.trainer import clock
+        with mock.patch.dict(os.environ, {"APP_TIMEZONE": "America/Phoenix"}):
+            self.assertEqual(clock.today(), datetime.now(ZoneInfo("America/Phoenix")).date())
+        with mock.patch.dict(os.environ, {"APP_TIMEZONE": ""}):
+            self.assertEqual(clock.today(), datetime.now(ZoneInfo("UTC")).date())
+
+
+class TypicalAdvantageTests(unittest.TestCase):
+    def test_a_long_effort_alone_gives_the_typical_advantage(self):
+        from apps.trainer import speed
+        cs, dp, how = speed.estimate([{"m": 4506, "t": 960, "day": date.today(), "src": "run"}])
+        self.assertEqual(dp, speed.TYPICAL_D_PRIME)
+        self.assertNotIn(" and ", how)
+
+
 if __name__ == "__main__":
     unittest.main()
