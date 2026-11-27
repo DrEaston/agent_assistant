@@ -401,6 +401,13 @@ class CoachPageTests(unittest.TestCase):
             self.assertIn("Coming up from the coach", viewing.text)
             self.assertIn(speed.clock(round(1609 / 4.5)), viewing.text)
             self.assertNotIn("Put it on my plan", viewing.text)
+            # while still viewing, the coach page's forms keep working (they're the coach's own)
+            with mock.patch.object(coach_reader, "get_llm_provider", return_value=FakeAI(reply)):
+                again = visitor.post("/coach/send", follow_redirects=False,
+                                     data={"day": day, "workout": "6x mile @ T w/ 90s jog"})
+            self.assertEqual(again.status_code, 303, again.text[:200])
+            self.assertEqual(visitor.post("/coach/view", data={"athlete_id": str(athlete)},
+                                          follow_redirects=False).status_code, 303)
             stopped = visitor.post("/apps/trainer/view-as/stop", follow_redirects=False)
             self.assertEqual(stopped.headers["location"], "/coach")
         self.assertIn("New from Coach", runner.get("/").text)

@@ -9,6 +9,7 @@
   {{ ui.empty("No athletes yet.") }}
   {% else %}
 
+  {% if error and not workout %}{% call ui.banner("warn") %}{{ error }}{% endcall %}{% endif %}
   {% call ui.section("Athlete page", id="athlete") %}
   <form method="post" action="/coach/view" class="card stack">
     <div class="field"><label for="athlete-pick">Athlete</label>
@@ -19,7 +20,7 @@
   {% endcall %}
 
   {% call ui.section("Write a workout", id="write") %}
-  {% if error %}{% call ui.banner("warn") %}{{ error }}{% endcall %}{% endif %}
+  {% if error and workout %}{% call ui.banner("warn") %}{{ error }}{% endcall %}{% endif %}
   <form method="post" action="/coach/send" class="card stack">
     {{ ui.field("Day", "day", value=tomorrow, type="date", required=True) }}
     <div class="field"><label for="workout">Workout</label>

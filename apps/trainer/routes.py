@@ -29,7 +29,8 @@ VIEW_COOKIE = "trainer_view_as"
 _viewing = contextvars.ContextVar("trainer_viewing", default=None)
 # Pages that always belong to the person signed in, even while a coach is viewing an athlete's Trainer.
 OWN_PAGES = ("/apps/trainer/athletes", "/apps/trainer/my-coach", "/apps/trainer/coach-invite",
-             "/apps/trainer/coaching-links", "/apps/trainer/view-as", "/strava/", "/trainer-calendar/")
+             "/apps/trainer/coaching-links", "/apps/trainer/view-as", "/strava/", "/trainer-calendar/",
+             "/coach")   # the coach page and its forms: sending a workout works while viewing an athlete
 
 
 async def view_as(request: Request):
@@ -465,7 +466,7 @@ async def coach_send(request: Request):
     try:
         workout = await run_in_threadpool(coach_reader.read, text)
         count = coaching().send_to_all(day, workout["title"], workout["sets"], workout["notes"])
-    except coach.Invalid as exc:
+    except (coach.Invalid, PermissionError) as exc:
         return coach_page(request, error=str(exc), workout=text, day=day)
     return back(f"/coach?sent={count}#sent")
 
@@ -474,7 +475,8 @@ async def coach_send(request: Request):
 def coach_view(request: Request, athlete_id: str = Form("")):
     """Open the chosen athlete's Trainer, read-only (their full view for this coach)."""
     if not athlete_id.isdigit() or not coaching().full_view(int(athlete_id)):
-        raise HTTPException(status_code=403, detail="This athlete's Trainer isn't open to you.")
+        return coach_page(request, error="That athlete's page isn't open to you right now. Sign out and in again "
+                                         "with the passcode to renew it.")
     response = back(BASE)
     response.set_cookie(VIEW_COOKIE, athlete_id, max_age=12 * 3600, httponly=True, samesite="lax",
                         secure=request.url.scheme == "https")
