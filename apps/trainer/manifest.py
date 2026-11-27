@@ -26,7 +26,7 @@ APP = {
         {"label": "Log", "url": "/apps/trainer/log"},
         {"label": "Shoes", "url": "/apps/trainer/shoes"},
         {"label": "My coach", "url": "/apps/trainer/my-coach"},
-        {"label": "My athletes", "url": "/apps/trainer/athletes"},
+        {"label": "Coach", "url": "/apps/trainer/athletes"},
     ),
     "theme": {
         "header": "#022c22",

@@ -5411,10 +5411,7 @@ def coach_passcode_form(request: Request, passcode: str = Form("")):
     if not coach_id:
         _coach_tries[client].append(time.time())
         return render_auth_page(request, "coach", "That passcode wasn't recognized.")
-    athletes = [r["athlete_id"] for r in db.connect().execute(
-        "SELECT athlete_id FROM tr_coach_links WHERE coach_id = ? AND status = 'active'", (coach_id,)).fetchall()]
-    landing = f"/apps/trainer/athletes/{athletes[0]}" if len(athletes) == 1 else "/apps/trainer/athletes"
-    return create_login_response(coach_id, landing)
+    return create_login_response(coach_id, "/apps/trainer/athletes")
 
 
 @app.get("/register")

@@ -163,6 +163,22 @@ def target_speed(intensity, model):
     return None
 
 
+PROFILE_EFFORTS = (("easy", None), ("threshold", 1609), ("10k", 1609), ("5k", 1609), ("3k", 1609), ("mile", 400),
+                   ("sprint", 200))
+
+
+def pace_profile(model):
+    """The paces Dieter would pick for each effort: [{effort, pace, rep}] (rep: time for a typical rep length)."""
+    out = []
+    for intensity, metres in PROFILE_EFFORTS:
+        v = target_speed(intensity, model)
+        if not v:
+            continue
+        out.append({"effort": INTENSITIES[intensity].capitalize(), "pace": f"{speed.pace(v)}/mi",
+                    "rep": f"{distance_name(metres)} in {speed.clock(round(metres / v))}" if metres else ""})
+    return out
+
+
 def targets(sets, model):
     """Each set with the athlete's target: per-rep time and range, and pace per mile for longer reps."""
     out = []

@@ -277,6 +277,15 @@ class CoachPageTests(unittest.TestCase):
         link_id = page.split("/apps/trainer/coaching-links/")[1].split("/")[0]
         owner.post(f"/apps/trainer/coaching-links/{link_id}/full-view", data={"on": "1"})
         self.assertIn("View Owner", daniel.get(f"/apps/trainer/athletes/{athlete}").text)
+        # while full view is on (temporary), the coach's athlete page shows the paces Dieter picked
+        from unittest import mock
+        with mock.patch.object(coach, "athlete_model", return_value=dict(MODEL)):
+            daniel.post(f"/apps/trainer/athletes/{athlete}/prescribe",
+                        data={"day": "2026-12-01", "title": "Miles", "reps_0": "6", "metres_0": "1609",
+                              "intensity_0": "threshold"})
+            profile = daniel.get(f"/apps/trainer/athletes/{athlete}").text
+        self.assertIn(f"{speed.pace(4.5)}/mi", profile)                     # threshold in the pace table
+        self.assertIn(speed.clock(round(1609 / 4.5)), profile)              # the rep time on the sent workout
         daniel.post(f"/apps/trainer/athletes/{athlete}/view")
         week = daniel.get("/apps/trainer/week")
         self.assertEqual(week.status_code, 200)
@@ -290,6 +299,7 @@ class CoachPageTests(unittest.TestCase):
         self.assertNotIn("read-only", daniel.get("/apps/trainer/week").text)
         # Turned off: the cookie alone does nothing
         owner.post(f"/apps/trainer/coaching-links/{link_id}/full-view")
+        self.assertNotIn(speed.clock(round(1609 / 4.5)), daniel.get(f"/apps/trainer/athletes/{athlete}").text)
         daniel.cookies.set("trainer_view_as", str(athlete))
         self.assertNotIn("Viewing Owner", daniel.get("/apps/trainer/week").text)
 
@@ -309,7 +319,13 @@ class CoachPageTests(unittest.TestCase):
         self.assertIn("wasn't recognized", wrong.text)
         signed_in = visitor.post("/coach", data={"passcode": "phxrun"}, follow_redirects=False)
         self.assertEqual(signed_in.status_code, 303)
-        self.assertEqual(signed_in.headers["location"], f"/apps/trainer/athletes/{athlete}")
+        self.assertEqual(signed_in.headers["location"], "/apps/trainer/athletes")
+        landing = visitor.get("/apps/trainer/athletes").text
+        self.assertIn("Athlete profile", landing)
+        self.assertIn(f'<option value="{athlete}" selected>Curtis</option>', landing)
+        self.assertIn("New workout", landing)
+        opened = visitor.get(f"/apps/trainer/athletes/open?athlete={athlete}", follow_redirects=False)
+        self.assertEqual(opened.headers["location"], f"/apps/trainer/athletes/{athlete}")
         page = visitor.get(f"/apps/trainer/athletes/{athlete}")
         self.assertEqual(page.status_code, 200)
         self.assertIn("Curtis", page.text)
@@ -321,9 +337,11 @@ class CoachPageTests(unittest.TestCase):
                                       follow_redirects=False).status_code, 403)
         # it can send a workout, and the athlete sees it with their own times on Trainer home and Today
         with mock.patch.object(coach, "athlete_model", return_value=dict(MODEL)):
-            visitor.post(f"/apps/trainer/athletes/{athlete}/prescribe",
-                         data={"day": "2026-12-01", "title": "Threshold miles", "reps_0": "6", "metres_0": "1609",
-                               "intensity_0": "threshold", "rest_0": "90 s jog"})
+            sent = visitor.post("/apps/trainer/athletes/send", follow_redirects=False,
+                                data={"athlete_id": str(athlete), "day": "2026-12-01", "title": "Threshold miles",
+                                      "reps_0": "6", "metres_0": "1609", "intensity_0": "threshold",
+                                      "rest_0": "90 s jog"})
+            self.assertEqual(sent.headers["location"], f"/apps/trainer/athletes/{athlete}?sent=1")
             home = runner.get("/apps/trainer").text
             self.assertIn("New from your coach", home)
             self.assertIn("6 × 1 mile at threshold, 90 s jog", home)

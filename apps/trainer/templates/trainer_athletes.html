@@ -1,22 +1,50 @@
 {% extends "layout.html" %}
 {% import "components.html" as ui %}
-{% block title %}My athletes · Trainer{% endblock %}
+{% block title %}Coach · Trainer{% endblock %}
 {% block content %}
-{% call ui.page_header("My athletes", crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs, current=current,
-    sub="People who shared Trainer with you. Send them workouts in plain terms; Dieter turns them into each athlete's own times.") %}{% endcall %}
+{% call ui.page_header("Coach", crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs, current=current,
+    sub="Open an athlete's profile, or send a workout in plain terms. Dieter turns it into each athlete's own paces.") %}{% endcall %}
 <main class="wrap">
-  {% if athletes %}
-  <div class="card">
-    {% for a in athletes %}
-    <div class="list-row row spread">
-      <span><a class="title" href="/apps/trainer/athletes/{{ a.athlete_id }}">{{ a.name }}</a><br>
-        <span class="small muted">{{ a.counts.sent }} waiting · {{ a.counts.accepted }} planned · {{ a.counts.done }} done{% if a.full_view_until %} · full view until {{ a.full_view_until }}{% endif %}</span></span>
-      <span class="chev" aria-hidden="true">›</span>
-    </div>
-    {% endfor %}
-  </div>
-  {% else %}
+  {% if not athletes %}
   {{ ui.empty("No one has shared Trainer with you yet. An athlete makes an invite link on their My coach page and sends it to you.") }}
+  {% else %}
+
+  {% call ui.section("Athlete profile", id="profile") %}
+  <form method="get" action="/apps/trainer/athletes/open" class="card stack">
+    <div class="field"><label for="profile-athlete">Athlete</label>
+      <select id="profile-athlete" name="athlete">{% for a in athletes %}<option value="{{ a.athlete_id }}"{% if a.athlete_id == chosen %} selected{% endif %}>{{ a.name }}</option>{% endfor %}</select></div>
+    <button type="submit" class="primary">View profile</button>
+  </form>
+  {% endcall %}
+
+  {% call ui.section("New workout", id="new") %}
+  <form method="post" action="/apps/trainer/athletes/send" class="card stack">
+    <div class="cols">
+      <div class="field"><label for="send-athlete">For</label>
+        <select id="send-athlete" name="athlete_id">{% for a in athletes %}<option value="{{ a.athlete_id }}"{% if a.athlete_id == chosen %} selected{% endif %}>{{ a.name }}</option>{% endfor %}</select></div>
+      {{ ui.field("Day", "day", value=tomorrow, type="date", required=True) }}
+    </div>
+    {{ ui.field("Title", "title", placeholder="Threshold miles + 200s", maxlength=120) }}
+    {% for i in set_rows %}
+    <fieldset class="plain-set stack">
+      <legend class="small muted">Set {{ i + 1 }}{% if i > 0 %} (optional){% endif %}</legend>
+      <div class="cols">
+        {{ ui.field("Reps", "reps_" ~ i, type="number", placeholder=("6" if i == 0 else "")) }}
+        <div class="field"><label for="metres_{{ i }}">Distance</label>
+          <select id="metres_{{ i }}" name="metres_{{ i }}"><option value="">—</option>{% for m, name in distances %}<option value="{{ m }}">{{ name }}</option>{% endfor %}</select></div>
+      </div>
+      <div class="cols">
+        <div class="field"><label for="intensity_{{ i }}">Effort</label>
+          <select id="intensity_{{ i }}" name="intensity_{{ i }}">{% for key, name in intensities.items() %}<option value="{{ key }}"{% if key == "threshold" %} selected{% endif %}>{{ name | capitalize }}</option>{% endfor %}</select></div>
+        {{ ui.field("Rest", "rest_" ~ i, placeholder="90 s jog", maxlength=40) }}
+      </div>
+    </fieldset>
+    {% endfor %}
+    {{ ui.field("Notes for them", "notes", placeholder="Warm up 2 miles with drills; cool down 1 mile", maxlength=500) }}
+    <button type="submit" class="primary">Send</button>
+    <p class="small muted">It goes to their Trainer home. After you send it, their profile shows the paces Dieter picked.</p>
+  </form>
+  {% endcall %}
   {% endif %}
 </main>
 {% endblock %}

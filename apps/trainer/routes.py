@@ -429,26 +429,65 @@ def coach_invite_accept(token: str):
     return back(f"{BASE}/athletes/{info['athlete_id']}")
 
 
+def _athlete_model(athlete_id):
+    """The athlete's speed model, worked out for a coach. Only called while the athlete has full view on for
+    this coach (temporary; to be blocked for Strava-sourced data before Trainer is shared more widely)."""
+    token = set_current_user_id(athlete_id)
+    try:
+        return coach.athlete_model(_state["db"], athlete_id, races=plan.race_bests(store().settings()))
+    finally:
+        reset_current_user_id(token)
+
+
 @router.get(BASE + "/athletes")
-def my_athletes(request: Request):
+def my_athletes(request: Request, athlete: int = 0):
+    """The coach's landing page: pick an athlete to open their profile, and send a workout."""
     c = coaching()
     _coach(c._user)
-    return render("trainer_athletes.html", title="My athletes", current=BASE + "/athletes", page_url=BASE + "/athletes",
-                  athletes=c.my_athletes())
-
-
-@router.get(BASE + "/athletes/{athlete_id}")
-def athlete_page(request: Request, athlete_id: int, sent: str = ""):
-    link, workouts = _coach(coaching().sent_to, athlete_id)
-    return render("trainer_athlete.html", title=link["name"], current=BASE + "/athletes",
-                  page_url=f"{BASE}/athletes/{athlete_id}", athlete=link, workouts=workouts, sent=bool(sent),
+    athletes = c.my_athletes()
+    chosen = athlete if any(a["athlete_id"] == athlete for a in athletes) else (
+        athletes[0]["athlete_id"] if athletes else 0)
+    return render("trainer_athletes.html", title="Coach", current=BASE + "/athletes", page_url=BASE + "/athletes",
+                  athletes=athletes, chosen=chosen,
                   intensities=coach.INTENSITIES, distances=[(m, coach.distance_name(m)) for m in coach.DISTANCES],
                   set_rows=range(3), tomorrow=(date.today() + timedelta(days=1)).isoformat())
 
 
+@router.get(BASE + "/athletes/open")
+def open_athlete(athlete: int = 0):
+    return back(f"{BASE}/athletes/{athlete}" if athlete else BASE + "/athletes")
+
+
+@router.post(BASE + "/athletes/send")
+async def send_workout(request: Request):
+    form = await request.form()
+    raw = str(form.get("athlete_id") or "")
+    if not raw.isdigit():
+        raise HTTPException(status_code=400, detail="Pick an athlete.")
+    return await _prescribe(form, int(raw))
+
+
+@router.get(BASE + "/athletes/{athlete_id}")
+def athlete_page(request: Request, athlete_id: int, sent: str = ""):
+    c = coaching()
+    link, workouts = _coach(c.sent_to, athlete_id)
+    paces = []
+    if c.full_view(athlete_id):   # temporary: the athlete's own switch on My coach
+        model = _athlete_model(athlete_id)
+        paces = coach.pace_profile(model)
+        for w in workouts:
+            w["sets"] = coach.targets(w["sets"], model)
+    return render("trainer_athlete.html", title=link["name"], current=BASE + "/athletes",
+                  page_url=f"{BASE}/athletes/{athlete_id}", athlete=link, workouts=workouts, sent=bool(sent),
+                  paces=paces, show_paces=bool(link["full_view_until"]))
+
+
 @router.post(BASE + "/athletes/{athlete_id}/prescribe")
 async def prescribe(request: Request, athlete_id: int):
-    form = await request.form()
+    return await _prescribe(await request.form(), athlete_id)
+
+
+async def _prescribe(form, athlete_id):
     sets = [{"reps": form.get(f"reps_{i}"), "metres": form.get(f"metres_{i}"),
              "intensity": form.get(f"intensity_{i}"), "rest": form.get(f"rest_{i}")} for i in range(coach.MAX_SETS)]
     _coach(coaching().prescribe, athlete_id, form.get("day"), form.get("title"), sets, form.get("notes"))
