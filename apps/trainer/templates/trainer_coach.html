@@ -29,8 +29,20 @@
       <button type="button" id="talk" aria-pressed="false">🎤 <span id="talk-label">Talk</span></button>
       <span class="small muted" id="talk-status" aria-live="polite"></span>
     </div>
-    <p class="small muted">Write or say it the way you'd tell them. Dieter reads it into sets and works out each athlete's own paces from their runs.</p>
-    <button type="submit" class="primary">Send to all athletes ({{ athletes | length }})</button>
+    <p class="small muted">Say or write it the way you'd tell them. Dieter lays it out as sets for you to check, then works out each athlete's own paces from their runs.</p>
+    <div class="row"><button type="button" id="read-workout">Read workout</button>
+      <span class="small muted" id="read-status" aria-live="polite"></span></div>
+    <div class="card stack workout-preview" id="preview" hidden>
+      <div class="row spread"><strong id="preview-title"></strong><span class="small muted">Dieter read it as</span></div>
+      <div class="table-scroll"><table class="data-table">
+        <thead><tr><th>Set</th><th class="num">Reps</th><th>Distance</th><th>Effort</th><th>Rest</th></tr></thead>
+        <tbody id="preview-sets"></tbody>
+      </table></div>
+      <p class="small" id="preview-notes"></p>
+      <p class="small muted">Not right? Change the words above and read it again.</p>
+    </div>
+    <input type="hidden" name="parsed" id="parsed" value="">
+    <button type="submit" class="primary" id="send-workout">Send to all athletes ({{ athletes | length }})</button>
   </form>
   {% endcall %}
 
@@ -88,8 +100,8 @@
         const text = (data.text || "").trim();
         if (!r.ok || !text) { idle("Didn't catch that. Try again?"); return; }
         box.value = box.value.trim() ? box.value.trim() + " " + text : text;
-        idle("Added. Check it, then send.");
-        box.focus();
+        idle("");
+        readWorkout();
       } catch (e) { idle("Couldn't hear that. Try again?"); }
     };
     recorder.start();
@@ -97,5 +109,39 @@
     status.textContent = "Listening… tap Stop when you're done.";
   });
 })();
+
+// Read the words into the standard layout; Send then sends exactly what was shown.
+const readBtn = document.getElementById("read-workout"), readStatus = document.getElementById("read-status");
+const preview = document.getElementById("preview"), parsed = document.getElementById("parsed");
+const sendBtn = document.getElementById("send-workout"), words = document.getElementById("workout");
+function clearReading() { preview.hidden = true; parsed.value = ""; sendBtn.hidden = true; }
+async function readWorkout() {
+  const text = words.value.trim();
+  if (!text) { readStatus.textContent = "Say or write the workout first."; return; }
+  readStatus.textContent = "Reading it…"; readBtn.disabled = true;
+  try {
+    const body = new FormData(); body.append("workout", text);
+    const r = await fetch("/coach/read", { method: "POST", body });
+    const data = await r.json();
+    if (!r.ok) { clearReading(); readStatus.textContent = data.error || "Couldn't read that. Try again?"; return; }
+    document.getElementById("preview-title").textContent = data.title || "Workout";
+    const rows = document.getElementById("preview-sets"); rows.replaceChildren();
+    data.sets.forEach((s, i) => {
+      const tr = document.createElement("tr");
+      [String(i + 1), String(s.reps), s.distance, s.effort, s.rest || "–"].forEach((v, j) => {
+        const td = document.createElement("td"); td.textContent = v; if (j === 1) td.className = "num"; tr.append(td);
+      });
+      rows.append(tr);
+    });
+    document.getElementById("preview-notes").textContent = data.notes ? "Notes: " + data.notes : "";
+    parsed.value = data.parsed; preview.hidden = false; sendBtn.hidden = false; readStatus.textContent = "";
+  } catch (e) { clearReading(); readStatus.textContent = "Couldn't reach Dieter. Try again?"; }
+  finally { readBtn.disabled = false; }
+}
+if (readBtn && words) {
+  clearReading();
+  readBtn.addEventListener("click", readWorkout);
+  words.addEventListener("input", () => { if (parsed.value) { clearReading(); readStatus.textContent = "Changed: read it again before sending."; } });
+}
 </script>
 {% endblock %}

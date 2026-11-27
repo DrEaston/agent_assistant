@@ -381,6 +381,19 @@ class CoachPageTests(unittest.TestCase):
                 sent = visitor.post("/coach/send", follow_redirects=False,
                                     data={"day": day, "workout": "2 mi wu, 6x mile @ T w/ 90s jog"})
             self.assertEqual(sent.headers["location"], "/coach?sent=1#sent")
+            # Read first: the standard layout to check, then Send sends exactly that (no second reading)
+            with mock.patch.object(coach_reader, "get_llm_provider", return_value=FakeAI(reply)):
+                read = visitor.post("/coach/read", data={"workout": "6x mile @ T w/ 90s jog"}).json()
+            self.assertEqual(read["sets"][0], {"reps": 6, "distance": "1 mile", "effort": "threshold",
+                                               "rest": "90 s jog", "text": "6 × 1 mile at threshold, 90 s jog"})
+            self.assertEqual(read["notes"], "2 mile warm-up")
+            with mock.patch.object(coach_reader, "get_llm_provider", side_effect=AssertionError("read twice")):
+                checked = visitor.post("/coach/send", follow_redirects=False,
+                                       data={"day": day, "workout": "6x mile @ T w/ 90s jog", "parsed": read["parsed"]})
+            self.assertEqual(checked.headers["location"], "/coach?sent=1#sent")
+            with mock.patch.object(coach_reader, "get_llm_provider", return_value=FakeAI("no idea")):
+                bad = visitor.post("/coach/read", data={"workout": "hmm"})
+            self.assertEqual(bad.status_code, 400)
             sent_page = visitor.get("/coach?sent=1").text
             self.assertIn("Sent to 1 athlete", sent_page)
             self.assertIn("Dieter read it as: 6 × 1 mile at threshold, 90 s jog", sent_page)
