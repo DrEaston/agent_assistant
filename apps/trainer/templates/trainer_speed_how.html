@@ -43,11 +43,11 @@
   </div>
   {% endcall %}
 
-  {% call ui.section("Kick") %}
+  {% call ui.section("Speed advantage") %}
   <div class="card stack">
     <p>The ground you can gain on your threshold pace in one all-out effort before you have to slow down. Run 3
-      minutes all out and you'd cover about that much more than 3 minutes at threshold pace.{% if e.kick_m %}
-      <strong>Yours is about {{ e.kick_m }} m.</strong>{% endif %}</p>
+      minutes all out and you'd cover about that much more than 3 minutes at threshold pace.{% if e.advantage_m %}
+      <strong>Yours is about {{ e.advantage_m }} m.</strong>{% endif %}</p>
     <p>Hard reps faster than threshold, like 200s to 800s, grow it. Together with threshold pace it sets your race
       predictions and the paces for a coach's workouts.</p>
     <p class="small muted">Sports scientists call this D′ ("D prime").</p>
@@ -56,7 +56,7 @@
 
   {% call ui.section("Safe limit") %}
   <div class="card stack">
-    <p>{{ e.ratio }} × your speed fitness, and never below {{ e.floor }} × your kick (so a few strides after a quiet
+    <p>{{ e.ratio }} × your speed fitness, and never below {{ e.floor }} × your speed advantage (so a few strides after a quiet
       stretch are always fine). Injury research finds that jumping more than about half again over what you've been
       doing is when injuries pile up. Building gradually raises the limit with you.</p>
     <p>Up to {{ e.well_over }}× the limit is "a little over"; past that is "well over".</p>

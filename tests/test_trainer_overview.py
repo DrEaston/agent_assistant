@@ -80,6 +80,16 @@ class PredictionTests(unittest.TestCase):
         self.assertEqual(analysis.predictions(None, 200), [])
 
 
+class SpeedFigureTests(unittest.TestCase):
+    def test_one_scale_for_load_fitness_limit_and_advantage(self):
+        g = analysis.speed_figure(310, 280, 420, 150)
+        self.assertEqual(g["limit"], round(420 / (420 * 1.08) * 300, 1))
+        self.assertLess(g["advantage"], g["fitness"])
+        self.assertLess(g["fitness"], g["load"])
+        self.assertIsNone(analysis.speed_figure(None, None, None, None))
+        self.assertIsNone(analysis.speed_figure(120, None, None, None)["fitness"])
+
+
 class LoadStatusTests(unittest.TestCase):
     def test_this_weeks_load_against_speed_fitness(self):
         from apps.trainer import speed

@@ -327,6 +327,15 @@ textarea.short { min-height: 5rem; }
 .route-start { fill: var(--ok); }
 .route-finish { fill: var(--panel); stroke: var(--ink); stroke-width: 2; }
 .speed-trace svg { display: block; width: 100%; height: 10rem; }
+.speed-figure { margin: var(--s2) 0; }
+.speed-figure svg { display: block; width: 100%; height: auto; overflow: visible; }
+.speed-figure .sf-track { fill: var(--track); }
+.speed-figure .sf-load { fill: var(--accent); }
+.speed-figure .sf-load.sf-over { fill: var(--warn); }
+.speed-figure .sf-fitness { stroke: var(--ink); stroke-width: 2; }
+.speed-figure .sf-limit { stroke: var(--warn); stroke-width: 2; stroke-dasharray: 3 3; }
+.speed-figure .sf-advantage { fill: none; stroke: var(--muted); stroke-width: 1.5; }
+.speed-figure .sf-label { fill: var(--muted); font-size: 10px; }
 .sparkline { display: block; width: 100%; height: 2.25rem; margin: .25rem 0; }
 .sparkline polyline { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .stat-big { font-size: var(--text-xl); font-weight: 700; font-variant-numeric: tabular-nums; }

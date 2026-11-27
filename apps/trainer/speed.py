@@ -75,11 +75,12 @@ BIN = 5                             # best_by_time works on 5-second steps
 MAX_MPS = 9.0                       # faster than this in a 5-second step is a GPS jump, not running
 HIST_FROM = 3.0                     # m/s: the histogram starts here (slower running never counts as speed work)
 FIT_WEEKS = 26                      # critical speed and top speed come from this many weeks of best efforts
-# Speed fitness = his average weekly speed load (speed points) over the 6 weeks before this one: the speed work his
+# Speed fitness = his average weekly speed load (speed points) over the 4 weeks before this one: the speed work his
 # legs are used to. Speed load this week is read against it, and the safe limit is 1.5 x speed fitness (acute:chronic
 # workload ratio, Gabbett 2016: over 1.5x is where injury risk rose in that research; it's debated, a guide).
-CHRONIC_WEEKS, RATIO = 6, 1.5
-FLOOR_KICKS = 2                     # the limit never drops below 2 x his kick (D'): strides after a quiet month are fine
+CHRONIC_WEEKS, RATIO = 4, 1.5
+FLOOR_ADVANTAGE = 2                 # the limit never drops below 2 x his speed advantage (D'): strides after a quiet
+                                    # month are fine
 EASING, HOLDING = 0.8, 1.2          # this week / speed fitness: under 0.8 easing off, up to 1.2 holding, then building
 FLOOR_NEAR_TOP = 500                # top-speed running line never below 500 m
 WELL_OVER = 1.5                     # "well over" from 1.5 x the safe limit; below that "a little over" (Curtis: his
@@ -797,7 +798,7 @@ def weekly(db, user_id, week_starts, races=None):
         work_usual = sum(b["speed_work"] or 0 for b in before) / CHRONIC_WEEKS
         top_usual = sum(b["near_top"] for b in before) / CHRONIC_WEEKS
         week["speed_fitness"] = round(work_usual) if week["line_ready"] else None
-        week["work_line"] = (round(max(RATIO * work_usual, FLOOR_KICKS * week["d_prime"])) if week["d_prime"] else None)
+        week["work_line"] = (round(max(RATIO * work_usual, FLOOR_ADVANTAGE * week["d_prime"])) if week["d_prime"] else None)
         week["top_line"] = round(max(RATIO * top_usual, FLOOR_NEAR_TOP))
         if not week["line_ready"]:
             week["work_line"] = week["top_line"] = None
@@ -875,9 +876,9 @@ def explain(db, user_id, races=None, today=None, weeks=16):
     over = [{"week": w.isoformat(), "label": f"{w:%b} {w.day}", "times": v["times_line"], "how": v["how_over"]}
             for w, v in weekly(db, user_id, starts, races).items() if v["how_over"]]
     return {"cs_pace": pace(cs), "cs_how": model["how"], "examples": examples, "over": over[-3:][::-1],
-            "kick_m": round(model["d_prime"]) if model["d_prime"] else None,
+            "advantage_m": round(model["d_prime"]) if model["d_prime"] else None,
             "ratio": RATIO, "chronic_weeks": CHRONIC_WEEKS, "well_over": WELL_OVER, "easing": EASING,
-            "holding": HOLDING, "floor": FLOOR_KICKS}
+            "holding": HOLDING, "floor": FLOOR_ADVANTAGE}
 
 
 def hard_efforts(db, user_id, weeks=52, today=None, limit=12, races=None):
