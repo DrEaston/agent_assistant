@@ -110,14 +110,13 @@
   </div>
   {% endcall %}
 
-  {% call ui.section("Speed fitness") %}
-    {% for o in sp.over_weeks | reverse %}
-    {% call ui.banner("warn" if o.how == "well over" else "info") %}<strong><a href="/apps/trainer/speed/{{ o.week }}">Week of {{ o.label }}</a>: {{ o.times }}× the safe limit, {{ o.how }}</strong>{% if o.cause %} ({% if o.cause.id %}<a href="/apps/trainer/run/{{ o.cause.id }}">{{ o.cause.summary }}</a>{% else %}{{ o.cause.summary }}{% endif %} on {{ o.cause.day.strftime("%b") }} {{ o.cause.day.day }}){% endif %}.{% if o.how == "well over" %} A jump like that is where injuries tend to come from; build up to it over a few weeks.{% endif %}{% endcall %}
-    {% endfor %}
-  <div class="card stack">
-    <div class="spread"><span class="small muted">Speed fitness</span><strong class="stat-big">{{ "{:,}".format(sp.speed_fitness) ~ " points/wk" if sp.speed_fitness is not none else "–" }}</strong></div>
-    {% if sp.speed_fitness_spark %}{{ ui.sparkline(sp.speed_fitness_spark, "Speed fitness, last 16 weeks") }}{% endif %}
-    <span class="small">The speed work your legs are used to: your average weekly speed load over the 4 weeks before this one.{% if sp.speed_fitness_gain is not none %} {{ "+" if sp.speed_fitness_gain >= 0 }}{{ "{:,}".format(sp.speed_fitness_gain) }} vs 12 weeks ago.{% endif %}{% if sp.speed_fitness is none and not sp.line_ready %} Shows once the 4 weeks before are read.{% endif %}</span>
+  {% call ui.section("Speed") %}
+  {% set wk = sp.weeks[-1] if sp.weeks else {} %}
+  <div class="speed-cells">
+    <div class="card stack speed-this-week">
+      <div class="spread"><h3 class="group-title">This week</h3>
+        {% if sp.load_status %}<span class="monitor monitor-{{ 'over' if sp.work_over or sp.top_over else sp.load_status | replace(' ', '-') }}">{{ sp.load_status | capitalize }}{% if sp.speed_work is not none and sp.work_line %} · {{ "{:,}".format(sp.speed_work) }} of {{ "{:,}".format(sp.work_line) }}{% endif %}</span>{% endif %}</div>
+      {% if (sp.work_over or sp.top_over) and wk.how_over %}{% call ui.banner("warn" if wk.how_over == "well over" else "info") %}{{ wk.times_line }}× the safe limit, {{ wk.how_over }}{% if wk.cause and wk.cause.id %}: mostly <a href="/apps/trainer/run/{{ wk.cause.id }}">{{ wk.cause.summary }}</a>{% endif %}.{% if wk.how_over == "well over" %} A jump like that is where injuries tend to come from; ease off and build up over a few weeks.{% endif %}{% endcall %}{% endif %}
     {% if sp.figure %}{% set g = sp.figure %}
     <figure class="speed-figure" aria-label="This week's speed load against your speed fitness, safe limit and speed advantage">
       <svg viewBox="0 0 300 70" role="img" aria-label="Speed load {{ sp.speed_work or 0 }}; speed fitness {{ sp.speed_fitness or 'not yet' }}; safe limit {{ sp.work_line or 'not yet' }}; speed advantage {{ sp.advantage_m or 'not yet' }} m">
@@ -133,22 +132,40 @@
       <figcaption class="small muted">All in metres gained on your threshold pace. <strong>Bar:</strong> this week's speed load. <strong>Solid tick:</strong> speed fitness, what a usual week holds. <strong>Dashed:</strong> safe limit, 1.5 × fitness. <strong>Bracket:</strong> speed advantage, the most one all-out effort can gain; a workout adds up more because you recover between reps.</figcaption>
     </figure>
     {% endif %}
-    <div class="stat-grid">
-      <div class="stat"><span class="small muted">Speed load this week</span><strong>{{ "{:,}".format(sp.speed_work) if sp.speed_work is not none else "–" }}{% if sp.load_status %} {{ ui.tag(sp.load_status | capitalize, "warn" if sp.work_over else "info") }}{% endif %}</strong>
+      <div class="stat-grid">
+      <div class="stat"><span class="small muted">Speed load this week</span><strong>{{ "{:,}".format(sp.speed_work) if sp.speed_work is not none else "–" }}</strong>
         <span class="small">points{% if sp.work_line %} · safe up to {{ "{:,}".format(sp.work_line) }}{% elif not sp.line_ready %} · safe limit once the 4 weeks before are read{% endif %}</span></div>
-      <div class="stat"><span class="small muted">Speed advantage</span><strong>{{ "{:,}".format(sp.advantage_m) ~ " m" if sp.advantage_m else "–" }}</strong>
-        <span class="small">the ground you can gain on your threshold pace in one all-out effort{% if sp.advantage_gain is not none %} · {{ "+" if sp.advantage_gain >= 0 }}{{ sp.advantage_gain }} m vs 12 weeks ago{% endif %}</span></div>
       <div class="stat"><span class="small muted">Near-sprint running this week</span><strong>{{ "{:,}".format(sp.near_top) }} m</strong>
         <span class="small">{% if sp.top_over %}{{ ui.tag("Over the safe limit", "warn") }} {% endif %}{% if sp.top_line %}safe limit {{ "{:,}".format(sp.top_line) }} m{% else %}safe limit once the 4 weeks before are read{% endif %}</span></div>
+      </div>
     </div>
-    <div class="stat-grid">
+
+    <div class="card stack">
+    <div class="spread"><h3 class="group-title">Speed fitness</h3><strong class="stat-big">{{ "{:,}".format(sp.speed_fitness) ~ " points/wk" if sp.speed_fitness is not none else "–" }}</strong></div>
+    {% if sp.speed_fitness_spark %}{{ ui.sparkline(sp.speed_fitness_spark, "Speed fitness, last 16 weeks") }}{% endif %}
+    <span class="small">The speed work your legs are used to: your average weekly speed load over the 4 weeks before this one.{% if sp.speed_fitness_gain is not none %} {{ "+" if sp.speed_fitness_gain >= 0 }}{{ "{:,}".format(sp.speed_fitness_gain) }} vs 12 weeks ago.{% endif %}{% if sp.speed_fitness is none and not sp.line_ready %} Shows once the 4 weeks before are read.{% endif %}</span>
+    </div>
+
+    <div class="card stack">
+      <div class="spread"><h3 class="group-title">Speed advantage</h3><strong class="stat-big">{{ "{:,}".format(sp.advantage_m) ~ " m" if sp.advantage_m else "–" }}</strong></div>
+        <span class="small">The ground you can gain on your threshold pace in one all-out effort{% if sp.advantage_gain is not none %} · {{ "+" if sp.advantage_gain >= 0 }}{{ sp.advantage_gain }} m vs 12 weeks ago{% endif %}</span>
+      <span class="small muted">Run 3 minutes all out and you'd cover about this much more than 3 minutes at threshold pace. It sets your race predictions and the coach's paces; hard reps faster than threshold grow it.</span>
+    </div>
+
+    <div class="card stack">
+      <h3 class="group-title">Top speed and strides</h3>
+      <div class="stat-grid">
       <div class="stat"><span class="small muted">Top speed</span><strong>{{ sp.top_pace_recent or "–" }}</strong>
         <span class="small">{% if sp.top_pace_recent %}/mi, best 5 seconds, last 4 weeks{% if sp.top_pace_before %} · {{ "faster" if sp.faster else "not faster" }} than before ({{ sp.top_pace_before }}){% endif %}{% else %}no fast running yet{% endif %}</span></div>
       <div class="stat"><span class="small muted">Stride speed, last 4 weeks</span><strong>{{ sp.stride_pace_recent or "–" }}</strong>
         <span class="small">{% if sp.stride_gain is not none %}{% if sp.stride_gain > 0 %}{{ sp.stride_gain }} s/mi faster{% elif sp.stride_gain < 0 %}{{ -sp.stride_gain }} s/mi slower{% else %}same{% endif %} than the 8 weeks before{% elif sp.stride_pace_recent %}/mi · needs a few more weeks to compare{% else %}no strides found yet{% endif %}</span></div>
       <div class="stat"><span class="small muted">Strides this week</span><strong>{{ t.strides[0] }}/{{ t.strides[1] }}</strong>
         <span class="small">planned strides are ticked when Strava shows them</span></div>
+      </div>
     </div>
+  </div>
+
+  <div class="card stack gap-above">
     <h3 class="group-title">Week by week</h3>
     <p class="small muted">Tap a week to see its runs and their speed load.</p>
     {% set read_weeks = sp.weeks | selectattr("read") | list | reverse | list %}
@@ -175,7 +192,6 @@
     {% set tbars = [] %}{% for w in sp.weeks %}{% set _ = tbars.append({"label": w.label, "value": w.near_top, "current": loop.last, "limit": w.top_line}) %}{% endfor %}
     {{ ui.bar_chart(tbars, sp.top_max, unit=" m", label="Near-sprint running per week, last 16 weeks") }}
     <p class="small muted">Near-sprint running per week (metres), with its safe limit.</p>
-
     <p class="small muted">Speed load is speed points: metres you got ahead of a pacer running at threshold pace. Speed advantage is D′ in your speed model; it sets your race predictions and the coach's paces. Estimates from each run's second-by-second data on Strava. <a href="/apps/trainer/speed/how">How these numbers work</a></p>
   </div>
   {% endcall %}

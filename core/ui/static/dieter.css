@@ -327,6 +327,14 @@ textarea.short { min-height: 5rem; }
 .route-start { fill: var(--ok); }
 .route-finish { fill: var(--panel); stroke: var(--ink); stroke-width: 2; }
 .speed-trace svg { display: block; width: 100%; height: 10rem; }
+.speed-cells { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: var(--s3); }
+.speed-cells .speed-this-week { grid-column: 1 / -1; }
+.monitor { display: inline-block; padding: .2rem .65rem; border-radius: 999px; font-size: var(--text-sm); font-weight: 600;
+  background: var(--tag-bg); color: var(--ink); white-space: nowrap; }
+.monitor-building { background: var(--ok-soft); color: var(--ok-ink); }
+.monitor-holding, .monitor-starting { background: var(--info-soft); color: var(--info); }
+.monitor-easing-off { background: var(--tag-bg); color: var(--muted); }
+.monitor-over { background: var(--warn-soft); color: var(--warn-ink); }
 .speed-figure { margin: var(--s2) 0; }
 .speed-figure svg { display: block; width: 100%; height: auto; overflow: visible; }
 .speed-figure .sf-track { fill: var(--track); }
