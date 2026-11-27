@@ -1,10 +1,17 @@
 {% extends "layout.html" %}
 {% import "components.html" as ui %}
+{% import "trainer_after_run.html" as after %}
 {% block title %}Trainer{% endblock %}
 {% block content %}
 {% set t = view.totals %}
 {% call ui.page_header("Trainer", crumbs=(("Dieter", "/"),), tabs=tabs, current=current, sub=view.label) %}{% endcall %}
 <main class="wrap">
+  {% if after_run and not trainer_viewing %}
+  {% call ui.section("After your run") %}
+  {{ after.checkin(after_run[0], shoe_list, feels, "/apps/trainer") }}
+  {% if after_run | length > 1 %}<p class="small gap-above"><a href="/apps/trainer/shoes">{{ after_run | length - 1 }} more run{{ "s" if after_run | length > 2 }} waiting</a></p>{% endif %}
+  {% endcall %}
+  {% endif %}
     {% if getting.on %}
     <p class="banner info" id="getting" data-left="{{ getting.left }}" data-history="{{ 1 if getting.history_done else 0 }}" aria-live="polite">
       {% if not getting.history_done %}Bringing in your Strava history…{% else %}Reading your runs from Strava: {{ getting.left }} left. Keep this page open; the numbers fill in as they're read.{% endif %}</p>

@@ -212,7 +212,7 @@ class CoachPageTests(unittest.TestCase):
             runner.post("/apps/trainer/my-coach/invite")
             page = runner.get("/apps/trainer/my-coach").text
             token = page.split("/apps/trainer/coach-invite/")[1].split('"')[0]
-            self.assertIn("wants you as their coach", coaching.get(f"/apps/trainer/coach-invite/{token}").text)
+            self.assertIn("invited you to be their coach", coaching.get(f"/apps/trainer/coach-invite/{token}").text)
             coaching.post(f"/apps/trainer/coach-invite/{token}")
             self.assertIn("Runner", coaching.get("/apps/trainer/athletes").text)
             sent = coaching.post(f"/apps/trainer/athletes/{athlete}/prescribe",
