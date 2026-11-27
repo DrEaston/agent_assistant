@@ -221,6 +221,16 @@ class WebhookPageTests(unittest.TestCase):
             self.assertTrue(exported.text.startswith("date,time,source,type"))
             self.assertEqual(client.post("/apps/trainer/sync/live").status_code, 403)  # admin only
             from apps.trainer import connector
+            from core.connector.tools import ToolError
+            # Guardrail: Strava-sourced Trainer data only reaches an AI for Dieter's owner (docs/trainer_sharing_plan.md)
+            with self.assertRaises(ToolError) as refused:
+                connector.sync_status({})
+            self.assertIn("Strava", str(refused.exception))
+            self.assertFalse(connector.ai_allowed(user))
+            conn = db.connect()
+            conn.execute("UPDATE users SET role = 'admin' WHERE id = ?", (user,))
+            conn.commit()
+            self.assertTrue(connector.ai_allowed(user))
             status = connector.sync_status({})
             self.assertEqual((status["strava_connected"], status["sessions_in_log"]), (False, 1))
             self.assertEqual(status["newest_session"]["title"], "Barre fusion 77")
@@ -700,6 +710,9 @@ class StrideTests(SyncTests):
         saved = routes._state.get("db")
         routes.configure(self.db)
         self.addCleanup(lambda: routes._state.update(db=saved))
+        conn = self.db.connect()
+        conn.execute("UPDATE users SET role = 'admin' WHERE id = ?", (self.user,))   # the owner: AI tools on
+        conn.commit()
         picture = connector.speed_picture({"weeks": 8})
         self.assertEqual(len(picture["weeks"]), 8)
         self.assertTrue(picture["recent_runs"])
