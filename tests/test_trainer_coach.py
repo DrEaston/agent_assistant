@@ -310,6 +310,7 @@ class CoachPageTests(unittest.TestCase):
         athlete = self.make_user("Curtis")
         runner = self.client_for(athlete)
         self.assertIn("Turn on the coach passcode", runner.get("/apps/trainer/my-coach").text)
+        self.assertIn("switches this browser to the coach", runner.get("/coach").text)   # signed in as himself
         runner.post("/apps/trainer/my-coach/passcode", data={"passcode": "phxrun", "coach_name": "Daniel"})
         self.assertIn("On since", runner.get("/apps/trainer/my-coach").text)
         self.api._coach_tries.clear()
@@ -319,8 +320,8 @@ class CoachPageTests(unittest.TestCase):
         self.assertIn("wasn't recognized", wrong.text)
         signed_in = visitor.post("/coach", data={"passcode": "phxrun"}, follow_redirects=False)
         self.assertEqual(signed_in.status_code, 303)
-        self.assertEqual(signed_in.headers["location"], "/apps/trainer/athletes")
-        landing = visitor.get("/apps/trainer/athletes").text
+        self.assertEqual(signed_in.headers["location"], "/coach")
+        landing = visitor.get("/coach").text                          # the coach's own address
         self.assertIn("Athlete profile", landing)
         self.assertIn(f'<option value="{athlete}" selected>Curtis</option>', landing)
         self.assertIn("New workout", landing)
@@ -332,7 +333,7 @@ class CoachPageTests(unittest.TestCase):
         # only the coach pages: everything else sends it back, and other forms are refused
         for path in ("/", "/apps/trainer/week", "/apps/recipes", "/apps/trainer/my-coach"):
             moved = visitor.get(path, follow_redirects=False)
-            self.assertEqual((moved.status_code, moved.headers.get("location")), (303, "/apps/trainer/athletes"), path)
+            self.assertEqual((moved.status_code, moved.headers.get("location")), (303, "/coach"), path)
         self.assertEqual(visitor.post("/apps/trainer/sessions/add", data={"day": "2026-12-01", "kind": "easy"},
                                       follow_redirects=False).status_code, 403)
         # it can send a workout, and the athlete sees it with their own times on Trainer home and Today

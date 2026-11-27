@@ -429,6 +429,12 @@ def coach_invite_accept(token: str):
     return back(f"{BASE}/athletes/{info['athlete_id']}")
 
 
+def _coach_home():
+    """Where the Coach page lives for whoever is signed in: /coach for the passcode coach account."""
+    row = _state["db"].get_user_by_id(get_current_user_id())
+    return "/coach" if row and row["role"] == coach.PASSCODE_ROLE else BASE + "/athletes"
+
+
 def _athlete_model(athlete_id):
     """The athlete's speed model, worked out for a coach. Only called while the athlete has full view on for
     this coach (temporary; to be blocked for Strava-sourced data before Trainer is shared more widely)."""
@@ -447,15 +453,15 @@ def my_athletes(request: Request, athlete: int = 0):
     athletes = c.my_athletes()
     chosen = athlete if any(a["athlete_id"] == athlete for a in athletes) else (
         athletes[0]["athlete_id"] if athletes else 0)
-    return render("trainer_athletes.html", title="Coach", current=BASE + "/athletes", page_url=BASE + "/athletes",
-                  athletes=athletes, chosen=chosen,
+    return render("trainer_athletes.html", title="Coach", current=BASE + "/athletes", page_url=_coach_home(),
+                  athletes=athletes, chosen=chosen, coach_home=_coach_home(),
                   intensities=coach.INTENSITIES, distances=[(m, coach.distance_name(m)) for m in coach.DISTANCES],
                   set_rows=range(3), tomorrow=(date.today() + timedelta(days=1)).isoformat())
 
 
 @router.get(BASE + "/athletes/open")
 def open_athlete(athlete: int = 0):
-    return back(f"{BASE}/athletes/{athlete}" if athlete else BASE + "/athletes")
+    return back(f"{BASE}/athletes/{athlete}" if athlete else _coach_home())
 
 
 @router.post(BASE + "/athletes/send")
@@ -479,7 +485,7 @@ def athlete_page(request: Request, athlete_id: int, sent: str = ""):
             w["sets"] = coach.targets(w["sets"], model)
     return render("trainer_athlete.html", title=link["name"], current=BASE + "/athletes",
                   page_url=f"{BASE}/athletes/{athlete_id}", athlete=link, workouts=workouts, sent=bool(sent),
-                  paces=paces, show_paces=bool(link["full_view_until"]))
+                  paces=paces, show_paces=bool(link["full_view_until"]), coach_home=_coach_home())
 
 
 @router.post(BASE + "/athletes/{athlete_id}/prescribe")

@@ -34,6 +34,9 @@
     {% endif %}
 
     {% if mode == "coach" %}
+    {% if request.state.current_user %}
+        <p class="section-subtitle">You're signed in as {{ request.state.current_user.display_name or "someone else" }}. Entering a passcode switches this browser to the coach; to stay signed in as you, open this page in a private window.</p>
+    {% endif %}
     <form method="post" action="/coach">
         <div class="form-group">
             <label for="passcode">Passcode</label>

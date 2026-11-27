@@ -2,7 +2,8 @@
 {% import "components.html" as ui %}
 {% block title %}Coach · Trainer{% endblock %}
 {% block content %}
-{% call ui.page_header("Coach", crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs, current=current,
+{% set solo = coach_home == "/coach" %}
+{% call ui.page_header("Coach", crumbs=(() if solo else (("Dieter", "/"), ("Trainer", "/apps/trainer"))), tabs=(() if solo else tabs), current=current,
     sub="Open an athlete's profile, or send a workout in plain terms. Dieter turns it into each athlete's own paces.") %}{% endcall %}
 <main class="wrap">
   {% if not athletes %}

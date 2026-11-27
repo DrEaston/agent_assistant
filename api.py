@@ -584,7 +584,7 @@ async def load_authenticated_user(request: Request, call_next):
         if is_passcode_coach(user) and not passcode_coach_allowed(request):
             if request.url.path.startswith("/api/") or request.method not in READ_ONLY_METHODS:
                 return JSONResponse({"detail": "This coach sign-in only opens the coach pages."}, status_code=403)
-            return RedirectResponse(url="/apps/trainer/athletes", status_code=303)
+            return RedirectResponse(url="/coach", status_code=303)
         response = await call_next(request)
         return response
     finally:
@@ -5396,9 +5396,10 @@ def guest_login_form(next: str = Form("")):
 
 @app.get("/coach")
 def coach_passcode_page(request: Request):
-    """Coach sign-in with the passcode an athlete set on My coach: no email or account needed."""
+    """The coach's own address: the Coach page once signed in with a passcode, otherwise the passcode box."""
     if is_passcode_coach(request.state.current_user):
-        return RedirectResponse(url="/apps/trainer/athletes", status_code=303)
+        raw = request.query_params.get("athlete", "")
+        return trainer_routes.my_athletes(request, int(raw) if raw.isdigit() else 0)
     return render_auth_page(request, "coach")
 
 
@@ -5411,7 +5412,7 @@ def coach_passcode_form(request: Request, passcode: str = Form("")):
     if not coach_id:
         _coach_tries[client].append(time.time())
         return render_auth_page(request, "coach", "That passcode wasn't recognized.")
-    return create_login_response(coach_id, "/apps/trainer/athletes")
+    return create_login_response(coach_id, "/coach")
 
 
 @app.get("/register")

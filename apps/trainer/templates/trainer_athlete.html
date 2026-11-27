@@ -2,7 +2,8 @@
 {% import "components.html" as ui %}
 {% block title %}{{ athlete.name }} · Coach{% endblock %}
 {% block content %}
-{% call ui.page_header(athlete.name, crumbs=(("Trainer", "/apps/trainer"), ("Coach", "/apps/trainer/athletes")), tabs=tabs, current=current,
+{% set solo = coach_home == "/coach" %}
+{% call ui.page_header(athlete.name, crumbs=((("Coach", coach_home),) if solo else (("Trainer", "/apps/trainer"), ("Coach", coach_home))), tabs=(() if solo else tabs), current=current,
     sub="Athlete profile: the workouts you sent, whether they took them, their notes" ~ (", and the paces Dieter picked." if show_paces else ".")) %}{% endcall %}
 <main class="wrap">
   {% if sent %}{% call ui.banner("ok") %}Sent to {{ athlete.name }}.{% if show_paces %} The paces Dieter picked are below.{% endif %}{% endcall %}{% endif %}
@@ -29,7 +30,7 @@
   {% endif %}
 
   {% call ui.section("Workouts sent") %}
-  <p><a class="button primary" href="/apps/trainer/athletes?athlete={{ athlete.athlete_id }}#new">New workout</a></p>
+  <p><a class="button primary" href="{{ coach_home }}?athlete={{ athlete.athlete_id }}#new">New workout</a></p>
   {% if not workouts %}{{ ui.empty("Nothing sent yet.") }}{% endif %}
   {% if workouts %}<div class="stack">
     {% for w in workouts %}
@@ -52,7 +53,7 @@
   {% endcall %}
 
   {% call ui.section("Stop coaching") %}
-  <form method="post" action="/apps/trainer/coaching-links/{{ athlete.link_id }}/end"><input type="hidden" name="next" value="/apps/trainer/athletes"><button type="submit" class="quiet">Stop coaching {{ athlete.name }}</button></form>
+  <form method="post" action="/apps/trainer/coaching-links/{{ athlete.link_id }}/end"><input type="hidden" name="next" value="{{ coach_home }}"><button type="submit" class="quiet">Stop coaching {{ athlete.name }}</button></form>
   {% endcall %}
 </main>
 {% endblock %}
