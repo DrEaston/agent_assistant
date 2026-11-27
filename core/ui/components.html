@@ -112,6 +112,11 @@
 
 
 {# Bar chart: bars = [{"label", "value", "current"}]; target draws a line. Values only; colours come from CSS. #}
+{#- A small trend line: points from the app ("x,y ..." in a 120 x 32 box). -#}
+{% macro sparkline(points, label="Trend") -%}
+<svg class="sparkline" viewBox="0 0 120 32" preserveAspectRatio="none" role="img" aria-label="{{ label }}"><polyline points="{{ points }}"></polyline></svg>
+{%- endmacro %}
+
 {% macro bar_chart(bars, max_value, target=none, unit="", label="Chart") -%}
 {% set width = (bars | length) * 24 %}
 <figure class="chart" aria-label="{{ label }}">

@@ -68,21 +68,6 @@
   </div>
   {% endcall %}
 
-  {% set f = o.fitness %}
-  {% call ui.section("Fitness") %}
-  <div class="card stack">
-    <div class="stat-grid">
-      <div class="stat"><span class="small muted">Fitness</span><strong>{{ f.fitness }}</strong>
-        <span class="small">{{ "+" if f.fitness_change >= 0 }}{{ f.fitness_change }} vs 4 weeks ago</span></div>
-      <div class="stat"><span class="small muted">Fatigue</span><strong>{{ f.fatigue }}</strong><span class="small">last 7 days</span></div>
-      <div class="stat"><span class="small muted">Form</span><strong>{{ "+" if f.form > 0 }}{{ f.form }}</strong><span class="small">{{ f.form_label }}</span></div>
-    </div>
-    <p class="small muted">Estimates from your log. Each session's load is its minutes weighted by heart rate (harder
-      minutes count more; max HR taken as {{ f.max_hr }}). Fitness is the 6-week average load, fatigue the 1-week
-      average, form the difference: low before a hard block, rising toward a race.</p>
-  </div>
-  {% endcall %}
-
   {% set sp = o.speed %}
   {% if sp.recent %}
   {% macro run_row(run) %}
@@ -104,25 +89,49 @@
   {% endcall %}
   {% endif %}
 
-  {% call ui.section("Speed") %}
-  <div class="card stack">
+  {% set f = o.fitness %}
+  {% call ui.section("Fitness") %}
     {% for o in sp.over_weeks | reverse %}
     {% call ui.banner("warn" if o.how == "well over" else "info") %}<strong><a href="/apps/trainer/speed/{{ o.week }}">Week of {{ o.label }}</a>: {{ o.times }}× the safe limit, {{ o.how }}</strong>{% if o.cause %} ({% if o.cause.id %}<a href="/apps/trainer/run/{{ o.cause.id }}">{{ o.cause.summary }}</a>{% else %}{{ o.cause.summary }}{% endif %} on {{ o.cause.day.strftime("%b") }} {{ o.cause.day.day }}){% endif %}.{% if o.how == "well over" %} A jump like that is where injuries tend to come from; build up to it over a few weeks.{% endif %}{% endcall %}
     {% endfor %}
-
+  <div class="fitness-pair">
+    <div class="card stack">
+      <span class="small muted">Aerobic · threshold pace</span>
+      <strong class="stat-big">{{ sp.cs_pace ~ "/mi" if sp.cs_pace else "–" }}</strong>
+      {% if sp.aerobic_spark %}{{ ui.sparkline(sp.aerobic_spark, "Threshold pace, last 16 weeks (up is faster)") }}{% endif %}
+      <span class="small">{% if sp.cs_gain is not none %}{% if sp.cs_gain > 0 %}{{ sp.cs_gain }} s/mi faster{% elif sp.cs_gain < 0 %}{{ -sp.cs_gain }} s/mi slower{% else %}same{% endif %} than 12 weeks ago{% elif sp.cs_pace %}{{ sp.cs_how }}{% elif sp.waiting %}still looking through your runs{% else %}needs a race or hard 10–40 minute effort{% endif %}</span>
+      <details><summary class="small">Recent aerobic training</summary>
+        <div class="stack gap-above">
+          <div class="stat-grid">
+            <div class="stat"><span class="small muted">Fitness</span><strong>{{ f.fitness }}</strong>
+              <span class="small">{{ "+" if f.fitness_change >= 0 }}{{ f.fitness_change }} vs 4 weeks ago</span></div>
+            <div class="stat"><span class="small muted">Fatigue</span><strong>{{ f.fatigue }}</strong><span class="small">last 7 days</span></div>
+            <div class="stat"><span class="small muted">Form</span><strong>{{ "+" if f.form > 0 }}{{ f.form }}</strong><span class="small">{{ f.form_label }}</span></div>
+            <div class="stat"><span class="small muted">Aerobic efficiency</span><strong>{{ sp.efficiency_recent or "–" }}</strong>
+              <span class="small">{% if sp.efficiency_before %}{{ "up" if sp.efficiency_up else "down" }} from {{ sp.efficiency_before }}{% else %}easy runs, last 4 weeks{% endif %}</span></div>
+          </div>
+          {% set fbars = [] %}{% for w in sp.weeks %}{% set _ = fbars.append({"label": w.label, "value": w.fitness, "current": loop.last}) %}{% endfor %}
+          {{ ui.bar_chart(fbars, (sp.weeks | map(attribute="fitness") | max) or 1, label="Fitness per week, last 16 weeks") }}
+          <p class="small muted">Fitness per week. Each session's load is its minutes weighted by heart rate (max HR taken as {{ f.max_hr }}); fitness is the 6-week average, fatigue the 1-week average, form the difference. Threshold pace is the pace you could hold for about an hour, from your hard runs and races.</p>
+        </div>
+      </details>
+    </div>
+    <div class="card stack">
+      <span class="small muted">Anaerobic · speed reserve</span>
+      <strong class="stat-big">{{ "{:,}".format(sp.d_prime_m) ~ " m" if sp.d_prime_m else "–" }}</strong>
+      {% if sp.anaerobic_spark %}{{ ui.sparkline(sp.anaerobic_spark, "Speed reserve, last 16 weeks") }}{% endif %}
+      <span class="small">{% if sp.d_prime_gain is not none %}{{ "+" if sp.d_prime_gain >= 0 }}{{ sp.d_prime_gain }} m vs 12 weeks ago{% else %}how far you can run faster than threshold before you're spent{% endif %}{% if sp.top_pace_recent %} · top speed {{ sp.top_pace_recent }}/mi{% endif %}</span>
+      <details><summary class="small">Recent anaerobic training</summary>
+        <div class="stack gap-above">
     <div class="stat-grid">
       <div class="stat"><span class="small muted">Speed points this week</span><strong>{{ "{:,}".format(sp.speed_work) if sp.speed_work is not none else "–" }}</strong>
         <span class="small">{% if sp.work_over %}{{ ui.tag("Over the safe limit", "warn") }} {% endif %}{% if sp.work_line %}safe limit {{ "{:,}".format(sp.work_line) }}{% elif not sp.line_ready %}safe limit once the 4 weeks before are read{% endif %}</span></div>
-      <div class="stat"><span class="small muted">Threshold pace</span><strong>{{ sp.cs_pace or "–" }}</strong>
-        <span class="small">{% if sp.cs_pace %}/mi{% if sp.cs_gain is not none %} · {% if sp.cs_gain > 0 %}{{ sp.cs_gain }} s/mi faster{% elif sp.cs_gain < 0 %}{{ -sp.cs_gain }} s/mi slower{% else %}same{% endif %} than 12 weeks ago{% endif %} · {{ sp.cs_how }}{% else %}{% if sp.waiting %}still looking through your runs for a race or hard 10–40 minute effort{% else %}needs a race or hard 10–40 minute effort in the last 6 months{% endif %}{% endif %}</span></div>
       <div class="stat"><span class="small muted">Near-sprint running this week</span><strong>{{ "{:,}".format(sp.near_top) }} m</strong>
         <span class="small">{% if sp.top_over %}{{ ui.tag("Over the safe limit", "warn") }} {% endif %}{% if sp.top_line %}safe limit {{ "{:,}".format(sp.top_line) }} m{% else %}safe limit once the 4 weeks before are read{% endif %}</span></div>
       <div class="stat"><span class="small muted">Stride speed, last 4 weeks</span><strong>{{ sp.stride_pace_recent or "–" }}</strong>
         <span class="small">{% if sp.stride_gain is not none %}{% if sp.stride_gain > 0 %}{{ sp.stride_gain }} s/mi faster{% elif sp.stride_gain < 0 %}{{ -sp.stride_gain }} s/mi slower{% else %}same{% endif %} than the 8 weeks before{% elif sp.stride_pace_recent %}/mi · needs a few more weeks to compare{% else %}no strides found yet{% endif %}</span></div>
       <div class="stat"><span class="small muted">Strides this week</span><strong>{{ t.strides[0] }}/{{ t.strides[1] }}</strong>
         <span class="small">planned strides are ticked when Strava shows them</span></div>
-      <div class="stat"><span class="small muted">Aerobic efficiency</span><strong>{{ sp.efficiency_recent or "–" }}</strong>
-        <span class="small">{% if sp.efficiency_before %}{{ "up" if sp.efficiency_up else "down" }} from {{ sp.efficiency_before }}{% else %}easy runs, last 4 weeks{% endif %}</span></div>
     </div>
 
     {% set bars = [] %}{% for w in sp.weeks %}{% set _ = bars.append({"label": w.label, "value": w.speed_work or 0, "current": loop.last, "limit": w.work_line}) %}{% endfor %}
@@ -152,8 +161,10 @@
     </details>
     {% endif %}
 
-    <p class="small muted">Estimates from each run's second-by-second data on Strava.
-      <a href="/apps/trainer/speed/how">How these numbers work</a></p>
+          <p class="small muted">Speed reserve is how far you can run faster than threshold pace before you're spent (D′ in your speed model). Estimates from each run's second-by-second data on Strava. <a href="/apps/trainer/speed/how">How these numbers work</a></p>
+        </div>
+      </details>
+    </div>
   </div>
   {% endcall %}
 
