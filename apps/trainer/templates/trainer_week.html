@@ -18,7 +18,6 @@
       <span class="chip">Strides {{ t.strides[0] }}/{{ t.strides[1] }}</span>
       <span class="chip">Weights {{ t.weights[0] }}/{{ t.weights[1] }}</span>
       <span class="chip">Pilates {{ t.pilates[0] }}/{{ t.pilates[1] }}</span>
-      <span class="chip">Water goal {{ t.water_days }}/7 days</span>
     </div>
     {% if view.week.goals %}
     <div><div class="small muted">Goals this week</div>
@@ -57,12 +56,11 @@
       {% for a in d.strava %}
         <div class="list-row small"><span class="grow">Strava: {% if a.url %}<a href="{{ a.url }}">{{ a.title }}</a>{% else %}{{ a.title }}{% endif %}</span><span class="num">{% if a.miles %}{{ a.miles }} mi · {% endif %}{{ a.minutes }} min{% if a.speed %} · {{ a.speed }}{% endif %}</span></div>
       {% endfor %}
-      {% if d.is_today or (d.is_past and (d.habits.water or d.habits.fueled)) %}
+      {% if d.is_today or (d.is_past and d.habits.fueled) %}
       <div class="list-row">
-        <span class="grow small">Water {{ d.habits.water }}/{{ view.settings.water_goal }} · {% if d.habits.fueled %}fueled ✓{% else %}fueling not logged{% endif %}</span>
+        <span class="grow small">{% if d.habits.fueled %}fueled ✓{% else %}fueling not logged{% endif %}</span>
         <form method="post" action="/apps/trainer/habits" class="row">
           <input type="hidden" name="day" value="{{ d.date }}"><input type="hidden" name="week" value="{{ view.start }}">
-          <button type="submit" name="water" value="+1" class="quiet">+1 water</button>
           <button type="submit" name="fueled" value="{{ 'no' if d.habits.fueled else 'yes' }}" class="quiet">{{ "Undo fueled" if d.habits.fueled else "Fueled" }}</button>
         </form>
       </div>

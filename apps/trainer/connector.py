@@ -79,7 +79,7 @@ def this_week(args):
                                                        "miles": s["miles"], "time": s["slot"], "status": s["status"],
                                                        "strides": s["strides"], "strides_done": bool(s["strides_done"])}
                                                       for s in d["sessions"]],
-                      "strava": d["strava"], "water": d["habits"]["water"], "fueled": bool(d["habits"]["fueled"])}
+                      "strava": d["strava"], "fueled": bool(d["habits"]["fueled"])}
                      for d in view["days"]],
             "url": site_url(f"/apps/trainer?week={view['start']}")}
 
@@ -171,7 +171,7 @@ def tools():
              log_totals, {"weeks": {"type": "integer", "minimum": 1, "maximum": 52}}, read_only=True),
         Tool("trainer_this_week", "This week's training",
              "The planned week (runs with miles, strides, weights, Pilates; status), what Strava recorded each day, "
-             "water and fueling, totals against his miles target, and the week's goals. week: any date in the week.",
+             "fueling, totals against his miles target, and the week's goals. week: any date in the week.",
              this_week, {"week": {"type": "string", "description": "A date like 2026-11-30; default this week."}},
              read_only=True),
         Tool("trainer_run", "One run in detail",

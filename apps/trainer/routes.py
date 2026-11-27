@@ -233,9 +233,7 @@ def check(key: str = Form(...), done: str = Form(""), week: str = Form("")):
 
 
 @router.post(BASE + "/habits")
-def habits(day: str = Form(...), water: str = Form(""), fueled: str = Form(""), week: str = Form("")):
-    if water in ("+1", "-1"):
-        _guard(store().set_habit, day, add_water=int(water))
+def habits(day: str = Form(...), fueled: str = Form(""), week: str = Form("")):
     if fueled in ("yes", "no"):
         _guard(store().set_habit, day, fueled=fueled == "yes")
     return back(f"{BASE}?week={week}#day-{day}" if week else BASE)
