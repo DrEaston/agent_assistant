@@ -1,0 +1,68 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}My coach · Trainer{% endblock %}
+{% block content %}
+{% call ui.page_header("My coach", crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs, current=current,
+    sub="Your coach sends workouts in plain terms, like 6 × 1 mile at threshold. Dieter fills in your times from your own runs, and only you see them.") %}{% endcall %}
+<main class="wrap">
+  {% call ui.section("Workouts from your coach") %}
+  {% if not workouts %}{{ ui.empty("Nothing yet. Workouts your coach sends show up here.") }}{% endif %}
+  {% if workouts and not has_model %}{% call ui.banner("warn") %}Dieter can't set your times yet: it needs a few hard runs, or a race time on <a href="/apps/trainer/usual">Usual week</a>.{% endcall %}{% endif %}
+  <div class="stack">
+  {% for w in workouts %}
+    <article class="card stack" id="workout-{{ w.id }}">
+      <div class="row spread">
+        <strong>{{ w.title }}</strong>
+        {% if w.status == "sent" %}{{ ui.tag("New", "info") }}{% elif w.status == "accepted" %}{{ ui.tag("On your plan", "ok") }}{% elif w.status == "done" %}{{ ui.tag("Done", "ok") }}{% else %}{{ ui.tag("Declined") }}{% endif %}
+      </div>
+      <p class="small muted">{{ w.day }} · from {{ w.coach }}</p>
+      <ul class="steps">
+        {% for s in w.sets %}<li><span>{{ s.text }}</span>{% if s.target %}<br><strong class="num">{{ s.target }}</strong>{% endif %}</li>{% endfor %}
+      </ul>
+      {% if w.notes %}<p class="small">Coach: {{ w.notes }}</p>{% endif %}
+      {% if w.status == "sent" %}
+        <form method="post" action="/apps/trainer/my-coach/workouts/{{ w.id }}/take"><button type="submit" class="primary">Put it on my plan</button></form>
+        <form method="post" action="/apps/trainer/my-coach/workouts/{{ w.id }}/decline" class="inline-form">
+          <input type="text" name="note" maxlength="500" placeholder="Why not (optional, your coach sees this)" aria-label="Why not">
+          <button type="submit" class="quiet">Decline</button>
+        </form>
+      {% elif w.status in ("accepted", "done") %}
+        {% if w.session_id %}<a class="small" href="/apps/trainer/sessions/{{ w.session_id }}">Open it on your plan</a>{% endif %}
+        <form method="post" action="/apps/trainer/my-coach/workouts/{{ w.id }}/done" class="inline-form">
+          <input type="text" name="note" maxlength="500" value="{{ w.athlete_note }}" placeholder="How it went (your coach sees only this)" aria-label="How it went">
+          <button type="submit"{% if w.status != "done" %} class="primary"{% endif %}>{{ "Update note" if w.status == "done" else "Done" }}</button>
+        </form>
+      {% elif w.athlete_note %}<p class="small muted">Your note: {{ w.athlete_note }}</p>{% endif %}
+    </article>
+  {% endfor %}
+  </div>
+  {% endcall %}
+
+  {% call ui.section("Your coach") %}
+  <p class="small muted">Your coach sees the workouts they sent, whether you took them, and the notes you write here. Not your runs, paces, times or anything else in Dieter.</p>
+  {% if coaches %}
+  <div class="card">
+    {% for c in coaches %}
+    <div class="list-row row spread">
+      <span><strong>{{ c.name }}</strong><br><span class="small muted">since {{ c.since }}</span></span>
+      <form method="post" action="/apps/trainer/coaching-links/{{ c.link_id }}/end"><input type="hidden" name="next" value="/apps/trainer/my-coach"><button type="submit" class="quiet">Stop sharing</button></form>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}{{ ui.empty("No coach yet.") }}{% endif %}
+  {% endcall %}
+
+  {% call ui.section("Invite a coach", id="invite") %}
+  {% if invite %}
+  <div class="card stack">
+    <div class="field"><label for="invite-link">Send this link to your coach. It works once.</label>
+      <input type="text" id="invite-link" value="{{ invite_url }}" readonly></div>
+    <form method="post" action="/apps/trainer/coaching-links/{{ invite.link_id }}/end"><input type="hidden" name="next" value="/apps/trainer/my-coach#invite"><button type="submit" class="quiet">Cancel this link</button></form>
+  </div>
+  {% else %}
+  <form method="post" action="/apps/trainer/my-coach/invite"><button type="submit" class="primary">Make an invite link</button></form>
+  <p class="small muted gap-above">Your coach needs a Dieter account. When they open the link and accept, they can send you workouts.</p>
+  {% endif %}
+  {% endcall %}
+</main>
+{% endblock %}

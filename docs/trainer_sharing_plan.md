@@ -52,26 +52,36 @@ and runs uploaded as .FIT files have no Strava strings attached.
    AI cap.
 6. **Garmin Connect IQ app** (source `garmin_ciq`), if several friends wear Garmins.
 
-## Coach mode
+## Coach mode (built: `apps/trainer/coach.py`)
 
-A coach is a Dieter account the athlete shares Trainer with (existing `trainer_coach_grants`: view, or view and
-assign sessions; the athlete can revoke any time).
+Replaces the older coach code in `api.py` (`trainer_coach_grants`, `/apps/trainer/coach`, `/apps/trainer/coaching`),
+which showed a coach the athlete's imported Strava runs and let any granted coach assign workouts. Those pages are off
+the menu; retire the routes and table once nothing uses them.
 
-- **What the coach sees:** the athlete's week, sessions, the formulas (threshold pace, speed points against the
-  safe limit), injury and body-check history if the athlete ticks "share injuries".
-- **Strava runs:** showing an athlete's Strava data to their coach is "showing it to another person". Until Strava
-  confirms coaching is allowed, the coach view uses only non-Strava runs (upload, COROS, Connect IQ) and otherwise
-  shows what Dieter itself holds (the plan, check-ins, notes). Ask Strava's developer team before switching it on.
-- **AI for the coach:** a coach's Claude or ChatGPT can read the athlete's non-Strava runs and plan only if the
-  athlete allows it on the share; never Strava runs.
-- **Coach actions:** assign or move sessions on the athlete's plan (shows as "from your coach"), leave notes on a
-  run. Changes the athlete hasn't seen are marked.
-- **Audit:** the athlete sees who looked at or changed what.
+- **Anyone can be a coach.** No athlete/coach account type: an athlete makes an invite link on **My coach**, the
+  coach opens it and accepts. A coach's athletes are on **My athletes**; a coach still has their own Trainer.
+- **The coach writes the workout in plain terms:** sets of reps × distance at an effort (easy, threshold, 10K, 5K,
+  3K or mile pace, sprint, by feel) with rest, a day, a title and notes. "6 × 1 mile at threshold, 90 s jog;
+  8 × 200 m sprint".
+- **Dieter fills in the athlete's times, for the athlete only**, from the athlete's own speed model (formulas, no
+  AI): threshold = critical speed; race paces from d = CS·t + D'; sprint = 90% of top speed; easy = easy pace.
+  Shown as a time per rep and a range (± 1.5%).
+- **Suggestions, not orders.** A workout waits on My coach until the athlete taps "Put it on my plan" (it becomes a
+  workout session with their times in the details) or declines it. The coach can take back one that's unanswered.
+- **What the coach sees:** what they wrote, its status (waiting, on their plan, done, declined) and the note the
+  athlete chooses to write. Never the athlete's runs, paces, target times, or anything else in Dieter. The coach
+  pages don't read runs at all, so Strava's "only to that user" rule holds.
+- **Either side can stop** at any time; it ends at once.
+
+Later: the coach seeing more, but only what the athlete switches on (weekly miles they log, injury check-ins) and
+never Strava-sourced numbers unless Strava confirms coaching use; notes both ways on a workout; a coach's AI reading
+shared, non-Strava data if the athlete allows it.
 
 ## Checking it works
 
 - A non-owner account asking Claude or Dieter's chat about Trainer gets the refusal, not numbers
   (`tests/test_trainer_strava.py`).
 - A friend account sees only its own runs and none of Curtis's household apps.
-- A coach without a grant gets a 403; after revoking, access ends at once.
+- A coach without a link gets a 403; after either side stops, access ends at once.
+- The coach's pages never contain the athlete's times or paces (`tests/test_trainer_coach.py`).
 - Shared views never contain a run whose source is `strava`.

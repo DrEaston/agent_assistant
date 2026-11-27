@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from core import ui
 from database import get_current_user_id, reset_current_user_id, set_current_user_id
 
-from . import analysis, plan, runpage, speed, strava
+from . import analysis, coach, plan, runpage, speed, strava
 from .manifest import APP
 
 router = APIRouter()
@@ -224,6 +224,124 @@ def delete_session(session_id: int):
     session = _guard(store().session, session_id)
     store().delete_session(session_id)
     return back(f"{BASE}?week={plan.week_start(session['day']).isoformat()}")
+
+
+# ---------------------------------------------------------------- Coach mode (apps/trainer/coach.py)
+# The athlete's pages (my-coach) show their own target times; the coach's pages (athletes) show only what the coach
+# wrote and what the athlete answered. Coach pages never read the athlete's runs.
+
+
+def coaching():
+    return coach.CoachStore(_state["db"])
+
+
+def _coach(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except (coach.Invalid, plan.Invalid) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from None
+
+
+def _my_model():
+    return coach.athlete_model(_state["db"], get_current_user_id(), races=plan.race_bests(store().settings()))
+
+
+@router.get(BASE + "/my-coach")
+def my_coach(request: Request):
+    c = coaching()
+    _coach(c._user)
+    model = _my_model()
+    workouts = c.for_me()
+    for w in workouts:
+        w["sets"] = coach.targets(w["sets"], model)
+    invite = c.open_invite()
+    invite_url = f"{str(request.base_url).rstrip('/')}{BASE}/coach-invite/{invite['token']}" if invite else ""
+    return render("trainer_my_coach.html", title="My coach", current=BASE + "/my-coach", page_url=BASE + "/my-coach",
+                  coaches=c.my_coaches(), workouts=workouts, invite=invite, invite_url=invite_url,
+                  has_model=bool(model.get("cs")))
+
+
+@router.post(BASE + "/my-coach/invite")
+def my_coach_invite():
+    _coach(coaching().invite)
+    return back(BASE + "/my-coach#invite")
+
+
+@router.post(BASE + "/coaching-links/{link_id}/end")
+def end_coaching(link_id: int, next: str = Form("")):
+    _coach(coaching().end, link_id)
+    return back(next, BASE + "/my-coach")
+
+
+@router.post(BASE + "/my-coach/workouts/{prescription_id}/take")
+def take_workout(prescription_id: int):
+    session = _coach(coaching().take, prescription_id, _my_model())
+    return back(f"{BASE}?week={plan.week_start(session['day']).isoformat()}#day-{session['day']}")
+
+
+@router.post(BASE + "/my-coach/workouts/{prescription_id}/decline")
+def decline_workout(prescription_id: int, note: str = Form("")):
+    _coach(coaching().decline, prescription_id, note)
+    return back(BASE + "/my-coach")
+
+
+@router.post(BASE + "/my-coach/workouts/{prescription_id}/done")
+def workout_done(prescription_id: int, note: str = Form("")):
+    _coach(coaching().done, prescription_id, note)
+    return back(BASE + "/my-coach")
+
+
+@router.get(BASE + "/coach-invite/{token}")
+def coach_invite_page(request: Request, token: str):
+    c = coaching()
+    _coach(c._user)
+    try:
+        info, problem = c.invite_info(token), ""
+    except coach.Invalid as exc:
+        info, problem = None, str(exc)
+    return render("trainer_coach_invite.html", title="Coach invite", current=BASE + "/athletes",
+                  page_url=BASE + "/athletes", info=info, problem=problem, token=token)
+
+
+@router.post(BASE + "/coach-invite/{token}")
+def coach_invite_accept(token: str):
+    info = _coach(coaching().accept, token)
+    return back(f"{BASE}/athletes/{info['athlete_id']}")
+
+
+@router.get(BASE + "/athletes")
+def my_athletes(request: Request):
+    c = coaching()
+    _coach(c._user)
+    return render("trainer_athletes.html", title="My athletes", current=BASE + "/athletes", page_url=BASE + "/athletes",
+                  athletes=c.my_athletes())
+
+
+@router.get(BASE + "/athletes/{athlete_id}")
+def athlete_page(request: Request, athlete_id: int, sent: str = ""):
+    link, workouts = _coach(coaching().sent_to, athlete_id)
+    return render("trainer_athlete.html", title=link["name"], current=BASE + "/athletes",
+                  page_url=f"{BASE}/athletes/{athlete_id}", athlete=link, workouts=workouts, sent=bool(sent),
+                  intensities=coach.INTENSITIES, distances=[(m, coach.distance_name(m)) for m in coach.DISTANCES],
+                  set_rows=range(3), tomorrow=(date.today() + timedelta(days=1)).isoformat())
+
+
+@router.post(BASE + "/athletes/{athlete_id}/prescribe")
+async def prescribe(request: Request, athlete_id: int):
+    form = await request.form()
+    sets = [{"reps": form.get(f"reps_{i}"), "metres": form.get(f"metres_{i}"),
+             "intensity": form.get(f"intensity_{i}"), "rest": form.get(f"rest_{i}")} for i in range(coach.MAX_SETS)]
+    _coach(coaching().prescribe, athlete_id, form.get("day"), form.get("title"), sets, form.get("notes"))
+    return back(f"{BASE}/athletes/{athlete_id}?sent=1")
+
+
+@router.post(BASE + "/athletes/{athlete_id}/workouts/{prescription_id}/withdraw")
+def withdraw_workout(athlete_id: int, prescription_id: int):
+    _coach(coaching().coaches_athlete, athlete_id)
+    _coach(coaching().withdraw, prescription_id)
+    return back(f"{BASE}/athletes/{athlete_id}")
 
 
 # ---------------------------------------------------------------- Sunday check-in
