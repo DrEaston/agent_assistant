@@ -973,7 +973,9 @@ class RouteTests(unittest.TestCase):
         plan_text = next(m["content"] for m in seen["messages"] if m["content"].startswith("The plan:"))
         self.assertIn("Status, unchecked steps from earlier", plan_text)
         self.assertIn("Status, next unchecked steps:", plan_text)
-        self.assertIn("(step ", plan_text.split("Status, next unchecked steps:")[1])
+        # Every unchecked step is listed under one of the two, with its ids (which one depends on today's date).
+        status = plan_text.split("Status, unchecked steps from earlier")[1].split("\nDish 1:")[0]
+        self.assertIn("(step ", status)
 
     def test_voice_size_and_done_but_no_assigning_people(self):
         self.client.get("/thanksgiving")
