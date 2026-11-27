@@ -83,6 +83,12 @@ def today():
     except Exception as exc:   # the card must never break Today
         print(f"Warning: after-run count failed: {exc!r}")
         card["after_run"] = 0
+    try:
+        new = coaching().new_for_me()
+        card["coach_new"] = {"count": len(new), "first": new[0]} if new else None
+    except Exception as exc:
+        print(f"Warning: coach workouts for Today failed: {exc!r}")
+        card["coach_new"] = None
     return card
 
 
@@ -149,7 +155,13 @@ def overview(request: Request, week: str = ""):
     getting = {"on": connected and (not history_done or numbers["speed"]["waiting"] > 0),
                "history_done": history_done, "left": numbers["speed"]["waiting"]}
     sh = shoe_store()
-    return render("trainer_overview.html", title="Trainer", current=BASE, page_url=BASE, view=view,
+    coach_new = []
+    if not _viewing.get():   # a coach in full view never sees the athlete's target times
+        model = _my_model()
+        coach_new = coaching().new_for_me()
+        for w in coach_new:
+            w["sets"] = coach.targets(w["sets"], model)
+    return render("trainer_overview.html", title="Trainer", current=BASE, page_url=BASE, view=view, coach_new=coach_new,
                   guidance=analysis.week_guidance(view), o=numbers, getting=getting, after_run=sh.waiting(),
                   shoe_list=sh.shoes(include_retired=False), feels=shoes.FEELS,
                   today=[s for d in view["days"] if d["is_today"] for s in d["sessions"]])
@@ -352,6 +364,7 @@ def my_coach(request: Request):
     invite_url = f"{str(request.base_url).rstrip('/')}{BASE}/coach-invite/{invite['token']}" if invite else ""
     return render("trainer_my_coach.html", title="My coach", current=BASE + "/my-coach", page_url=BASE + "/my-coach",
                   coaches=c.my_coaches(), workouts=workouts, invite=invite, invite_url=invite_url,
+                  passcode=c.passcode_status(), coach_url=f"{str(request.base_url).rstrip('/')}/coach",
                   has_model=bool(model.get("cs")), is_owner=c.is_owner(), full_view_days=coach.FULL_VIEW_DAYS)
 
 
@@ -359,6 +372,19 @@ def my_coach(request: Request):
 def my_coach_invite():
     _coach(coaching().invite)
     return back(BASE + "/my-coach#invite")
+
+
+@router.post(BASE + "/my-coach/passcode")
+def my_coach_passcode(passcode: str = Form(""), coach_name: str = Form("")):
+    """Turn on (or change) the coach passcode: a coach signs in at /coach with it, no email needed."""
+    _coach(coaching().set_passcode, passcode, coach_name)
+    return back(BASE + "/my-coach#passcode")
+
+
+@router.post(BASE + "/my-coach/passcode/off")
+def my_coach_passcode_off():
+    _coach(coaching().passcode_off)
+    return back(BASE + "/my-coach#passcode")
 
 
 @router.post(BASE + "/coaching-links/{link_id}/end")

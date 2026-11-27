@@ -1,17 +1,19 @@
 {% extends "base.html" %}
 
-{% block title %}{% if mode == "register" %}Create Account{% elif mode == "pending" %}Approval Pending{% else %}Log In{% endif %} - Dieter{% endblock %}
+{% block title %}{% if mode == "register" %}Create Account{% elif mode == "pending" %}Approval Pending{% elif mode == "coach" %}Coach sign-in{% else %}Log In{% endif %} - Dieter{% endblock %}
 
 {% block content %}
 <section class="detail-section auth-panel">
     <div class="section-header">
         <div>
-            <h2>{% if mode == "register" %}Create Account{% elif mode == "pending" %}Approval Pending{% else %}Log In{% endif %}</h2>
+            <h2>{% if mode == "register" %}Create Account{% elif mode == "pending" %}Approval Pending{% elif mode == "coach" %}Coach sign-in{% else %}Log In{% endif %}</h2>
             <p class="section-subtitle">
                 {% if mode == "register" and not has_users %}
                     Create the first account to claim the existing Dieter data.
                 {% elif mode == "register" %}
                     Request access to Dieter. An admin must approve new member accounts before login.
+                {% elif mode == "coach" %}
+                    Enter the passcode your athlete gave you to open their coach page.
                 {% elif mode == "pending" %}
                     Your account request has been saved and is waiting for admin approval.
                 {% else %}
@@ -31,7 +33,15 @@
         </div>
     {% endif %}
 
-    {% if mode == "pending" %}
+    {% if mode == "coach" %}
+    <form method="post" action="/coach">
+        <div class="form-group">
+            <label for="passcode">Passcode</label>
+            <input type="password" id="passcode" name="passcode" required autocomplete="off" autofocus>
+        </div>
+        <button type="submit">Open coach page</button>
+    </form>
+    {% elif mode == "pending" %}
         <p class="section-subtitle">You can log in after your account is approved.</p>
         <p class="section-subtitle"><a href="/login">Back to login</a></p>
     {% else %}
@@ -89,6 +99,7 @@
         <p class="section-subtitle"><a href="/login">Already have an account?</a></p>
     {% elif mode == "login" %}
         <p class="section-subtitle"><a href="/register">Create an account</a></p>
+        <p class="section-subtitle"><a href="/coach">Coach with a passcode? Sign in here</a></p>
     {% endif %}
 </section>
 {% endblock %}

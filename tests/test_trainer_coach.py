@@ -173,6 +173,37 @@ class FullViewTests(CoachStoreTests):
             self.assertFalse(self.store.full_view(self.athlete))     # stopping coaching ends it at once
 
 
+class CoachPasscodeTests(CoachStoreTests):
+    """A coach sign-in with no email: the athlete sets a passcode; it opens one shared coach account."""
+
+    def test_on_change_and_off(self):
+        with As(self.athlete):
+            self.assertFalse(self.store.passcode_status()["on"])
+            with self.assertRaises(coach.Invalid):
+                self.store.set_passcode("abc")                       # too short
+            coach_id = self.store.set_passcode("phxrun", "Daniel")
+            status = self.store.passcode_status()
+            self.assertTrue(status["on"])
+            self.assertEqual(status["coach_name"], "Daniel")
+        self.assertEqual(self.db.get_user_by_id(coach_id)["role"], coach.PASSCODE_ROLE)
+        self.assertNotIn("phxrun", self.db.get_user_by_id(coach_id)["password_hash"])   # stored only as a hash
+        self.assertEqual(self.store.passcode_sign_in("phxrun"), coach_id)
+        self.assertIsNone(self.store.passcode_sign_in("phxrunn"))
+        self.assertIsNone(self.store.passcode_sign_in(""))
+        with As(coach_id):                                            # linked as the athlete's coach
+            self.assertEqual([a["athlete_id"] for a in self.store.my_athletes()], [self.athlete])
+        with As(self.athlete):
+            self.assertEqual(self.store.set_passcode("tempe5k", "Daniel"), coach_id)   # same account, new passcode
+        self.assertIsNone(self.store.passcode_sign_in("phxrun"))
+        self.assertEqual(self.store.passcode_sign_in("tempe5k"), coach_id)
+        with As(self.athlete):
+            self.assertEqual(len(self.store.my_coaches()), 1)        # still one link
+            self.store.passcode_off()
+            self.assertFalse(self.store.passcode_status()["on"])
+            self.assertEqual(self.store.my_coaches(), [])
+        self.assertIsNone(self.store.passcode_sign_in("tempe5k"))
+
+
 class CoachPageTests(unittest.TestCase):
     """The pages: the athlete sees their times, the coach doesn't."""
 
@@ -261,6 +292,57 @@ class CoachPageTests(unittest.TestCase):
         owner.post(f"/apps/trainer/coaching-links/{link_id}/full-view")
         daniel.cookies.set("trainer_view_as", str(athlete))
         self.assertNotIn("Viewing Owner", daniel.get("/apps/trainer/week").text)
+
+
+    def test_passcode_coach_signs_in_without_email_and_only_gets_coach_pages(self):
+        from unittest import mock
+        from fastapi.testclient import TestClient
+        athlete = self.make_user("Curtis")
+        runner = self.client_for(athlete)
+        self.assertIn("Turn on the coach passcode", runner.get("/apps/trainer/my-coach").text)
+        runner.post("/apps/trainer/my-coach/passcode", data={"passcode": "phxrun", "coach_name": "Daniel"})
+        self.assertIn("On since", runner.get("/apps/trainer/my-coach").text)
+        self.api._coach_tries.clear()
+        visitor = TestClient(self.api.app)
+        self.assertIn("Passcode", visitor.get("/coach").text)
+        wrong = visitor.post("/coach", data={"passcode": "nope-nope"})
+        self.assertIn("wasn't recognized", wrong.text)
+        signed_in = visitor.post("/coach", data={"passcode": "phxrun"}, follow_redirects=False)
+        self.assertEqual(signed_in.status_code, 303)
+        self.assertEqual(signed_in.headers["location"], f"/apps/trainer/athletes/{athlete}")
+        page = visitor.get(f"/apps/trainer/athletes/{athlete}")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Curtis", page.text)
+        # only the coach pages: everything else sends it back, and other forms are refused
+        for path in ("/", "/apps/trainer/week", "/apps/recipes", "/apps/trainer/my-coach"):
+            moved = visitor.get(path, follow_redirects=False)
+            self.assertEqual((moved.status_code, moved.headers.get("location")), (303, "/apps/trainer/athletes"), path)
+        self.assertEqual(visitor.post("/apps/trainer/sessions/add", data={"day": "2026-12-01", "kind": "easy"},
+                                      follow_redirects=False).status_code, 403)
+        # it can send a workout, and the athlete sees it with their own times on Trainer home and Today
+        with mock.patch.object(coach, "athlete_model", return_value=dict(MODEL)):
+            visitor.post(f"/apps/trainer/athletes/{athlete}/prescribe",
+                         data={"day": "2026-12-01", "title": "Threshold miles", "reps_0": "6", "metres_0": "1609",
+                               "intensity_0": "threshold", "rest_0": "90 s jog"})
+            home = runner.get("/apps/trainer").text
+            self.assertIn("New from your coach", home)
+            self.assertIn("6 × 1 mile at threshold, 90 s jog", home)
+            self.assertIn(speed.clock(round(1609 / 4.5)), home)
+            self.assertNotIn(speed.clock(round(1609 / 4.5)), visitor.get(f"/apps/trainer/athletes/{athlete}").text)
+        self.assertIn("New from Daniel", runner.get("/").text)
+        # turned off: signed out, and the passcode stops working
+        runner.post("/apps/trainer/my-coach/passcode/off")
+        self.assertNotEqual(visitor.get(f"/apps/trainer/athletes/{athlete}", follow_redirects=False).status_code, 200)
+        self.assertIn("wasn't recognized", TestClient(self.api.app).post("/coach", data={"passcode": "phxrun"}).text)
+
+    def test_passcode_tries_are_limited(self):
+        from fastapi.testclient import TestClient
+        self.api._coach_tries.clear()
+        visitor = TestClient(self.api.app)
+        for _ in range(self.api.COACH_TRIES):
+            visitor.post("/coach", data={"passcode": "guess-guess"})
+        self.assertIn("Too many tries", visitor.post("/coach", data={"passcode": "guess-guess"}).text)
+        self.api._coach_tries.clear()
 
 
 if __name__ == "__main__":

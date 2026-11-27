@@ -14,8 +14,14 @@ Tables (additive, created on first use):
   and full_view_until: a temporary exception (see FULL_VIEW_DAYS).
 - tr_prescriptions: one prescribed workout: athlete, coach, day, title, sets (JSON), coach's notes, status
   sent/accepted/declined/done, the plan session it became, the athlete's note back.
+- tr_coach_passcodes: a coach sign-in with no email (Coach passcode on My coach): the athlete picks a passcode and
+  Dieter makes one shared coach account for it, linked to them as their coach. Anyone with the passcode signs in at
+  /coach as that account and only gets the coach pages (api.py keeps role "coach" there). The passcode is stored
+  only as that account's password hash, never in code or in the clear.
 """
 
+import hashlib
+import hmac
 import json
 import secrets
 from datetime import date, timedelta
@@ -35,7 +41,29 @@ SCHEMA = (
         day TEXT NOT NULL, title TEXT DEFAULT '', sets_json TEXT DEFAULT '[]', notes TEXT DEFAULT '',
         status TEXT NOT NULL DEFAULT 'sent', session_id INTEGER, athlete_note TEXT DEFAULT '',
         created_at TEXT DEFAULT CURRENT_TIMESTAMP, answered_at TEXT DEFAULT '')""",
+    """CREATE TABLE IF NOT EXISTS tr_coach_passcodes (
+        athlete_id INTEGER PRIMARY KEY, coach_id INTEGER NOT NULL, on_since TEXT DEFAULT '')""",
 )
+PASSCODE_ROLE = "coach"          # the shared passcode account: api.py lets it use the coach pages only
+PASSCODE_MIN = 6
+PBKDF2_ITERATIONS = 210_000      # same format as api.py's hash_password, so it is an ordinary password hash
+
+
+def _hash(passcode):
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", passcode.encode("utf-8"), salt, PBKDF2_ITERATIONS)
+    return f"pbkdf2_sha256${PBKDF2_ITERATIONS}${salt.hex()}${digest.hex()}"
+
+
+def _matches(passcode, stored):
+    try:
+        algorithm, iterations, salt_hex, digest_hex = (stored or "").split("$", 3)
+        if algorithm != "pbkdf2_sha256":
+            return False
+        actual = hashlib.pbkdf2_hmac("sha256", passcode.encode("utf-8"), bytes.fromhex(salt_hex), int(iterations))
+        return hmac.compare_digest(actual, bytes.fromhex(digest_hex))
+    except Exception:
+        return False
 
 INTENSITIES = {
     "easy": "easy",
@@ -353,6 +381,12 @@ class CoachStore:
                                     (self._user(),)).fetchall()
         return [self._view(r, for_athlete=True) for r in rows]
 
+    def new_for_me(self):
+        """Workouts coaches sent the signed-in athlete that they haven't answered yet, soonest day first."""
+        rows = self._conn().execute("SELECT * FROM tr_prescriptions WHERE athlete_id = ? AND status = 'sent' "
+                                    "ORDER BY day, id", (self._user(),)).fetchall()
+        return [self._view(r, for_athlete=True) for r in rows]
+
     def _mine(self, prescription_id):
         row = self._conn().execute("SELECT * FROM tr_prescriptions WHERE id = ? AND athlete_id = ?",
                                    (prescription_id, self._user())).fetchone()
@@ -393,3 +427,67 @@ class CoachStore:
         self._conn().execute("UPDATE tr_prescriptions SET status = ?, athlete_note = ?, answered_at = CURRENT_TIMESTAMP "
                              "WHERE id = ?", (status, " ".join(str(note or "").split())[:500], prescription_id))
         self._commit()
+
+    # -------------------------------------------------------- coach passcode (no email)
+
+    def passcode_status(self):
+        """{on, since, coach_name} for the signed-in athlete's coach passcode."""
+        row = self._conn().execute("SELECT * FROM tr_coach_passcodes WHERE athlete_id = ?", (self._user(),)).fetchone()
+        if not row:
+            return {"on": False}
+        return {"on": True, "since": (row["on_since"] or "")[:10], "coach_name": self._name(row["coach_id"])}
+
+    def set_passcode(self, passcode, coach_name=""):
+        """Turn the coach passcode on (or change it). Makes the shared coach account the first time and links it to
+        the athlete as an active coach. Changing the passcode signs out anyone using the old one."""
+        me = self._user()
+        passcode = str(passcode or "").strip()
+        if len(passcode) < PASSCODE_MIN:
+            raise Invalid(f"Pick a passcode of at least {PASSCODE_MIN} characters.")
+        name = " ".join(str(coach_name or "").split())[:60] or "Coach"
+        email = f"coach-passcode-{me}@askdieter.local"
+        user = self.db.get_user_by_email(email)
+        conn = self._conn()
+        if user:
+            coach_id = user["id"]
+            conn.execute("UPDATE users SET password_hash = ?, display_name = ?, status = 'active', role = ?, "
+                         "updated_at = CURRENT_TIMESTAMP WHERE id = ?", (_hash(passcode), name, PASSCODE_ROLE, coach_id))
+            conn.execute("DELETE FROM user_sessions WHERE user_id = ?", (coach_id,))
+        else:
+            coach_id = self.db.create_user(email, name, _hash(passcode), PASSCODE_ROLE)
+            conn = self._conn()
+        if not conn.execute("SELECT 1 FROM tr_coach_links WHERE athlete_id = ? AND coach_id = ? AND status = 'active'",
+                            (me, coach_id)).fetchone():
+            conn.execute("INSERT INTO tr_coach_links (athlete_id, coach_id, token, status, accepted_at) "
+                         "VALUES (?, ?, ?, 'active', CURRENT_TIMESTAMP)", (me, coach_id, secrets.token_urlsafe(18)))
+        conn.execute("INSERT INTO tr_coach_passcodes (athlete_id, coach_id, on_since) VALUES (?, ?, CURRENT_TIMESTAMP) "
+                     "ON CONFLICT(athlete_id) DO UPDATE SET coach_id = excluded.coach_id, on_since = CURRENT_TIMESTAMP",
+                     (me, coach_id))
+        self._commit()
+        return coach_id
+
+    def passcode_off(self):
+        """Turn it off: the passcode stops working, anyone signed in with it is signed out, and the link ends."""
+        me = self._user()
+        conn = self._conn()
+        row = conn.execute("SELECT coach_id FROM tr_coach_passcodes WHERE athlete_id = ?", (me,)).fetchone()
+        if not row:
+            raise Invalid("The coach passcode is already off.")
+        coach_id = row["coach_id"]
+        conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (_hash(secrets.token_urlsafe(32)), coach_id))
+        conn.execute("DELETE FROM user_sessions WHERE user_id = ?", (coach_id,))
+        conn.execute("UPDATE tr_coach_links SET status = 'ended', ended_at = CURRENT_TIMESTAMP, full_view_until = '' "
+                     "WHERE athlete_id = ? AND coach_id = ? AND status = 'active'", (me, coach_id))
+        conn.execute("DELETE FROM tr_coach_passcodes WHERE athlete_id = ?", (me,))
+        self._commit()
+
+    def passcode_sign_in(self, passcode):
+        """The shared coach account this passcode opens, or None. Called by the /coach sign-in page (no one signed in)."""
+        passcode = str(passcode or "").strip()
+        if not passcode:
+            return None
+        for row in self._conn().execute("SELECT coach_id FROM tr_coach_passcodes").fetchall():
+            user = self.db.get_user_by_id(row["coach_id"])
+            if user and user["status"] == "active" and _matches(passcode, user["password_hash"]):
+                return user["id"]
+        return None

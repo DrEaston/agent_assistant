@@ -63,6 +63,31 @@
   {% else %}{{ ui.empty("No coach yet.") }}{% endif %}
   {% endcall %}
 
+  {% call ui.section("Coach passcode", id="passcode") %}
+  {% if passcode.on %}
+  <div class="card stack">
+    <p><strong>On since {{ passcode.since }}.</strong> Anyone with the passcode can open <a href="{{ coach_url }}">{{ coach_url }}</a>, type it in, and use your coach page as {{ passcode.coach_name }}: send you workouts and read your notes. They only get the coach pages, nothing else in Dieter.</p>
+    <details><summary class="small">Change the passcode</summary>
+      <form method="post" action="/apps/trainer/my-coach/passcode" class="stack gap-above">
+        {{ ui.field("New passcode", "passcode", type="password", required=True) }}
+        {{ ui.field("Coach's name", "coach_name", value=passcode.coach_name, maxlength=60) }}
+        <button type="submit">Save (signs out anyone using the old one)</button>
+      </form>
+    </details>
+    <form method="post" action="/apps/trainer/my-coach/passcode/off"><button type="submit" class="quiet">Turn off the passcode</button></form>
+  </div>
+  {% else %}
+  <form method="post" action="/apps/trainer/my-coach/passcode" class="card stack">
+    <p class="small muted">No email or account for your coach: pick a passcode, and anyone you give it to can sign in at {{ coach_url }} as your coach. At least 6 characters.</p>
+    <div class="cols">
+      {{ ui.field("Passcode", "passcode", type="password", required=True) }}
+      {{ ui.field("Coach's name", "coach_name", placeholder="Coach", maxlength=60) }}
+    </div>
+    <button type="submit" class="primary">Turn on the coach passcode</button>
+  </form>
+  {% endif %}
+  {% endcall %}
+
   {% call ui.section("Invite a coach", id="invite") %}
   {% if invite %}
   <div class="card stack">

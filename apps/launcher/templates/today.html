@@ -135,6 +135,7 @@
           {% if training %}
           <span class="tile-title">Today: {{ training.lines[0].text }}</span>
           <span class="small muted">{% for line in training.lines[1:] %}{{ line.text }}{% if not loop.last %} · {% endif %}{% endfor %}{% if training.left == 0 %} All done ✓{% endif %}</span>
+          {% if training.coach_new %}<span class="small"><strong>New from {{ training.coach_new.first.coach }}:</strong> {{ training.coach_new.first.title or "a workout" }}{% if training.coach_new.count > 1 %} + {{ training.coach_new.count - 1 }} more{% endif %}</span>{% endif %}
           {% if training.after_run %}<span class="small">Which shoes? {{ training.after_run }} run{{ "s" if training.after_run > 1 }} waiting</span>{% endif %}
           {% elif workout %}
           <span class="tile-title">Last: {{ workout.title }}</span>
