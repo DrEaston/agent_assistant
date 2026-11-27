@@ -47,7 +47,7 @@ import json
 import statistics
 import zlib
 from datetime import date, timedelta
-from . import clock
+from .clock import today as local_today
 
 VERSION = 8                         # bump when the summary changes: older rows are read again
 SCHEMA = (
@@ -495,7 +495,7 @@ def easy_speed(db, user_id, today=None):
     """His easy speed: the middle of the slower half of his runs' usual speeds in the last FIT_WEEKS (None if fewer
     than 5 runs are read)."""
     ensure(db)
-    since = ((today or clock.today()) - timedelta(weeks=FIT_WEEKS)).isoformat()
+    since = ((today or local_today()) - timedelta(weeks=FIT_WEEKS)).isoformat()
     usual = sorted(r[0] for r in db.connect().execute(
         "SELECT usual_mps FROM tr_run_speed WHERE user_id = ? AND day >= ? AND usual_mps > 0",
         (user_id, since)).fetchall())
@@ -543,7 +543,7 @@ def _keep(db, user_id, external_id, day, data, easy):
 
 
 def _waiting(db, user_id, limit, today=None):
-    since = ((today or clock.today()) - timedelta(weeks=LOOKBACK_WEEKS)).isoformat()
+    since = ((today or local_today()) - timedelta(weeks=LOOKBACK_WEEKS)).isoformat()
     ensure(db)
     return db.connect().execute(
         """SELECT w.external_id, substr(COALESCE(NULLIF(w.started_at_local, ''), w.started_at), 1, 10) AS day
@@ -839,7 +839,7 @@ def recent(db, user_id, limit=10, fast_only=False, races=None):
     """His latest runs with what was fast in them and their speed points (at today's threshold pace):
     [{id, day, title, miles, summary, points}]."""
     ensure(db)
-    cs = model_at(_rows(db, user_id, clock.today() - timedelta(weeks=FIT_WEEKS)), clock.today(), races)["cs"]
+    cs = model_at(_rows(db, user_id, local_today() - timedelta(weeks=FIT_WEEKS)), local_today(), races)["cs"]
     rows = db.connect().execute(
         f"""SELECT s.external_id, s.day, s.efforts_json, s.hist_json, w.title, w.distance_meters
             FROM tr_run_speed s LEFT JOIN trainer_imported_workouts w
@@ -864,7 +864,7 @@ def week_runs(db, user_id, monday, races=None):
 def explain(db, user_id, races=None, today=None, weeks=16):
     """The numbers for "How these numbers work": his threshold pace and where it came from, two worked 400 m examples
     at his threshold pace, and his recent weeks over the safe limit."""
-    today = today or clock.today()
+    today = today or local_today()
     monday = today - timedelta(days=today.weekday())
     model = model_at(_rows(db, user_id, today - timedelta(weeks=FIT_WEEKS)), today, races)
     cs = model["cs"]
@@ -893,7 +893,7 @@ def explain(db, user_id, races=None, today=None, weeks=16):
 def hard_efforts(db, user_id, weeks=52, today=None, limit=12, races=None):
     """His hardest long efforts (10 minutes or more, any length) in the last `weeks`: per run its best one, the
     `limit` strongest by the threshold pace each implies, oldest first. For "how am I progressing" questions."""
-    today = today or clock.today()
+    today = today or local_today()
     runs = _rows(db, user_id, today - timedelta(weeks=weeks))
     easy = easy_speed(db, user_id, today)
     found = []
