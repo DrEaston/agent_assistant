@@ -543,6 +543,16 @@ class StrideTests(SyncTests):
         self.assertTrue(any(s > last // 2 for s in steps))         # the reps, faster than threshold
         self.assertEqual(heated["fast"], [])
         self.assertEqual(heated["key"]["threshold"], speed.pace(4.5))
+        # The key labels every other colour with the pace it stands for, open at both ends, threshold in the middle
+        ticks = heated["key"]["ticks"]
+        self.assertEqual(len(ticks), runpage.HEAT_STEPS)
+        self.assertEqual(ticks[0]["label"], "≥" + speed.pace(2.9))
+        self.assertEqual(ticks[-1]["label"], "≤" + speed.pace(6.1))
+        self.assertEqual((ticks[last // 2]["label"], ticks[last // 2]["note"]), (speed.pace(4.5), "threshold"))
+        for t in ticks:
+            if t["label"] and 0 < t["step"] < last:
+                self.assertEqual(runpage.heat_step(runpage.heat_speed(t["step"], 2.9, 4.5, 6.1), 2.9, 4.5, 6.1),
+                                 t["step"])   # each labelled pace really is the colour above it
         self.assertEqual(r["max_hr"], 150)
         saved = routes._state.get("db")
         routes.configure(self.db)

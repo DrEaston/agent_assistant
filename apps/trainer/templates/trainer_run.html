@@ -29,11 +29,8 @@
       <circle class="route-start" cx="{{ r.map.start[0] }}" cy="{{ r.map.start[1] }}" r="6"><title>Start</title></circle>
       <circle class="route-finish" cx="{{ r.map.finish[0] }}" cy="{{ r.map.finish[1] }}" r="6"><title>Finish</title></circle>
     </svg>
-    <figcaption class="small muted">{% if r.map.key %}Coloured by pace, from easy (cyan) through threshold pace (magenta) to your top speed (yellow). {% else %}Fast stretches are highlighted. {% endif %}Green dot is the start, the outlined dot the finish.
-    {% if r.map.key %}<div class="heat-key" aria-label="Colour key: speed">
-      <div class="heat-bar">{% for s in r.map.key.steps %}<span class="heat-swatch heat-{{ s }}"></span>{% endfor %}</div>
-      <div class="chart-axis small muted"><span>{{ r.map.key.easy }}</span>{% if r.map.key.threshold %}<span>{{ r.map.key.threshold }} threshold</span>{% endif %}<span>{{ r.map.key.top }}</span></div>
-    </div>{% endif %}</figcaption>
+    <figcaption class="small muted">{% if r.map.key %}Coloured by pace: read any stretch's pace off the key below. {% else %}Fast stretches are highlighted. {% endif %}Green dot is the start, the outlined dot the finish.
+    {% if r.map.key %}{{ ui.heat_key(r.map.key, tag="div") }}{% endif %}</figcaption>
   </figure>
   {% endcall %}
   {% endif %}

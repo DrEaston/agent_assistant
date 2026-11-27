@@ -81,12 +81,33 @@ def heat_top(cs, vmax):
     return vmax or (HEAT_TOP * cs if cs else None)
 
 
+def heat_speed(step, easy, cs, top):
+    """The speed a colour stands for: the inverse of heat_step."""
+    f = step / (HEAT_STEPS - 1)
+    mid = cs if cs and easy < cs < top else (easy + top) / 2
+    return easy + 2 * f * (mid - easy) if f <= 0.5 else mid + (2 * f - 1) * (top - mid)
+
+
 def heat_key(easy, cs, top):
-    """The key under the map: paces at the slow end, threshold pace (if known) and the fast end."""
+    """The key under the map: a pace under every other colour (slow end, threshold in the middle, fast end), so he
+    can read a stretch's pace straight off its colour. The ends are open: easy pace or slower, top pace or faster."""
     if not easy or not top or top <= easy:
         return None
-    return {"steps": list(range(HEAT_STEPS)), "easy": speed.pace(easy), "top": speed.pace(top) + "/mi and faster",
-            "threshold": speed.pace(cs) if cs and easy < cs < top else ""}
+    threshold = speed.pace(cs) if cs and easy < cs < top else ""
+    last, ticks = HEAT_STEPS - 1, []
+    for s in range(HEAT_STEPS):
+        label, note = "", ""
+        if s % 2 == 0:
+            label = speed.pace(heat_speed(s, easy, cs, top))
+            if s == 0:
+                label = "≥" + label
+            elif s == last:
+                label = "≤" + label
+            elif s == last // 2 and threshold:
+                note = "threshold"
+        ticks.append({"step": s, "label": label, "note": note})
+    return {"steps": list(range(HEAT_STEPS)), "ticks": ticks, "easy": speed.pace(easy),
+            "top": speed.pace(top) + "/mi and faster", "threshold": threshold}
 
 
 def _heat(series, proj, easy, cs, top):

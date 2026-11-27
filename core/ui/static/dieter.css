@@ -311,9 +311,19 @@ textarea.short { min-height: 5rem; }
 .route-heat.heat-6 { stroke: var(--heat-6); } .heat-swatch.heat-6 { background: var(--heat-6); }
 .route-heat.heat-7 { stroke: var(--heat-7); } .heat-swatch.heat-7 { background: var(--heat-7); }
 .route-heat.heat-8 { stroke: var(--heat-8); } .heat-swatch.heat-8 { background: var(--heat-8); }
-.heat-key { margin-top: var(--s2); }
-.heat-bar { display: flex; height: .55rem; border-radius: var(--r-pill); overflow: hidden; }
+.heat-key { display: block; margin-top: var(--s2); }
+.heat-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s2); margin-bottom: var(--s1); }
+.heat-bar { display: flex; height: .8rem; border-radius: var(--r-pill); overflow: hidden; }
 .heat-swatch { flex: 1; }
+.heat-swatch + .heat-swatch { box-shadow: inset 1px 0 0 rgba(0, 0, 0, .18); }
+/* one column per colour, so each pace sits under the colour it names; the end labels hug the edges */
+.heat-ticks { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); margin-top: .2rem; }
+.heat-tick { display: flex; flex-direction: column; align-items: center; white-space: nowrap; font-size: var(--text-xs);
+  color: var(--muted); font-variant-numeric: tabular-nums; line-height: 1.25; }
+.heat-tick.labelled::before { content: ""; width: 1px; height: .3rem; background: var(--line-strong); margin-bottom: .1rem; }
+.heat-tick:first-child { align-items: flex-start; } .heat-tick:last-child { align-items: flex-end; }
+.heat-pace { color: var(--ink); font-weight: 600; }
+.heat-note { font-size: .7rem; }
 .route-start { fill: var(--ok); }
 .route-finish { fill: var(--panel); stroke: var(--ink); stroke-width: 2; }
 .speed-trace svg { display: block; width: 100%; height: 10rem; }
