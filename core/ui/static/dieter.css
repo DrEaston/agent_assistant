@@ -120,6 +120,7 @@ body {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 a { color: var(--accent); }
+.accent-text { color: var(--accent); font-weight: 500; }  /* highlighted text that isn't a link (e.g. a run's fast work) */
 h1, h2, h3 { line-height: 1.2; margin: 0; }
 h1 { font-size: var(--text-xl); }
 h2 { font-size: var(--text-lg); }

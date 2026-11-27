@@ -65,7 +65,7 @@
   {% macro run_row(run) %}
       <a class="link-row" href="/apps/trainer/run/{{ run.id }}">
         <span class="label-stack"><span class="title">{{ run.title }}{% if run.miles %} · {{ run.miles }} mi{% endif %}</span>
-          <span class="small muted">{{ run.day }} · {{ run.summary or "easy" }}{% if run.points %} · speed load {{ run.points }}{% endif %}</span></span>
+          <span class="small muted">{{ run.day }} · {% if run.summary %}<span class="accent-text">{{ run.summary }}</span>{% else %}easy{% endif %}{% if run.points %} · speed load {{ run.points }}{% endif %}</span></span>
         <span class="chev" aria-hidden="true">›</span>
       </a>
   {% endmacro %}
