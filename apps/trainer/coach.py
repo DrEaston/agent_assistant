@@ -10,7 +10,8 @@ it, and the note the athlete chose to write. Nothing here reads Strava data for 
 out only when the athlete is the one signed in (`targets()` is called from the athlete's pages only).
 
 Tables (additive, created on first use):
-- tr_coach_links: athlete, coach (empty until the invite is accepted), invite token, status invited/active/ended.
+- tr_coach_links: athlete, coach (empty until the invite is accepted), invite token, status invited/active/ended,
+  and full_view_until: a temporary exception (see FULL_VIEW_DAYS).
 - tr_prescriptions: one prescribed workout: athlete, coach, day, title, sets (JSON), coach's notes, status
   sent/accepted/declined/done, the plan session it became, the athlete's note back.
 """
@@ -27,7 +28,8 @@ SCHEMA = (
     """CREATE TABLE IF NOT EXISTS tr_coach_links (
         id INTEGER PRIMARY KEY AUTOINCREMENT, athlete_id INTEGER NOT NULL, coach_id INTEGER,
         token TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'invited',
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP, accepted_at TEXT DEFAULT '', ended_at TEXT DEFAULT '')""",
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP, accepted_at TEXT DEFAULT '', ended_at TEXT DEFAULT '',
+        full_view_until TEXT DEFAULT '')""",
     """CREATE TABLE IF NOT EXISTS tr_prescriptions (
         id INTEGER PRIMARY KEY AUTOINCREMENT, athlete_id INTEGER NOT NULL, coach_id INTEGER NOT NULL,
         day TEXT NOT NULL, title TEXT DEFAULT '', sets_json TEXT DEFAULT '[]', notes TEXT DEFAULT '',
@@ -52,6 +54,11 @@ SPRINT_SHARE = 0.9      # "sprint" = Dieter's near-sprint line: 90% of his top s
 SPREAD = 0.015          # target range: +/- 1.5% of the target speed
 MAX_SETS = 6
 STATUSES = ("sent", "accepted", "declined", "done")
+FULL_VIEW_DAYS = 30     # Temporary, for building coach mode with a real coach: Dieter's owner (admin) can let one
+                        # coach see all of their Trainer pages read-only. It switches itself off after this many days.
+                        # This shows the owner's Strava-sourced runs to another person, which Strava's API terms
+                        # restrict; it is the owner's own call about their own data, and it is never offered to
+                        # other accounts.
 
 
 class Invalid(ValueError):
@@ -151,6 +158,11 @@ def targets(sets, model):
     return out
 
 
+def _live(until, today=None):
+    """The full-view end date if it hasn't passed, else ""."""
+    return until if until and until >= (today or date.today()).isoformat() else ""
+
+
 # ------------------------------------------------------------ store
 
 
@@ -239,7 +251,35 @@ class CoachStore:
         rows = self._conn().execute("SELECT * FROM tr_coach_links WHERE athlete_id = ? AND status = 'active' "
                                     "ORDER BY accepted_at", (self._user(),)).fetchall()
         return [{"link_id": r["id"], "coach_id": r["coach_id"], "name": self._name(r["coach_id"]),
-                 "since": (r["accepted_at"] or "")[:10]} for r in rows]
+                 "since": (r["accepted_at"] or "")[:10], "full_view_until": _live(r["full_view_until"])}
+                for r in rows]
+
+    def is_owner(self, user_id=None):
+        row = self.db.get_user_by_id(user_id or self._user())
+        row = dict(row) if row else {}
+        return row.get("role") == "admin" and row.get("status", "active") == "active"
+
+    def set_full_view(self, link_id, on, today=None):
+        """The owner lets one of their coaches see all their Trainer pages, read-only, for FULL_VIEW_DAYS (or stops it)."""
+        me = self._user()
+        if not self.is_owner(me):
+            raise PermissionError("Full view is only for Dieter's owner, for now.")
+        until = ((today or date.today()) + timedelta(days=FULL_VIEW_DAYS)).isoformat() if on else ""
+        cur = self._conn().execute("UPDATE tr_coach_links SET full_view_until = ? WHERE id = ? AND athlete_id = ? "
+                                   "AND status = 'active'", (until, link_id, me))
+        self._commit()
+        if not cur.rowcount:
+            raise Invalid("That coach isn't linked to you.")
+        return until
+
+    def full_view(self, athlete_id, today=None):
+        """Whether the signed-in coach may see this athlete's whole Trainer right now (read-only)."""
+        me = get_current_user_id()
+        if not me or me == athlete_id:
+            return False
+        row = self._conn().execute("SELECT full_view_until FROM tr_coach_links WHERE athlete_id = ? AND coach_id = ? "
+                                   "AND status = 'active'", (athlete_id, me)).fetchone()
+        return bool(row and _live(row["full_view_until"], today) and self.is_owner(athlete_id))
 
     def my_athletes(self):
         rows = self._conn().execute("SELECT * FROM tr_coach_links WHERE coach_id = ? AND status = 'active' "
@@ -251,7 +291,8 @@ class CoachStore:
                                           (r["athlete_id"], r["coach_id"])).fetchall():
                 counts[p["status"]] = counts.get(p["status"], 0) + 1
             out.append({"link_id": r["id"], "athlete_id": r["athlete_id"], "name": self._name(r["athlete_id"]),
-                        "since": (r["accepted_at"] or "")[:10], "counts": counts})
+                        "since": (r["accepted_at"] or "")[:10], "counts": counts,
+                        "full_view_until": _live(r["full_view_until"]) if self.is_owner(r["athlete_id"]) else ""})
         return out
 
     def coaches_athlete(self, athlete_id):
@@ -261,7 +302,8 @@ class CoachStore:
                                    "AND status = 'active'", (athlete_id, me)).fetchone()
         if not row:
             raise PermissionError("This athlete hasn't shared Trainer with you (or stopped sharing).")
-        return {"link_id": row["id"], "athlete_id": athlete_id, "name": self._name(athlete_id)}
+        return {"link_id": row["id"], "athlete_id": athlete_id, "name": self._name(athlete_id),
+                "full_view_until": _live(row["full_view_until"]) if self.is_owner(athlete_id) else ""}
 
     # -------------------------------------------------------- prescriptions
 

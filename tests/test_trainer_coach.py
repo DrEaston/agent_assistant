@@ -141,6 +141,38 @@ class CoachStoreTests(unittest.TestCase):
             self.assertEqual([w["id"] for w in self.store.sent_to(self.athlete)[1]], [pid])
 
 
+class FullViewTests(CoachStoreTests):
+    """Temporary full view: only Dieter's owner can give it, it ends by itself, and stopping coaching ends it."""
+
+    def test_only_the_owner_can_turn_it_on_and_it_ends_by_itself(self):
+        from datetime import date, timedelta
+        self.link()
+        with As(self.athlete):
+            link_id = self.store.my_coaches()[0]["link_id"]
+            with self.assertRaises(PermissionError):
+                self.store.set_full_view(link_id, True)              # not the owner
+        conn = self.db.connect()
+        conn.execute("UPDATE users SET role = 'admin' WHERE id = ?", (self.athlete,))
+        conn.commit()
+        with As(self.athlete):
+            until = self.store.set_full_view(link_id, True)
+            self.assertEqual(until, (date.today() + timedelta(days=coach.FULL_VIEW_DAYS)).isoformat())
+        with As(self.coach_user):
+            self.assertTrue(self.store.full_view(self.athlete))
+            self.assertFalse(self.store.full_view(self.athlete, today=date.today() + timedelta(days=31)))
+        with As(self.other):
+            self.assertFalse(self.store.full_view(self.athlete))     # not their coach
+        with As(self.athlete):
+            self.store.set_full_view(link_id, False)
+        with As(self.coach_user):
+            self.assertFalse(self.store.full_view(self.athlete))
+        with As(self.athlete):
+            self.store.set_full_view(link_id, True)
+            self.store.end(link_id)
+        with As(self.coach_user):
+            self.assertFalse(self.store.full_view(self.athlete))     # stopping coaching ends it at once
+
+
 class CoachPageTests(unittest.TestCase):
     """The pages: the athlete sees their times, the coach doesn't."""
 
@@ -197,6 +229,38 @@ class CoachPageTests(unittest.TestCase):
             self.assertNotIn(speed.pace(4.5), theirs)
         stranger = self.client_for(self.make_user("Stranger"))
         self.assertEqual(stranger.get(f"/apps/trainer/athletes/{athlete}").status_code, 403)
+        # Full view is the owner's only, and not on by default
+        self.assertEqual(coaching.post(f"/apps/trainer/athletes/{athlete}/view").status_code, 403)
+
+    def test_temporary_full_view_is_read_only_and_owner_only(self):
+        athlete, coach_user = self.make_user("Owner"), self.make_user("Daniel")
+        conn = self.api.db.connect()
+        conn.execute("UPDATE users SET role = 'admin' WHERE id = ?", (athlete,))
+        conn.commit()
+        owner, daniel = self.client_for(athlete), self.client_for(coach_user)
+        owner.post("/apps/trainer/my-coach/invite")
+        token = owner.get("/apps/trainer/my-coach").text.split("/apps/trainer/coach-invite/")[1].split('"')[0]
+        daniel.post(f"/apps/trainer/coach-invite/{token}")
+        page = owner.get("/apps/trainer/my-coach").text
+        self.assertIn("Turn on full view", page)
+        link_id = page.split("/apps/trainer/coaching-links/")[1].split("/")[0]
+        owner.post(f"/apps/trainer/coaching-links/{link_id}/full-view", data={"on": "1"})
+        self.assertIn("View Owner", daniel.get(f"/apps/trainer/athletes/{athlete}").text)
+        daniel.post(f"/apps/trainer/athletes/{athlete}/view")
+        week = daniel.get("/apps/trainer/week")
+        self.assertEqual(week.status_code, 200)
+        self.assertIn("Viewing Owner's Trainer, read-only", week.text)
+        # Read-only: forms are refused while viewing
+        self.assertEqual(daniel.post("/apps/trainer/sessions/add", data={"day": "2026-12-01", "kind": "easy"},
+                                     follow_redirects=False).status_code, 403)
+        # His own coach pages stay his
+        self.assertIn("Owner", daniel.get("/apps/trainer/athletes").text)
+        daniel.post("/apps/trainer/view-as/stop")
+        self.assertNotIn("read-only", daniel.get("/apps/trainer/week").text)
+        # Turned off: the cookie alone does nothing
+        owner.post(f"/apps/trainer/coaching-links/{link_id}/full-view")
+        daniel.cookies.set("trainer_view_as", str(athlete))
+        self.assertNotIn("Viewing Owner", daniel.get("/apps/trainer/week").text)
 
 
 if __name__ == "__main__":

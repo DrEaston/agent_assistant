@@ -10,7 +10,7 @@
     {% for a in athletes %}
     <div class="list-row row spread">
       <span><a class="title" href="/apps/trainer/athletes/{{ a.athlete_id }}">{{ a.name }}</a><br>
-        <span class="small muted">{{ a.counts.sent }} waiting · {{ a.counts.accepted }} planned · {{ a.counts.done }} done</span></span>
+        <span class="small muted">{{ a.counts.sent }} waiting · {{ a.counts.accepted }} planned · {{ a.counts.done }} done{% if a.full_view_until %} · full view until {{ a.full_view_until }}{% endif %}</span></span>
       <span class="chev" aria-hidden="true">›</span>
     </div>
     {% endfor %}

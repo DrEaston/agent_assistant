@@ -38,8 +38,8 @@
   </div>
   {% endcall %}
 
-  {% call ui.section("Your coach") %}
-  <p class="small muted">Your coach sees the workouts they sent, whether you took them, and the notes you write here. Not your runs, paces, times or anything else in Dieter.</p>
+  {% call ui.section("Your coach", id="coaches") %}
+  <p class="small muted">Your coach sees the workouts they sent, whether you took them, and the notes you write here. Not your runs, paces, times or anything else in Dieter{% if is_owner %}, unless you turn on full view below{% endif %}.</p>
   {% if coaches %}
   <div class="card">
     {% for c in coaches %}
@@ -47,6 +47,17 @@
       <span><strong>{{ c.name }}</strong><br><span class="small muted">since {{ c.since }}</span></span>
       <form method="post" action="/apps/trainer/coaching-links/{{ c.link_id }}/end"><input type="hidden" name="next" value="/apps/trainer/my-coach"><button type="submit" class="quiet">Stop sharing</button></form>
     </div>
+    {% if is_owner %}
+    <div class="list-row"><div class="grow stack">
+      {% if c.full_view_until %}
+      <span class="small"><strong>Full view is on until {{ c.full_view_until }}.</strong> {{ c.name }} can see all your Trainer pages (runs, speed, heat maps, your week), read-only.</span>
+      <form method="post" action="/apps/trainer/coaching-links/{{ c.link_id }}/full-view"><button type="submit" class="quiet">Turn off full view</button></form>
+      {% else %}
+      <span class="small muted">Temporary, while coach mode is being built: let {{ c.name }} see all your Trainer pages, read-only, for {{ full_view_days }} days. This shows your Strava runs to another person, which Strava's terms restrict.</span>
+      <form method="post" action="/apps/trainer/coaching-links/{{ c.link_id }}/full-view"><input type="hidden" name="on" value="1"><button type="submit">Turn on full view for {{ full_view_days }} days</button></form>
+      {% endif %}
+    </div></div>
+    {% endif %}
     {% endfor %}
   </div>
   {% else %}{{ ui.empty("No coach yet.") }}{% endif %}

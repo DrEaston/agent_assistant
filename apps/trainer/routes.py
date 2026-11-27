@@ -12,7 +12,9 @@ import os
 from datetime import date, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Form, HTTPException, Request
+import contextvars
+
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
@@ -22,8 +24,32 @@ from database import get_current_user_id, reset_current_user_id, set_current_use
 from . import analysis, coach, plan, runpage, speed, strava
 from .manifest import APP
 
-router = APIRouter()
 _state = {"db": None}
+VIEW_COOKIE = "trainer_view_as"
+_viewing = contextvars.ContextVar("trainer_viewing", default=None)
+# Pages that always belong to the person signed in, even while a coach is viewing an athlete's Trainer.
+OWN_PAGES = ("/apps/trainer/athletes", "/apps/trainer/my-coach", "/apps/trainer/coach-invite",
+             "/apps/trainer/coaching-links", "/apps/trainer/view-as", "/strava/", "/trainer-calendar/")
+
+
+async def view_as(request: Request):
+    """Temporary full view (coach.FULL_VIEW_DAYS): a coach the owner allowed sees the owner's Trainer pages as the
+    owner, read-only. Nothing else changes: any other page or form stays the coach's own, and forms are refused."""
+    raw = request.cookies.get(VIEW_COOKIE, "")
+    path = request.url.path
+    if not raw.isdigit() or path.startswith(OWN_PAGES) or not get_current_user_id():
+        return
+    athlete_id = int(raw)
+    if not coach.CoachStore(_state["db"]).full_view(athlete_id):
+        return
+    if request.method not in ("GET", "HEAD"):
+        raise HTTPException(status_code=403, detail="You're viewing someone else's Trainer: it's read-only.")
+    name = coach.CoachStore(_state["db"])._name(athlete_id)
+    _viewing.set({"athlete_id": athlete_id, "name": name})
+    set_current_user_id(athlete_id)   # this request only (the sign-in middleware resets it afterwards)
+
+
+router = APIRouter(dependencies=[Depends(view_as)])
 _templates = ui.templates(Path(__file__).parent / "templates")
 BASE = "/apps/trainer"
 REPORT_URL = BASE + "/feedback"
@@ -61,6 +87,7 @@ def catch_up(limit=5):
 
 
 def render(name, **context):
+    context.setdefault("trainer_viewing", _viewing.get())
     context.setdefault("app", APP)
     context.setdefault("tabs", TABS)
     context.setdefault("report_url", REPORT_URL)
@@ -260,7 +287,7 @@ def my_coach(request: Request):
     invite_url = f"{str(request.base_url).rstrip('/')}{BASE}/coach-invite/{invite['token']}" if invite else ""
     return render("trainer_my_coach.html", title="My coach", current=BASE + "/my-coach", page_url=BASE + "/my-coach",
                   coaches=c.my_coaches(), workouts=workouts, invite=invite, invite_url=invite_url,
-                  has_model=bool(model.get("cs")))
+                  has_model=bool(model.get("cs")), is_owner=c.is_owner(), full_view_days=coach.FULL_VIEW_DAYS)
 
 
 @router.post(BASE + "/my-coach/invite")
@@ -342,6 +369,31 @@ def withdraw_workout(athlete_id: int, prescription_id: int):
     _coach(coaching().coaches_athlete, athlete_id)
     _coach(coaching().withdraw, prescription_id)
     return back(f"{BASE}/athletes/{athlete_id}")
+
+
+@router.post(BASE + "/coaching-links/{link_id}/full-view")
+def full_view_switch(link_id: int, on: str = Form("")):
+    """The owner turns a coach's temporary full view on (for coach.FULL_VIEW_DAYS) or off."""
+    _coach(coaching().set_full_view, link_id, bool(on))
+    return back(BASE + "/my-coach#coaches")
+
+
+@router.post(BASE + "/athletes/{athlete_id}/view")
+def start_viewing(request: Request, athlete_id: int):
+    """A coach with full view opens the athlete's Trainer (read-only) until they tap Stop viewing."""
+    if not coaching().full_view(athlete_id):
+        raise HTTPException(status_code=403, detail="Full view isn't on for this athlete.")
+    response = back(BASE)
+    response.set_cookie(VIEW_COOKIE, str(athlete_id), max_age=12 * 3600, httponly=True, samesite="lax",
+                        secure=request.url.scheme == "https")
+    return response
+
+
+@router.post(BASE + "/view-as/stop")
+def stop_viewing():
+    response = back(BASE + "/athletes")
+    response.delete_cookie(VIEW_COOKIE)
+    return response
 
 
 # ---------------------------------------------------------------- Sunday check-in

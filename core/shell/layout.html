@@ -12,6 +12,7 @@
 </head>
 <body class="has-dock">
 {% block dock %}{% include "dock.html" %}{% endblock %}
+{% if trainer_viewing %}<div class="banner warn row spread" role="status"><span>Viewing {{ trainer_viewing.name }}'s Trainer, read-only.</span><form method="post" action="/apps/trainer/view-as/stop"><button type="submit" class="quiet">Stop viewing</button></form></div>{% endif %}
 {% if preview_label %}<p class="banner warn" role="status">Preview of {{ preview_label }}. This is a copy; nothing you do here reaches the live site.</p>{% endif %}
 {% block content %}{% endblock %}
 {% block report %}

@@ -5,6 +5,12 @@
 {% call ui.page_header(athlete.name, crumbs=(("Trainer", "/apps/trainer"), ("My athletes", "/apps/trainer/athletes")), tabs=tabs, current=current,
     sub="You see what you sent, whether they took it, and their notes. Their runs and times stay private: Dieter fills in the paces for them.") %}{% endcall %}
 <main class="wrap">
+  {% if athlete.full_view_until %}
+  <form method="post" action="/apps/trainer/athletes/{{ athlete.athlete_id }}/view" class="card stack">
+    <p class="small">{{ athlete.name }} gave you full view until {{ athlete.full_view_until }}: all their Trainer pages, read-only.</p>
+    <button type="submit" class="primary">View {{ athlete.name }}'s Trainer</button>
+  </form>
+  {% endif %}
   {% if sent %}{% call ui.banner("ok") %}Sent. {{ athlete.name }} will see it with their own times.{% endcall %}{% endif %}
 
   {% call ui.section("Send a workout") %}

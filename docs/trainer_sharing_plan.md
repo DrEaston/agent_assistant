@@ -73,6 +73,12 @@ the menu; retire the routes and table once nothing uses them.
   pages don't read runs at all, so Strava's "only to that user" rule holds.
 - **Either side can stop** at any time; it ends at once.
 
+- **Temporary full view (for building this with Daniel).** Only Dieter's owner can switch it on, per coach, for
+  30 days (`coach.FULL_VIEW_DAYS`); it switches itself off, and stopping coaching ends it. The coach taps "View ..."
+  and sees the owner's Trainer pages as the owner, read-only (forms are refused), with a banner and a Stop viewing
+  button. This shows the owner's Strava runs to another person, which Strava's terms restrict: the owner's own
+  call about their own data, never offered to other accounts. Remove it once the real coach view exists.
+
 Later: the coach seeing more, but only what the athlete switches on (weekly miles they log, injury check-ins) and
 never Strava-sourced numbers unless Strava confirms coaching use; notes both ways on a workout; a coach's AI reading
 shared, non-Strava data if the athlete allows it.
