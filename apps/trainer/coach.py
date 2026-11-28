@@ -45,6 +45,8 @@ SCHEMA = (
         status TEXT NOT NULL DEFAULT 'sent', session_id INTEGER, athlete_note TEXT DEFAULT '',
         created_at TEXT DEFAULT CURRENT_TIMESTAMP, answered_at TEXT DEFAULT '')""",
 )
+ADDED_COLUMNS = (("rounds", "INTEGER DEFAULT 1"), ("round_rest", "TEXT DEFAULT ''"))
+MAX_ROUNDS = 20
 PASSCODE_ROLE = "coach"          # the shared passcode account: api.py lets it use the coach pages only
 PASSCODE_EMAIL = "coach-passcode@askdieter.local"
 PASSCODE_HASH = os.getenv("DIETER_COACH_PASSCODE_HASH",
@@ -102,15 +104,43 @@ def distance_name(metres):
 
 
 def describe_set(s):
-    """'6 × 1 mile at threshold, 90 s jog' - what the coach wrote, with no times."""
+    """'3 × 1200 m at threshold, 60 s jog between, then 2 min' - what the coach wrote, with no times.
+    rest: between the reps of this set; rest_after: after the set, before the next one."""
     text = f"{s['reps']} × {distance_name(s['metres'])}"
     if s["intensity"] in ("sprint", "easy", "feel"):
         text += f" {INTENSITIES[s['intensity']]}"
     else:
         text += f" at {INTENSITIES[s['intensity']]}"
-    if s.get("rest"):
-        text += f", {s['rest']}"
+    if s.get("rest") and s["reps"] > 1:
+        text += f", {s['rest']} between"
+    if s.get("rest_after"):
+        text += f", then {s['rest_after']}"
     return text
+
+
+def describe_rounds(rounds, round_rest=""):
+    """'3 rounds, 4 min between rounds', or '' for a single round."""
+    if not rounds or rounds <= 1:
+        return ""
+    return f"{rounds} rounds" + (f", {round_rest} between rounds" if round_rest else "")
+
+
+def describe_workout(sets, rounds=1, round_rest=""):
+    """The whole workout in one line: '3 × (3 × 1200 m at threshold, ...; 4 × 200 m sprint), 4 min between rounds'."""
+    body = "; ".join(describe_set(s) for s in sets)
+    if rounds and rounds > 1:
+        return f"{rounds} × ({body})" + (f", {round_rest} between rounds" if round_rest else "")
+    return body
+
+
+def clean_rounds(rounds, round_rest=""):
+    try:
+        rounds = int(str(rounds or 1).strip() or 1)
+    except ValueError:
+        raise Invalid("Rounds is a number, like 3.") from None
+    if not 1 <= rounds <= MAX_ROUNDS:
+        raise Invalid(f"Rounds are between 1 and {MAX_ROUNDS}.")
+    return rounds, (" ".join(str(round_rest or "").split())[:40] if rounds > 1 else "")
 
 
 def clean_sets(raw):
@@ -132,7 +162,8 @@ def clean_sets(raw):
         if intensity not in INTENSITIES:
             raise Invalid(f"Effort is one of: {', '.join(INTENSITIES.values())}.")
         sets.append({"reps": reps, "metres": metres, "intensity": intensity,
-                     "rest": " ".join(str(row.get("rest") or "").split())[:40]})
+                     "rest": " ".join(str(row.get("rest") or "").split())[:40],
+                     "rest_after": " ".join(str(row.get("rest_after") or "").split())[:40]})
     if not sets:
         raise Invalid("Add at least one set, like 6 × 1 mile at threshold.")
     return sets[:MAX_SETS]
@@ -223,6 +254,10 @@ class CoachStore:
         if not self._ready:
             for statement in SCHEMA:
                 conn.execute(statement)
+            have = {r[1] for r in conn.execute("PRAGMA table_info(tr_prescriptions)").fetchall()}
+            for column, kind in ADDED_COLUMNS:          # additive: older workouts are 1 round
+                if column not in have:
+                    conn.execute(f"ALTER TABLE tr_prescriptions ADD COLUMN {column} {kind}")
             conn.commit()
             self._ready = True
         return conn
@@ -357,14 +392,18 @@ class CoachStore:
 
     def _view(self, row, for_athlete):
         sets = json.loads(row["sets_json"] or "[]")
+        keys = row.keys()
+        rounds = (row["rounds"] if "rounds" in keys else 1) or 1
+        round_rest = (row["round_rest"] if "round_rest" in keys else "") or ""
         p = {"id": row["id"], "day": row["day"], "title": row["title"], "notes": row["notes"],
              "status": row["status"], "athlete_note": row["athlete_note"], "session_id": row["session_id"],
              "sets": [dict(s, text=describe_set(s)) for s in sets],
+             "rounds": rounds, "round_rest": round_rest, "rounds_text": describe_rounds(rounds, round_rest),
              "coach": self._name(row["coach_id"]) if for_athlete else "",
-             "summary": "; ".join(describe_set(s) for s in sets)}
+             "summary": describe_workout(sets, rounds, round_rest)}
         return p
 
-    def prescribe(self, athlete_id, day, title, sets, notes=""):
+    def prescribe(self, athlete_id, day, title, sets, notes="", rounds=1, round_rest=""):
         """A coach sends a workout. It waits for the athlete to take it; nothing changes on their plan until then."""
         link = self.coaches_athlete(athlete_id)
         try:
@@ -372,10 +411,13 @@ class CoachStore:
         except ValueError:
             raise Invalid("Pick a day for the workout.") from None
         sets = clean_sets(sets)
+        rounds, round_rest = clean_rounds(rounds, round_rest)
         title = " ".join(str(title or "").split())[:120] or "Workout from your coach"
         cur = self._conn().execute(
-            "INSERT INTO tr_prescriptions (athlete_id, coach_id, day, title, sets_json, notes) VALUES (?, ?, ?, ?, ?, ?)",
-            (link["athlete_id"], self._user(), day, title, json.dumps(sets), " ".join(str(notes or "").split())[:500]))
+            "INSERT INTO tr_prescriptions (athlete_id, coach_id, day, title, sets_json, notes, rounds, round_rest) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (link["athlete_id"], self._user(), day, title, json.dumps(sets), " ".join(str(notes or "").split())[:500],
+             rounds, round_rest))
         self._commit()
         return cur.lastrowid
 
@@ -422,6 +464,10 @@ class CoachStore:
         sets = targets(json.loads(row["sets_json"] or "[]"), model)
         details = "; ".join(s["text"] + (f" ({s['target']})" if s["target"] and not s["target"].startswith("Dieter")
                                           else "") for s in sets)
+        rounds = (row["rounds"] if "rounds" in row.keys() else 1) or 1
+        if rounds > 1:
+            details = f"{rounds} rounds of: {details}" + (f". {row['round_rest']} between rounds"
+                                                         if row["round_rest"] else "")
         if row["notes"]:
             details += f". Coach: {row['notes']}"
         session = plan.PlanStore(self.db).add_session(row["day"], "workout", row["title"], details=details)
@@ -480,13 +526,13 @@ class CoachStore:
         self._commit()
         return coach_id
 
-    def send_to_all(self, day, title, sets, notes=""):
+    def send_to_all(self, day, title, sets, notes="", rounds=1, round_rest=""):
         """The coach sends one workout to every athlete they coach. Returns how many it went to."""
         athletes = self.my_athletes()
         if not athletes:
             raise Invalid("No athletes to send to yet.")
         for a in athletes:
-            self.prescribe(a["athlete_id"], day, title, sets, notes)
+            self.prescribe(a["athlete_id"], day, title, sets, notes, rounds, round_rest)
         return len(athletes)
 
     def sent_by_me(self, limit=20):

@@ -20,7 +20,10 @@ MAX_TEXT = 1500
 PROMPT = f"""You read a running coach's workout and turn it into JSON for a training app. Reply with JSON only:
 {{"title": short name for the workout (max 60 characters),
   "sets": [{{"reps": whole number, "metres": rep distance in metres, "intensity": one effort below,
-            "rest": the recovery between reps in a few words, or ""}}],
+            "rest": the recovery between the reps of this set in a few words, or "",
+            "rest_after": the recovery after this set before the next one, or ""}}],
+  "rounds": how many times the whole list of sets is repeated (1 if not repeated),
+  "round_rest": the recovery between rounds in a few words, or "",
   "notes": everything else the athlete should know (warm-up, cool-down, drills, cues), in the coach's words, or ""}}
 
 Efforts (use exactly these words):
@@ -32,6 +35,9 @@ Efforts (use exactly these words):
 
 Rules:
 - One set per repeated block, in order. "6 x 1 mile" is reps 6, metres 1609. A single run ("2 mile tempo") is reps 1.
+- Repeated groups are rounds: "3 x (3 x 1200, 4 x 200)" is rounds 3 with two sets (3 x 1200 and 4 x 200), listed once.
+  Rest between the 1200s goes in that set's "rest"; rest between the 1200s and the 200s goes in the 1200 set's
+  "rest_after"; rest between the groups goes in "round_rest".
 - Distances: 1 mile = 1609, 2 miles = 3218, 1 km = 1000; "200s" = 200 metres. Between 50 and 20000 metres.
 - A block by time or by feel without a distance (e.g. "3 x 10 min tempo", "hill sprints") is not a set: put it in notes.
 - At most {coach.MAX_SETS} sets. Don't invent anything the coach didn't write; never add paces or times."""
@@ -43,13 +49,6 @@ def _json(text):
     if not match:
         raise ValueError("no JSON in the reply")
     return json.loads(match.group(0))
-
-
-FIX_PROMPT = PROMPT + """
-
-You are now changing a workout you already read. The user message has the workout as JSON and the coach's change.
-Apply only that change and keep everything else exactly as it is. Reply with the whole updated workout as JSON in
-the same shape."""
 
 
 def _ask(system, content, provider, what):
@@ -71,7 +70,11 @@ def _checked(data):
     sets = coach.clean_sets(rows)
     title = " ".join(str(data.get("title") or "").split())[:120]
     notes = " ".join(str(data.get("notes") or "").split())[:500]
-    return {"title": title, "sets": sets, "notes": notes}
+    try:
+        rounds, round_rest = coach.clean_rounds(data.get("rounds") or 1, data.get("round_rest"))
+    except coach.Invalid:
+        rounds, round_rest = 1, ""
+    return {"title": title, "sets": sets, "notes": notes, "rounds": rounds, "round_rest": round_rest}
 
 
 def read(text, provider=None):
@@ -80,13 +83,3 @@ def read(text, provider=None):
     if not text:
         raise coach.Invalid("Write the workout first, like: 6 x 1 mile at threshold, 90 s jog; 8 x 200 m fast.")
     return _checked(_ask(PROMPT, text, provider, "read"))
-
-
-def revise(workout, change, provider=None):
-    """The workout on screen with the coach's spoken or typed change applied ("make the rest 60 seconds")."""
-    change = " ".join(str(change or "").split())[:500]
-    if not change:
-        raise coach.Invalid("Say or type what to change, like: make the rest 60 seconds.")
-    content = json.dumps({"workout": {"title": workout.get("title", ""), "sets": workout.get("sets", []),
-                                      "notes": workout.get("notes", "")}, "change": change})
-    return _checked(_ask(FIX_PROMPT, content, provider, "fix"))

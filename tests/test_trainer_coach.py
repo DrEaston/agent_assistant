@@ -46,21 +46,22 @@ class ReaderTests(unittest.TestCase):
             '"rest": "90 s jog"}, {"reps": "8", "metres": "200", "intensity": "sprint", "rest": ""}], '
             '"notes": "2 mile warm-up"}'))
         self.assertEqual(out["title"], "Miles and 200s")
-        self.assertEqual([coach.describe_set(x) for x in out["sets"]][0], "6 × 1 mile at threshold, 90 s jog")
+        self.assertEqual([coach.describe_set(x) for x in out["sets"]][0], "6 × 1 mile at threshold, 90 s jog between")
         self.assertEqual(out["sets"][1]["reps"], 8)
         self.assertEqual(out["notes"], "2 mile warm-up")
 
-    def test_revise_applies_a_change_and_is_checked_like_input(self):
-        current = {"title": "Miles", "notes": "", "sets": [{"reps": 6, "metres": 1609, "intensity": "threshold",
-                                                            "rest": "90 s jog"}]}
-        out = coach_reader.revise(current, "add 4 strides at the end", provider=FakeAI(
-            '{"title": "Miles", "notes": "", "sets": [{"reps": 6, "metres": 1609, "intensity": "threshold", '
-            '"rest": "90 s jog"}, {"reps": 4, "metres": 100, "intensity": "sprint", "rest": ""}]}'))
-        self.assertEqual(len(out["sets"]), 2)
-        with self.assertRaises(coach.Invalid):
-            coach_reader.revise(current, "   ", provider=FakeAI("{}"))
-        with self.assertRaises(coach.Invalid):
-            coach_reader.revise(current, "make them 5 m", provider=FakeAI('{"sets": [{"reps": 6, "metres": 5}]}'))
+    def test_rounds_and_rest_after_a_set(self):
+        out = coach_reader.read("3 x (3 x 1200 T, 60s, 2 min, 4 x 200 fast 30s), 4 min between", provider=FakeAI(
+            '{"title": "1200s and 200s", "rounds": 3, "round_rest": "4 min", "notes": "", "sets": ['
+            '{"reps": 3, "metres": 1200, "intensity": "threshold", "rest": "60 s jog", "rest_after": "2 min"},'
+            '{"reps": 4, "metres": 200, "intensity": "sprint", "rest": "30 s jog", "rest_after": ""}]}'))
+        self.assertEqual((out["rounds"], out["round_rest"]), (3, "4 min"))
+        self.assertEqual(coach.describe_set(out["sets"][0]), "3 × 1200 m at threshold, 60 s jog between, then 2 min")
+        self.assertEqual(coach.describe_workout(out["sets"], 3, "4 min"),
+                         "3 × (3 × 1200 m at threshold, 60 s jog between, then 2 min; 4 × 200 m sprint, 30 s jog "
+                         "between), 4 min between rounds")
+        odd = coach_reader.read("x", provider=FakeAI('{"rounds": 99, "sets": [{"reps": 2, "metres": 400}]}'))
+        self.assertEqual(odd["rounds"], 1)                                     # nonsense rounds fall back to 1
 
     def test_unknown_efforts_become_by_feel_and_nonsense_is_refused(self):
         out = coach_reader.read("4x400 at goal pace", provider=FakeAI(
@@ -114,7 +115,7 @@ class CoachStoreTests(unittest.TestCase):
                                  {"reps": "8", "metres": "200", "intensity": "sprint", "rest": "200 m jog"},
                                  {"reps": "", "metres": ""}])
         self.assertEqual(len(sets), 2)
-        self.assertEqual(coach.describe_set(sets[0]), "6 × 1 mile at threshold, 90 s jog")
+        self.assertEqual(coach.describe_set(sets[0]), "6 × 1 mile at threshold, 90 s jog between")
         rows = coach.targets(sets, MODEL)
         mile = round(1609 / 4.5)
         self.assertTrue(rows[0]["target"].startswith(speed.clock(mile) + " each ("))
@@ -303,10 +304,10 @@ class CoachPageTests(unittest.TestCase):
                                        "metres_1": "200", "intensity_1": "sprint"})
             self.assertEqual(sent.status_code, 200)
             mine = runner.get("/apps/trainer/my-coach").text
-            self.assertIn("6 × 1 mile at threshold, 90 s jog", mine)
+            self.assertIn("6 × 1 mile at threshold, 90 s jog between", mine)
             self.assertIn(speed.clock(round(1609 / 4.5)), mine)
             theirs = coaching.get(f"/apps/trainer/athletes/{athlete}").text
-            self.assertIn("6 × 1 mile at threshold, 90 s jog", theirs)
+            self.assertIn("6 × 1 mile at threshold, 90 s jog between", theirs)
             self.assertNotIn(speed.clock(round(1609 / 4.5)), theirs)
             self.assertNotIn(speed.pace(4.5), theirs)
         stranger = self.client_for(self.make_user("Stranger"))
@@ -394,32 +395,33 @@ class CoachPageTests(unittest.TestCase):
                 sent = visitor.post("/coach/send", follow_redirects=False,
                                     data={"day": day, "workout": "2 mi wu, 6x mile @ T w/ 90s jog"})
             self.assertEqual(sent.headers["location"], "/coach?sent=1#sent")
-            # Read first: the standard layout to check, then Send sends exactly that (no second reading)
-            with mock.patch.object(coach_reader, "get_llm_provider", return_value=FakeAI(reply)):
-                read = visitor.post("/coach/read", data={"workout": "6x mile @ T w/ 90s jog"}).json()
-            self.assertEqual(read["sets"][0], {"reps": 6, "distance": "1 mile", "effort": "threshold",
-                                               "rest": "90 s jog", "text": "6 × 1 mile at threshold, 90 s jog"})
-            self.assertEqual(read["notes"], "2 mile warm-up")
-            with mock.patch.object(coach_reader, "get_llm_provider", side_effect=AssertionError("read twice")):
-                checked = visitor.post("/coach/send", follow_redirects=False,
-                                       data={"day": day, "workout": "6x mile @ T w/ 90s jog", "parsed": read["parsed"]})
-            self.assertEqual(checked.headers["location"], "/coach?sent=1#sent")
-            # Fix it: the coach says what to change; the workout on screen comes back changed
-            fixed_reply = ('{"title": "Threshold miles", "sets": [{"reps": 6, "metres": 1609, "intensity": "threshold", '
-                           '"rest": "60 s jog"}], "notes": "2 mile warm-up"}')
-            fake = FakeAI(fixed_reply)
-            with mock.patch.object(coach_reader, "get_llm_provider", return_value=fake):
-                fixed = visitor.post("/coach/fix", data={"parsed": read["parsed"], "change": "make the rest 60 seconds"}).json()
-            self.assertEqual(fixed["sets"][0]["rest"], "60 s jog")
-            self.assertIn("make the rest 60 seconds", fake.seen)                 # the change and the workout went to the AI
-            self.assertIn("90 s jog", fake.seen)
-            self.assertEqual(visitor.post("/coach/fix", data={"parsed": "", "change": "x"}).status_code, 400)
+            # Talk fills the builder (/coach/read gives rows); Send takes the builder rows, with rounds
+            rounds_reply = ('{"title": "1200s and 200s", "rounds": 3, "round_rest": "4 min", "notes": "", "sets": ['
+                            '{"reps": 3, "metres": 1200, "intensity": "threshold", "rest": "60 s jog", "rest_after": "2 min"},'
+                            '{"reps": 4, "metres": 200, "intensity": "sprint", "rest": "30 s jog"}]}')
+            with mock.patch.object(coach_reader, "get_llm_provider", return_value=FakeAI(rounds_reply)):
+                read = visitor.post("/coach/read", data={"workout": "3 rounds of 3 x 1200 ..."}).json()
+            self.assertEqual((read["rounds"], read["round_rest"]), (3, "4 min"))
+            self.assertEqual(read["sets"][0]["rest_after"], "2 min")
+            with mock.patch.object(coach_reader, "get_llm_provider", side_effect=AssertionError("builder rows only")):
+                built = visitor.post("/coach/send", follow_redirects=False, data={
+                    "day": day, "title": "1200s and 200s", "rounds": "3", "round_rest": "4 min",
+                    "reps_0": "3", "metres_0": "1200", "intensity_0": "threshold", "rest_0": "60 s jog",
+                    "rest_after_0": "2 min", "reps_1": "4", "metres_1": "200", "intensity_1": "sprint",
+                    "rest_1": "30 s jog"})
+            self.assertEqual(built.headers["location"], "/coach?sent=1#sent")
+            self.assertIn("3 × (3 × 1200 m at threshold, 60 s jog between, then 2 min; 4 × 200 m sprint, 30 s jog "
+                          "between), 4 min between rounds", visitor.get("/coach").text)
+            self.assertIn("3 rounds, 4 min between rounds", runner.get("/apps/trainer/my-coach").text)
+            bad_rows = visitor.post("/coach/send", data={"day": day, "reps_0": "3", "metres_0": "5"})
+            self.assertIn("between 50 m and 20 km", bad_rows.text)
+            self.assertIn('value="5"', bad_rows.text)                             # what they entered is kept
             with mock.patch.object(coach_reader, "get_llm_provider", return_value=FakeAI("no idea")):
                 bad = visitor.post("/coach/read", data={"workout": "hmm"})
             self.assertEqual(bad.status_code, 400)
             sent_page = visitor.get("/coach?sent=1").text
             self.assertIn("Sent to 1 athlete", sent_page)
-            self.assertIn("Dieter read it as: 6 × 1 mile at threshold, 90 s jog", sent_page)
+            self.assertIn("Dieter read it as: 6 × 1 mile at threshold, 90 s jog between", sent_page)
             self.assertNotIn(speed.clock(round(1609 / 4.5)), sent_page)          # no paces on the coach page
             with mock.patch.object(coach_reader, "get_llm_provider", return_value=FakeAI("sorry, no idea")):
                 failed = visitor.post("/coach/send", data={"day": day, "workout": "something odd"})

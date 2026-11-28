@@ -16,6 +16,7 @@
         {% if w.status == "sent" %}{{ ui.tag("New", "info") }}{% elif w.status == "accepted" %}{{ ui.tag("On your plan", "ok") }}{% elif w.status == "done" %}{{ ui.tag("Done", "ok") }}{% else %}{{ ui.tag("Declined") }}{% endif %}
       </div>
       <p class="small muted">{{ w.day }} · from {{ w.coach }}</p>
+      {% if w.rounds_text %}<p class="small"><strong>{{ w.rounds_text }}:</strong></p>{% endif %}
       <ul class="steps">
         {% for s in w.sets %}<li><span>{{ s.text }}</span>{% if s.target %}<br><strong class="num">{{ s.target }}</strong>{% endif %}</li>{% endfor %}
       </ul>
