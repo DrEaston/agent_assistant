@@ -123,7 +123,7 @@ class ShoeStore:
         return row["id"] if row else None
 
     def waiting(self, limit=3, today=None):
-        """Recent runs with no shoes logged and not skipped, newest first, with the pair to suggest."""
+        """Recent runs not checked in yet (no shoes, no feel or note saved, not skipped), newest first."""
         since = ((today or clock.today()) - timedelta(days=ASK_DAYS)).isoformat()
         rows = self._conn().execute(
             f"""SELECT w.* FROM trainer_imported_workouts w
@@ -131,6 +131,8 @@ class ShoeStore:
                   AND substr(w.started_at, 1, 10) >= ?
                   AND COALESCE(w.strava_deleted_at, '') = ''
                   AND NOT EXISTS (SELECT 1 FROM trainer_workout_shoes u WHERE u.imported_workout_id = w.id)
+                  AND NOT EXISTS (SELECT 1 FROM trainer_run_reflections f WHERE f.imported_workout_id = w.id
+                                  AND f.user_id = w.user_id)
                   AND NOT EXISTS (SELECT 1 FROM tr_run_checkin_skips k WHERE k.workout_id = w.id AND k.user_id = w.user_id)
                 ORDER BY w.started_at DESC LIMIT ?""",
             (self._user(), *RUN_TYPES, since, limit)).fetchall()
