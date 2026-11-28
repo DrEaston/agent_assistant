@@ -50,7 +50,6 @@
           {% if w.changes %}<form method="post" action="/apps/trainer/my-coach/workouts/{{ w.id }}/reset"><button type="submit" class="quiet">Back to the coach's version</button></form>{% endif %}
           <p class="small muted">Your coach sees what you changed in plain words, never your times. The speed load above updates when you save.</p>
         </details>
-      {% if w.status == "sent" %}
         <form method="post" action="/apps/trainer/my-coach/workouts/{{ w.id }}/take"><button type="submit" class="primary">Put it on my plan</button></form>
         <form method="post" action="/apps/trainer/my-coach/workouts/{{ w.id }}/decline" class="inline-form">
           <input type="text" name="note" maxlength="500" placeholder="Why not (optional, your coach sees this)" aria-label="Why not">
