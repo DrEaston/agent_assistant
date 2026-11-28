@@ -1,4 +1,4 @@
-"""COROS: Dieter's own copy of every run, straight from the watch's maker (docs/coros_plan.md).
+"""COROS: new runs come straight from the watch's maker instead of Strava (docs/coros_plan.md).
 
 COROS runs an official MCP server (https://mcp.coros.com/mcp, by region) that any app may connect to with the
 athlete's own COROS sign-in: "self-service, no application required", single-user, OAuth 2.0. Dieter is an ordinary
@@ -13,8 +13,12 @@ OAuth client of it:
   downloadActivityFitFiles / queryActivityFitFileDownloadUrls give each activity's FIT file (every second of the
   run). COROS allows 50 FIT files per person per 24 hours, so the history comes in over several days.
 
-FIT files are kept as files (core/media's Blobs: a local folder plus Cloud Storage), not in the database. Reading
-them into Trainer's analysis is the next step (docs/coros_plan.md).
+From the moment he connects, COROS is where new activities come from: each pass lists the last two weeks, and
+every activity that started after he connected is fetched as a FIT file, read (fit.py) and put in his log
+(source 'coros') with its speed analysis, the same as a Strava run. Strava stops adding new activities then
+(strava.Sync.handle); everything already in the log stays. FIT files are kept as files (core/media's Blobs: a local
+folder plus Cloud Storage), not in the database. "Test with my latest run" reads his newest COROS run without
+adding it and compares it with the same run from Strava.
 """
 
 import base64
@@ -29,14 +33,16 @@ import urllib.request
 from datetime import date, datetime, timedelta
 from urllib.parse import urlencode, urlsplit
 
+from . import fit
+
 MCP_URL = os.getenv("COROS_MCP_URL", "https://mcpus.coros.com/mcp")
 SCOPES = "openid mcp.tools offline_access"
 PROTOCOL = "2025-06-18"
 FIT_PER_DAY = 50          # COROS: 50 FIT files per person per 24 hours (shared by both FIT tools)
-FIT_PER_PASS = 8          # fetched per page view, so a visit stays quick
-LIST_WINDOW_DAYS = 30     # querySportRecords has no paging: ask a month at a time
-HISTORY_START = date(2024, 1, 1)
-RUN_CODES = {100, 101, 102, 103, 104}  # COROS running sport types (road, indoor, trail, track, ...): kept as reported
+FIT_PER_PASS = 5          # fetched per pass, so a visit stays quick
+RECENT_DAYS = 14          # each pass lists this far back (querySportRecords has no paging)
+PASS_EVERY = 10 * 60      # seconds between passes when Trainer or Today opens (COROS has no push)
+FIT_SPORTS = {1: "Run", 2: "Ride", 5: "Swim", 10: "WeightTraining", 11: "Walk", 17: "Hike"}  # FIT sport -> type
 
 SCHEMA = (
     "CREATE TABLE IF NOT EXISTS tr_coros_sync (key TEXT PRIMARY KEY, value TEXT DEFAULT '')",
@@ -302,6 +308,12 @@ class Coros:
             (user_id, row["client_id"], row["redirect_uri"], tokens["access_token"], tokens.get("refresh_token", ""),
              time.time() + float(tokens.get("expires_in") or 3600), datetime.utcnow().isoformat(timespec="seconds")))
         conn.commit()
+        if not self.get(f"since_{user_id}"):   # from now on, new activities come from COROS
+            self.put(f"since_{user_id}", datetime.utcnow().isoformat(timespec="seconds"))
+
+    def since(self, user_id):
+        """When COROS took over from Strava for him (UTC), or "" when it hasn't."""
+        return self.get(f"since_{user_id}") if self.connected(user_id) else ""
 
     def _token_call(self, meta, form):
         status, _, text = self.call(meta["token_endpoint"], "POST", form=form)
@@ -317,6 +329,7 @@ class Coros:
     def disconnect(self, user_id):
         conn = self._conn()
         conn.execute("DELETE FROM tr_coros_tokens WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM tr_coros_sync WHERE key = ?", (f"since_{user_id}",))  # Strava brings them in again
         conn.commit()
 
     def _access(self, user_id, force=False):
@@ -398,53 +411,71 @@ class Coros:
         conn.commit()
         return len(found)
 
-    def catch_up_list(self, user_id, today=None, windows=3):
-        """Newest month first, then a few older months each visit until the history start."""
-        today = today or date.today()
-        self.list_window(user_id, today - timedelta(days=LIST_WINDOW_DAYS - 1), today)
-        older = self.get(f"history_until_{user_id}")
-        end = date.fromisoformat(older) if older else today - timedelta(days=LIST_WINDOW_DAYS)
-        for _ in range(windows):
-            if end < HISTORY_START:
-                self.put(f"history_done_{user_id}", "1")
-                break
-            start = end - timedelta(days=LIST_WINDOW_DAYS - 1)
-            self.list_window(user_id, start, end)
-            end = start - timedelta(days=1)
-            self.put(f"history_until_{user_id}", end.isoformat())
-
     def used_today(self, user_id):
         since = (datetime.utcnow() - timedelta(hours=24)).isoformat(timespec="seconds")
         return self._conn().execute("SELECT COUNT(*) FROM tr_coros_activities WHERE user_id = ? AND fit_at >= ?",
                                     (user_id, since)).fetchone()[0]
 
-    def fetch_fits(self, user_id, limit=FIT_PER_PASS):
-        """Download FIT files, runs first and newest first, inside COROS's 50-a-day allowance."""
-        room = min(limit, FIT_PER_DAY - self.used_today(user_id))
-        if room <= 0 or not self.blobs:
+    def _download(self, user_id, row):
+        """Fetch, keep and read one activity's FIT file. Returns the read run (fit.read)."""
+        data = self._fit(user_id, row["label_id"], row["sport_type"])
+        key = f"coros/{user_id}/{row['label_id']}.fit"
+        if self.blobs:
+            self.blobs.put(key, data)
+        conn = self._conn()
+        conn.execute("UPDATE tr_coros_activities SET fit_key = ?, fit_bytes = ?, fit_at = ?, fit_error = '' "
+                     "WHERE user_id = ? AND label_id = ?", (key, len(data), datetime.utcnow().isoformat(timespec="seconds"),
+                                                           user_id, row["label_id"]))
+        conn.commit()
+        try:
+            return fit.read(data)
+        except fit.FitError as exc:
+            raise CorosError(f"Couldn't read the FIT file: {exc}") from None
+
+    def bring_in(self, user_id, limit=FIT_PER_PASS, today=None):
+        """List the last two weeks and add every activity since the switch to his log. Returns how many were added."""
+        cutoff = self.since(user_id)
+        if not cutoff:
             return 0
+        today = today or date.today()
+        self.list_window(user_id, today - timedelta(days=RECENT_DAYS), today)
+        room = min(limit, FIT_PER_DAY - self.used_today(user_id))
         conn = self._conn()
         rows = conn.execute(
-            "SELECT * FROM tr_coros_activities WHERE user_id = ? AND fit_at = '' AND fit_error = '' "
-            "ORDER BY (sport_type IN (100, 101, 102, 103, 104)) DESC, day DESC LIMIT ?", (user_id, room)).fetchall()
-        got = 0
-        for row in rows:
-            stamp = datetime.utcnow().isoformat(timespec="seconds")
+            "SELECT * FROM tr_coros_activities WHERE user_id = ? AND fit_at = '' AND fit_error = '' AND day >= ? "
+            "ORDER BY day", (user_id, cutoff[:10])).fetchall()
+        added = 0
+        for row in rows[:max(0, room)]:
             try:
-                data = self._fit(user_id, row["label_id"], row["sport_type"])
-                key = f"coros/{user_id}/{row['label_id']}.fit"
-                self.blobs.put(key, data)
-                conn.execute("UPDATE tr_coros_activities SET fit_key = ?, fit_bytes = ?, fit_at = ? "
-                             "WHERE user_id = ? AND label_id = ?", (key, len(data), stamp, user_id, row["label_id"]))
-                got += 1
+                run = self._download(user_id, row)
             except CorosError as exc:
                 conn.execute("UPDATE tr_coros_activities SET fit_error = ?, fit_at = ? WHERE user_id = ? AND "
-                             "label_id = ?", (str(exc)[:300], stamp, user_id, row["label_id"]))
-                if "quota" in str(exc).lower() or "limit" in str(exc).lower():
-                    conn.commit()
-                    break
-            conn.commit()
-        return got
+                             "label_id = ?", (str(exc)[:300], datetime.utcnow().isoformat(timespec="seconds"),
+                                              user_id, row["label_id"]))
+                conn.commit()
+                continue
+            if run["start"] and run["start"].replace(tzinfo=None).isoformat() < cutoff:
+                continue  # recorded before the switch: that one came from Strava
+            add_to_log(self.db, user_id, row["label_id"], row["name"], run)
+            added += 1
+        return added
+
+    def test_latest(self, user_id, today=None):
+        """Read his newest COROS run (without adding it) and compare it with the same run from Strava."""
+        today = today or date.today()
+        self.list_window(user_id, today - timedelta(days=RECENT_DAYS), today)
+        row = self._conn().execute(   # a run if COROS's sport codes say so, else his newest activity
+            "SELECT * FROM tr_coros_activities WHERE user_id = ? ORDER BY sport_type BETWEEN 100 AND 199 DESC, "
+            "day DESC, started_at DESC, label_id DESC LIMIT 1", (user_id,)).fetchone()
+        if not row:
+            raise CorosError("No COROS runs in the last two weeks.")
+        result = compare(self.db, user_id, row["label_id"], self._download(user_id, row))
+        self.put(f"test_{user_id}", json.dumps(result))
+        return result
+
+    def last_test(self, user_id):
+        text = self.get(f"test_{user_id}")
+        return json.loads(text) if text else None
 
     def _fit(self, user_id, label_id, sport_type):
         args = {"labelId": label_id, "sportType": sport_type, "limit": 1}
@@ -463,7 +494,7 @@ class Coros:
         row = self.connected(user_id)
         counts = conn.execute(
             "SELECT COUNT(*) AS found, SUM(fit_key != '') AS saved, SUM(fit_error != '') AS failed, "
-            "SUM(sport_type IN (100, 101, 102, 103, 104)) AS runs, MIN(day) AS oldest, MAX(day) AS newest "
+            "SUM(sport_type BETWEEN 100 AND 199) AS runs, MIN(day) AS oldest, MAX(day) AS newest "
             "FROM tr_coros_activities WHERE user_id = ?", (user_id,)).fetchone()
         last_error = conn.execute("SELECT fit_error FROM tr_coros_activities WHERE user_id = ? AND fit_error != '' "
                                   "ORDER BY fit_at DESC LIMIT 1", (user_id,)).fetchone()
@@ -471,21 +502,97 @@ class Coros:
                 "error": (row or {}).get("error", ""), "found": counts["found"] or 0, "saved": counts["saved"] or 0,
                 "failed": counts["failed"] or 0, "runs": counts["runs"] or 0, "oldest": counts["oldest"] or "",
                 "newest": counts["newest"] or "", "used_today": self.used_today(user_id), "per_day": FIT_PER_DAY,
-                "history_done": self.get(f"history_done_{user_id}") == "1",
+                "since": self.since(user_id), "added": self.added(user_id), "test": self.last_test(user_id),
                 "last_error": last_error["fit_error"] if last_error else ""}
+
+    def added(self, user_id):
+        return self.db.connect().execute("SELECT COUNT(*) FROM trainer_imported_workouts WHERE user_id = ? AND "
+                                         "source = 'coros'", (user_id,)).fetchone()[0]
 
     def note_error(self, user_id, message):
         conn = self._conn()
         conn.execute("UPDATE tr_coros_tokens SET error = ? WHERE user_id = ?", (message[:300], user_id))
         conn.commit()
 
-    def sync(self, user_id):
-        """One pass: list new and older activities, then fetch a few FIT files. Errors are kept, not raised."""
+    def sync(self, user_id, force=False):
+        """One pass (at most every PASS_EVERY unless forced): bring in new activities. Errors are kept, not raised."""
         if not self.connected(user_id):
-            return
+            return 0
+        if not force and time.time() - float(self.get(f"pass_at_{user_id}") or 0) < PASS_EVERY:
+            return 0
+        self.put(f"pass_at_{user_id}", time.time())
         try:
-            self.catch_up_list(user_id)
-            self.fetch_fits(user_id)
+            added = self.bring_in(user_id)
             self.note_error(user_id, "")
+            return added
         except CorosError as exc:
             self.note_error(user_id, str(exc))
+            return 0
+
+
+def _local(run):
+    start = run["start"].replace(tzinfo=None) if run["start"] else datetime.utcnow()
+    return start + timedelta(seconds=run["local_offset"] or 0)
+
+
+def add_to_log(db, user_id, label_id, name, run):
+    """A COROS activity in his log (source 'coros'), with its speed analysis for runs."""
+    from . import speed, strava
+
+    kind = FIT_SPORTS.get(run["sport"], "Workout")
+    local = _local(run)
+    part = "Morning" if local.hour < 12 else "Afternoon" if local.hour < 17 else "Evening"
+    title = name or f"{part} {kind if kind in ('Run', 'Ride', 'Walk') else 'Workout'}"
+    moving = run["moving_s"] or run["elapsed_s"]
+    db.add_trainer_imported_workout(
+        source="coros", external_id=str(label_id), activity_type=kind,
+        workout_category=strava.classify_strava_workout(kind, title), title=title,
+        started_at=local.date().isoformat(), distance_meters=run["distance_m"], moving_time_seconds=moving,
+        elapsed_time_seconds=run["elapsed_s"], elevation_gain_meters=run["ascent_m"],
+        average_speed_mps=(run["distance_m"] / moving) if run["distance_m"] and moving else None,
+        average_heartrate=run["avg_hr"], max_heartrate=run["max_hr"], raw={"coros_label_id": str(label_id)},
+        user_id=user_id)
+    sync = strava.Sync(db)
+    sync._conn().execute("UPDATE trainer_imported_workouts SET started_at_local = ? WHERE source = 'coros' AND "
+                         "external_id = ? AND user_id = ?", (local.isoformat(timespec="seconds"), str(label_id), user_id))
+    db._commit()
+    if kind == "Run" and run["records"]:
+        speed._keep(db, user_id, str(label_id), local.date().isoformat(), fit.streams(run),
+                    speed.easy_speed(db, user_id))
+
+
+def compare(db, user_id, label_id, run):
+    """His newest COROS run next to the same run from Strava (same start within 10 minutes)."""
+    from . import speed
+
+    speed.ensure(db)
+    local = _local(run)
+    coros_side = speed.summarize(speed.unpack(speed.pack(fit.streams(run))))
+    out = {"label_id": str(label_id), "when": local.strftime("%a %b %d, %H:%M"), "rows": []}
+    strava_row = db.connect().execute(
+        "SELECT w.external_id, w.distance_meters, w.moving_time_seconds, w.average_heartrate, w.max_heartrate, "
+        "s.series FROM trainer_imported_workouts w LEFT JOIN tr_run_speed s ON s.user_id = w.user_id AND "
+        "s.external_id = w.external_id WHERE w.user_id = ? AND w.source = 'strava' AND "
+        "abs(strftime('%s', w.started_at_local) - strftime('%s', ?)) < 600", (user_id, local.isoformat())).fetchone()
+    strava_side = speed.summarize(speed.unpack(strava_row["series"])) if strava_row and strava_row["series"] else {}
+
+    def efforts(side):
+        return speed.summary(json.loads(side.get("efforts_json") or "[]")) if side else ""
+
+    def miles(m):
+        return f"{m / speed.METERS_PER_MILE:.2f} mi" if m else "–"
+
+    out["strava_id"] = strava_row["external_id"] if strava_row else ""
+    out["rows"] = [
+        ("Distance", miles(run["distance_m"]), miles(strava_row["distance_meters"]) if strava_row else "–"),
+        ("Moving time", speed.clock(run["moving_s"] or run["elapsed_s"] or 0),
+         speed.clock(strava_row["moving_time_seconds"] or 0) if strava_row else "–"),
+        ("Heart rate", f"{run['avg_hr'] or '–'} avg · {run['max_hr'] or '–'} max",
+         f"{round(strava_row['average_heartrate'] or 0) or '–'} avg · {round(strava_row['max_heartrate'] or 0) or '–'} max"
+         if strava_row else "–"),
+        ("Samples", f"{len(run['records']):,}", "kept" if strava_side else "–"),
+        ("What was fast", efforts(coros_side) or "nothing", efforts(strava_side) or ("nothing" if strava_side else "–")),
+        ("Top speed (best 5 s)", speed.pace(coros_side.get("best5_mps")) + "/mi" if coros_side.get("best5_mps") else "–",
+         speed.pace(strava_side.get("best5_mps")) + "/mi" if strava_side.get("best5_mps") else "–"),
+    ]
+    return out

@@ -121,6 +121,11 @@ def catch_up(limit=5):
             s.process(limit)
     except Exception as exc:
         print(f"Warning: Strava catch-up failed: {exc!r}")
+    try:   # COROS has no push: new activities are fetched when Trainer or Today opens (at most every 10 minutes)
+        if get_current_user_id():
+            coros_client().sync(get_current_user_id())
+    except Exception as exc:
+        print(f"Warning: COROS catch-up failed: {exc!r}")
 
 
 def render(name, **context):
@@ -915,14 +920,24 @@ def coros_callback(code: str = "", state: str = "", error: str = "", error_descr
         client.finish(get_current_user_id(), state, code)
     except coros.CorosError as exc:
         return back(BASE + "/log?problem=" + str(exc)[:200].replace("&", " ") + "#coros")
-    client.sync(get_current_user_id())
+    client.sync(get_current_user_id(), force=True)
     return back(BASE + "/log#coros")
 
 
 @router.post(BASE + "/coros/sync")
 def coros_sync_now():
-    coros_client().sync(get_current_user_id())
+    coros_client().sync(get_current_user_id(), force=True)
     return back(BASE + "/log#coros")
+
+
+@router.post(BASE + "/coros/test")
+def coros_test():
+    """Read his newest COROS run (not added to the log) and compare it with the same run from Strava."""
+    try:
+        coros_client().test_latest(get_current_user_id())
+    except coros.CorosError as exc:
+        return back(BASE + "/log?problem=" + str(exc)[:200].replace("&", " ") + "#coros")
+    return back(BASE + "/log#coros-test")
 
 
 @router.post(BASE + "/coros/disconnect")

@@ -1,7 +1,7 @@
 # COROS: Dieter's own copy of every run
 
 Curtis runs with a COROS watch. Strava's API terms only let Dieter show his Strava data to him and bar using it for
-machine learning, so Trainer should read runs from COROS directly and keep its own record.
+machine learning, so new runs should come from COROS directly. His history stays as Strava brought it in.
 
 ## How Dieter gets the data
 
@@ -21,18 +21,22 @@ The larger COROS Partner API (webhooks, multi-user) needs an application and isn
 
 ## Steps
 
-1. **Connect and collect** (done, apps/trainer/coros.py): Connect COROS on the Log page; activities are listed into
-   `tr_coros_activities`; FIT files are saved like Media's files (a local folder plus Cloud Storage under
-   `coros/<user>/<labelId>.fit`). "Fetch more now" runs a pass; each pass fetches up to 8 files.
-2. **Read the FIT files into Trainer**: parse each FIT file (time, distance, speed, heart rate, cadence, GPS) into
-   the same per-second series the speed analysis already uses, match each COROS run to the run in Dieter's log
-   (same start within a couple of minutes), and prefer COROS's series. Runs that only exist in COROS join the log.
-3. **COROS first**: fetch new runs automatically (a pass when Trainer or Today opens), so Strava becomes optional.
-   The share card, landing page and any write-up can then use COROS data; the capstone's data rules are revisited.
-4. Later, if useful: COROS's own numbers (threshold pace, training load, sleep, HRV) for comparison.
+1. **Switch new activities to COROS** (apps/trainer/coros.py, fit.py). Strava already brought in his history, so
+   nothing old is fetched. From the moment he connects COROS (Trainer → Log), each pass lists the last two weeks and
+   every activity that started after the switch is fetched as a FIT file, read, and added to his log
+   (source `coros`) with its speed analysis, exactly like a Strava run. Strava stops adding new activities
+   (`strava.Sync.handle`); changes to activities it brought in before still arrive. COROS has no push, so a pass runs
+   when Trainer or Today opens (at most every 10 minutes) or with "Check now". Disconnecting hands new activities
+   back to Strava. FIT files are kept like Media's files (`coros/<user>/<labelId>.fit`).
+2. **Test with my latest run**: reads his newest COROS run without adding it and shows it next to the same run from
+   Strava (distance, time, heart rate, what was fast, top speed), to check the two agree before relying on COROS.
+3. Later, if useful: COROS's own numbers (threshold pace, training load, sleep, HRV) for comparison, and the
+   capstone's data rules revisited for COROS-sourced runs.
 
 ## Open questions
 
 - What `querySportRecords` returns exactly (field names, time zone of start times): step 1 stores the raw record
   so step 2 can read it properly once real answers are in.
-- Whether COROS's 50-a-day limit counts per app or per person across apps (it says per platform user).
+- Whether COROS's 50-a-day limit counts per app or per person across apps (it says per platform user); a few new
+  activities a day is far below it either way.
+- COROS's sport codes in activity lists (the FIT file's own sport decides Run / Ride / ... in the log).

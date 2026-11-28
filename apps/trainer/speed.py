@@ -839,7 +839,7 @@ def titles(db, user_id, ids):
         return {}
     rows = db.connect().execute(
         f"SELECT external_id, title, distance_meters FROM trainer_imported_workouts WHERE user_id = ? AND "
-        f"source = 'strava' AND external_id IN ({', '.join('?' * len(ids))})", [user_id, *ids]).fetchall()
+        f"source IN ('strava', 'coros') AND external_id IN ({', '.join('?' * len(ids))})", [user_id, *ids]).fetchall()
     return {r["external_id"]: (r["title"] or "Run", round((r["distance_meters"] or 0) / METERS_PER_MILE, 1))
             for r in rows}
 
@@ -852,7 +852,7 @@ def recent(db, user_id, limit=10, fast_only=False, races=None):
     rows = db.connect().execute(
         f"""SELECT s.external_id, s.day, s.efforts_json, s.hist_json, w.title, w.distance_meters
             FROM tr_run_speed s LEFT JOIN trainer_imported_workouts w
-              ON w.user_id = s.user_id AND w.external_id = s.external_id AND w.source = 'strava'
+              ON w.user_id = s.user_id AND w.external_id = s.external_id AND w.source IN ('strava', 'coros')
             WHERE s.user_id = ? {"AND s.efforts_json NOT IN ('[]', '')" if fast_only else ""}
             ORDER BY s.day DESC LIMIT ?""", (user_id, limit)).fetchall()
     return [{"id": r["external_id"], "day": r["day"], "title": r["title"] or "Run",

@@ -5767,7 +5767,7 @@ def trainer_run_page_target(page_url):
     match = re.match(r"^/apps/trainer/run/(\d+)", urlsplit(page_url or "").path)
     if not match:
         return None
-    row = db.connect().execute("SELECT id FROM trainer_imported_workouts WHERE source = 'strava' AND external_id = ? "
+    row = db.connect().execute("SELECT id FROM trainer_imported_workouts WHERE source IN ('strava', 'coros') AND external_id = ? "
                                "AND user_id = ?", (match.group(1), get_current_user_id())).fetchone()
     return row["id"] if row else None
 

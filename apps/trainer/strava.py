@@ -289,6 +289,8 @@ class Sync:
                 "AND user_id = ?", (datetime.utcnow().isoformat(timespec="seconds"), event["object_id"], user))
             self.db._commit()
             return "marked deleted"
+        if self._coros_took_over(user, event["object_id"]):
+            return "skipped: new activities come from COROS"
         detail = self.call(f"{API}/activities/{event['object_id']}?include_all_efforts=false", token=self._token(user))
         self._store(user, detail, detail)
         if classify_strava_workout(detail.get("sport_type") or detail.get("type"), detail.get("name")).startswith("run"):
@@ -298,6 +300,17 @@ class Sync:
             except StravaError as exc:
                 print(f"Warning: couldn't read speed for run {event['object_id']}: {exc}")
         return "stored"
+
+    def _coros_took_over(self, user_id, activity_id):
+        """True when COROS is connected for him (coros.py brings in new activities then) and this activity isn't in
+        his log already (changes to activities Strava brought in before still arrive)."""
+        conn = self._conn()
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tr_coros_tokens'").fetchone():
+            return False
+        if not conn.execute("SELECT 1 FROM tr_coros_tokens WHERE user_id = ?", (user_id,)).fetchone():
+            return False
+        return not conn.execute("SELECT 1 FROM trainer_imported_workouts WHERE source = 'strava' AND external_id = ? "
+                                "AND user_id = ?", (str(activity_id), user_id)).fetchone()
 
     def process(self, limit=10):
         """Handle waiting events, oldest first. Returns how many were handled."""
