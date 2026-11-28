@@ -43,7 +43,13 @@
       <ul class="steps">
         {% for s in w.sets %}<li><span>{{ s.text }}</span>{% if show_paces and s.target %}<br><strong class="num">{{ s.target }}</strong>{% endif %}{% if s.was and (not show_paces is defined or show_paces) %}<br><span class="small muted">was {{ s.was }}</span>{% endif %}{% if s.basis and s.target and (not show_paces is defined or show_paces) %}<br><span class="small muted">{{ s.basis }}</span>{% endif %}</li>{% endfor %}
       </ul>
-      {% if w.fit and w.fit.load is not none and (not show_paces is defined or show_paces) %}<p class="small"><strong>Speed load: about {{ w.fit.load }}</strong>{% if w.fit.adjusted and w.fit.load_before != w.fit.load %} (was {{ w.fit.load_before }}){% endif %}{% if w.fit.near %} · near-sprint {{ w.fit.near }} m{% endif %}{% if w.fit.week and w.status == "sent" %} · this week {{ w.fit.week.so_far }} → {{ w.fit.week.after }} of {{ w.fit.week.limit }} safe{% if w.fit.week.over %} {{ ui.tag("Over", "warn") }}{% endif %}{% endif %}</p>{% endif %}
+      {% if w.fit and w.fit.load is not none and (not show_paces is defined or show_paces) %}
+      <div class="workout-load stack">
+        {% if w.fit.week and w.status == "sent" %}<p class="small">This week's speed limit: <strong>{{ w.fit.week.limit }}</strong> <span class="muted">(so far {{ w.fit.week.so_far }})</span></p>{% endif %}
+        <p class="small">This workout: <strong>{{ w.fit.load }}</strong> speed load{% if w.fit.adjusted and w.fit.load_before != w.fit.load %} <span class="muted">(eased from {{ w.fit.load_before }})</span>{% endif %}{% if w.fit.week and w.status == "sent" %} · puts your week at <strong>{{ w.fit.week.after }}</strong> {{ ui.tag("Too high", "warn") if w.fit.week.over else ui.tag("OK", "ok") }}{% endif %}</p>
+        {% if w.fit.near %}<p class="small">Near-sprint: <strong>{{ w.fit.near }} m</strong>{% if w.fit.week and w.fit.week.near_limit and w.status == "sent" %} · this week's limit {{ w.fit.week.near_limit }} m · puts your week at <strong>{{ w.fit.week.near_after }} m</strong> {{ ui.tag("Too high", "warn") if w.fit.week.near_over else ui.tag("OK", "ok") }}{% endif %}</p>{% endif %}
+      </div>
+      {% endif %}
       {% if w.fit and w.fit.adjusted and w.status == "sent" %}{% call ui.banner("warn" if w.fit.flag else "info") %}{{ w.fit.note }}{% endcall %}{% elif w.adjusted %}<p class="small muted">Eased to fit your weekly limits when it went on the plan.</p>{% endif %}
       {% if w.changes %}<p class="small"><strong>{{ w.changes }}</strong></p>{% endif %}
       {% if w.notes %}<p class="small muted">Your notes: {{ w.notes }}</p>{% endif %}
