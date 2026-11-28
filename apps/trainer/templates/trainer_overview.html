@@ -206,7 +206,7 @@
     {% endif %}
     {% set bars = [] %}{% for w in sp.weeks %}{% set _ = bars.append({"label": w.label, "value": w.speed_work or 0, "current": loop.last, "limit": w.work_line}) %}{% endfor %}
     {{ ui.bar_chart(bars, sp.work_max, unit=" points", label="Speed load per week, last 16 weeks") }}
-    <p class="small muted">Speed load per week. The dashed mark over each week is its safe limit (1.5 × speed fitness); bars past it are marked.</p>
+    <p class="small muted">Speed load per week. The dashed mark over each week is its safe limit (1.9 × speed fitness); bars past it are marked.</p>
     {% set tbars = [] %}{% for w in sp.weeks %}{% set _ = tbars.append({"label": w.label, "value": w.near_top, "current": loop.last, "limit": w.top_line}) %}{% endfor %}
     {{ ui.bar_chart(tbars, sp.top_max, unit=" m", label="Near-sprint running per week, last 16 weeks") }}
     <p class="small muted">Near-sprint running per week (metres), with its safe limit.</p>
