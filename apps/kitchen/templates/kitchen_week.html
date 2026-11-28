@@ -27,14 +27,12 @@
             <span class="label-stack">
               {% if item.url %}<a class="title" href="{{ item.url }}">{{ item.title }}</a>{% else %}<span class="title">{{ item.title }}</span>{% endif %}
             </span>
-            {% if not is_guest %}
             <div class="row">
               <form method="post" action="/apps/recipes/meal-plan/{{ item.id }}/cooked">
                 <button type="submit" class="pill-button">Cooked</button>
               </form>
               {{ ui.remove_button("/apps/recipes/meal-plan/" ~ item.id ~ "/remove", "Take " ~ item.title ~ " off the plan") }}
             </div>
-            {% endif %}
           </div>
           {% else %}
           {% if not thanksgiving %}<p class="empty">Nothing planned yet. <a href="/apps/recipes/library">Pick some dinners</a>.</p>{% endif %}
@@ -53,7 +51,7 @@
             <a class="title grow" href="{{ meal.url }}">{{ meal.title }}</a>
             {% if meal.id in planned_ids %}
             <span class="tag accent">On the plan</span>
-            {% elif not is_guest %}
+            {% else %}
             <form method="post" action="/apps/recipes/meal-plan/meals/{{ meal.id }}/add">
               <button type="submit" class="pill-button" aria-label="Add {{ meal.title }} to the plan">+ Plan</button>
             </form>

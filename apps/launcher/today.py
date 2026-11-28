@@ -66,7 +66,7 @@ def short_date(value):
 
 
 def render(*, user_name, now, thanksgiving=None, planned_meals=(), shopping=None, todos=(), focus=None,
-           last_workout=None, playlist_drafts=0, is_guest=False, report_url=None, studio=None, logbook=None,
+           last_workout=None, playlist_drafts=0, report_url=None, studio=None, logbook=None,
            media=None, training=None):
     workout = None
     if last_workout:
@@ -84,7 +84,6 @@ def render(*, user_name, now, thanksgiving=None, planned_meals=(), shopping=None
         "focus": focus,
         "workout": workout,
         "playlist_drafts": playlist_drafts,
-        "is_guest": is_guest,
         "report_url": report_url,
         # Studio reports (admin only): shown while any fix waits to be checked or any report is open.
         "studio": studio if studio and (studio.get("to_check") or studio.get("open")) else None,

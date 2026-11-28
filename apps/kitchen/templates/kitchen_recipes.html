@@ -23,7 +23,6 @@
       {% for meal in meals %}
       <div class="link-row" id="recipe-{{ meal.id }}" data-search="{{ meal.search }}">
         <a class="title grow" href="{{ meal.url }}">{{ meal.title }}</a>
-        {% if not is_guest %}
           {% if meal.id in planned_ids %}
           <span class="tag accent">On the plan</span>
           {% else %}
@@ -32,7 +31,6 @@
             <button type="submit" class="pill-button" aria-label="Add {{ meal.title }} to the plan">+ Plan</button>
           </form>
           {% endif %}
-        {% endif %}
       </div>
       {% else %}
       <p class="empty">No recipes yet. <a href="/apps/recipes/import">Add some from photos</a>.</p>

@@ -4,7 +4,7 @@ Today: a guest account ("Open Demo as Guest" on the sign-in page, a demo landing
 `scripts/seed_demo_data.py`), threaded through about a dozen files. A guest signs in to a read-only copy of
 household data. Curtis wants it gone for now.
 
-## Step 1: remove guest mode (after Thanksgiving)
+## Step 1: remove guest mode (after Thanksgiving) - done Nov 28, 2026
 
 - Remove the guest sign-in button, the demo landing page, the Guest Mode banner and the `guest` role checks; the
   sign-in page offers only real sign-in.

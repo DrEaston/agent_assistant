@@ -52,8 +52,8 @@ the local worker to route approved runs to those repos.
 The public guest profile at `https://dieter.ai` does not require personal data
 or external-service credentials.
 
-For local review, demo mode creates a separate `demo.db` with invented data and
-a demo user. The seeded demo highlights Kitchen/Recipes with Overnight Cinnamon
+For local review, a separate `demo.db` holds invented data and a demo member
+account. The seeded demo highlights Kitchen/Recipes with Overnight Cinnamon
 Rolls and other sample meals, plus Scheduler, Studio, and Trainer data.
 
 ```powershell
@@ -61,7 +61,6 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe scripts\seed_demo_data.py --force
 $env:DB_PATH="demo.db"
-$env:DEMO_MODE="1"
 .\.venv\Scripts\python.exe -m uvicorn api:app --reload
 ```
 
@@ -83,10 +82,7 @@ Open:
 http://localhost:8000
 ```
 
-In demo mode, `/` shows the public Dieter landing page. Use **Open Guest Demo**
-for read-only access, or **Member Login** for a real account.
-
-Local seeded demo login:
+Sign in with the seeded demo account:
 
 ```text
 demo@example.com
@@ -96,8 +92,6 @@ demo-password
 AI actions, Spotify, Strava, and Cloud Run persistence are optional. Without
 their credentials, the core app still loads and the integration-specific actions
 remain unavailable or unconfigured.
-When `DEMO_MODE=1` is set, the app labels itself as a read-only public preview
-and refuses Codex worker polling even if a token is accidentally configured.
 
 For review, Kitchen/Recipes and Scheduler are the strongest product surfaces.
 Trainer shows the next important product direction. Music/Spotify is included

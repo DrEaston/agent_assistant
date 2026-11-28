@@ -108,7 +108,7 @@ def steps(instructions_text):
     return out
 
 
-def recipe_page(*, meal, sections, plan_item=None, cooked=False, is_guest=False, history=(), pending_cards=(),
+def recipe_page(*, meal, sections, plan_item=None, cooked=False, history=(), pending_cards=(),
                 restored=False):
     """sections: [(heading or None, [ingredient lines])]."""
     groups, pantry, has_servings = [], [], False
@@ -129,7 +129,6 @@ def recipe_page(*, meal, sections, plan_item=None, cooked=False, is_guest=False,
         steps=step_list,
         plan_item=plan_item,
         cooked=cooked,
-        is_guest=is_guest,
         history=list(history),
         pending_cards=list(pending_cards),
         restored=restored,
@@ -138,14 +137,14 @@ def recipe_page(*, meal, sections, plan_item=None, cooked=False, is_guest=False,
     )
 
 
-def week_page(*, planned, shopping, recent, thanksgiving=None, is_guest=False, added=False):
+def week_page(*, planned, shopping, recent, thanksgiving=None, added=False):
     planned_ids = {item.get("source_id") for item in planned if item.get("source_id")}
     return render("kitchen_week.html", planned=planned, shopping=shopping, recent=recent, planned_ids=planned_ids,
-                  thanksgiving=thanksgiving, is_guest=is_guest, added=added,
+                  thanksgiving=thanksgiving, added=added,
                   page_url="/apps/recipes", current="/apps/recipes")
 
 
-def library_page(*, meals, planned_ids=(), is_guest=False):
+def library_page(*, meals, planned_ids=()):
     rows = library_rows(meals)
     return render("kitchen_recipes.html", meals=rows, chips=chips_for(rows), planned_ids=set(planned_ids),
-                  is_guest=is_guest, page_url="/apps/recipes/library", current="/apps/recipes/library")
+                  page_url="/apps/recipes/library", current="/apps/recipes/library")
