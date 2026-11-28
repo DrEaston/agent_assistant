@@ -649,8 +649,6 @@ a.link-row:hover { background: var(--hover); }
   font-weight: 700; }
 .landing .landing-cta:hover { background: #ffffff; border-color: #ffffff; }
 .landing-note { margin: 0; color: var(--muted); font-size: var(--text-sm); }
-.landing-sample .share-card { box-shadow: 0 0 0 1px var(--line), 0 24px 60px rgba(236, 0, 140, .12); }
-.landing-caption { margin: var(--s3) 0 0; color: var(--muted); font-size: var(--text-sm); text-align: center; }
 .landing-features h2 { margin: 0 0 var(--s4); font-size: 1.4rem; }
 .landing-features ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s4); }
 .landing-features li { display: flex; flex-direction: column; gap: .25rem; padding-left: var(--s4);

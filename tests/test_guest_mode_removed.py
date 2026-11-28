@@ -72,8 +72,7 @@ class GuestModeRemovedTests(unittest.TestCase):
         self.assertIn("Dieter Trainer", page.text)
         self.assertIn('href="/login?next=/apps/trainer"', page.text)
         self.assertIn("New sign-ups aren't open right now.", page.text)
-        self.assertIn('class="share-card"', page.text)          # the example run, drawn with the real card
-        self.assertIn("route-heat heat-7", page.text)
+        self.assertNotIn('class="share-card"', page.text)       # no one's runs on a public page (Strava's terms)
         self.assertNotIn("Report a problem", page.text)
 
     def test_sign_ups_are_closed(self):

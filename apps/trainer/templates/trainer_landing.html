@@ -1,7 +1,6 @@
 {% extends "layout.html" %}
-{% import "trainer_share_card.html" as share %}
 {#- askdieter.ai/trainer: the public landing page for Dieter Trainer (also where askdieter.ai sends people who
-    aren't signed in). The example card is a made-up run (apps/trainer/landing.py). -#}
+    aren't signed in). No run data here: Strava's terms only let Dieter show a person's runs to that person. -#}
 {% block title %}Dieter Trainer{% endblock %}
 {% block dock %}{% endblock %}
 {% block report %}{% endblock %}
@@ -20,11 +19,6 @@
       <p class="landing-note">New sign-ups aren't open right now.</p>
       {% endif %}
     </div>
-  </section>
-
-  <section class="landing-sample" aria-label="An example run">
-    {{ share.card(sample, sample_week, "An example run in Dieter Trainer") }}
-    <p class="landing-caption">An example run (made up). Every run gets this card, ready to post on Strava.</p>
   </section>
 
   <section class="landing-features">

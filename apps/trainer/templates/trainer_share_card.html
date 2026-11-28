@@ -1,5 +1,5 @@
-{#- One run as a dark card: the screenshot view (trainer_share.html) and the example on askdieter.ai/trainer
-    (trainer_landing.html). r = runpage.detail(); week = speed.weekly() for its week. -#}
+{#- One run as a dark card, for the screenshot view (trainer_share.html). r = runpage.detail(); week = speed.weekly()
+    for its week. -#}
 {% import "components.html" as ui %}
 {% macro card(r, week, label="") -%}
 <article class="share-card" aria-label="{{ label or r.title }}">
