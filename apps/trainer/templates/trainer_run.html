@@ -37,8 +37,9 @@
     {% if r.map %}
     <figure class="card explore-map" aria-label="Route">
       <svg viewBox="0 0 {{ r.map.w }} {{ r.map.h }}" role="img" aria-label="Route of the run; the dot shows where you were">
+        {# faster colours drawn last, so they sit on top of slower running over the same ground #}
         {% if r.map.heat %}<polyline class="route-casing" points="{{ r.map.path }}"></polyline>
-        {% for seg in r.map.heat %}<polyline class="route-heat heat-{{ seg.step }}" points="{{ seg.points }}"></polyline>{% endfor %}
+        {% for seg in r.map.heat|sort(attribute="step") %}<polyline class="route-heat heat-{{ seg.step }}" points="{{ seg.points }}"></polyline>{% endfor %}
         {% else %}<polyline class="route-path" points="{{ r.map.path }}"></polyline>
         {% for f in r.map.fast %}<polyline class="route-fast" points="{{ f }}"></polyline>{% endfor %}{% endif %}
         <polyline class="route-window" id="ex-window" points=""></polyline>
