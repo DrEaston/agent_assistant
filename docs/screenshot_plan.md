@@ -7,11 +7,10 @@ Use the local demo database and capture these screenshots on desktop.
 ```powershell
 python scripts\seed_demo_data.py --force --source-db projects.db
 $env:DB_PATH="demo.db"
-$env:DEMO_MODE="1"
 python -m uvicorn api:app --reload
 ```
 
-Open `http://localhost:8000/login`, then use guest mode.
+Open `http://localhost:8000/login` and sign in as `demo@example.com` / `demo-password`.
 
 ## Capture List
 

@@ -76,12 +76,10 @@
               <span class="title">{{ item.title }}</span>
               {% if item.when %}<span class="small muted">{{ item.when }}</span>{% endif %}
             </span>
-            {% if not is_guest %}
             <form method="post" action="/scheduler/{{ item.id }}/complete">
               <input type="hidden" name="next" value="/">
               <button type="submit" class="pill-button" aria-label="Mark {{ item.title }} done">Done</button>
             </form>
-            {% endif %}
           </div>
           {% endfor %}
           {% if focus %}

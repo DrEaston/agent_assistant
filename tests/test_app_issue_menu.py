@@ -151,8 +151,8 @@ class AppIssueMenuTests(unittest.TestCase):
         self.assertIn({"href": "#cct-questions", "text": "Questions", "in_app_menu": True}, menu_links)
         self.assertIn({"href": "#cct-page-agent", "text": "How Built", "in_app_menu": True}, menu_links)
 
-    def test_assistant_hamburgers_link_to_issue_form_for_admin_and_guest(self):
-        for role in ("admin", "guest"):
+    def test_assistant_hamburgers_link_to_issue_form_for_admin(self):
+        for role in ("admin",):
             for path, expected_area in (
                 ("/apps/assistant/planner", "Assistant%20/%20Planner"),
                 ("/apps/assistant/scheduler", "Assistant%20/%20Planner"),
@@ -218,15 +218,6 @@ class AppIssueMenuTests(unittest.TestCase):
         self.assertIn('class="studio-home-bubble" href="/apps/issues">Studio</a>', self.render_path("/"))
         self.assertNotIn('class="studio-home-bubble" href="/apps/issues">Studio</a>', self.render_path("/apps/recipes", recipe_app=SimpleNamespace(import_url=None)))
         self.assertNotIn('class="studio-home-bubble" href="/apps/issues">Studio</a>', self.render_path("/apps/trainer", trainer_mode="athlete"))
-
-    def test_guest_app_hamburger_links_to_demo_issues_form(self):
-        html = self.render_path(
-            "/apps/recipes",
-            user_role="guest",
-            recipe_app=SimpleNamespace(import_url=None),
-        )
-
-        self.assert_issue_menu_link(html, "/apps/issues/new?area=Kitchen%20/%20Recipes")
 
     def test_members_page_uses_launcher_shell_menu(self):
         html = self.render_path("/admin/members")

@@ -81,20 +81,6 @@
             color: #fff;
         }
 
-        .demo-mode-banner {
-            background: #fef3c7;
-            border-bottom: 1px solid #f59e0b;
-            color: #78350f;
-            font-size: 0.95rem;
-            font-weight: 700;
-            padding: 0.65rem 1.25rem;
-            text-align: center;
-        }
-
-        .demo-mode-banner span {
-            font-weight: 500;
-        }
-
         .recipe-shell-page nav button[data-recipe-chat-open] {
             background: #3b0764;
             border-color: #7c3aed;
@@ -2916,24 +2902,6 @@
         .launcher-app-grid .app-launch-card {
             min-height: 11rem;
             padding: 1.25rem;
-        }
-
-        .demo-landing-hero {
-            display: grid;
-            gap: 0.8rem;
-            max-width: 48rem;
-        }
-
-        .demo-landing-actions {
-            display: flex;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 0.75rem;
-            margin-top: 0.4rem;
-        }
-
-        .demo-landing-actions form {
-            margin: 0;
         }
 
         .planner-launch-card {
@@ -8133,7 +8101,7 @@
         </summary>
         <div class="app-nav" aria-label="{{ nav_label }}">
             {{ caller() }}
-            {% if show_issue_item and request is defined and request.state.current_user and request.state.current_user.role in ["admin", "guest"] %}
+            {% if show_issue_item and request is defined and request.state.current_user and request.state.current_user.role == "admin" %}
                 {{ app_issue_menu_item(issue_area) }}
             {% endif %}
         </div>
@@ -8149,17 +8117,9 @@
 {% set show_auth_shell = request is defined and (request.url.path.startswith("/login") or request.url.path.startswith("/register")) %}
 {% set show_global_nav = not app_shell and not show_auth_shell %}
 {% set show_dieter_chat = request is defined and not show_auth_shell %}
-{% set is_guest_session = request is defined and request.state.current_user and request.state.current_user.role == "guest" %}
-{% set show_guest_home_chat = is_guest_session and show_launcher_shell %}
 {% set page_theme = app_shell.theme if app_shell else none %}
-<body class="{% if page_theme %}app-themed-page{% endif %}{% if app_shell and app_shell.body_class %} {{ app_shell.body_class }}{% endif %}"{% if page_theme %} style="--page-theme-header: {{ page_theme.header }}; --page-theme-color: {{ page_theme.color }}; --page-theme-border: {{ page_theme.border }}; --page-theme-panel: {{ page_theme.panel }}; --page-theme-panel-strong: {{ page_theme.panel_strong }}; --page-theme-text: {{ page_theme.text }}; --page-theme-hover: {{ page_theme.hover }}; --page-theme-subtitle: {{ page_theme.subtitle }};"{% endif %}{% if is_guest_session %} data-guest-session="true"{% endif %}{% if show_guest_home_chat %} data-open-guest-chat="true"{% endif %}>
+<body class="{% if page_theme %}app-themed-page{% endif %}{% if app_shell and app_shell.body_class %} {{ app_shell.body_class }}{% endif %}"{% if page_theme %} style="--page-theme-header: {{ page_theme.header }}; --page-theme-color: {{ page_theme.color }}; --page-theme-border: {{ page_theme.border }}; --page-theme-panel: {{ page_theme.panel }}; --page-theme-panel-strong: {{ page_theme.panel_strong }}; --page-theme-text: {{ page_theme.text }}; --page-theme-hover: {{ page_theme.hover }}; --page-theme-subtitle: {{ page_theme.subtitle }};"{% endif %}>
 {% if preview_label %}<p role="status" style="margin:0;padding:.6rem 1rem;background:#fef3c7;color:#78350f;font-weight:600;text-align:center;">Preview of {{ preview_label }}. This is a copy; nothing you do here reaches the live site.</p>{% endif %}
-    {% if is_guest_session %}
-        <div class="demo-mode-banner">
-            Guest Mode
-            <span>Read-only public preview. External integrations and Codex worker execution are disabled.</span>
-        </div>
-    {% endif %}
     {% if show_global_nav %}
         <nav>
             <a href="/" style="font-size: 1.2rem; font-weight: bold;">Dieter</a>
@@ -8272,7 +8232,6 @@
                                 {% endif %}
                             </div>
                             <div class="scheduler-item-actions">
-                                {% if not is_guest_session %}
                                     {% if item.notes and scheduler_notes_need_checklist(item.notes) %}
                                         <form method="post" action="/scheduler/{{ item.id }}/notes/make-checklist" class="inline-form">
                                             <input type="hidden" name="next" value="{{ request.url.path }}">
@@ -8283,14 +8242,11 @@
                                         <input type="hidden" name="next" value="{{ request.url.path }}">
                                         <button type="submit" class="secondary compact">Done</button>
                                     </form>
-                                {% endif %}
                                 <button type="button" class="secondary compact" data-scheduler-due-close>Close</button>
-                                {% if not is_guest_session %}
                                     <form method="post" action="/scheduler/{{ item.id }}/delete" class="inline-form">
                                         <input type="hidden" name="next" value="{{ request.url.path }}">
                                         <button type="submit" class="secondary compact danger-button">Delete</button>
                                     </form>
-                                {% endif %}
                             </div>
                         </article>
                     {% endfor %}
@@ -8354,16 +8310,13 @@
                                     </ul>
                                 {% endif %}
                             </div>
-                            {% if not is_guest_session %}
                                 <form method="post" action="/scheduler/{{ item.id }}/notes/add" class="scheduler-quick-add">
                                     <input type="hidden" name="next" value="{{ request.url.path }}">
                                     <label class="sr-only" for="scheduler-upcoming-add-{{ item.id }}">Add item to {{ item.title }}</label>
                                     <input type="text" id="scheduler-upcoming-add-{{ item.id }}" name="note_text" placeholder="Add item" autocomplete="off" required>
                                     <button type="submit" class="compact">Add</button>
                                 </form>
-                            {% endif %}
                             <div class="scheduler-item-actions">
-                                {% if not is_guest_session %}
                                     {% if item.notes and scheduler_notes_need_checklist(item.notes) %}
                                         <form method="post" action="/scheduler/{{ item.id }}/notes/make-checklist" class="inline-form">
                                             <input type="hidden" name="next" value="{{ request.url.path }}">
@@ -8374,14 +8327,11 @@
                                         <input type="hidden" name="next" value="{{ request.url.path }}">
                                         <button type="submit" class="secondary compact">Done</button>
                                     </form>
-                                {% endif %}
                                 <button type="button" class="secondary compact" data-scheduler-upcoming-close>Close</button>
-                                {% if not is_guest_session %}
                                     <form method="post" action="/scheduler/{{ item.id }}/delete" class="inline-form">
                                         <input type="hidden" name="next" value="{{ request.url.path }}">
                                         <button type="submit" class="secondary compact danger-button">Delete</button>
                                     </form>
-                                {% endif %}
                             </div>
                         </article>
                     {% endfor %}
@@ -8409,12 +8359,12 @@
                 <div class="recipe-chat-header">
                     <div>
                         <strong>Ask Dieter</strong>
-                        <small>{% if is_guest_session %}Ask read-only questions about the app and repository.{% else %}Ask a question, plan your work, or draft a recipe change.{% endif %}</small>
+                        <small>Ask a question, plan your work, or draft a recipe change.</small>
                     </div>
                     <button type="button" class="recipe-chat-close" data-recipe-chat-close aria-label="Close recipe chat">Close</button>
                 </div>
                 <div class="recipe-chat-messages" data-recipe-chat-messages>
-                    <div class="recipe-chat-message agent" data-recipe-chat-welcome>{% if is_guest_session %}Dieter is a personal assistant demo with Kitchen, Scheduler, Trainer, Music, and Studio. Studio turns app feedback into plans, Codex runs, and test loops. Ask about the app structure or demo flow.{% else %}Tell me what you want to plan, cook, or change.{% endif %}</div>
+                    <div class="recipe-chat-message agent" data-recipe-chat-welcome>Tell me what you want to plan, cook, or change.</div>
                 </div>
                 <form class="recipe-chat-form" data-recipe-chat-form>
                     <section class="recipe-chat-plan-review" data-recipe-chat-plan-review hidden>
@@ -8431,7 +8381,7 @@
                         </details>
                         <textarea class="recipe-chat-plan-draft" data-recipe-chat-plan-draft aria-label="Editable Dieter action plan"></textarea>
                     </section>
-                    <textarea data-recipe-chat-input placeholder="{% if is_guest_session %}Example: How does Studio turn issues into code changes?{% else %}Example: Help me pick what to work on, or update this recipe note.{% endif %}" required></textarea>
+                    <textarea data-recipe-chat-input placeholder="Example: Help me pick what to work on, or update this recipe note." required></textarea>
                     <button type="button" class="recipe-chat-voice-button" data-recipe-chat-voice aria-label="Dictate message" title="Dictate message">Mic</button>
                     <button type="button" class="secondary compact" data-recipe-chat-cancel-plan hidden>Cancel</button>
                     <button type="submit">Send</button>
@@ -8490,86 +8440,14 @@
     </script>
     <script>
         (() => {
-            const isGuestSession = document.body?.dataset.guestSession === "true";
-            const dismissedReminderPrefix = "schedulerDismissed:";
-            const reminderStorageKey = (id) => `${dismissedReminderPrefix}${id}`;
-            const getReminderId = (article) => article?.dataset.schedulerReminderId || "";
-            const visibleReminderArticles = (panel) => Array.from(panel.querySelectorAll("[data-scheduler-reminder-id]")).filter((article) => !article.hidden);
-            const allChecklistItemsComplete = (article) => {
-                const items = Array.from(article?.querySelectorAll(".scheduler-note-toggle") || []);
-                return items.length > 0 && items.every((form) => form.closest("li")?.classList.contains("scheduler-note-checked"));
-            };
-            const hideReminderArticle = (article) => {
-                if (!article) {
-                    return;
-                }
-                const reminderId = getReminderId(article);
-                if (reminderId) {
-                    try {
-                        window.sessionStorage.setItem(reminderStorageKey(reminderId), "true");
-                    } catch (error) {
-                        // Session storage can be unavailable in hardened browsers.
-                    }
-                }
-                article.hidden = true;
-                const panel = article.closest("[data-scheduler-upcoming-panel]");
-                if (panel && visibleReminderArticles(panel).length === 0) {
-                    panel.open = false;
-                    panel.hidden = true;
-                }
-            };
-
-            if (isGuestSession) {
-                document.querySelectorAll("[data-scheduler-reminder-id]").forEach((article) => {
-                    const reminderId = getReminderId(article);
-                    if (!reminderId) {
-                        return;
-                    }
-                    try {
-                        if (window.sessionStorage.getItem(reminderStorageKey(reminderId)) === "true") {
-                            article.hidden = true;
-                        }
-                    } catch (error) {
-                        return;
-                    }
-                    const panel = article.closest("[data-scheduler-upcoming-panel]");
-                    if (panel && visibleReminderArticles(panel).length === 0) {
-                        panel.hidden = true;
-                    }
-                });
-
-                document.querySelectorAll(".scheduler-note-toggle").forEach((form) => {
-                    form.addEventListener("submit", (event) => {
-                        event.preventDefault();
-                        const row = form.closest("li");
-                        const button = form.querySelector("button");
-                        if (!row || !button) {
-                            return;
-                        }
-                        const isNowChecked = !row.classList.contains("scheduler-note-checked");
-                        row.classList.toggle("scheduler-note-checked", isNowChecked);
-                        button.textContent = isNowChecked ? "\u2713" : "";
-                        button.setAttribute("aria-label", isNowChecked ? "Mark note incomplete" : "Mark note done");
-                    });
-                });
-            }
-
             document.querySelectorAll("[data-scheduler-due-close]").forEach((button) => {
                 button.addEventListener("click", () => {
-                    const article = button.closest("[data-scheduler-reminder-id]");
-                    if (isGuestSession && allChecklistItemsComplete(article)) {
-                        hideReminderArticle(article);
-                    }
                     document.querySelector("[data-scheduler-due-overlay]")?.classList.add("hidden");
                 });
             });
 
             document.querySelectorAll("[data-scheduler-upcoming-close]").forEach((button) => {
                 button.addEventListener("click", () => {
-                    const article = button.closest("[data-scheduler-reminder-id]");
-                    if (isGuestSession && allChecklistItemsComplete(article)) {
-                        hideReminderArticle(article);
-                    }
                     const panel = button.closest("[data-scheduler-upcoming-panel]");
                     if (panel) {
                         panel.open = false;
@@ -8834,11 +8712,6 @@
                     openChatPanel();
                 });
             });
-
-            if (document.body.dataset.openGuestChat === "true" && !window.sessionStorage.getItem("dieterGuestHomeChatOpened")) {
-                window.sessionStorage.setItem("dieterGuestHomeChatOpened", "true");
-                window.setTimeout(openChatPanel, 250);
-            }
 
             closeButton?.addEventListener("click", () => {
                 panel.classList.remove("open");

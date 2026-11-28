@@ -4,9 +4,8 @@
 {% block recipe_app_subtitle %}{% if recipe_view == "create_meal" %}Build a meal from flexible recipe parts and send it to the plan.{% else %}Plan meals, build grocery lists, and improve recipes as you cook.{% endif %}{% endblock %}
 
 {% block content %}
-{% set is_guest = request.state.current_user and request.state.current_user.role == "guest" %}
 {% set favorite_meal_count = complete_meals|selectattr("is_favorite")|list|length %}
-{% if recipe_view != "create_meal" and not is_guest %}
+{% if recipe_view != "create_meal" %}
 <section class="detail-section meal-plan-section" id="meal-plan">
     <div class="section-header">
         <div>
@@ -115,11 +114,9 @@
                                 {% endif %}
                             </span>
                         </a>
-                        {% if not is_guest %}
                             <form method="post" action="/apps/recipes/meal-plan/meals/{{ meal.id }}/add" class="inline-form featured-meal-action">
                                 <button type="submit" class="compact">Add to Plan</button>
                             </form>
-                        {% endif %}
                     </article>
                 {% endfor %}
             </div>
@@ -127,9 +124,9 @@
             <div class="complete-meal-controls">
                 <label for="complete-meal-search-input">Search complete meals</label>
                 <select id="complete-meal-scope-select" data-meal-scope-select aria-label="Recipe catalogue scope">
-                    <option value="favorites" {% if not is_guest and favorite_meal_count > 0 %}selected{% endif %}>Favorites</option>
+                    <option value="favorites" {% if favorite_meal_count > 0 %}selected{% endif %}>Favorites</option>
                     <option value="new">New</option>
-                    <option value="all" {% if is_guest or favorite_meal_count == 0 %}selected{% endif %}>All Recipes</option>
+                    <option value="all" {% if favorite_meal_count == 0 %}selected{% endif %}>All Recipes</option>
                 </select>
                 <input
                     id="complete-meal-search-input"
@@ -162,12 +159,10 @@
                             <strong>{{ meal.display_title or meal.source_label or "Complete meal" }}</strong>
                         </a>
                         <span class="recipe-title-meta">
-                            {% if not is_guest %}
                                 <form method="post" action="/apps/recipes/meals/{{ meal.id }}{% if meal.is_favorite %}/favorite/delete{% else %}/favorite{% endif %}" class="inline-form">
                                     <input type="hidden" name="next" value="{{ request.url.path }}">
                                     <button type="submit" class="secondary compact">{% if meal.is_favorite %}Favorited{% else %}Favorite{% endif %}</button>
                                 </form>
-                            {% endif %}
                             <span class="meal-status meal-status-ready">{{ meal.catalogue_label }}</span>
                             {% if meal.is_new %}
                                 <span class="meal-status meal-status-ready">NEW</span>
@@ -178,11 +173,9 @@
                             {% if meal.quality_notes %}
                                 <span class="review-count">{{ meal.quality_notes|length }} note{% if meal.quality_notes|length != 1 %}s{% endif %}</span>
                             {% endif %}
-                            {% if not is_guest %}
                                 <form method="post" action="/apps/recipes/meal-plan/meals/{{ meal.id }}/add" class="inline-form">
                                     <button type="submit" class="compact">Add to Plan</button>
                                 </form>
-                            {% endif %}
                         </span>
                     </div>
                 {% endfor %}
@@ -244,7 +237,6 @@
                 <div class="selected-components" data-selected-components aria-live="polite">
                     <p class="selected-components-empty" data-selected-components-empty>No meal parts selected.</p>
                 </div>
-                {% if not is_guest %}
                     <form method="post" action="/apps/recipes/meals/save" class="save-meal-form" data-save-meal-form>
                         <input type="hidden" name="selected_component_ids" value="[]" data-selected-component-ids>
                         <input type="text" name="meal_name" placeholder="Name this meal" aria-label="Meal name">
@@ -255,7 +247,6 @@
                         <input type="text" name="meal_name" placeholder="Optional meal name" aria-label="Optional meal name">
                         <button type="submit" class="compact">Add to Meal Plan</button>
                     </form>
-                {% endif %}
                 <div class="component-picker-actions">
                     <button type="button" class="compact" data-generate-grocery-list>Preview Shopping List</button>
                     <button type="button" class="secondary compact" data-clear-meal-selection>Clear Meal Picks</button>
