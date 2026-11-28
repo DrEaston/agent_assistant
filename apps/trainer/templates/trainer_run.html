@@ -16,7 +16,7 @@
     </div>
     {% if r.groups %}<p><strong>{% for g in r.groups %}{{ g.text }}{{ "; " if not loop.last }}{% endfor %}</strong></p>
     {% elif r.has_series %}<p class="muted">An easy run: nothing faster than your fast-running line.</p>{% endif %}
-    {% if r.map %}<div class="row"><a class="button quiet" href="/apps/trainer/run/{{ r.id }}/share">Screenshot for Strava</a></div>{% endif %}
+    {% if r.map %}<div class="row"><a class="button quiet" href="/apps/trainer/run/{{ r.id }}/share">Screenshot</a></div>{% endif %}
     {% if not r.has_series %}{% call ui.banner("info") %}The details for this run haven't been read from Strava yet. Tap Sync now on the Log page.{% endcall %}{% endif %}
   </div>
 

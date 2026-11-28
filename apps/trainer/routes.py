@@ -21,7 +21,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from core import ui
 from database import get_current_user_id, reset_current_user_id, set_current_user_id
 
-from . import analysis, clock, coach, coach_reader, plan, runpage, shoes, speed, strava
+from . import analysis, clock, coach, coach_reader, coros, plan, runpage, shoes, speed, strava
 from .manifest import APP
 
 _state = {"db": None}
@@ -66,6 +66,22 @@ TABS = (
 
 def configure(db):
     _state["db"] = db
+
+
+def configure_coros(blobs):
+    """Where COROS FIT files are kept (core/media's Blobs: a local folder plus Cloud Storage)."""
+    _state["coros_blobs"] = blobs
+
+
+def coros_client():
+    return coros.Coros(_state["db"], _state.get("coros_blobs"))
+
+
+def _here(request, path):
+    """This site's own address for a path (live or a preview), for COROS's sign-in to come back to."""
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    return f"{proto.split(',')[0].strip()}://{host}{path}"
 
 
 def store():
@@ -875,7 +891,44 @@ def log_page(request: Request, kind: str = "", year: str = "", live: int = 0, hi
     return render("trainer_log.html", title="Training log", current=BASE + "/log", page_url=BASE + "/log",
                   totals=totals, status=sync().status(get_current_user_id()), connected=connected,
                   is_admin=_is_admin(request), live=live, history=history, problem=problem,
-                  today=clock.today().isoformat())
+                  today=clock.today().isoformat(), coros_status=coros_client().status(user))
+
+
+# ---------------------------------------------------------------- COROS (apps/trainer/coros.py)
+
+
+@router.get(BASE + "/coros/connect")
+def coros_connect(request: Request):
+    try:
+        return RedirectResponse(coros_client().start(get_current_user_id(), _here(request, BASE + "/coros/callback")),
+                                status_code=303)
+    except coros.CorosError as exc:
+        return back(BASE + "/log?problem=" + str(exc)[:200].replace("&", " ") + "#coros")
+
+
+@router.get(BASE + "/coros/callback")
+def coros_callback(code: str = "", state: str = "", error: str = "", error_description: str = ""):
+    if error:
+        return back(BASE + "/log?problem=" + f"COROS: {error_description or error}"[:200].replace("&", " ") + "#coros")
+    client = coros_client()
+    try:
+        client.finish(get_current_user_id(), state, code)
+    except coros.CorosError as exc:
+        return back(BASE + "/log?problem=" + str(exc)[:200].replace("&", " ") + "#coros")
+    client.sync(get_current_user_id())
+    return back(BASE + "/log#coros")
+
+
+@router.post(BASE + "/coros/sync")
+def coros_sync_now():
+    coros_client().sync(get_current_user_id())
+    return back(BASE + "/log#coros")
+
+
+@router.post(BASE + "/coros/disconnect")
+def coros_disconnect():
+    coros_client().disconnect(get_current_user_id())
+    return back(BASE + "/log#coros")
 
 
 @router.post(BASE + "/log/add")

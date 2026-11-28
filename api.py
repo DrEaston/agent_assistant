@@ -233,6 +233,9 @@ class _MediaCloud:
 
 media_connector.configure(db, MediaBlobs(Path(os.getenv("MEDIA_DIR", str(db_path.resolve().parent / "media"))),
                                          _MediaCloud() if cloud_persistence.enabled else None))
+# COROS FIT files (apps/trainer/coros.py): files like Media's, under the same bucket's media prefix (coros/...).
+trainer_routes.configure_coros(MediaBlobs(Path(os.getenv("COROS_DIR", str(db_path.resolve().parent / "coros"))),
+                                          _MediaCloud() if cloud_persistence.enabled else None))
 app.include_router(logbook_routes.router)
 from core.mascot import routes as mascot_routes  # noqa: E402  (the animation lab, /media/lab: before /media/<id>)
 app.include_router(mascot_routes.router)

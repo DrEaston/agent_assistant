@@ -40,6 +40,27 @@
   </div>
   {% endcall %}
 
+  {% call ui.section("COROS") %}
+  <div class="card stack" id="coros">
+    {% if not coros_status.connected %}
+      <p>Connect your COROS account and Dieter keeps its own copy of every run: the full second-by-second file
+        straight from your watch, not through Strava.</p>
+      <div class="row"><a class="button primary" href="/apps/trainer/coros/connect">Connect COROS</a></div>
+    {% else %}
+      <div class="spread"><span>Connected</span>{{ ui.tag("On", "ok") }}</div>
+      <p>{{ coros_status.found }} activities found{% if coros_status.oldest %} ({{ coros_status.oldest }} to {{ coros_status.newest }}){% endif %}, {{ coros_status.runs }} of them runs.
+        {{ coros_status.saved }} run files saved{% if coros_status.failed %}, {{ coros_status.failed }} couldn't be fetched{% endif %}.</p>
+      <p class="small muted">COROS allows {{ coros_status.per_day }} files a day ({{ coros_status.used_today }} used in the last 24 hours), runs first and newest first, so the rest comes in over the next few days.{% if not coros_status.history_done %} Older months are still being listed.{% endif %}</p>
+      {% if coros_status.error %}{% call ui.banner("warn") %}{{ coros_status.error }}{% endcall %}{% endif %}
+      {% if coros_status.last_error %}<p class="small muted">Last file problem: {{ coros_status.last_error }}</p>{% endif %}
+      <div class="row"><form method="post" action="/apps/trainer/coros/sync"><button type="submit">Fetch more now</button></form></div>
+      {% call ui.confirm("Disconnect COROS", danger=True) %}
+        <form method="post" action="/apps/trainer/coros/disconnect" class="stack"><p class="small">Dieter stops fetching. Files already saved stay.</p><button type="submit" class="danger">Disconnect</button></form>
+      {% endcall %}
+    {% endif %}
+  </div>
+  {% endcall %}
+
   {% call ui.section("Last 12 weeks") %}
   <div class="card flush">
     <div class="list-row small muted"><span class="grow">Week of</span><span class="num">Run mi · runs · weights · Pilates · hours</span></div>
