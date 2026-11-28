@@ -240,6 +240,14 @@ def fill_week(week: str = Form(...), replace: str = Form("")):
     return back(f"{BASE}?week={_start(week).isoformat()}")
 
 
+def _sync_coach(session_id, status=None, deleted=False):
+    """A plan session that came from a coach workout keeps that workout in step (coach.session_changed)."""
+    try:
+        coaching().session_changed(session_id, status=status, deleted=deleted)
+    except Exception as exc:
+        print(f"Warning: keeping the coach workout in step failed: {exc!r}")
+
+
 @router.post(BASE + "/check")
 def check(key: str = Form(...), done: str = Form(""), week: str = Form("")):
     """Check rows on This week: "s-<id>" a session done, "x-<id>" its strides done."""
@@ -248,6 +256,7 @@ def check(key: str = Form(...), done: str = Form(""), week: str = Form("")):
         raise HTTPException(status_code=400, detail="Unknown item.")
     if kind == "s":
         _guard(store().update_session, int(raw), status="done" if done else "planned")
+        _sync_coach(int(raw), status="done" if done else "planned")
     else:
         _guard(store().update_session, int(raw), strides_done=1 if done else 0)
     return back(f"{BASE}?week={week}" if week else BASE)
@@ -281,6 +290,7 @@ def save_session(session_id: int, day: str = Form(...), kind: str = Form(...), t
                  status: str = Form("planned"), note: str = Form("")):
     session = _guard(store().update_session, session_id, day=day, kind=kind, title=title, miles=miles or None,
                      slot=slot, details=details, strides=strides or 0, status=status, note=note)
+    _sync_coach(session_id, status=status)
     return back(f"{BASE}?week={plan.week_start(session['day']).isoformat()}")
 
 
@@ -288,6 +298,7 @@ def save_session(session_id: int, day: str = Form(...), kind: str = Form(...), t
 def delete_session(session_id: int):
     session = _guard(store().session, session_id)
     store().delete_session(session_id)
+    _sync_coach(session_id, deleted=True)
     return back(f"{BASE}?week={plan.week_start(session['day']).isoformat()}")
 
 
@@ -393,7 +404,8 @@ def my_coach(request: Request):
     invite_url = f"{str(request.base_url).rstrip('/')}{BASE}/coach-invite/{invite['token']}" if invite else ""
     return render("trainer_my_coach.html", title="My coach", current=BASE + "/my-coach", page_url=BASE + "/my-coach",
                   coaches=c.my_coaches(), workouts=workouts, invite=invite, invite_url=invite_url,
-                  has_model=bool(model.get("cs")), is_owner=c.is_owner(), full_view_days=coach.FULL_VIEW_DAYS)
+                  has_model=bool(model.get("cs")), is_owner=c.is_owner(), full_view_days=coach.FULL_VIEW_DAYS,
+                  intensities=coach.INTENSITIES)
 
 
 @router.post(BASE + "/my-coach/invite")
@@ -417,6 +429,22 @@ def take_workout(prescription_id: int):
         week = None     # c.take below says what's wrong (not yours, already answered)
     session = _coach(c.take, prescription_id, _my_model(), week)
     return back(f"{BASE}?week={plan.week_start(session['day']).isoformat()}#day-{session['day']}")
+
+
+@router.post(BASE + "/my-coach/workouts/{prescription_id}/change")
+async def change_workout(request: Request, prescription_id: int):
+    """The athlete's own version of a coach workout before taking it: reps, effort, +/- seconds, remove, rounds."""
+    form = await request.form()
+    edits = {i: {"reps": form.get(f"reps_{i}"), "intensity": form.get(f"intensity_{i}"),
+                 "nudge": form.get(f"nudge_{i}"), "remove": form.get(f"remove_{i}")} for i in range(coach.MAX_SETS)}
+    _coach(coaching().change, prescription_id, edits, form.get("rounds"))
+    return back(f"{BASE}/my-coach#workout-{prescription_id}")
+
+
+@router.post(BASE + "/my-coach/workouts/{prescription_id}/reset")
+def reset_workout(prescription_id: int):
+    _coach(coaching().reset_change, prescription_id)
+    return back(f"{BASE}/my-coach#workout-{prescription_id}")
 
 
 @router.post(BASE + "/my-coach/workouts/{prescription_id}/decline")
@@ -485,6 +513,7 @@ def coach_page(request: Request, sent: int = 0, error: str = "", workout: str = 
     c = coaching()
     return render("trainer_coach.html", title="Coach", current="/coach", page_url="/coach",
                   athletes=c.my_athletes(), recent=c.sent_by_me(), sent=sent, coach_home="/coach", report_url=None,
+                  coach_name=c._name(c._user()),
                   rows=[{k: str(v or "") for k, v in r.items()} for r in _builder_rows(filled or {})],
                   filled={k: str((filled or {}).get(k) or "") for k in ("title", "notes", "rounds", "round_rest")},
                   intensities=coach.INTENSITIES, distances=[(m, coach.distance_name(m)) for m in coach.DISTANCES],

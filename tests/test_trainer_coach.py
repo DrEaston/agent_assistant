@@ -412,7 +412,7 @@ class CoachPageTests(unittest.TestCase):
         conn.execute("UPDATE users SET role = 'admin' WHERE id = ?", (athlete,))
         conn.commit()
         runner = self.client_for(athlete)
-        self.assertIn("switches this browser to the coach", runner.get("/coach").text)   # signed in as himself
+        self.assertIn("doesn&#39;t sign you out of your own Dieter account", runner.get("/coach").text)
         self.api._coach_tries.clear()
         visitor = TestClient(self.api.app)
         with mock.patch.object(coach.CoachStore, "_owner", return_value=athlete), \
@@ -498,6 +498,89 @@ class CoachPageTests(unittest.TestCase):
             stopped = visitor.post("/apps/trainer/view-as/stop", follow_redirects=False)
             self.assertEqual(stopped.headers["location"], "/coach")
         self.assertIn("New from Coach", runner.get("/").text)
+
+    def test_coach_sign_in_never_replaces_your_own(self):
+        from unittest import mock
+        athlete = self.make_user("Curtis")
+        conn = self.api.db.connect()
+        conn.execute("UPDATE users SET role = 'admin' WHERE id = ?", (athlete,))
+        conn.commit()
+        browser = self.client_for(athlete)                                     # signed in as himself
+        self.api._coach_tries.clear()
+        with mock.patch.object(coach.CoachStore, "_owner", return_value=athlete):
+            browser.post("/coach", data={"passcode": "test-passcode"})
+        self.assertIn("View athlete page", browser.get("/coach").text)        # the coach page as the coach
+        self.assertIn("(coach)", browser.get("/coach").text)
+        home = browser.get("/apps/trainer", follow_redirects=False)            # everywhere else he's still himself
+        self.assertEqual(home.status_code, 200)
+        self.assertNotIn("Viewing", home.text)
+        self.assertEqual(browser.get("/", follow_redirects=False).status_code, 200)
+        browser.post("/coach/logout")                                          # coach sign out leaves him signed in
+        self.assertIn("Passcode", browser.get("/coach").text)
+        self.assertEqual(browser.get("/apps/trainer", follow_redirects=False).status_code, 200)
+
+    def test_athlete_changes_a_workout_and_the_plan_stays_in_step(self):
+        from unittest import mock
+        athlete = self.make_user("Curtis")
+        coach_id = self.make_user("Daniel")
+        store = coach.CoachStore(self.api.db)
+        token = set_current_user_id(athlete)
+        try:
+            invite = store.invite()
+        finally:
+            reset_current_user_id(token)
+        token = set_current_user_id(coach_id)
+        try:
+            store.accept(invite)
+            day = (date.today() + __import__("datetime").timedelta(days=1)).isoformat()
+            pid = store.prescribe(athlete, day, "1200s and 200s",
+                                  [{"reps": 3, "metres": 1200, "intensity": "threshold", "rest": "60 s"},
+                                   {"reps": 4, "metres": 200, "intensity": "sprint", "rest": "30 s"},
+                                   {"reps": 2, "metres": 400, "intensity": "mile"}], rounds=3, round_rest="4 min")
+        finally:
+            reset_current_user_id(token)
+        runner = self.client_for(athlete)
+        with mock.patch.object(coach, "athlete_model", return_value=dict(MODEL)):
+            page = runner.get("/apps/trainer/my-coach").text
+            self.assertIn("Change it", page)
+            self.assertIn("Speed load: about", page)
+            runner.post(f"/apps/trainer/my-coach/workouts/{pid}/change",
+                        data={"rounds": "2", "reps_0": "3", "intensity_0": "threshold", "nudge_0": "2",
+                              "reps_1": "3", "intensity_1": "mile", "remove_2": "1"})
+            mine = runner.get("/apps/trainer/my-coach").text
+        self.assertIn("Curtis changed it: 2 rounds instead of 3; 1200s: 2 s slower per rep; 200s: 3 reps instead "
+                      "of 4, mile pace instead of sprint; removed the 400s", mine)
+        self.assertIn("2 rounds", mine)
+        token = set_current_user_id(coach_id)
+        try:
+            sent = store.sent_by_me()[0]
+        finally:
+            reset_current_user_id(token)
+        self.assertIn("removed the 400s", sent["changes"])                     # the coach sees what changed, no times
+        with mock.patch.object(coach, "athlete_model", return_value=dict(MODEL)):
+            runner.post(f"/apps/trainer/my-coach/workouts/{pid}/take")
+        token = set_current_user_id(athlete)
+        try:
+            row = store._mine(pid)
+            self.assertEqual(row["status"], "accepted")
+            session = row["session_id"]
+            self.assertIn("2 rounds of:", plan.PlanStore(self.api.db).session(session)["details"])
+        finally:
+            reset_current_user_id(token)
+        runner.post("/apps/trainer/check", data={"key": f"s-{session}", "done": "1"})   # done on the plan
+        token = set_current_user_id(athlete)
+        try:
+            self.assertEqual(store._mine(pid)["status"], "done")
+        finally:
+            reset_current_user_id(token)
+        runner.post("/apps/trainer/check", data={"key": f"s-{session}", "done": ""})
+        runner.post(f"/apps/trainer/sessions/{session}/delete")                        # removed from the plan
+        token = set_current_user_id(athlete)
+        try:
+            row = store._mine(pid)
+            self.assertEqual((row["status"], row["athlete_note"]), ("declined", "Removed from the plan"))
+        finally:
+            reset_current_user_id(token)
 
     def test_passcode_tries_are_limited(self):
         from fastapi.testclient import TestClient
