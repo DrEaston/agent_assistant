@@ -37,8 +37,9 @@
   </div>
   {% endcall %}
   {% endif %}
+  {% if checked and not trainer_viewing %}{% call ui.banner("ok") %}{{ "Saved. Thanks: it's on the run now." if checked == "saved" else "Skipped: Dieter won't ask about that run again." }}{% if after_run %} One more below.{% endif %}{% endcall %}{% endif %}
   {% if after_run and not trainer_viewing %}
-  {% call ui.section("After your run") %}
+  {% call ui.section("After your run", id="after-run") %}
   {{ after.checkin(after_run[0], shoe_list, feels, "/apps/trainer") }}
   {% if after_run | length > 1 %}<p class="small gap-above"><a href="/apps/trainer/shoes">{{ after_run | length - 1 }} more run{{ "s" if after_run | length > 2 }} waiting</a></p>{% endif %}
   {% endcall %}

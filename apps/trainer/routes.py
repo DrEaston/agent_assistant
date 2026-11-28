@@ -140,7 +140,7 @@ def _guard(fn, *args, **kwargs):
 
 
 @router.get(BASE)
-def overview(request: Request, week: str = ""):
+def overview(request: Request, week: str = "", checked: str = ""):
     """The landing page: this week at a glance, weekly mileage, fitness and speed. (?week=... is This week.)"""
     if week:
         return this_week(request, week)
@@ -164,6 +164,7 @@ def overview(request: Request, week: str = ""):
                  else [w for w in c.for_me() if w["day"] >= clock.today().isoformat()][:5])
     _fit(coach_new, model)
     return render("trainer_overview.html", title="Trainer", current=BASE, page_url=BASE, view=view, coach_new=coach_new,
+                  checked=checked if checked in ("saved", "skipped") else "",
                   guidance=analysis.week_guidance(view), o=numbers, getting=getting, after_run=sh.waiting(),
                   shoe_list=sh.shoes(include_retired=False), feels=shoes.FEELS,
                   today=[s for d in view["days"] if d["is_today"] for s in d["sessions"]])
@@ -338,11 +339,16 @@ def after_run(workout_id: int, shoe_id: str = Form(""), feel: str = Form(""), no
               skip: str = Form(""), next: str = Form("")):
     """The after-run check-in: a tap on a pair saves it with how it felt and the note; Skip stops asking."""
     sh = shoe_store()
-    if skip:
-        _shoes(sh.skip, workout_id)
+    if skip or not (shoe_id.isdigit() or feel.strip() or note.strip()):
+        _shoes(sh.skip, workout_id)        # nothing to save: stop asking about this run
+        done = "skipped"
     else:
         _shoes(sh.save, workout_id, int(shoe_id) if shoe_id.isdigit() else None, feel, note)
-    return back(next, BASE)
+        done = "saved"
+    target = next if next.startswith("/") and not next.startswith("//") else BASE
+    if target == BASE:
+        target = f"{BASE}?checked={done}#after-run"
+    return back(target, BASE)
 
 
 # ---------------------------------------------------------------- Coach mode (apps/trainer/coach.py)

@@ -52,6 +52,11 @@ class ShoeStoreTests(unittest.TestCase):
         self.store.skip(a)
         self.assertEqual(self.store.waiting(), [])
         self.assertEqual(self.store.count_waiting(), 0)
+        # How it felt alone (no shoes) also counts as checked in: the box goes away
+        c = self.run_on(1)
+        self.assertEqual([r["workout_id"] for r in self.store.waiting()], [c])
+        self.store.save(c, None, "3", "")
+        self.assertEqual(self.store.waiting(), [])
         saved = self.store.for_run(b)
         self.assertEqual((saved["shoe"], saved["feel"], saved["feel_label"], saved["note"]),
                          ("Pegasus 41", 7, "hard", "Calf a bit tight"))
