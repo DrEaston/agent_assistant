@@ -543,7 +543,9 @@ class CoachPageTests(unittest.TestCase):
         with mock.patch.object(coach, "athlete_model", return_value=dict(MODEL)):
             page = runner.get("/apps/trainer/my-coach").text
             self.assertIn("Change it", page)
-            self.assertIn("Speed load: about", page)
+            self.assertIn("This week's speed limit", page)
+            self.assertIn("This workout: <strong>", page)
+            self.assertIn("puts your week at", page)
             runner.post(f"/apps/trainer/my-coach/workouts/{pid}/change",
                         data={"rounds": "2", "reps_0": "3", "intensity_0": "threshold", "nudge_0": "2",
                               "reps_1": "3", "intensity_1": "mile", "remove_2": "1"})

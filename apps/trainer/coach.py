@@ -358,6 +358,11 @@ def fitted(sets, model, rounds=1, week=None):
         so_far = week.get("speed_work") or 0
         week_view = {"so_far": round(so_far), "limit": week["work_line"], "after": round(so_far + load),
                      "over": so_far + load > week["work_line"] + 0.5}
+        if week.get("top_line"):
+            near_so_far = week.get("near_top") or 0
+            week_view.update({"near_so_far": round(near_so_far), "near_limit": week["top_line"],
+                              "near_after": round(near_so_far + near),
+                              "near_over": near_so_far + near > week["top_line"] + 0.5})
     return {"sets": out, "adjusted": adjusted, "note": note, "flag": flag, "load": round(load), "near": round(near),
             "load_before": round(load_before), "near_before": round(near_before), "week": week_view}
 
