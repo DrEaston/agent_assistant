@@ -15,7 +15,7 @@ MAP_W = 600              # route map width (height follows the route's shape)
 
 def _workout(db, user_id, external_id):
     row = db.connect().execute(
-        "SELECT * FROM trainer_imported_workouts WHERE user_id = ? AND source = 'strava' AND external_id = ?",
+        "SELECT * FROM trainer_imported_workouts WHERE user_id = ? AND source IN ('strava', 'coros') AND external_id = ?",
         (user_id, str(external_id))).fetchone()
     return dict(row) if row else None
 

@@ -123,7 +123,7 @@ def run(args):
         except ValueError:
             raise ToolError("date should look like 2026-11-26.") from None
         ids = [r[0] for r in db.connect().execute(
-            "SELECT external_id FROM trainer_imported_workouts WHERE user_id = ? AND source = 'strava' AND "
+            "SELECT external_id FROM trainer_imported_workouts WHERE user_id = ? AND source IN ('strava', 'coros') AND "
             "workout_category LIKE 'run%' AND COALESCE(strava_deleted_at, '') = '' AND "
             "substr(COALESCE(NULLIF(started_at_local, ''), started_at), 1, 10) = ? ORDER BY started_at",
             (user, on.isoformat())).fetchall()]

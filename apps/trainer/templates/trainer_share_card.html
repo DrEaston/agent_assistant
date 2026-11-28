@@ -4,6 +4,7 @@
 {% macro card(r, week, label="") -%}
 <article class="share-card" aria-label="{{ label or r.title }}">
   <header class="share-head">
+    <p class="share-mark">askdieter.ai/trainer</p>
     <h1>{{ r.title }}</h1>
     <p class="share-sub">{{ r.day.strftime("%A, %b ") ~ r.day.day }}{% if r.time %} · {{ r.time }}{% endif %}</p>
   </header>
@@ -46,6 +47,5 @@
     {% endif %}
   </div>
 
-  <footer class="share-foot"><span>Made by askdieter.ai/trainer</span></footer>
 </article>
 {%- endmacro %}

@@ -40,6 +40,43 @@
   </div>
   {% endcall %}
 
+  {% call ui.section("COROS") %}
+  <div class="card stack" id="coros">
+    {% if not coros_status.connected %}
+      <p>Connect your COROS account and new runs come straight from your watch instead of through Strava: the full
+        second-by-second file, kept by Dieter. Everything already in your log stays.</p>
+      <div class="row"><a class="button primary" href="/apps/trainer/coros/connect">Connect COROS</a></div>
+    {% else %}
+      <div class="spread"><span>New activities come from COROS</span>{{ ui.tag("On", "ok") }}</div>
+      <p class="small muted">Since {{ coros_status.since[:10] }}. {{ coros_status.added }} added from COROS so far. Dieter checks for new ones when you open Trainer or Today (every 10 minutes at most); Strava no longer adds new ones.</p>
+      {% if coros_status.error %}{% call ui.banner("warn") %}{{ coros_status.error }}{% endcall %}{% endif %}
+      {% if coros_status.last_error %}<p class="small muted">Last file problem: {{ coros_status.last_error }}</p>{% endif %}
+      <div class="row">
+        <form method="post" action="/apps/trainer/coros/sync"><button type="submit">Check now</button></form>
+        <form method="post" action="/apps/trainer/coros/test"><button type="submit" class="quiet">Test with my latest run</button></form>
+      </div>
+      {% if coros_status.test %}
+      <div class="stack" id="coros-test">
+        <p class="small"><strong>Latest COROS run ({{ coros_status.test.when }}) next to the same run from Strava</strong>{% if not coros_status.test.strava_id %}: no matching Strava run found{% endif %}</p>
+        <div class="card flush">
+          <div class="list-row small muted"><span class="grow"></span><span class="num">COROS · Strava</span></div>
+          {% for label, c, s in coros_status.test.rows %}
+          <div class="list-row"><span class="grow">{{ label }}</span><span class="num small">{{ c }} · {{ s }}</span></div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      {% if coros_status.last_list %}
+      <details><summary class="small">What COROS sent last (for fixing problems)</summary>
+        <pre class="small wrap-text">{{ coros_status.last_list }}</pre></details>
+      {% endif %}
+      {% call ui.confirm("Disconnect COROS", danger=True) %}
+        <form method="post" action="/apps/trainer/coros/disconnect" class="stack"><p class="small">New activities come from Strava again. Everything already in your log stays.</p><button type="submit" class="danger">Disconnect</button></form>
+      {% endcall %}
+    {% endif %}
+  </div>
+  {% endcall %}
+
   {% call ui.section("Last 12 weeks") %}
   <div class="card flush">
     <div class="list-row small muted"><span class="grow">Week of</span><span class="num">Run mi · runs · weights · Pilates · hours</span></div>

@@ -118,7 +118,7 @@ class ShoeStore:
         return row
 
     def workout_id(self, external_id):
-        row = self._conn().execute("SELECT id FROM trainer_imported_workouts WHERE source = 'strava' AND external_id = ? "
+        row = self._conn().execute("SELECT id FROM trainer_imported_workouts WHERE source IN ('strava', 'coros') AND external_id = ? "
                                    "AND user_id = ?", (str(external_id), self._user())).fetchone()
         return row["id"] if row else None
 

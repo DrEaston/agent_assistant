@@ -3875,8 +3875,9 @@ class Database:
         laps=None,
         raw=None,
         user_id=None,
+        source="strava",
     ):
-        """Store an imported Strava workout/activity for a user."""
+        """Store an imported workout/activity for a user (from Strava, or COROS with source='coros')."""
         target_user_id = user_id or self._active_user_id()
         self.connect()
         cursor = self.conn.cursor()
@@ -3888,7 +3889,7 @@ class Database:
                  average_speed_mps, max_speed_mps, average_heartrate, max_heartrate, average_cadence,
                  average_watts, kilojoules, suffer_score, perceived_exertion, gear_id, gear_name,
                  start_latlng_json, end_latlng_json, splits_metric_json, laps_json, raw_json, updated_at)
-            VALUES ('strava', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(source, external_id, user_id) DO UPDATE SET
                 activity_type = excluded.activity_type,
                 workout_category = excluded.workout_category,
@@ -3917,6 +3918,7 @@ class Database:
                 updated_at = CURRENT_TIMESTAMP
             """,
             (
+                source or "strava",
                 str(external_id),
                 target_user_id,
                 activity_type,

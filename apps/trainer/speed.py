@@ -49,7 +49,7 @@ import zlib
 from datetime import date, timedelta
 from .clock import today as local_today
 
-VERSION = 8                         # bump when the summary changes: older rows are read again
+VERSION = 11                        # bump when the summary changes: older rows are read again
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS tr_run_speed (
         user_id INTEGER NOT NULL, external_id TEXT NOT NULL, day TEXT NOT NULL, version INTEGER DEFAULT 0,
@@ -161,17 +161,21 @@ def label(metres, seconds=0, run_metres=0):
     if metres >= 0.85 * run_metres and seconds >= 480:
         return NAMES[race] if abs(race - metres) <= race * 0.01 else "hard run"
     near = min(STANDARD, key=lambda d: abs(d - metres))
-    if abs(near - metres) <= near * 0.12:
+    if abs(near - metres) <= near * 0.08:   # 8%: a 224 m rep is "220 m", not a slow-looking "200" (Curtis, Nov 2026)
         return NAMES.get(near, str(near))
     return "tempo" if seconds >= 480 else "rep"
 
 
-def find_efforts(times, speeds, dists=None, easy=None):
+def find_efforts(times, speeds, dists=None, easy=None, laps=None):
     """([{at, seconds, metres, avg_mps, top_mps, kind}], usual m/s) for each fast stretch in a run.
 
     Usual speed is the run's median while moving. A stretch is time above max(1.35 x easy, easy + 1 m/s), `easy`
     being his easy speed across runs (the run's own usual when it isn't known yet), lasting MIN_SECONDS to
-    MAX_SECONDS. Distance comes from the distance stream when there is one."""
+    MAX_SECONDS. Distance comes from the distance stream when there is one.
+
+    Laps he pressed on his watch (COROS runs: [{start, seconds, metres}]) are the truth where they exist: a lap run
+    faster than the line is a rep with the watch's own time and distance, and fast stretches found inside it are
+    dropped. Stretches outside fast laps (strides) are still found from speed."""
     samples = _samples(times, speeds, dists)
     moving = [v for _, v, _ in samples if v > 1.0]
     if len(moving) < 60:
@@ -187,11 +191,13 @@ def find_efforts(times, speeds, dists=None, easy=None):
             if current and t - current["end"] <= max(MERGE_GAP, MERGE_SHARE * (current["end"] - current["start"])):
                 current["end"], current["last_d"] = t, d
                 current["points"].append((t, v))
+                current["samples"].append((t, v, d))
             else:
-                current = {"start": t, "end": t, "first_d": d, "last_d": d, "points": [(t, v)]}
+                current = {"start": t, "end": t, "first_d": d, "last_d": d, "points": [(t, v)], "samples": [(t, v, d)]}
                 bursts.append(current)
     found = []
     for b in bursts:
+        _trim(b)
         seconds = b["end"] - b["start"] + 1
         if not (MIN_SECONDS <= seconds <= MAX_SECONDS) or len(b["points"]) < 4:
             continue
@@ -206,7 +212,50 @@ def find_efforts(times, speeds, dists=None, easy=None):
         found.append({"at": int(b["start"]), "seconds": int(seconds), "metres": round(metres),
                       "avg_mps": round(metres / seconds, 2), "top_mps": round(top, 2),
                       "kind": label(metres, seconds, run_metres)})
+    if laps:
+        from_laps = lap_efforts(laps, samples, line, run_metres)
+        if from_laps:
+            inside = lambda e: any(l["at"] - 5 <= e["at"] + e["seconds"] / 2 <= l["at"] + l["seconds"] + 5
+                                   for l in from_laps)
+            found = sorted([e for e in found if not inside(e)] + from_laps, key=lambda e: e["at"])
     return found, round(usual, 2)
+
+
+def lap_efforts(laps, samples, line, run_metres):
+    """Fast laps from his watch as efforts: the watch's time and distance, top speed from the samples inside."""
+    out = []
+    for lap in laps:
+        seconds, metres, start = lap.get("seconds") or 0, lap.get("metres") or 0, lap.get("start") or 0
+        if not (MIN_SECONDS <= seconds <= MAX_SECONDS) or not metres or metres / seconds < line:
+            continue
+        points = [(t, v) for t, v, _ in samples if start <= t < start + seconds]
+        top = (_best_window(points) if len(points) >= 3 else None) or metres / seconds
+        out.append({"at": int(start), "seconds": round(seconds), "metres": round(metres),
+                    "avg_mps": round(metres / seconds, 2), "top_mps": round(top, 2),
+                    "kind": label(metres, seconds, run_metres), "lap": True})
+    return out
+
+
+EDGE = 0.8    # a stretch starts and ends where he's within 80% of its usual speed: the slowing down after it
+              # (above the fast line but well below rep pace) isn't part of the rep. Curtis's 200s, 33-34 s on his
+              # watch, read 36-37 s before this; on a simulated rep this lands on the watch time.
+
+
+def _trim(burst):
+    """Drop the build-up and the slow-down at a stretch's ends (below EDGE x its median speed)."""
+    samples = burst["samples"]
+    if len(samples) < 6:
+        return
+    floor = EDGE * statistics.median(v for _, v, _ in samples)
+    a, b = 0, len(samples) - 1
+    while a < b and samples[a][1] < floor:
+        a += 1
+    while b > a and samples[b][1] < floor:
+        b -= 1
+    kept = samples[a:b + 1]
+    burst["start"], burst["end"] = kept[0][0], kept[-1][0]
+    burst["first_d"], burst["last_d"] = kept[0][2], kept[-1][2]
+    burst["points"] = [(t, v) for t, v, _ in kept]
 
 
 STEADY = 0.75  # a best effort's slowest 15 seconds must be at least 75% of its average speed (no jog or stop inside;
@@ -471,6 +520,8 @@ def pack(streams):
               "d": [None if d is None else round(d * 10) for d in (dists + [None] * n)[:n]],
               "hr": [None if h is None else int(h) for h in (hr + [None] * n)[:n]] if hr else [],
               "ll": [[round(p[0], 5), round(p[1], 5)] if p else None for p in ll[::LL_STEP]] if ll else []}
+    if streams.get("laps"):   # laps he pressed on his watch (COROS runs): [{start, seconds, metres}]
+        series["laps"] = streams["laps"]
     return base64.b64encode(zlib.compress(json.dumps(series, separators=(",", ":")).encode(), 9)).decode()
 
 
@@ -480,13 +531,14 @@ def unpack(text):
         return {}
     s = json.loads(zlib.decompress(base64.b64decode(text)))
     return {"t": s["t"], "v": [None if v is None else v / 100 for v in s["v"]],
-            "d": [None if d is None else d / 10 for d in s["d"]], "hr": s.get("hr") or [], "ll": s.get("ll") or []}
+            "d": [None if d is None else d / 10 for d in s["d"]], "hr": s.get("hr") or [], "ll": s.get("ll") or [],
+            "laps": s.get("laps") or []}
 
 
 def summarize(series, easy=None):
     """Everything kept about one run, from its series."""
     times, speeds, dists = series.get("t") or [], series.get("v") or [], series.get("d") or []
-    efforts, usual = find_efforts(times, speeds, dists, easy)
+    efforts, usual = find_efforts(times, speeds, dists, easy, series.get("laps"))
     return {"strides": sum(1 for e in efforts if e["kind"] == "stride"), "efforts_json": json.dumps(efforts),
             "stride_mps": stride_speed(efforts), "usual_mps": usual, "best5_mps": top_speed(times, speeds),
             "hist_json": json.dumps(histogram(times, speeds)), "bests_json": json.dumps(best_efforts(times, dists, speeds)),
@@ -839,7 +891,7 @@ def titles(db, user_id, ids):
         return {}
     rows = db.connect().execute(
         f"SELECT external_id, title, distance_meters FROM trainer_imported_workouts WHERE user_id = ? AND "
-        f"source = 'strava' AND external_id IN ({', '.join('?' * len(ids))})", [user_id, *ids]).fetchall()
+        f"source IN ('strava', 'coros') AND external_id IN ({', '.join('?' * len(ids))})", [user_id, *ids]).fetchall()
     return {r["external_id"]: (r["title"] or "Run", round((r["distance_meters"] or 0) / METERS_PER_MILE, 1))
             for r in rows}
 
@@ -852,7 +904,7 @@ def recent(db, user_id, limit=10, fast_only=False, races=None):
     rows = db.connect().execute(
         f"""SELECT s.external_id, s.day, s.efforts_json, s.hist_json, w.title, w.distance_meters
             FROM tr_run_speed s LEFT JOIN trainer_imported_workouts w
-              ON w.user_id = s.user_id AND w.external_id = s.external_id AND w.source = 'strava'
+              ON w.user_id = s.user_id AND w.external_id = s.external_id AND w.source IN ('strava', 'coros')
             WHERE s.user_id = ? {"AND s.efforts_json NOT IN ('[]', '')" if fast_only else ""}
             ORDER BY s.day DESC LIMIT ?""", (user_id, limit)).fetchall()
     return [{"id": r["external_id"], "day": r["day"], "title": r["title"] or "Run",
