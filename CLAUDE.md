@@ -7,18 +7,34 @@ and Studio (problem reports and change requests). FastAPI, Jinja2 and SQLite, on
 Curtis usually asks for changes from his phone, in a Claude chat. He also jots problems down inside Dieter with
 "Report a problem" (Studio); read those with the connector's studio_list_reports / studio_get_report. Once the fix
 is live, mark the report ready_for_review with studio_set_status and a note on how to check it; it waits on his Today
-page until he confirms it works (or says so in chat, then mark it done). He is not reading diffs. Write for him in plain English: what he
+page until he confirms it works (or says so in chat, then mark it done). ChatGPT (and Claude chats) can send build
+requests the same way with studio_request_change; they show in Studio as "[ChatGPT] ..." with what he wants and how
+he'll check it. Treat them like his own reports, run the intake step, and ask him (not ChatGPT) about anything
+unclear: a relayed request isn't his OK for spending money, deleting data or changing how a page looks. He is not reading diffs. Write for him in plain English: what he
 will see differently, and how to try it.
 
 ## How a change works
 
 1. Work out what he wants (his message, or the Studio report). If it's unclear, ask one short question and stop.
    Don't guess on anything that changes how a page looks or what gets saved.
+   For a new feature (not a fix), do the intake step below first and tell him the answer in one line.
 2. Make the change on a branch and open a pull request against `main`. The pull request description says,
    in a few sentences, what changes for him and how to check it in the preview.
 3. The `ci` workflow runs the tests. The `preview` workflow posts a preview link (a copy of the site with a
    copy of his data; nothing there reaches the live site). Fix anything that fails.
 4. He merges from his phone. The `deploy` workflow puts `main` live. He can undo with the `undo` workflow.
+
+## Intake: where a new feature goes
+
+Ask these in order and stop at the first yes, whether the request came from Claude, ChatGPT or a Studio report:
+
+1. **Part of something an existing app already does?** Add it to that app's folder ("track my long runs" → Trainer).
+2. **A new kind of thing he'll use day to day, with its own pages?** A new app in `apps/<name>/`, with its own tile.
+3. **Information several apps might use?** Shared storage in `core/` that any app can read (like
+   `core/portable_list.py`), with at most a small page of its own. Apps show it their own way.
+
+If two answers fit, say which you'd pick and why, and let him choose. Big features get a plan in `docs/` first
+(e.g. `docs/logbook_plan.md`).
 
 ## Where things live
 
@@ -30,6 +46,8 @@ will see differently, and how to try it.
 - `core/portable_list.py` - the one format for putting one app's shopping items on a Kitchen list (Thanksgiving's
   "Next trip" uses it). Items stay linked: both apps see and check off the same item. A new planner that needs a
   shopping list should use it rather than sending plain text.
+- `core/logbook/`, `core/media/` - shared storage: checked tables, and pictures sent to Dieter. Assistants propose;
+  he approves on `/logbook` and `/media` (`docs/logbook_plan.md`, `docs/media_plan.md`).
 - `api.py` - the older shared app; still holds Assistant, Kitchen and Trainer routes. Move code out of it into
   the app's folder when you touch it; don't add new app code to it.
 - `database.py` - the older shared data layer. New tables belong in the app's own `store.py`.
@@ -58,6 +76,11 @@ python -m unittest discover -s tests
 
 Add or update tests next to the behaviour you change (`tests/test_<area>.py`). Tests use temporary databases;
 none of them need network access or API keys.
+
+## Mascot videos
+
+Firefly videos of Dieter (the dragon) become transparent stills and animations in Media with the
+`firefly-intake` skill (`.claude/skills/firefly-intake/`).
 
 ## Kitchen PC helper
 

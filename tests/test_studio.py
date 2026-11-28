@@ -116,6 +116,37 @@ class StudioTests(unittest.TestCase):
         finally:
             reset_current_user_id(token)
 
+    def test_chatgpt_sends_a_build_request_to_studio(self):
+        admin = self.db.create_user("curtis@example.com", "Curtis", "x", "admin")
+        token = set_current_user_id(admin)
+        try:
+            sent = connector.request_change({
+                "title": "Store ChatGPT images", "what": "Keep the Ragnar picture with the table it came from.",
+                "done_when": "The Ragnar table page shows the picture.", "details": "fileParams: image",
+                "area": "Logbook", "assistant": "chatgpt"})
+            report = connector.get_report({"report_id": sent["report_id"]})
+            self.assertEqual(report["title"], "[ChatGPT] Store ChatGPT images")
+            self.assertEqual(report["area"], "Logbook")
+            self.assertEqual(report["reporter"], "ChatGPT (for Curtis)")
+            for bit in ("Sent by ChatGPT for Curtis.", "## What he wants", "Ragnar picture",
+                        "## How he'll know it works", "## Details", "fileParams"):
+                self.assertIn(bit, report["text"])
+            self.assertIn(sent["report_id"], [r["id"] for r in connector.list_reports({})["reports"]])
+            for missing in ({"what": "x", "done_when": "y", "assistant": "chatgpt"},
+                            {"title": "x", "what": "x", "done_when": "y", "assistant": "someone"},
+                            {"title": "x", "what": "x", "assistant": "chatgpt"}):
+                with self.assertRaises(ToolError):
+                    connector.request_change(missing)
+        finally:
+            reset_current_user_id(token)
+        member = self.db.create_user("member@example.com", "Member", "x", "member")
+        token = set_current_user_id(member)
+        try:
+            with self.assertRaises(ToolError):
+                connector.request_change({"title": "x", "what": "x", "done_when": "y", "assistant": "chatgpt"})
+        finally:
+            reset_current_user_id(token)
+
     def test_fixes_wait_to_be_checked_and_old_reports_are_flagged(self):
         fixed, old, fresh = self.add_report(), self.add_report(title="Old"), self.add_report(title="Fresh")
         conn = self.db.connect()

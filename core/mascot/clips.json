@@ -1,0 +1,21 @@
+{
+  "_about": "Dieter's animation clips (docs/mascot_plan.md). Each is a kept Media picture. starts/ends are his pose at each end: a clip may follow one that ends in its start pose. play: once, loop or pingpong. reference: the clip whose first frame sets where he sits on the canvas.",
+  "reference": "alert_breathing",
+  "clips": [
+    {"name": "alert_breathing", "title": "Alert, breathing", "media_id": "med-12428cd02367", "play": "loop", "starts": "alert", "ends": "alert", "role": "idle"},
+    {"name": "alert_blink", "title": "Blink", "media_id": "med-5691bf315b8a", "play": "once", "starts": "alert", "ends": "alert", "role": "idle gesture, every 3-8 s"},
+    {"name": "alert_head_move", "title": "Head move", "media_id": "med-7c61b154841c", "play": "once", "starts": "alert", "ends": "alert", "role": "idle gesture, every 30-90 s"},
+    {"name": "yawn_stretch", "title": "Yawn and wing stretch", "media_id": "med-2853b71dc763", "play": "once", "starts": "alert", "ends": "alert", "role": "idle gesture, every few minutes or after waking"},
+    {"name": "listening", "title": "Listening", "media_id": "med-865e8e1fa360", "play": "loop", "starts": "alert", "ends": "alert", "role": "listen()"},
+    {"name": "thinking_enter", "title": "Thinking: enter", "media_id": "med-a5999e2c8a40", "play": "once", "starts": "alert", "ends": "thinking", "role": "think()"},
+    {"name": "thinking_hold", "title": "Thinking: hold", "media_id": "med-a02ab4d835cd", "play": "loop", "starts": "thinking", "ends": "thinking", "role": "think(), for as long as it takes"},
+    {"name": "thinking_exit", "title": "Thinking: exit", "media_id": "med-b74e15531974", "play": "once", "starts": "thinking", "ends": "alert", "role": "after think()"},
+    {"name": "speaking", "title": "Speaking", "media_id": "med-aabf5615a2ec", "play": "loop", "starts": "alert", "ends": "alert", "role": "speak(audio), while it plays"},
+    {"name": "nod", "title": "Acknowledgment nod", "media_id": "med-b52b40fbe56c", "play": "once", "starts": "alert", "ends": "alert", "role": "done()"},
+    {"name": "confused", "title": "Curious tilt", "media_id": "med-164628982b73", "play": "once", "starts": "alert", "ends": "alert", "role": "confused()"},
+    {"name": "going_to_sleep", "title": "Going to sleep", "media_id": "med-53699b6bffbb", "play": "once", "starts": "alert", "ends": "asleep", "role": "sleep()"},
+    {"name": "sleeping", "title": "Sleeping", "media_id": "med-5c5385cb2129", "play": "pingpong", "starts": "asleep", "ends": "asleep", "role": "asleep"},
+    {"name": "peek", "title": "Peek", "media_id": "med-2e6772b15dbd", "play": "once", "starts": "asleep", "ends": "asleep", "role": "asleep, now and then"},
+    {"name": "waking", "title": "Waking up", "media_id": "med-ceaf27cde6ba", "play": "once", "starts": "asleep", "ends": "alert", "role": "wake()"}
+  ]
+}

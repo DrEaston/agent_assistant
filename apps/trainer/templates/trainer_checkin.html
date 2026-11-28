@@ -1,0 +1,55 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Sunday check-in{% endblock %}
+{% block content %}
+{% call ui.page_header("Sunday check-in", crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs, current=current,
+    sub="Look back at " ~ last.label ~ ", then set " ~ coming.label ~ ".") %}{% endcall %}
+<main class="wrap">
+  {% if saved %}{% call ui.banner("ok") %}Saved. <a href="/apps/trainer?week={{ coming.start }}">See the week</a>{% endcall %}{% endif %}
+  <form method="post" action="/apps/trainer/checkin" class="stack">
+    <input type="hidden" name="last_week" value="{{ last.start }}">
+    <input type="hidden" name="coming_week" value="{{ coming.start }}">
+    {% set t = last.totals %}
+    {% call ui.section("Last week · " ~ last.label) %}
+    <div class="card stack">
+      <div class="spread"><span>Miles run (Strava)</span><strong class="num">{{ t.miles_run }} / {{ t.miles_target | round(1) }}</strong></div>
+      {{ ui.meter(t.miles_run, t.miles_target or 1) }}
+      <div class="chips small">
+        <span class="chip">Hard workout {{ t.workout[0] }}/{{ t.workout[1] }}</span>
+        <span class="chip">Strides {{ t.strides[0] }}/{{ t.strides[1] }}</span>
+        <span class="chip">Weights {{ t.weights[0] }}/{{ t.weights[1] }}</span>
+        <span class="chip">Pilates {{ t.pilates[0] }}/{{ t.pilates[1] }}</span>
+      </div>
+      {% if last.week.goals %}<div class="small muted">Goals were: {{ last.week.goals | join("; ") }}</div>{% endif %}
+      <div class="field"><label for="review">How did it go? Fueling, anything sore</label>
+        <textarea id="review" name="review" class="short">{{ last.week.review }}</textarea></div>
+    </div>
+    {% endcall %}
+    {% call ui.section("Next week · " ~ coming.label) %}
+    <div class="card stack">
+      {{ ui.field("Miles target", "miles_target", value=(coming.week.miles_target | round(1)), type="number") }}
+      {% set g = coming.week.goals %}
+      {{ ui.field("Goal 1", "goal1", value=(g[0] if g|length > 0 else ""), placeholder="e.g. strides twice", maxlength=160) }}
+      {{ ui.field("Goal 2", "goal2", value=(g[1] if g|length > 1 else ""), placeholder="e.g. fuel before Tuesday's workout", maxlength=160) }}
+      {{ ui.field("Goal 3", "goal3", value=(g[2] if g|length > 2 else ""), maxlength=160) }}
+      {% if coming.empty %}
+      <label class="row"><input type="checkbox" name="draft" value="fill" checked> Draft the week from my usual week (I can change it after)</label>
+      {% else %}
+      <label class="row"><input type="checkbox" name="draft" value="replace"> Redraft the unfinished sessions from my usual week</label>
+      {% endif %}
+    </div>
+    {% endcall %}
+    <button type="submit" class="primary">Save the check-in</button>
+  </form>
+  {% if not coming.empty %}
+  {% call ui.section("Next week's sessions") %}
+  <div class="card flush">
+    {% for d in coming.days %}{% for s in d.sessions %}
+    <div class="list-row"><span class="grow">{{ d.short }} · {{ s.title }}{% if s.miles %} · {{ s.miles | round(1) }} mi{% endif %}{% if s.strides %} + strides{% endif %}</span>
+      <a class="small" href="/apps/trainer/sessions/{{ s.id }}">Change</a></div>
+    {% endfor %}{% endfor %}
+  </div>
+  {% endcall %}
+  {% endif %}
+</main>
+{% endblock %}

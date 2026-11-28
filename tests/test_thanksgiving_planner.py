@@ -875,6 +875,38 @@ class RouteTests(unittest.TestCase):
         plan = tg_router.store().get_plan()
         return plan, next(d for d in tg_router.store().get_dishes(plan["id"]) if d["name"] == "Pumpkin pie")
 
+    def test_dish_page_delay_pushes_unfinished_steps_and_undoes(self):
+        self.client.get("/thanksgiving")
+        plan, pie = self.pie()
+        dinner = planner.parse_dt(plan["dinner_at"])
+        when = lambda d: {s["id"]: planner.resolve_anchor(s["anchor"], dinner) for s in d["steps"]}
+        before = when(pie)
+        first = pie["steps"][0]["id"]
+        self.client.post("/thanksgiving/steps/toggle", data={"key": f"{pie['id']}:{first}", "done": "1"})
+        page = self.client.get(f"/thanksgiving/menu/{pie['id']}").text
+        self.assertIn(f'action="/thanksgiving/dishes/{pie["id"]}/delay"', page)
+        self.assertIn("data-step-toggle", page)  # ticks save in place, no reload
+        r = self.client.post(f"/thanksgiving/dishes/{pie['id']}/delay", data={"minutes": "30"}, follow_redirects=False)
+        self.assertEqual(r.status_code, 303)
+        self.assertTrue(r.headers["location"].startswith(f"/thanksgiving/menu/{pie['id']}?delayed="))
+        after = when(self.pie()[1])
+        self.assertEqual(after[first], before[first])  # done steps stay put
+        for step_id in before:
+            if step_id != first:
+                self.assertEqual((after[step_id] - before[step_id]).total_seconds(), 30 * 60, step_id)
+        page = self.client.get(r.headers["location"]).text
+        self.assertIn("Moved the rest of Pumpkin pie 30 min later", page)
+        self.client.post(f"/thanksgiving/dishes/{pie['id']}/delay/undo")
+        self.assertEqual(when(self.pie()[1]), before)
+
+    def test_dish_page_delay_wont_go_past_dinner(self):
+        self.client.get("/thanksgiving")
+        plan, mac = self.mac()
+        before = mac["steps"]
+        r = self.client.post(f"/thanksgiving/dishes/{mac['id']}/delay", data={"minutes": "1440"}, follow_redirects=False)
+        self.assertIn("delay_problem=", r.headers["location"])
+        self.assertEqual(self.mac()[1]["steps"], before)
+
     def test_voice_moves_the_crust_with_preview_apply_and_undo(self):
         self.client.get("/thanksgiving")
         plan, pie = self.pie()
@@ -941,7 +973,9 @@ class RouteTests(unittest.TestCase):
         plan_text = next(m["content"] for m in seen["messages"] if m["content"].startswith("The plan:"))
         self.assertIn("Status, unchecked steps from earlier", plan_text)
         self.assertIn("Status, next unchecked steps:", plan_text)
-        self.assertIn("(step ", plan_text.split("Status, next unchecked steps:")[1])
+        # Every unchecked step is listed under one of the two, with its ids (which one depends on today's date).
+        status = plan_text.split("Status, unchecked steps from earlier")[1].split("\nDish 1:")[0]
+        self.assertIn("(step ", status)
 
     def test_voice_size_and_done_but_no_assigning_people(self):
         self.client.get("/thanksgiving")

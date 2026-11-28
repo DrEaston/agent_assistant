@@ -1,0 +1,69 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}{{ athlete.name }} · Coach{% endblock %}
+{% block content %}
+{% set solo = coach_home == "/coach" %}
+{% call ui.page_header(athlete.name, crumbs=((("Coach", coach_home),) if solo else (("Trainer", "/apps/trainer"), ("Coach", coach_home))), tabs=(() if solo else tabs), current=current,
+    sub="Athlete profile: the workouts you sent, whether they took them, their notes" ~ (", and the paces Dieter picked." if show_paces else ".")) %}{% endcall %}
+<main class="wrap">
+  {% if sent %}{% call ui.banner("ok") %}Sent to {{ athlete.name }}.{% if show_paces %} The paces Dieter picked are below.{% endif %}{% endcall %}{% endif %}
+
+  {% call ui.section("Dieter's paces for " ~ athlete.name) %}
+  {% if paces %}
+  <div class="table-scroll card"><table class="data-table">
+    <tr><th>Effort</th><th class="num">Pace</th><th class="num">Typical rep</th></tr>
+    {% for p in paces %}<tr><td>{{ p.effort }}</td><td class="num">{{ p.pace }}</td><td class="num">{{ p.rep or "–" }}</td></tr>{% endfor %}
+  </table></div>
+  <p class="small muted">Worked out from {{ athlete.name }}'s own runs and race times. Shown while full view is on (until {{ athlete.full_view_until }}).</p>
+  {% elif show_paces %}
+  {{ ui.empty("Dieter can't set " ~ athlete.name ~ "'s paces yet: it needs a few hard runs or a race time.") }}
+  {% else %}
+  {{ ui.empty(athlete.name ~ "'s paces are private. " ~ athlete.name ~ " sees them on their own Trainer.") }}
+  {% endif %}
+  {% endcall %}
+
+  {% if athlete.full_view_until %}
+  <form method="post" action="/apps/trainer/athletes/{{ athlete.athlete_id }}/view" class="card stack">
+    <p class="small">Full view until {{ athlete.full_view_until }}: all of {{ athlete.name }}'s Trainer pages, read-only.</p>
+    <button type="submit">View {{ athlete.name }}'s Trainer</button>
+  </form>
+  {% endif %}
+
+  {% call ui.section("Workouts sent") %}
+  <p><a class="button primary" href="{{ coach_home }}?athlete={{ athlete.athlete_id }}#new">New workout</a></p>
+  {% if not workouts %}{{ ui.empty("Nothing sent yet.") }}{% endif %}
+  {% if workouts %}<div class="stack">
+    {% for w in workouts %}
+    <article class="card stack">
+      <div class="row spread">
+        <strong>{{ w.day }} · {{ w.title or "Workout" }}</strong>
+        {% if w.status == "sent" %}{{ ui.tag("Waiting") }}{% elif w.status == "accepted" %}{{ ui.tag("On their plan", "info") }}{% elif w.status == "done" %}{{ ui.tag("Done", "ok") }}{% else %}{{ ui.tag("Declined", "warn") }}{% endif %}
+      </div>
+      {% if w.rounds_text %}<p class="small"><strong>{{ w.rounds_text }}:</strong></p>{% endif %}
+      <ul class="steps">
+        {% for s in w.sets %}<li><span>{{ s.text }}</span>{% if show_paces and s.target %}<br><strong class="num">{{ s.target }}</strong>{% endif %}{% if s.was and (not show_paces is defined or show_paces) %}<br><span class="small muted">was {{ s.was }}</span>{% endif %}{% if s.basis and s.target and (not show_paces is defined or show_paces) %}<br><span class="small muted">{{ s.basis }}</span>{% endif %}</li>{% endfor %}
+      </ul>
+      {% if w.fit and w.fit.load is not none and (not show_paces is defined or show_paces) %}
+      <div class="workout-load stack">
+        {% if w.fit.week and w.status == "sent" %}<p class="small">This week's speed limit: <strong>{{ w.fit.week.limit }}</strong> <span class="muted">(so far {{ w.fit.week.so_far }})</span></p>{% endif %}
+        <p class="small">This workout: <strong>{{ w.fit.load }}</strong> speed load{% if w.fit.adjusted and w.fit.load_before != w.fit.load %} <span class="muted">(eased from {{ w.fit.load_before }})</span>{% endif %}{% if w.fit.week and w.status == "sent" %} · puts your week at <strong>{{ w.fit.week.after }}</strong> {{ ui.tag("Too high", "warn") if w.fit.week.over else ui.tag("OK", "ok") }}{% endif %}</p>
+        {% if w.fit.near %}<p class="small">Near-sprint: <strong>{{ w.fit.near }} m</strong>{% if w.fit.week and w.fit.week.near_limit and w.status == "sent" %} · this week's limit {{ w.fit.week.near_limit }} m · puts your week at <strong>{{ w.fit.week.near_after }} m</strong> {{ ui.tag("Too high", "warn") if w.fit.week.near_over else ui.tag("OK", "ok") }}{% endif %}</p>{% endif %}
+      </div>
+      {% endif %}
+      {% if w.fit and w.fit.adjusted and w.status == "sent" %}{% call ui.banner("warn" if w.fit.flag else "info") %}{{ w.fit.note }}{% endcall %}{% elif w.adjusted %}<p class="small muted">Eased to fit your weekly limits when it went on the plan.</p>{% endif %}
+      {% if w.changes %}<p class="small"><strong>{{ w.changes }}</strong></p>{% endif %}
+      {% if w.notes %}<p class="small muted">Your notes: {{ w.notes }}</p>{% endif %}
+      {% if w.athlete_note %}<p class="small">{{ athlete.name }}: {{ w.athlete_note }}</p>{% endif %}
+      {% if w.status == "sent" %}
+      <form method="post" action="/apps/trainer/athletes/{{ athlete.athlete_id }}/workouts/{{ w.id }}/withdraw"><button type="submit" class="quiet">Take it back</button></form>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>{% endif %}
+  {% endcall %}
+
+  {% call ui.section("Stop coaching") %}
+  <form method="post" action="/apps/trainer/coaching-links/{{ athlete.link_id }}/end"><input type="hidden" name="next" value="{{ coach_home }}"><button type="submit" class="quiet">Stop coaching {{ athlete.name }}</button></form>
+  {% endcall %}
+</main>
+{% endblock %}

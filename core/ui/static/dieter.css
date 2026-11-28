@@ -4,6 +4,17 @@
 
 /* ---------- Tokens ---------- */
 :root {
+  /* speed heatmap on Trainer's route maps: CMYK, cyan (easy) > magenta (threshold) > yellow (top speed) */
+  --heat-0: #00aeef;
+  --heat-1: #3b83d6;
+  --heat-2: #7657be;
+  --heat-3: #b12ca5;
+  --heat-4: #ec008c;
+  --heat-5: #f13d69;
+  --heat-6: #f67946;
+  --heat-7: #fab623;
+  --heat-8: #fff200;
+  --heat-casing: #1f2328;
   /* Neutral page, the same in every app */
   --bg: #f5f6f8;
   --panel: #ffffff;
@@ -109,6 +120,7 @@ body {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 a { color: var(--accent); }
+.accent-text { color: var(--accent); font-weight: 500; }  /* highlighted text that isn't a link (e.g. a run's fast work) */
 h1, h2, h3 { line-height: 1.2; margin: 0; }
 h1 { font-size: var(--text-xl); }
 h2 { font-size: var(--text-lg); }
@@ -276,6 +288,99 @@ textarea.short { min-height: 5rem; }
 .progress-bar .meter { flex: 1; max-width: none; margin: 0; height: 8px; }
 .progress-bar strong { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+/* ---------- Charts (bar_chart macro) ---------- */
+.chart { margin: 0; }
+.chart svg { display: block; width: 100%; height: 9rem; }
+.chart-bar { fill: var(--line-strong); }
+.chart-bar.hit { fill: var(--accent); }
+.chart-bar.current { fill: var(--info); }
+.chart-target { stroke: var(--accent-strong); stroke-width: 1.5; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+.chart-bar.over { fill: var(--warn); }
+/* A route drawn from GPS points (no street map) and a line of a value over time, with shaded stretches. */
+.route-map, .speed-trace { margin: 0; }
+.route-map svg { display: block; width: 100%; height: auto; max-height: 60vh; }
+.route-path { fill: none; stroke: var(--line-strong); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.route-fast { fill: none; stroke: var(--accent); stroke-width: 5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.route-casing { fill: none; stroke: var(--heat-casing); stroke-width: 8; stroke-opacity: .35; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+/* See-through so a stretch he ran more than once shows both passes; butt caps so colour changes don't leave dots. */
+.route-heat { fill: none; stroke-width: 5; stroke-opacity: .6; stroke-linejoin: round; stroke-linecap: butt; vector-effect: non-scaling-stroke; }
+.route-heat.heat-0 { stroke: var(--heat-0); } .heat-swatch.heat-0 { background: var(--heat-0); }
+.route-heat.heat-1 { stroke: var(--heat-1); } .heat-swatch.heat-1 { background: var(--heat-1); }
+.route-heat.heat-2 { stroke: var(--heat-2); } .heat-swatch.heat-2 { background: var(--heat-2); }
+.route-heat.heat-3 { stroke: var(--heat-3); } .heat-swatch.heat-3 { background: var(--heat-3); }
+.route-heat.heat-4 { stroke: var(--heat-4); } .heat-swatch.heat-4 { background: var(--heat-4); }
+.route-heat.heat-5 { stroke: var(--heat-5); } .heat-swatch.heat-5 { background: var(--heat-5); }
+.route-heat.heat-6 { stroke: var(--heat-6); } .heat-swatch.heat-6 { background: var(--heat-6); }
+.route-heat.heat-7 { stroke: var(--heat-7); } .heat-swatch.heat-7 { background: var(--heat-7); }
+.route-heat.heat-8 { stroke: var(--heat-8); } .heat-swatch.heat-8 { background: var(--heat-8); }
+.heat-key { display: block; margin-top: var(--s2); }
+.heat-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s2); margin-bottom: var(--s1); }
+.heat-bar { display: flex; height: .8rem; border-radius: var(--r-pill); overflow: hidden; }
+.heat-swatch { flex: 1; }
+.heat-swatch + .heat-swatch { box-shadow: inset 1px 0 0 rgba(0, 0, 0, .18); }
+/* one column per colour, so each pace sits under the colour it names; the end labels hug the edges */
+.heat-ticks { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); margin-top: .2rem; }
+.heat-tick { display: flex; flex-direction: column; align-items: center; white-space: nowrap; font-size: var(--text-xs);
+  color: var(--muted); font-variant-numeric: tabular-nums; line-height: 1.25; }
+.heat-tick.labelled::before { content: ""; width: 1px; height: .3rem; background: var(--line-strong); margin-bottom: .1rem; }
+.heat-tick:first-child { align-items: flex-start; } .heat-tick:last-child { align-items: flex-end; }
+.heat-pace { color: var(--ink); font-weight: 600; }
+.heat-note { font-size: .7rem; }
+.route-start { fill: var(--ok); }
+.route-finish { fill: var(--panel); stroke: var(--ink); stroke-width: 2; }
+.speed-trace svg { display: block; width: 100%; height: 10rem; }
+.speed-cells { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: var(--s3); }
+.speed-cells .speed-this-week { grid-column: 1 / -1; }
+.monitor { display: inline-block; padding: .2rem .65rem; border-radius: 999px; font-size: var(--text-sm); font-weight: 600;
+  background: var(--tag-bg); color: var(--ink); white-space: nowrap; }
+.monitor-building { background: var(--ok-soft); color: var(--ok-ink); }
+.monitor-holding, .monitor-starting { background: var(--info-soft); color: var(--info); }
+.monitor-easing-off { background: var(--tag-bg); color: var(--muted); }
+.monitor-over { background: var(--warn-soft); color: var(--warn-ink); }
+.speed-figure { margin: var(--s2) 0; }
+.speed-figure svg { display: block; width: 100%; height: auto; overflow: visible; }
+.speed-figure .sf-track { fill: var(--track); }
+.speed-figure .sf-load { fill: var(--accent); }
+.speed-figure .sf-load.sf-over { fill: var(--warn); }
+.speed-figure .sf-fitness { stroke: var(--ink); stroke-width: 2; }
+.speed-figure .sf-limit { stroke: var(--warn); stroke-width: 2; stroke-dasharray: 3 3; }
+.speed-figure .sf-advantage { fill: none; stroke: var(--muted); stroke-width: 1.5; }
+.speed-figure .sf-label { fill: var(--muted); font-size: 10px; }
+.sparkline { display: block; width: 100%; height: 2.25rem; margin: .25rem 0; }
+.sparkline polyline { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.stat-big { font-size: var(--text-xl); font-weight: 700; font-variant-numeric: tabular-nums; }
+.fitness-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: var(--s3); }
+.trace-line { fill: none; stroke: var(--info); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.trace-mark { fill: var(--accent-soft); }
+.trace-cs { stroke: var(--warn); stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+/* Explore a run (Trainer): the route map and speed graph on one screen; stacked on phones, side by side when wide */
+.explore { display: grid; gap: var(--s3); }
+.explore-map, .explore-graph { margin: 0; }
+.explore-map svg { display: block; width: 100%; height: 44vh; }
+.explore-graph svg { display: block; width: 100%; height: 26vh; min-height: 9rem; touch-action: none; cursor: crosshair; }
+.explore-readout { margin: 0; min-height: 1.6em; font-weight: 700; font-variant-numeric: tabular-nums; }
+.explore-cursor { stroke: var(--ink); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.explore-select { fill: var(--info-soft); }
+.route-window { fill: none; stroke: var(--info); stroke-width: 7; stroke-opacity: .45; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.route-dot { fill: var(--info); stroke: var(--panel); stroke-width: 3; vector-effect: non-scaling-stroke; }
+@media (min-width: 48rem), (orientation: landscape) and (min-width: 36rem) {
+  .explore { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  .explore-map svg { height: 70vh; }
+  .explore-graph svg { height: 40vh; }
+}
+.chart-limit { stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 3 2; vector-effect: non-scaling-stroke; }
+.chart-axis { display: flex; justify-content: space-between; margin-top: .25rem; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: var(--s3); }
+.stat { display: flex; flex-direction: column; gap: .15rem; }
+.stat strong { font-size: var(--text-xl); font-variant-numeric: tabular-nums; }
+
+/* ---------- Mascot stage (core/mascot): Dieter drawn on a canvas; the checkerboard shows what's transparent ---------- */
+.stage { display: block; width: 100%; max-width: 26rem; aspect-ratio: 1; margin: 0 auto; border-radius: var(--r-md, 12px);
+  background-color: var(--panel); background-size: 24px 24px; background-position: 0 0, 12px 12px;
+  background-image: linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%),
+                    linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%); }
+.stage.plain { background-image: none; background-color: transparent; }
+
 /* ---------- Inline confirm (details that swaps its button for the form) ---------- */
 .confirm > summary { list-style: none; }
 .confirm > summary::-webkit-details-marker { display: none; }
@@ -439,6 +544,9 @@ a.link-row:hover { background: var(--hover); }
 .ingredients .ing .name { flex: 1; }
 .ingredients .ing .amount { font-weight: 700; color: var(--accent); text-align: right; }
 .ingredients .ing:has(input:checked) .name, .ingredients .ing:has(input:checked) .amount { color: var(--muted); text-decoration: line-through; }
+/* a group of form fields without the browser's fieldset box */
+.plain-set { border: 0; margin: 0; padding: 0; min-width: 0; }
+.plain-set > legend { padding: 0; margin-bottom: var(--s1); }
 .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s3); }
 .steps li { display: flex; gap: var(--s3); background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-card); padding: var(--s3) var(--s4); line-height: 1.55; }
 .step-num { flex: none; width: 30px; height: 30px; border-radius: var(--r-pill); background: var(--accent-soft); color: var(--accent); font-weight: 800; display: inline-flex; align-items: center; justify-content: center; }
@@ -462,3 +570,23 @@ a.link-row:hover { background: var(--hover); }
 .diff-added { color: var(--ok-ink); background: var(--ok-soft); }
 .diff-gap { color: var(--muted); font-style: italic; }
 .ask-msg.card-msg { max-width: 100%; width: 100%; padding: 0; background: none; white-space: normal; }
+
+/* ---------- Data tables (Logbook, and any app that shows rows) ---------- */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.data-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.data-table th, .data-table td { padding: var(--s2) var(--s3); border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.data-table th { background: var(--panel-sunk); font-weight: 650; vertical-align: bottom; }
+.data-table th .col-type { display: block; font-weight: 500; font-size: var(--text-xs); color: var(--muted); }
+.data-table tr:last-child td { border-bottom: 0; }
+.data-table select, .data-table input { min-width: 7rem; }
+
+/* Pictures (core/media): a checkerboard behind them so a transparent background shows as transparent. */
+.media-thumb, .media-preview {
+  background: repeating-conic-gradient(var(--line) 0 25%, var(--panel) 0 50%) 50% / 16px 16px;
+  border: 1px solid var(--line); object-fit: contain;
+}
+.media-thumb { flex: none; width: 56px; height: 56px; border-radius: var(--r-control); }
+.media-preview { display: block; width: 100%; max-height: 70vh; border-radius: var(--r-card); }
+.media-facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--s1) var(--s3); margin: 0; }
+.media-facts dt { color: var(--muted); }
+.media-facts dd { margin: 0; overflow-wrap: anywhere; }

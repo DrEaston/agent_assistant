@@ -109,3 +109,36 @@
 {% macro toast(id="toast") -%}
 <div class="toast" id="{{ id }}" role="status" hidden></div>
 {%- endmacro %}
+
+
+{# Bar chart: bars = [{"label", "value", "current"}]; target draws a line. Values only; colours come from CSS. #}
+{#- A small trend line: points from the app ("x,y ..." in a 120 x 32 box). -#}
+{% macro sparkline(points, label="Trend") -%}
+<svg class="sparkline" viewBox="0 0 120 32" preserveAspectRatio="none" role="img" aria-label="{{ label }}"><polyline points="{{ points }}"></polyline></svg>
+{%- endmacro %}
+
+{% macro bar_chart(bars, max_value, target=none, unit="", label="Chart") -%}
+{% set width = (bars | length) * 24 %}
+<figure class="chart" aria-label="{{ label }}">
+  <svg viewBox="0 0 {{ width }} 108" preserveAspectRatio="none" role="img" aria-label="{{ label }}">
+    {% for b in bars %}
+    {% set h = ((b.value or 0) / (max_value or 1) * 100) | round(1) %}
+    <rect class="chart-bar{% if target and (b.value or 0) >= target %} hit{% endif %}{% if b.current %} current{% endif %}{% if b.limit and (b.value or 0) > b.limit %} over{% endif %}" x="{{ loop.index0 * 24 + 3 }}" y="{{ 104 - h }}" width="18" height="{{ h }}" rx="3"><title>{{ b.label }}: {{ b.value }}{{ unit }}{% if b.limit %} (line {{ b.limit }}{{ unit }}){% endif %}</title></rect>
+    {% if b.limit %}{% set ly = (104 - b.limit / (max_value or 1) * 100) | round(1) %}<line class="chart-limit" x1="{{ loop.index0 * 24 }}" x2="{{ loop.index0 * 24 + 24 }}" y1="{{ ly }}" y2="{{ ly }}"></line>{% endif %}
+    {% endfor %}
+    {% if target %}{% set ty = (104 - target / (max_value or 1) * 100) | round(1) %}
+    <line class="chart-target" x1="0" x2="{{ width }}" y1="{{ ty }}" y2="{{ ty }}"></line>{% endif %}
+  </svg>
+  <figcaption class="chart-axis small muted"><span>{{ bars[0].label if bars }}</span><span>{{ bars[-1].label if bars }}</span></figcaption>
+</figure>
+{%- endmacro %}
+
+{# A colour key for a stepped heatmap: a title with the slow/fast ends, the bar, and a label under every other colour.
+   key = {"steps": [...], "ticks": [{"step", "label", "note"}]} (Trainer's runpage.heat_key). #}
+{% macro heat_key(key, title="Pace per mile", slow="Slower", fast="Faster", tag="div") -%}
+<{{ tag }} class="heat-key" aria-label="Colour key: {{ title|lower }}, from {{ key.ticks[0].label }} ({{ slow|lower }}) to {{ key.ticks[-1].label }} ({{ fast|lower }})">
+  <div class="heat-head small"><span class="muted">◀ {{ slow }}</span><strong>{{ title }}</strong><span class="muted">{{ fast }} ▶</span></div>
+  <div class="heat-bar">{% for s in key.steps %}<span class="heat-swatch heat-{{ s }}"></span>{% endfor %}</div>
+  <div class="heat-ticks">{% for t in key.ticks %}<span class="heat-tick{% if t.label %} labelled{% endif %}">{% if t.label %}<span class="heat-pace">{{ t.label }}</span>{% if t.note %}<span class="heat-note">{{ t.note }}</span>{% endif %}{% endif %}</span>{% endfor %}</div>
+</{{ tag }}>
+{%- endmacro %}

@@ -1,0 +1,72 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Usual week{% endblock %}
+{% block content %}
+{% call ui.page_header("Usual week", crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs, current=current,
+    sub="The pattern new weeks are drafted from. Change it any time; it doesn't touch weeks already planned.") %}{% endcall %}
+<main class="wrap">
+  <form method="post" action="/apps/trainer/usual" class="card stack">
+    <div class="cols">
+      {{ ui.field("Miles per week", "miles", value=(settings.miles | round(1)), type="number", required=True) }}
+    </div>
+    <div class="cols">
+      <div class="field"><label for="workout_day">Hard workout day</label>
+        <select id="workout_day" name="workout_day">{% for d in days %}<option value="{{ d }}"{% if d == settings.workout_day %} selected{% endif %}>{{ day_names[d] }}</option>{% endfor %}</select></div>
+      {{ ui.field("Hard workout time", "workout_time", value=settings.workout_time, type="time") }}
+    </div>
+    <div class="cols">
+      <div class="field"><label for="long_day">Long run day</label>
+        <select id="long_day" name="long_day">{% for d in days %}<option value="{{ d }}"{% if d == settings.long_day %} selected{% endif %}>{{ day_names[d] }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="rest_day">Rest day</label>
+        <select id="rest_day" name="rest_day"><option value="">None</option>{% for d in days %}<option value="{{ d }}"{% if d == settings.rest_day %} selected{% endif %}>{{ day_names[d] }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="cols">
+      {{ ui.field("Weights sessions a week", "weights", value=settings.weights, type="number") }}
+      {{ ui.field("Pilates sessions a week", "pilates", value=settings.pilates, type="number") }}
+    </div>
+    <div class="cols">
+      {{ ui.field("Easy runs with strides a week", "strides", value=settings.strides, type="number") }}
+      {{ ui.field("Strides", "strides_text", value=settings.strides_text, maxlength=120) }}
+    </div>
+    <p class="small muted">Optional: recent race or time-trial times (minutes:seconds). Dieter works out your threshold pace
+      from your runs by itself; add these only if its number looks off, or for a race it can't see.</p>
+    <div class="cols">
+      {{ ui.field("Mile", "race_mile", value=settings.race_mile, placeholder="5:18", maxlength=8) }}
+      {{ ui.field("3K", "race_3k", value=settings.race_3k, placeholder="10:05", maxlength=8) }}
+    </div>
+    <div class="cols">
+      {{ ui.field("5K", "race_5k", value=settings.race_5k, placeholder="17:39", maxlength=8) }}
+      {{ ui.field("10K", "race_10k", value=settings.race_10k, placeholder="36:40", maxlength=8) }}
+    </div>
+    <p class="small muted">Optional: your speed advantage in metres (the ground you gain on threshold pace in one all-out
+      effort). Dieter uses it only until it measures yours from an all-out 2–7 minute effort; leave it empty for the
+      typical 150 m.</p>
+    <div class="cols">
+      {{ ui.field("Speed advantage (m)", "speed_advantage", value=settings.speed_advantage, type="number", placeholder="150") }}
+    </div>
+    <div class="cols">
+      {{ ui.field("Usual run time", "run_time", value=settings.run_time, type="time") }}
+      {{ ui.field("Usual weights / Pilates time", "gym_time", value=settings.gym_time, type="time") }}
+    </div>
+    <button type="submit" class="primary">Save</button>
+  </form>
+
+  {% call ui.section("On your phone's calendar") %}
+  <div class="card stack">
+    {% if renewed %}{% call ui.banner("ok") %}New link made. The old one has stopped working; subscribe again with this one.{% endcall %}{% endif %}
+    <p>Subscribe once and every planned session shows up in your calendar with a reminder 30 minutes before, plus a
+      Sunday 7 pm "Set the week". Changes in Dieter show up within an hour or so.</p>
+    <a class="button primary" href="{{ webcal_url }}">Add to my calendar</a>
+    <p class="small muted">Google Calendar: Settings › Add calendar › From URL, and paste the link below. Keep it private:
+      anyone with it can see your training plan.</p>
+    <input type="text" readonly value="{{ feed_url }}" aria-label="Calendar link">
+    {% call ui.confirm("Make a new link") %}
+    <form method="post" action="/apps/trainer/calendar/renew" class="row">
+      <span class="muted">The old link stops working.</span>
+      <button type="submit" class="danger">Make a new link</button>
+    </form>
+    {% endcall %}
+  </div>
+  {% endcall %}
+</main>
+{% endblock %}

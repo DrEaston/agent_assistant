@@ -375,6 +375,27 @@ class ConnectorFlowTests(unittest.TestCase):
         self.assertIn("no tool", use(name="music_play"))
         self.assertIn("no tool", use(name="dieter_use_tool", arguments={"name": "dieter_find_tools"}))
 
+    def test_file_tools_must_be_called_directly(self):
+        # ChatGPT attaches files only to tools in its own list (it reads their openai/fileParams), so the
+        # dieter_use_tool wrapper refuses them with instructions instead of failing obscurely.
+        _, tokens = self.connect()
+        token = tokens["access_token"]
+        order = [t["name"] for t in self.rpc(token, "tools/list").json()["result"]["tools"]]
+        self.assertEqual(order[:3], ["dieter_find_tools", "dieter_use_tool", "media_save_image"])  # can't fall off the end
+        listed = {t["name"]: t for t in self.rpc(token, "tools/list").json()["result"]["tools"]}
+        self.assertEqual(listed["media_save_image"]["_meta"], {"openai/fileParams": ["image"]})
+        image = listed["media_save_image"]["inputSchema"]["properties"]["image"]  # the shape ChatGPT documents
+        self.assertEqual((image["type"], image["required"], image["additionalProperties"]),
+                         ("object", ["download_url", "file_id"], False))
+        self.assertEqual(listed["media_save_image"]["inputSchema"]["required"], ["image", "title", "assistant"])
+        found = {t["name"]: t for t in self.tool(token, "dieter_find_tools", query="image")["tools"]}
+        self.assertEqual(found["media_save_image"]["takes_files"], ["image"])
+        self.assertNotIn("takes_files", found.get("media_list", {}))
+        answer = self.rpc(token, "tools/call", {"name": "dieter_use_tool", "arguments": {
+            "name": "media_save_image", "arguments": {"image": {"file_id": "file_1"}}}}).json()["result"]
+        self.assertTrue(answer["isError"])
+        self.assertEqual(json.loads(answer["content"][0]["text"])["error"], "needs_direct_call")
+
     def test_kitchen_shopping_lists(self):
         _, tokens = self.connect()
         token = tokens["access_token"]

@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from .oauth import public_base
-from .tools import ToolError
+from .tools import IMAGES, ToolError
 
 PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 # The version changes with every deploy (Cloud Run sets K_REVISION), so a client that compares it knows to fetch
@@ -40,7 +40,7 @@ META_TOOLS = [
 ]
 
 INSTRUCTIONS = """Dieter is this person's household app (askdieter.ai): Kitchen (recipes, shopping lists and the
-Thanksgiving planner), with more apps to come. Tools act on their real data, as them.
+Thanksgiving planner), Assistant (projects, to-dos, reading), the Logbook (checked tables) and Media (pictures), with more to come. Tools act on their real data, as them.
 
 - Look before you change: read a list or plan first, then use the item keys and ids it gives you.
 - Change things directly when asked ("add milk", "check off the eggs"); say what you changed afterwards.
@@ -48,6 +48,14 @@ Thanksgiving planner), with more apps to come. Tools act on their real data, as 
   or thanksgiving_finish_trip for the Thanksgiving list) rather than checking it off.
 - Thanksgiving: thanksgiving_get_plan has every dish, step and time. Plan changes go through
   thanksgiving_change_plan; preview first when a change moves several steps.
+- Logbook: their checked tables (race results, records, lists they keep) and the source of fact. When a question
+  might be answered there, logbook_find first instead of answering from memory; say so when it isn't there. Answers,
+  summaries and images use only the verified version (quote its label) and logbook_summarize's numbers, not your own
+  arithmetic. Changes are proposals they approve on the Logbook page; you can't approve or verify.
+- Media: pictures. When they ask to save a picture to Dieter, attach it to media_save_image with a title and
+  where it came from; it waits for their OK on the Media page. Only use pictures media_list shows as kept.
+- Building: Dieter's code is changed by Claude Code, not by you. When they ask you to have something built or
+  changed in Dieter, send it with studio_request_change (the outcome they want and how they'll check it, not code).
 - When they want to see something in Dieter (a recipe, a list, a day of the plan), give the link from dieter_open_page.
 - Keep answers short; they're often reading on a phone in a store or kitchen.
 - Your tool list may be older than Dieter. If a tool you need is missing, dieter_find_tools lists them all and
@@ -81,8 +89,18 @@ def make_router(toolsets, authenticate, run_as, signer=lambda user: user, instru
         words = str(arguments.get("query") or "").lower().split()
         found = [t for t in all_tools(user)
                  if all(w in f"{t.get('name', '')} {t.get('description', '')}".lower() for w in words)]
-        return {"tools": [{"name": t["name"], "description": t.get("description") or "",
-                           "inputSchema": t.get("inputSchema") or {}} for t in found]}
+        listed = []
+        for t in found:
+            entry = {"name": t["name"], "description": t.get("description") or "",
+                     "inputSchema": t.get("inputSchema") or {}}
+            if file_params(t):
+                entry["takes_files"] = file_params(t)
+                entry["call_directly"] = FILE_TOOL_NOTE
+            listed.append(entry)
+        return {"tools": listed}
+
+    def tool_named(user, name):
+        return next((t for t in all_tools(user) if t.get("name") == name), None)
 
     def call_tool(user, params):
         name = str(params.get("name") or "")
@@ -95,6 +113,10 @@ def make_router(toolsets, authenticate, run_as, signer=lambda user: user, instru
             if inner in (FIND_TOOLS, USE_TOOL) or not owner(inner):
                 return {"content": [{"type": "text", "text": f"Dieter has no tool called {inner!r}. "
                                                              "dieter_find_tools lists them."}], "isError": True}
+            if file_params(tool_named(user, inner) or {}):
+                return {"content": [{"type": "text", "text": json.dumps(
+                    {"error": "needs_direct_call", "tool": inner, "message": FILE_TOOL_NOTE},
+                    ensure_ascii=False)}], "isError": True}
             params = {"name": inner, "arguments": arguments.get("arguments")}
             name = inner
         toolset = owner(name)
@@ -109,8 +131,12 @@ def make_router(toolsets, authenticate, run_as, signer=lambda user: user, instru
             print(f"Warning: connector tool {name} failed: {exc!r}")
             return {"content": [{"type": "text", "text": f"Dieter hit an error running {name}. Try again, or "
                                                           "use the website for this one."}], "isError": True}
+        images = result.pop(IMAGES, None) if isinstance(result, dict) else None
         text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, indent=1, default=str)
-        return {"content": [{"type": "text", "text": text}], "isError": False}
+        content = [{"type": "text", "text": text}]
+        for image in images or []:  # MCP image content: the assistant sees the picture itself
+            content.append({"type": "image", "data": image["data"], "mimeType": image["mimeType"]})
+        return {"content": content, "isError": False}
 
     async def handle(message, user):
         method, msg_id = message.get("method"), message.get("id")
@@ -123,8 +149,8 @@ def make_router(toolsets, authenticate, run_as, signer=lambda user: user, instru
         if method == "ping":
             return _result(msg_id, {})
         if method == "tools/list":
-            return _result(msg_id, {"tools": META_TOOLS + await run_in_threadpool(run_as, user,
-                                                                                    lambda: all_tools(user))})
+            listed = await run_in_threadpool(run_as, user, lambda: all_tools(user))
+            return _result(msg_id, {"tools": META_TOOLS + files_first(listed)})
         if method == "tools/call":
             answer = await run_in_threadpool(run_as, user, lambda: call_tool(user, params))
             if answer is None:
@@ -161,6 +187,25 @@ def make_router(toolsets, authenticate, run_as, signer=lambda user: user, instru
         return Response(status_code=405, headers={"Allow": "POST"})
 
     return router
+
+
+FILE_TOOL_NOTE = ("This tool takes a file. ChatGPT only attaches a file to a tool that's in its own tool list "
+                  "(it reads the tool's openai/fileParams), so it can't be run through dieter_use_tool. Ask Curtis "
+                  "to refresh the Dieter connector in ChatGPT's settings (Apps & Connectors, Dieter, Refresh, or "
+                  "disconnect and connect again), then call the tool directly.")
+
+
+def file_params(tool):
+    """The parameters a tool takes as files (ChatGPT's _meta["openai/fileParams"]), or []."""
+    meta = tool.get("_meta") if isinstance(tool, dict) else None
+    params = meta.get("openai/fileParams") if isinstance(meta, dict) else None
+    return list(params) if isinstance(params, list) else []
+
+
+def files_first(tools):
+    """Tools that take a file go first. ChatGPT may not hand the model every tool in a long list, and it can only
+    attach a file to a tool the model was given (dieter_use_tool can't carry one), so those mustn't fall off the end."""
+    return sorted(tools, key=lambda t: not (t.get("_meta") or {}).get("openai/fileParams"))
 
 
 def _result(msg_id, result):

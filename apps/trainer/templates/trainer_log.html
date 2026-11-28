@@ -1,0 +1,86 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Training log{% endblock %}
+{% block content %}
+{% call ui.page_header("Training log", crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs, current=current,
+    sub="Your own record of every session, from Strava and entered here, as weekly and monthly totals.") %}
+  <a class="button quiet" href="/apps/trainer/log.csv{% if year %}?year={{ year }}{% endif %}">Download CSV</a>
+{% endcall %}
+<main class="wrap">
+  {% if problem %}{% call ui.banner("warn") %}{{ problem }}{% endcall %}{% endif %}
+  {% if live %}{% call ui.banner("ok") %}Live sync is on. New Strava activities will arrive here by themselves.{% endcall %}{% endif %}
+  {% if history >= 0 %}{% call ui.banner("ok" if status.history_done else "info") %}
+    {% if status.history_done %}History import finished: {{ status.history_count }} activities in your log.
+    {% else %}Imported {{ history }} more ({{ status.history_count }} so far). Tap “Continue history import” again until it says finished.{% endif %}
+  {% endcall %}{% endif %}
+
+  {% call ui.section("Strava") %}
+  <div class="card stack">
+    {% if not connected %}
+      <p>Strava isn't connected yet. <a href="/apps/trainer/strava/connect">Connect Strava</a></p>
+    {% else %}
+      <div class="spread"><span>Live sync</span>{{ ui.tag("On" if status.live else "Off", "ok" if status.live else "warn") }}</div>
+      {% if status.live %}
+        <p class="small muted">New, changed and deleted Strava activities arrive within a minute or so.{% if status.last_event %} Last one: {{ status.last_event }} UTC.{% endif %}{% if status.pending %} {{ status.pending }} waiting.{% endif %}</p>
+      {% elif is_admin %}
+        <form method="post" action="/apps/trainer/sync/live"><button type="submit" class="primary">Turn on live sync</button></form>
+        <p class="small muted">Asks Strava to send each new activity to Dieter as soon as it's uploaded. One time only.</p>
+      {% else %}
+        <p class="small muted">Dieter's admin turns this on.</p>
+      {% endif %}
+      <div class="row">
+        <form method="post" action="/apps/trainer/sync/history"><button type="submit">{{ "Continue history import" if status.history_count and not status.history_done else "Import my whole Strava history" }}</button></form>
+        <form method="post" action="/apps/trainer/sync/now"><button type="submit" class="quiet">Sync now</button></form>
+      </div>
+      {% if status.history_count %}<p class="small muted">{{ status.history_count }} older activities imported{% if status.history_done %}, all done{% endif %}. Laps and splits fill in a few at a time.</p>{% endif %}
+      {% call ui.confirm("Disconnect Strava", danger=True) %}
+        <form method="post" action="/apps/trainer/strava/disconnect" class="stack"><p class="small">New runs stop arriving. Runs already in your log stay.</p><button type="submit" class="danger">Disconnect</button></form>
+      {% endcall %}
+    {% endif %}
+  </div>
+  {% endcall %}
+
+  {% call ui.section("Last 12 weeks") %}
+  <div class="card flush">
+    <div class="list-row small muted"><span class="grow">Week of</span><span class="num">Run mi · runs · weights · Pilates · hours</span></div>
+    {% for w in totals.weeks %}
+    <div class="list-row"><span class="grow">{{ w.key }}</span>
+      <span class="num small">{{ w.run_miles }} · {{ w.runs }} · {{ w.strength }} · {{ w.pilates }} · {{ w.hours }}</span></div>
+    {% endfor %}
+  </div>
+  {% endcall %}
+
+  {% if totals.months %}
+  {% call ui.section("By month") %}
+  <div class="card flush">
+    {% for m in totals.months %}
+    <div class="list-row"><span class="grow">{{ m.key }}</span>
+      <span class="num small">{{ m.run_miles }} mi · {{ m.runs }} runs · {{ m.strength }} weights · {{ m.pilates }} Pilates{% if m.bike_miles %} · {{ m.bike_miles }} bike mi{% endif %}</span></div>
+    {% endfor %}
+  </div>
+  {% endcall %}
+  {% endif %}
+
+  <p class="small muted gap-above">{{ totals.total }} sessions in your log. Every one is kept with its full detail;
+    <a href="/apps/trainer/log.csv">download them all</a> any time.</p>
+
+  {% call ui.section("Add a session done without Strava") %}
+  <form method="post" action="/apps/trainer/log/add" class="card stack">
+    <div class="cols">
+      {{ ui.field("Day", "day", value=today, type="date", required=True) }}
+      <div class="field"><label for="activity_type">What</label>
+        <select id="activity_type" name="activity_type">
+          {% for t in ("Pilates", "Weight Training", "Yoga", "Run", "Walk", "Ride", "Swim", "Workout") %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+        </select></div>
+    </div>
+    <div class="cols">
+      {{ ui.field("Minutes", "minutes", type="number") }}
+      {{ ui.field("Miles", "miles", type="number") }}
+    </div>
+    {{ ui.field("Title", "title", maxlength=120, placeholder="e.g. Reformer class") }}
+    {{ ui.field("Notes", "notes", maxlength=500) }}
+    <button type="submit" class="primary">Add to my log</button>
+  </form>
+  {% endcall %}
+</main>
+{% endblock %}

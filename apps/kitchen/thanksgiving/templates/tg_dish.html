@@ -31,7 +31,19 @@
       <div data-recipe-for="{{ dish.id }}"><p class="muted">No recipe yet. Paste the ingredients and method under Edit dish.</p></div>
     {% endif %}
   </div>
-  <h3 class="block-title">Steps</h3>
+  <h3 class="block-title" id="steps">Steps</h3>
+  {% if delayed %}<div class="banner ok delay-note">{{ delayed }}
+    <form method="post" action="/thanksgiving/dishes/{{ dish.id }}/delay/undo" data-delay><button class="quiet" type="submit">Undo</button></form></div>{% endif %}
+  {% if delay_problem %}<div class="banner warn">{{ delay_problem }}</div>{% endif %}
+  {% if dish_tasks|rejectattr("done")|list %}
+  <div class="delay-row">
+    <span class="small muted">Running late? Push the rest of {{ dish.name }} later:</span>
+    {% for minutes, label in ((15, "15 min"), (30, "30 min"), (60, "1 hr"), (120, "2 hr")) %}
+    <form method="post" action="/thanksgiving/dishes/{{ dish.id }}/delay" data-delay>
+      <input type="hidden" name="minutes" value="{{ minutes }}"><button class="quiet" type="submit">+{{ label }}</button></form>
+    {% endfor %}
+  </div>
+  {% endif %}
   <div class="card">
   {% for t in dish_tasks %}{{ task_row(t, show_dish=False, show_lines=False) }}{% else %}<p class="muted">No steps yet.</p>{% endfor %}
   </div>
