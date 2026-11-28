@@ -450,12 +450,15 @@ def my_athletes(request: Request, athlete: int = 0):
                   set_rows=range(3), tomorrow=(clock.today() + timedelta(days=1)).isoformat())
 
 
-def coach_page(request: Request, sent: int = 0, error: str = "", workout: str = "", day: str = ""):
+def coach_page(request: Request, sent: int = 0, error: str = "", workout: str = "", day: str = "", filled=None):
     """/coach (api.py serves it there for the passcode coach): pick an athlete and open their Trainer, read-only;
     write a workout and send it to all athletes; what was sent lately."""
     c = coaching()
     return render("trainer_coach.html", title="Coach", current="/coach", page_url="/coach",
                   athletes=c.my_athletes(), recent=c.sent_by_me(), sent=sent, coach_home="/coach", report_url=None,
+                  rows=[{k: str(v or "") for k, v in r.items()} for r in _builder_rows(filled or {})],
+                  filled={k: str((filled or {}).get(k) or "") for k in ("title", "notes", "rounds", "round_rest")},
+                  intensities=coach.INTENSITIES, distances=[(m, coach.distance_name(m)) for m in coach.DISTANCES],
                   error=error, workout=workout, tomorrow=day or (clock.today() + timedelta(days=1)).isoformat())
 
 
@@ -465,67 +468,45 @@ def coach_sign_in_page(error="", signed_in_as=""):
                   page_url="/coach", report_url=None)
 
 
-def _workout_view(workout):
-    """The read workout in the standard layout: one row per set (reps, distance, effort, rest), title and notes,
-    plus the exact sets to send back with Send (so what's sent is what the coach checked)."""
-    rows = [{"reps": s["reps"], "distance": coach.distance_name(s["metres"]),
-             "effort": coach.INTENSITIES[s["intensity"]], "rest": s.get("rest") or "", "text": coach.describe_set(s)}
-            for s in workout["sets"]]
-    return {"title": workout["title"], "notes": workout["notes"], "sets": rows,
-            "parsed": json.dumps({"title": workout["title"], "notes": workout["notes"], "sets": workout["sets"]})}
+def _builder_rows(form):
+    """The builder's set rows from the coach page form (empty rows are skipped by clean_sets)."""
+    return [{"reps": form.get(f"reps_{i}"), "metres": form.get(f"metres_{i}"), "intensity": form.get(f"intensity_{i}"),
+             "rest": form.get(f"rest_{i}"), "rest_after": form.get(f"rest_after_{i}")} for i in range(coach.MAX_SETS)]
 
 
 @router.post("/coach/read")
 async def coach_read(request: Request):
-    """Read the coach's words (typed or dictated) into the standard layout, for them to check before sending."""
+    """Talk (or typed words) -> the workout as builder rows: sets, rounds, rest between rounds, title and notes.
+    The coach then adjusts the rows and sends; nothing is sent from here."""
     form = await request.form()
     try:
         workout = await run_in_threadpool(coach_reader.read, str(form.get("workout") or ""))
     except coach.Invalid as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
-    return _workout_view(workout)
-
-
-@router.post("/coach/fix")
-async def coach_fix(request: Request):
-    """Apply the coach's change ("make the rest 60 s") to the workout on screen and show it again."""
-    form = await request.form()
-    try:
-        try:
-            current = _checked_workout(str(form.get("parsed") or ""))
-        except (ValueError, TypeError):
-            raise coach.Invalid("Read the workout first, then say what to change.")
-        workout = await run_in_threadpool(coach_reader.revise, current, str(form.get("change") or ""))
-    except coach.Invalid as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    return _workout_view(workout)
-
-
-def _checked_workout(raw):
-    """The workout the coach checked (from /coach/read), validated again like any input."""
-    data = json.loads(raw)
-    sets = coach.clean_sets([s for s in data.get("sets") or [] if isinstance(s, dict)])
-    return {"title": " ".join(str(data.get("title") or "").split())[:120], "sets": sets,
-            "notes": " ".join(str(data.get("notes") or "").split())[:500]}
+    return {"title": workout["title"], "notes": workout["notes"], "sets": workout["sets"],
+            "rounds": workout["rounds"], "round_rest": workout["round_rest"],
+            "summary": coach.describe_workout(workout["sets"], workout["rounds"], workout["round_rest"])}
 
 
 @router.post("/coach/send")
 async def coach_send(request: Request):
-    """The coach's words -> AI reads them into sets -> sent to every athlete, whose pages work out the paces.
-    With JavaScript the coach has already checked the reading (/coach/read) and that exact workout is sent."""
+    """The builder's sets (and rounds) go to every athlete, whose own pages work out the paces. If the builder is
+    empty but words were typed (no JavaScript), Dieter reads the words."""
     form = await request.form()
     text, day = str(form.get("workout") or ""), str(form.get("day") or "")
+    rows = _builder_rows(form)
     try:
-        parsed = str(form.get("parsed") or "")
-        try:
-            workout = _checked_workout(parsed) if parsed else None
-        except (ValueError, TypeError):
-            workout = None
-        if workout is None:
+        if any(str(r["reps"] or "").strip() or str(r["metres"] or "").strip() for r in rows):
+            workout = {"title": form.get("title"), "notes": form.get("notes"), "sets": rows,
+                       "rounds": form.get("rounds") or 1, "round_rest": form.get("round_rest")}
+        elif text.strip():
             workout = await run_in_threadpool(coach_reader.read, text)
-        count = coaching().send_to_all(day, workout["title"], workout["sets"], workout["notes"])
+        else:
+            raise coach.Invalid("Add at least one set, like 3 × 1200 m at threshold.")
+        count = coaching().send_to_all(day, workout["title"], workout["sets"], workout["notes"],
+                                       workout["rounds"], workout["round_rest"])
     except (coach.Invalid, PermissionError) as exc:
-        return coach_page(request, error=str(exc), workout=text, day=day)
+        return coach_page(request, error=str(exc), workout=text, day=day, filled=form)
     return back(f"/coach?sent={count}#sent")
 
 
