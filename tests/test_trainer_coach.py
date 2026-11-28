@@ -54,13 +54,14 @@ class ScalingTests(unittest.TestCase):
         sets = coach.clean_sets([{"reps": 4, "metres": 200, "intensity": "sprint", "rest": "30 s"}])
         free = coach.fitted(sets, MODEL, rounds=3)
         self.assertFalse(free["adjusted"])
-        week = {"speed_work": 200, "work_line": 400, "near_top": 0, "top_line": 500}
-        fit = coach.fitted(sets, MODEL, rounds=3, week=week)
-        if free["load"] > 200:
-            self.assertTrue(fit["adjusted"])
-            self.assertLessEqual(fit["load"], 200)
-            self.assertTrue(fit["sets"][0]["was"])
-            self.assertEqual(fit["sets"][0]["reps"], 4)
+        self.assertEqual(free["load"], 600)                                   # 12 reps x 50 m gained at 800 pace
+        fit = coach.fitted(sets, MODEL, rounds=3, week={"speed_work": 0, "work_line": 450, "near_top": 0,
+                                                         "top_line": 500})
+        self.assertTrue(fit["adjusted"])
+        self.assertLessEqual(fit["load"], 450)
+        self.assertGreater(fit["load"], 400)                                  # eased only as much as needed
+        self.assertTrue(fit["sets"][0]["was"])
+        self.assertEqual((fit["sets"][0]["reps"], fit["flag"]), (4, ""))
         tight = coach.fitted(sets, MODEL, rounds=3, week={"speed_work": 400, "work_line": 400})
         self.assertEqual(tight["flag"], "too much")                          # can't fit by easing: flagged, not cut
         self.assertEqual(len(tight["sets"]), 1)
@@ -167,7 +168,9 @@ class CoachStoreTests(unittest.TestCase):
         self.assertEqual(coach.describe_set(sets[1]), "8 × 200 m sprint, 200 m jog between")
         k = coach.targets(coach.clean_sets([{"reps": "3", "metres": "2000", "intensity": "threshold"}]), MODEL)[0]
         self.assertIn(speed.pace(4.5) + "/mi", k["target"])       # pace per mile for longer reps that aren't a mile
-        self.assertEqual(rows[1]["target"], f"about {speed.clock(200 / (0.9 * 8.0))} each")
+        # 8 x 200 "sprint" = 1600 m in total: 1600 m race pace, not near-max
+        v1600 = 1600 / ((1600 - 200) / 4.5)
+        self.assertEqual(rows[1]["target"], f"about {speed.clock(200 / v1600)} each")
         # 5K pace from d = CS·t + D': faster than threshold, slower than mile pace
         self.assertGreater(coach.target_speed("5k", MODEL), 4.5)
         self.assertGreater(coach.target_speed("mile", MODEL), coach.target_speed("5k", MODEL))
