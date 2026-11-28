@@ -336,7 +336,6 @@ SESSION_DAYS = 30
 PBKDF2_ITERATIONS = 210_000
 SESSION_COOKIE_SECURE = bool(os.getenv("K_SERVICE")) or os.getenv("SESSION_COOKIE_SECURE", "").lower() == "true"
 REGISTRATION_CODE = os.getenv("DIETER_REGISTRATION_CODE", "")
-GUEST_EMAIL = os.getenv("DIETER_GUEST_EMAIL", "guest@askdieter.local")
 READ_ONLY_METHODS = {"GET", "HEAD", "OPTIONS"}
 STRAVA_CLIENT_ID = os.getenv("STRAVA_CLIENT_ID", "")
 STRAVA_CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET", "")
@@ -345,8 +344,6 @@ STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token"
 STRAVA_AUTHORIZE_URL = "https://www.strava.com/oauth/authorize"
 STRAVA_REDIRECT_URI = os.getenv("STRAVA_REDIRECT_URI", "")
 OPENAI_TRANSCRIPTION_MODEL = os.getenv("OPENAI_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe")
-DEMO_MODE = os.getenv("DEMO_MODE", "").lower() in {"1", "true", "yes", "on"}
-jinja_env.globals["demo_mode"] = DEMO_MODE
 jinja_env.globals["preview_label"] = os.getenv("PREVIEW_LABEL", "")
 
 
@@ -464,27 +461,6 @@ def redirect_or_unauthorized(request):
     return RedirectResponse(url=f"/login?next={request.url.path}", status_code=303)
 
 
-def is_guest_user(user):
-    """Return True for the shared read-only guest account."""
-    return bool(user and user["role"] == "guest")
-
-
-def guest_read_only_response(request):
-    """Reject writes from guest sessions."""
-    if request.url.path.startswith("/api/"):
-        return JSONResponse({"detail": "Guest access is read-only."}, status_code=403)
-    return HTMLResponse(
-        """
-        <section style="font-family: system-ui, sans-serif; max-width: 36rem; margin: 4rem auto; line-height: 1.5;">
-            <h1>Guest access is read-only</h1>
-            <p>You can browse the recipe catalogue as a guest, but saving, editing, planning, and deleting need a full account.</p>
-            <p><a href="/apps/recipes">Back to recipes</a></p>
-        </section>
-        """,
-        status_code=403,
-    )
-
-
 def is_passcode_coach(user):
     """The shared coach account a passcode opens (apps/trainer/coach.py): coach pages only."""
     return bool(user and user["role"] == trainer_coach.PASSCODE_ROLE)
@@ -515,17 +491,6 @@ def _coach_tries_left(client):
     return COACH_TRIES - len(recent)
 
 
-def get_or_create_guest_user_id():
-    """Create the shared guest user on demand and expose the recipe catalogue to it."""
-    user = db.get_user_by_email(GUEST_EMAIL)
-    if user:
-        return user["id"]
-    password = secrets.token_urlsafe(32)
-    guest_id = db.create_user(GUEST_EMAIL, "Guest", hash_password(password), "guest")
-    db.share_recipe_library_with_all_users()
-    return guest_id
-
-
 @app.middleware("http")
 async def load_authenticated_user(request: Request, call_next):
     """Load the logged-in user and require authentication for app routes."""
@@ -538,7 +503,6 @@ async def load_authenticated_user(request: Request, call_next):
     path = request.url.path
     public_prefixes = (
         "/login",
-        "/guest-login",
         "/register",
         "/registration-pending",
         "/logout",
@@ -568,12 +532,12 @@ async def load_authenticated_user(request: Request, call_next):
     public_exact_paths = {"/cct-roadmap", "/thanksgiving/menu",  # the shareable Thanksgiving menu
                           "/coach",  # coach sign-in with a passcode (apps/trainer/coach.py)
                           "/strava/webhook"}  # Strava pushes new activities here (apps/trainer/strava.py)
-    if DEMO_MODE:
-        public_exact_paths.update({"/", "/demo"})
     token = request.cookies.get(SESSION_COOKIE_NAME, "")
     user = None
     if token:
         user = db.get_session_user(hash_session_token(token), datetime.utcnow().isoformat())
+    if user and user["role"] == "guest":
+        user = None  # guest mode is gone: an old guest session counts as signed out
 
     # The coach passcode sign-in has its own cookie. It's who you are on the coach pages (and while viewing an
     # athlete from there), or everywhere when it's the only sign-in in this browser. Your own sign-in stays yours.
@@ -593,13 +557,6 @@ async def load_authenticated_user(request: Request, call_next):
             if db.get_user_count() == 0:
                 return RedirectResponse(url="/register", status_code=303)
             return redirect_or_unauthorized(request)
-        if (
-            is_guest_user(user)
-            and request.method not in READ_ONLY_METHODS
-            and not path.startswith(("/login", "/register", "/logout", "/guest-login"))
-            and path != "/api/dieter/action"
-        ):
-            return guest_read_only_response(request)
         if is_passcode_coach(user) and not passcode_coach_allowed(request):
             if request.url.path.startswith("/api/") or request.method not in READ_ONLY_METHODS:
                 return JSONResponse({"detail": "This coach sign-in only opens the coach pages."}, status_code=403)
@@ -4509,41 +4466,6 @@ async def transcribe_upload(audio, prompt):
     finally:
         tmp_path.unlink(missing_ok=True)
 
-def current_user_is_guest_session():
-    """Return true when the active request belongs to the shared guest account."""
-    user_id = get_current_user_id()
-    if not user_id:
-        return False
-    return is_guest_user(dict_from_row(db.get_user_by_id(user_id)))
-
-GUEST_APP_OVERVIEW = (
-    "Dieter is a FastAPI personal assistant with Kitchen, Scheduler, Trainer, Music, and Studio. "
-    "Studio is the agentic development layer: feedback becomes issues, plans, Codex runs, and test loops. "
-    "Guest mode is read-only; app menus show demo issue intake without saving."
-)
-
-def guest_repository_chat_response(content, page_url=""):
-    """Answer guest Ask Dieter questions without touching private integrations or data."""
-    question = (content or "").lower()
-    page_hint = (page_url or "").lower()
-    studio = "Studio captures feedback, classifies it by app area, drafts a plan, and tracks Codex/test status."
-    structure = "Repo map: `apps/` owns app shells/templates; `api.py` owns routes/chat; `database.py` owns SQLite persistence."
-    guest = "Guest mode is read-only. The demo issue form shows the normal path but does not save or run Codex."
-    if any(token in question for token in ["studio", "issue", "codex", "feedback", "development"]):
-        return f"{studio}\n\n{guest}"
-    if any(token in question for token in ["structure", "repo", "repository", "code", "folder", "architecture", "routes"]):
-        return f"{structure}\n\n{studio}"
-    if any(token in question for token in ["guest", "demo", "password", "login", "locked", "read only", "read-only"]):
-        return f"{guest}\n\n{GUEST_APP_OVERVIEW}"
-    if any(token in question for token in ["kitchen", "recipe", "scheduler", "trainer", "music", "apps"]):
-        return (
-            "Apps: Kitchen handles recipes/groceries, Scheduler handles agenda cards, Trainer shows frozen run/ride data, "
-            "Music is a playlist prototype, and Studio turns app feedback into planned development work."
-        )
-    if "/apps/issues" in page_hint:
-        return f"{studio}\n\nSample reports show the issue-to-Codex pipeline without exposing real repo access."
-    return GUEST_APP_OVERVIEW
-
 def dieter_chat_handles(message):
     """Dieter's chat (Claude) answers on Kitchen and Assistant pages and on Today (to-dos and reminders included)."""
     if not claude_agent.available() or (message.previous_action_plan or "").strip() or message.confirmation_token:
@@ -4561,7 +4483,7 @@ _dieter_chat_primed = {"at": 0.0}
 def dieter_chat_warm():
     """Ask Dieter opened: get Claude ready (core/connector/chat.prime) so the first answer is quick. The cached copy
     lasts an hour, so this does the work at most every 50 minutes."""
-    if (not claude_agent.available() or current_user_is_guest_session()
+    if (not claude_agent.available()
             or time.time() - _dieter_chat_primed["at"] < 50 * 60):
         return {"ok": True}
     _dieter_chat_primed["at"] = time.time()
@@ -4613,13 +4535,6 @@ def kitchen_recipe_restore(meal_id: int, change_id: int):
 def api_dieter_action(message: DieterActionMessage):
     """Route Ask Dieter requests to recipe edits, planner edits, or contextual chat."""
     page_url = message.page_url or ""
-    if current_user_is_guest_session():
-        return {
-            "assistant_message": guest_repository_chat_response(message.content, page_url),
-            "changed_fields": [],
-            "guest_context": True,
-            "model": "local-guest-repository",
-        }
     recipe_kind, recipe_id = parse_recipe_target_from_url(page_url)
 
     if music_routes.message_requests_playlist_action(message.content, page_url):
@@ -5260,7 +5175,7 @@ def ensure_cct_starter_projects(request):
     """Create one concise CCT project and merge the older split starter projects."""
     current_user = getattr(getattr(request, "state", None), "current_user", None)
     user_role = current_user.get("role") if isinstance(current_user, dict) else getattr(current_user, "role", "")
-    if not current_user or user_role == "guest":
+    if not current_user:
         return []
     unified_id = merge_existing_cct_projects()
     if unified_id:
@@ -5393,7 +5308,7 @@ def append_query_param(path, **params):
 @app.get("/login")
 def login_page(request: Request):
     """Show login form."""
-    if request.state.current_user and not is_guest_user(request.state.current_user):
+    if request.state.current_user:
         return RedirectResponse(url="/", status_code=303)
     return render_auth_page(request, "login")
 
@@ -5411,18 +5326,10 @@ def login_form(
         return render_auth_page(request, "login", "Email or password was not recognized.")
     if user["status"] == "pending":
         return RedirectResponse(url="/registration-pending", status_code=303)
-    if user["status"] != "active":
+    if user["status"] != "active" or user["role"] == "guest":
         return render_auth_page(request, "login", "This account is not active.")
     safe_next = safe_internal_redirect_target(next)
     return create_login_response(user["id"], safe_next)
-
-
-@app.post("/guest-login")
-def guest_login_form(next: str = Form("")):
-    """Start a read-only guest session."""
-    user_id = get_or_create_guest_user_id()
-    fallback = "/apps" if DEMO_MODE else "/apps/recipes"
-    return create_login_response(user_id, safe_internal_redirect_target(next or fallback, fallback))
 
 
 @app.get("/coach")
@@ -5462,7 +5369,7 @@ def coach_logout(request: Request):
 @app.get("/register")
 def register_page(request: Request):
     """Show registration form."""
-    if request.state.current_user and not is_guest_user(request.state.current_user):
+    if request.state.current_user:
         return RedirectResponse(url="/", status_code=303)
     return render_auth_page(request, "register")
 
@@ -5579,7 +5486,7 @@ def admin_update_member_trainer_mode(request: Request, user_id: int, trainer_mod
 @app.get("/")
 def home_default(request: Request):
     """Today: the home page."""
-    if not request.state.current_user:  # signed out: straight to sign-in (the old demo front page stays at /demo)
+    if not request.state.current_user:  # signed out: straight to sign-in
         return RedirectResponse(url="/login", status_code=303)
     return render_today_page(request)
 
@@ -5647,18 +5554,11 @@ def render_today_page(request: Request):
         focus=_quietly("the focus project", focus_project),
         last_workout=last[0] if last else None,
         playlist_drafts=_quietly("playlists", lambda: len(db.get_playlist_drafts()), 0),
-        is_guest=current_user_is_guest_session(),
         studio=_quietly("Studio", lambda: studio_routes.store().summary()) if current_user_is_admin(request) else None,
         logbook=_quietly("Logbook", lambda: logbook_connector.store().today()),
         media=_quietly("Media", lambda: media_connector.store().today()),
         training=_quietly("Trainer", lambda: (trainer_routes.catch_up(3), trainer_routes.today())[1]),
     )
-
-
-@app.get("/demo")
-def demo_landing(request: Request):
-    """Public read-only demo landing page."""
-    return render_demo_landing(request)
 
 
 @app.get("/dashboard")
@@ -5751,50 +5651,6 @@ def render_apps_page(request: Request):
     template = jinja_env.get_template("apps.html")
     html = template.render(context)
     return HTMLResponse(html)
-
-
-def render_demo_landing(request: Request):
-    """Render the public demo front door."""
-    demo_apps = [
-        {
-            "class": "kitchen-launch-card",
-            "kicker": "Kitchen",
-            "title": "Kitchen / Recipes",
-            "url": "/apps/recipes",
-            "description": "Browse demo recipes, meal planning, grocery lists, and cooking feedback.",
-        },
-        {
-            "class": "planner-launch-card",
-            "kicker": "Scheduler",
-            "title": "Scheduler",
-            "url": "/apps/assistant/scheduler",
-            "description": "Review agenda cards and checklist-style planning workflows.",
-        },
-        {
-            "class": "issues-launch-card",
-            "kicker": "Studio",
-            "title": "Dieter Studio",
-            "url": "/apps/issues",
-            "description": "Report problems, ask for changes, and check previews before they go live.",
-        },
-        {
-            "class": "trainer-launch-card",
-            "kicker": "Trainer",
-            "title": "Trainer",
-            "url": "/apps/trainer",
-            "description": "Preview workout, import, and coach/athlete workflow direction.",
-        },
-    ]
-    template = jinja_env.get_template("demo_landing.html")
-    return HTMLResponse(
-        template.render(
-            {
-                "request": request,
-                "demo_apps": demo_apps,
-                "scheduler_due": scheduler_due_context(),
-            }
-        )
-    )
 
 
 TRAINER_CATEGORY_LABELS = {
@@ -6828,7 +6684,6 @@ def kitchen_week_page(request: Request):
         shopping=shopping_lists[0] if shopping_lists else None,
         recent=kitchen_pages.library_rows(meals[:6]),
         thanksgiving=_quietly("Thanksgiving", thanksgiving_summary),
-        is_guest=current_user_is_guest_session(),
         added=request.query_params.get("added") == "1",
     )
 
@@ -6838,8 +6693,7 @@ def kitchen_library_page(request: Request):
     """Kitchen: every recipe, searchable."""
     recipe_app = get_recipe_app_context()
     planned_ids = [row["source_id"] for row in planned_meal_rows() if row["source_id"]]
-    return kitchen_pages.library_page(meals=kitchen_library_meals(recipe_app), planned_ids=planned_ids,
-                                      is_guest=current_user_is_guest_session())
+    return kitchen_pages.library_page(meals=kitchen_library_meals(recipe_app), planned_ids=planned_ids)
 
 
 @app.get("/apps/recipes/classic")
@@ -6920,11 +6774,10 @@ def kitchen_recipe_page(request: Request, meal_id: int):
     else:
         sections = [(None, meal["display_ingredients_text"].splitlines())]
     plan_item = next((row for row in planned_meal_rows() if row["source_id"] == meal_id), None)
-    is_guest = current_user_is_guest_session()
     return kitchen_pages.recipe_page(meal=meal, sections=sections, plan_item=plan_item,
-                                     cooked=request.query_params.get("cooked") == "1", is_guest=is_guest,
-                                     history=[] if is_guest else kitchen_recipe_changes.history(db, meal_id),
-                                     pending_cards=[] if is_guest else kitchen_recipe_changes.pending_cards(db, meal_id),
+                                     cooked=request.query_params.get("cooked") == "1",
+                                     history=kitchen_recipe_changes.history(db, meal_id),
+                                     pending_cards=kitchen_recipe_changes.pending_cards(db, meal_id),
                                      restored=request.query_params.get("restored") == "1")
 
 

@@ -18,14 +18,12 @@
 
   <div class="row gap-above">
     {% if steps %}<button type="button" class="primary" id="cook-start">Start cooking</button>{% endif %}
-    {% if not is_guest %}
       {% if plan_item %}
       <form method="post" action="/apps/recipes/meal-plan/{{ plan_item.id }}/cooked"><button type="submit">Mark cooked</button></form>
       {% else %}
       <form method="post" action="/apps/recipes/meal-plan/meals/{{ meal.id }}/add"><input type="hidden" name="next" value="/apps/recipes/meals/{{ meal.id }}"><button type="submit">+ Plan</button></form>
       {% endif %}
       <a class="button quiet" href="/apps/recipes/meals/{{ meal.id }}/details">Edit and details</a>
-    {% endif %}
   </div>
 
   <div class="cols side-main recipe-cols gap-above">
@@ -83,14 +81,12 @@
           {% for l in d.lines %}<div class="diff-line diff-{{ l.op }}">{% if l.op == "removed" %}− {% elif l.op == "added" %}+ {% endif %}{{ l.text }}</div>{% endfor %}{% endfor %}
         </details>
       </div>
-      {% if not is_guest %}
       {% call ui.confirm("Restore") %}
       <form method="post" action="/apps/recipes/meals/{{ meal.id }}/history/{{ v.id }}/restore" class="row">
         <span class="small muted">Put the recipe back to how it was before this change?</span>
         <button type="submit">Restore</button>
       </form>
       {% endcall %}
-      {% endif %}
     </div>
     {% endfor %}
   </section>
