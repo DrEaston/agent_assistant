@@ -119,6 +119,12 @@ def strava_activity_import_payload(activity, detail=None):
 # ---------------------------------------------------------------- talking to Strava
 
 
+def from_coros(activity):
+    """Recorded on a COROS watch (Strava's device name, or COROS's "-- from COROS" note in the description)."""
+    text = f"{activity.get('device_name') or ''} {activity.get('description') or ''}".lower()
+    return "coros" in text
+
+
 def http_json(url, method="GET", data=None, access_token="", opener=None):
     body, headers = None, {"Accept": "application/json"}
     if data is not None:
@@ -289,9 +295,9 @@ class Sync:
                 "AND user_id = ?", (datetime.utcnow().isoformat(timespec="seconds"), event["object_id"], user))
             self.db._commit()
             return "marked deleted"
-        if self._coros_took_over(user, event["object_id"]):
-            return "skipped: new activities come from COROS"
         detail = self.call(f"{API}/activities/{event['object_id']}?include_all_efforts=false", token=self._token(user))
+        if self._coros_took_over(user, event["object_id"]) and from_coros(detail):
+            return "skipped: recorded on his COROS watch, which brings it in"
         self._store(user, detail, detail)
         if classify_strava_workout(detail.get("sport_type") or detail.get("type"), detail.get("name")).startswith("run"):
             from . import speed  # strides: read the run's speed stream now, while it's new
@@ -302,8 +308,9 @@ class Sync:
         return "stored"
 
     def _coros_took_over(self, user_id, activity_id):
-        """True when COROS is connected for him (coros.py brings in new activities then) and this activity isn't in
-        his log already (changes to activities Strava brought in before still arrive)."""
+        """True when COROS is connected for him (coros.py brings in what his watch records then) and this activity
+        isn't in his log already (changes to activities Strava brought in before still arrive). Only activities from
+        his COROS watch are skipped (from_coros): Zwift rides and the like still come from Strava."""
         conn = self._conn()
         if not conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tr_coros_tokens'").fetchone():
             return False
