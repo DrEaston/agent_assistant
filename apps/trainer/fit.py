@@ -91,8 +91,8 @@ def _when(value):
 
 def read(data):
     """{start (UTC datetime), local_offset (s), sport, distance_m, elapsed_s, moving_s, avg_hr, max_hr, ascent_m,
-    records: [{t, lat, lon, d, v, hr}]} from a FIT file."""
-    records, session, offset = [], {}, None
+    records: [{t, lat, lon, d, v, hr}], laps: [{start, seconds (timer), metres}]} from a FIT file."""
+    records, session, offset, laps = [], {}, None, []
     for number, v in messages(data):
         if number == RECORD and v.get(253) is not None:
             speed = v.get(73) if v.get(73) is not None else v.get(6)
@@ -100,6 +100,9 @@ def read(data):
                             "v": speed / 1000 if speed is not None else None, "hr": v.get(3),
                             "lat": v[0] * SEMICIRCLE if v.get(0) is not None else None,
                             "lon": v[1] * SEMICIRCLE if v.get(1) is not None else None})
+        elif number == LAP and v.get(2) is not None and v.get(8) is not None:
+            laps.append({"start": v[2], "seconds": v[8] / 1000,
+                         "metres": v[9] / 100 if v.get(9) is not None else None})
         elif number == SESSION and not session:
             session = v
         elif number == ACTIVITY and v.get(5) is not None and v.get(253) is not None:
@@ -111,7 +114,7 @@ def read(data):
     return {"start": _when(start), "local_offset": offset or 0, "sport": session.get(5),
             "distance_m": scale(9, 100) or (records[-1]["d"] if records and records[-1]["d"] else None),
             "elapsed_s": scale(7, 1000), "moving_s": scale(8, 1000), "avg_hr": session.get(16),
-            "max_hr": session.get(17), "ascent_m": session.get(22), "records": records}
+            "max_hr": session.get(17), "ascent_m": session.get(22), "records": records, "laps": laps}
 
 
 def streams(run):
@@ -122,6 +125,9 @@ def streams(run):
     t0 = records[0]["t"]
     return {"time": {"data": [r["t"] - t0 for r in records]},
             "velocity_smooth": {"data": _speeds(records)},
+            "laps": [{"start": lap["start"] - t0, "seconds": round(lap["seconds"], 1),
+                      "metres": round(lap["metres"], 1) if lap["metres"] is not None else None}
+                     for lap in run.get("laps") or [] if len(run.get("laps") or []) > 1],
             "distance": {"data": [r["d"] for r in records]},
             "heartrate": {"data": [r["hr"] for r in records]} if any(r["hr"] for r in records) else {},
             "latlng": {"data": [[r["lat"], r["lon"]] if r["lat"] is not None else None for r in records]}

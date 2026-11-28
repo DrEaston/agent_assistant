@@ -20,7 +20,7 @@ AS = "https://mcpus.coros.com"
 EPOCH = datetime(1989, 12, 31, tzinfo=timezone.utc)
 
 
-def fit_file(start, seconds=1800, rep_every=None, sport=1, offset=-7 * 3600, burst=30, flat_speed=False):
+def fit_file(start, seconds=1800, rep_every=None, sport=1, offset=-7 * 3600, burst=30, flat_speed=False, laps=()):
     """A FIT file: one record a second (time, position, distance, speed, heart rate), then session and activity.
     Easy running at 3 m/s; with rep_every, 30 seconds at 6 m/s every rep_every seconds."""
     t0 = int((start - EPOCH).total_seconds())
@@ -42,6 +42,11 @@ def fit_file(start, seconds=1800, rep_every=None, sport=1, offset=-7 * 3600, bur
                    (16, 1, 0x02), (17, 1, 0x02)])
     body.extend(struct.pack("<BIIBIIIBB", 1, t0 + seconds, t0, sport, seconds * 1000, seconds * 1000,
                             int(d * 100), 140, 165))
+    if laps:   # laps pressed on the watch: (start second, timer seconds, metres)
+        define(3, 19, [(253, 4, 0x86), (2, 4, 0x86), (7, 4, 0x86), (8, 4, 0x86), (9, 4, 0x86)])
+        for at, secs, metres in laps:
+            body.extend(struct.pack("<BIIIII", 3, t0 + at + int(secs), t0 + at, int(secs * 1000), int(secs * 1000),
+                                    int(metres * 100)))
     define(2, 34, [(253, 4, 0x86), (5, 4, 0x86)])
     body.extend(struct.pack("<BII", 2, t0 + seconds, t0 + seconds + offset))
     header = struct.pack("<BBHI4s", 12, 0x20, 2100, len(body), b".FIT")
@@ -120,6 +125,21 @@ class FitReaderTests(unittest.TestCase):
         series = speed.unpack(speed.pack(fit.streams(run)))
         self.assertAlmostEqual(max(v for v in series["v"] if v), 6.0, delta=0.3)
         self.assertGreaterEqual(speed.summarize(series)["strides"], 4)
+
+    def test_watch_laps_are_the_reps(self):
+        # He timed 200s on his watch in 33-34 s: those laps are the reps, not the stretch found from speed.
+        from apps.trainer import speed
+        laps = [(0, 120, 360)]                                  # warm-up, then each rep (from second 120) and jog
+        for k in range(1, 6):
+            laps += [(120 * k, 33.6, 200), (120 * k + 34, 86, 258)]
+        run = fit.read(fit_file(datetime(2026, 11, 28, 15, 10, tzinfo=timezone.utc), seconds=700, rep_every=120,
+                                burst=36, laps=laps))
+        self.assertEqual(len(run["laps"]), 11)
+        efforts = speed.find_efforts(*[speed.unpack(speed.pack(fit.streams(run)))[k] for k in ("t", "v", "d")],
+                                     easy=3.0, laps=fit.streams(run)["laps"])[0]
+        reps = [e for e in efforts if e.get("lap")]
+        self.assertEqual([(e["seconds"], e["metres"], e["kind"]) for e in reps], [(34, 200, "200")] * 5)
+        self.assertEqual(len(efforts), 5)                      # the speed-found stretches inside them are dropped
 
     def test_not_a_fit_file(self):
         with self.assertRaises(fit.FitError):

@@ -49,7 +49,7 @@ import zlib
 from datetime import date, timedelta
 from .clock import today as local_today
 
-VERSION = 10                        # bump when the summary changes: older rows are read again
+VERSION = 11                        # bump when the summary changes: older rows are read again
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS tr_run_speed (
         user_id INTEGER NOT NULL, external_id TEXT NOT NULL, day TEXT NOT NULL, version INTEGER DEFAULT 0,
@@ -166,12 +166,16 @@ def label(metres, seconds=0, run_metres=0):
     return "tempo" if seconds >= 480 else "rep"
 
 
-def find_efforts(times, speeds, dists=None, easy=None):
+def find_efforts(times, speeds, dists=None, easy=None, laps=None):
     """([{at, seconds, metres, avg_mps, top_mps, kind}], usual m/s) for each fast stretch in a run.
 
     Usual speed is the run's median while moving. A stretch is time above max(1.35 x easy, easy + 1 m/s), `easy`
     being his easy speed across runs (the run's own usual when it isn't known yet), lasting MIN_SECONDS to
-    MAX_SECONDS. Distance comes from the distance stream when there is one."""
+    MAX_SECONDS. Distance comes from the distance stream when there is one.
+
+    Laps he pressed on his watch (COROS runs: [{start, seconds, metres}]) are the truth where they exist: a lap run
+    faster than the line is a rep with the watch's own time and distance, and fast stretches found inside it are
+    dropped. Stretches outside fast laps (strides) are still found from speed."""
     samples = _samples(times, speeds, dists)
     moving = [v for _, v, _ in samples if v > 1.0]
     if len(moving) < 60:
@@ -208,7 +212,28 @@ def find_efforts(times, speeds, dists=None, easy=None):
         found.append({"at": int(b["start"]), "seconds": int(seconds), "metres": round(metres),
                       "avg_mps": round(metres / seconds, 2), "top_mps": round(top, 2),
                       "kind": label(metres, seconds, run_metres)})
+    if laps:
+        from_laps = lap_efforts(laps, samples, line, run_metres)
+        if from_laps:
+            inside = lambda e: any(l["at"] - 5 <= e["at"] + e["seconds"] / 2 <= l["at"] + l["seconds"] + 5
+                                   for l in from_laps)
+            found = sorted([e for e in found if not inside(e)] + from_laps, key=lambda e: e["at"])
     return found, round(usual, 2)
+
+
+def lap_efforts(laps, samples, line, run_metres):
+    """Fast laps from his watch as efforts: the watch's time and distance, top speed from the samples inside."""
+    out = []
+    for lap in laps:
+        seconds, metres, start = lap.get("seconds") or 0, lap.get("metres") or 0, lap.get("start") or 0
+        if not (MIN_SECONDS <= seconds <= MAX_SECONDS) or not metres or metres / seconds < line:
+            continue
+        points = [(t, v) for t, v, _ in samples if start <= t < start + seconds]
+        top = (_best_window(points) if len(points) >= 3 else None) or metres / seconds
+        out.append({"at": int(start), "seconds": round(seconds), "metres": round(metres),
+                    "avg_mps": round(metres / seconds, 2), "top_mps": round(top, 2),
+                    "kind": label(metres, seconds, run_metres), "lap": True})
+    return out
 
 
 EDGE = 0.8    # a stretch starts and ends where he's within 80% of its usual speed: the slowing down after it
@@ -495,6 +520,8 @@ def pack(streams):
               "d": [None if d is None else round(d * 10) for d in (dists + [None] * n)[:n]],
               "hr": [None if h is None else int(h) for h in (hr + [None] * n)[:n]] if hr else [],
               "ll": [[round(p[0], 5), round(p[1], 5)] if p else None for p in ll[::LL_STEP]] if ll else []}
+    if streams.get("laps"):   # laps he pressed on his watch (COROS runs): [{start, seconds, metres}]
+        series["laps"] = streams["laps"]
     return base64.b64encode(zlib.compress(json.dumps(series, separators=(",", ":")).encode(), 9)).decode()
 
 
@@ -504,13 +531,14 @@ def unpack(text):
         return {}
     s = json.loads(zlib.decompress(base64.b64decode(text)))
     return {"t": s["t"], "v": [None if v is None else v / 100 for v in s["v"]],
-            "d": [None if d is None else d / 10 for d in s["d"]], "hr": s.get("hr") or [], "ll": s.get("ll") or []}
+            "d": [None if d is None else d / 10 for d in s["d"]], "hr": s.get("hr") or [], "ll": s.get("ll") or [],
+            "laps": s.get("laps") or []}
 
 
 def summarize(series, easy=None):
     """Everything kept about one run, from its series."""
     times, speeds, dists = series.get("t") or [], series.get("v") or [], series.get("d") or []
-    efforts, usual = find_efforts(times, speeds, dists, easy)
+    efforts, usual = find_efforts(times, speeds, dists, easy, series.get("laps"))
     return {"strides": sum(1 for e in efforts if e["kind"] == "stride"), "efforts_json": json.dumps(efforts),
             "stride_mps": stride_speed(efforts), "usual_mps": usual, "best5_mps": top_speed(times, speeds),
             "hist_json": json.dumps(histogram(times, speeds)), "bests_json": json.dumps(best_efforts(times, dists, speeds)),
