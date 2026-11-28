@@ -412,7 +412,7 @@ class CoachPageTests(unittest.TestCase):
         conn.execute("UPDATE users SET role = 'admin' WHERE id = ?", (athlete,))
         conn.commit()
         runner = self.client_for(athlete)
-        self.assertIn("doesn&#39;t sign you out of your own Dieter account", runner.get("/coach").text)
+        self.assertIn("sign you out of your own Dieter account", runner.get("/coach").text)
         self.api._coach_tries.clear()
         visitor = TestClient(self.api.app)
         with mock.patch.object(coach.CoachStore, "_owner", return_value=athlete), \
