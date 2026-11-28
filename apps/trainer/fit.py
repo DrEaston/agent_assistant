@@ -120,20 +120,31 @@ def streams(run):
     if not records:
         return {}
     t0 = records[0]["t"]
-    speeds, last_d, last_t = [], None, None
-    for r in records:
-        v = r["v"]
-        if v is None and r["d"] is not None and last_d is not None and r["t"] > last_t:
-            v = (r["d"] - last_d) / (r["t"] - last_t)
-        speeds.append(v)
-        if r["d"] is not None:
-            last_d, last_t = r["d"], r["t"]
     return {"time": {"data": [r["t"] - t0 for r in records]},
-            "velocity_smooth": {"data": _smooth(speeds)},
+            "velocity_smooth": {"data": _speeds(records)},
             "distance": {"data": [r["d"] for r in records]},
             "heartrate": {"data": [r["hr"] for r in records]} if any(r["hr"] for r in records) else {},
             "latlng": {"data": [[r["lat"], r["lon"]] if r["lat"] is not None else None for r in records]}
             if any(r["lat"] is not None for r in records) else {}}
+
+
+def _speeds(records, span=2):
+    """Speed from the watch's distance: metres covered from `span` seconds before to `span` seconds after each
+    moment. The watch's own speed field is smoothed more, which flattens 10-second strides below the stride line;
+    distance over a few seconds keeps them without GPS spikes. The watch's speed fills any gap in distance."""
+    out = []
+    for i, r in enumerate(records):
+        a, b = max(0, i - span), min(len(records) - 1, i + span)
+        while a < i and records[a]["d"] is None:
+            a += 1
+        while b > i and records[b]["d"] is None:
+            b -= 1
+        dt = records[b]["t"] - records[a]["t"]
+        if b > a and dt > 0 and records[a]["d"] is not None and records[b]["d"] is not None:
+            out.append(max(0.0, (records[b]["d"] - records[a]["d"]) / dt))
+        else:
+            out.append(r["v"])
+    return out
 
 
 def _smooth(speeds, width=3):

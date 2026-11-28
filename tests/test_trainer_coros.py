@@ -20,7 +20,7 @@ AS = "https://mcpus.coros.com"
 EPOCH = datetime(1989, 12, 31, tzinfo=timezone.utc)
 
 
-def fit_file(start, seconds=1800, rep_every=None, sport=1, offset=-7 * 3600):
+def fit_file(start, seconds=1800, rep_every=None, sport=1, offset=-7 * 3600, burst=30, flat_speed=False):
     """A FIT file: one record a second (time, position, distance, speed, heart rate), then session and activity.
     Easy running at 3 m/s; with rep_every, 30 seconds at 6 m/s every rep_every seconds."""
     t0 = int((start - EPOCH).total_seconds())
@@ -34,9 +34,10 @@ def fit_file(start, seconds=1800, rep_every=None, sport=1, offset=-7 * 3600):
     define(0, 20, [(253, 4, 0x86), (0, 4, 0x85), (1, 4, 0x85), (5, 4, 0x86), (73, 4, 0x86), (3, 1, 0x02)])
     lat, lon, d = int(33.35 / fit.SEMICIRCLE), int(-111.79 / fit.SEMICIRCLE), 0.0
     for s in range(seconds):
-        v = 6.0 if rep_every and s % rep_every < 30 and s > 60 else 3.0
+        v = 6.0 if rep_every and s % rep_every < burst and s > 60 else 3.0
         d += v
-        body.extend(struct.pack("<BIiiIIB", 0, t0 + s, lat + s * 300, lon, int(d * 100), int(v * 1000), 140))
+        shown = 3.0 if flat_speed else v   # flat_speed: the watch's own speed field smoothed flat
+        body.extend(struct.pack("<BIiiIIB", 0, t0 + s, lat + s * 300, lon, int(d * 100), int(shown * 1000), 140))
     define(1, 18, [(253, 4, 0x86), (2, 4, 0x86), (5, 1, 0x00), (7, 4, 0x86), (8, 4, 0x86), (9, 4, 0x86),
                    (16, 1, 0x02), (17, 1, 0x02)])
     body.extend(struct.pack("<BIIBIIIBB", 1, t0 + seconds, t0, sport, seconds * 1000, seconds * 1000,
@@ -110,6 +111,15 @@ class FitReaderTests(unittest.TestCase):
         s = fit.streams(run)
         self.assertEqual(s["time"]["data"][:3], [0, 1, 2])
         self.assertEqual(len(s["latlng"]["data"]), 600)
+
+    def test_strides_come_from_distance_not_the_smoothed_speed(self):
+        # 10-second strides the watch's speed field smooths away still show in the distance it records.
+        from apps.trainer import speed
+        run = fit.read(fit_file(datetime(2026, 11, 28, 15, 10, tzinfo=timezone.utc), seconds=900, rep_every=150,
+                                burst=10, flat_speed=True))
+        series = speed.unpack(speed.pack(fit.streams(run)))
+        self.assertAlmostEqual(max(v for v in series["v"] if v), 6.0, delta=0.3)
+        self.assertGreaterEqual(speed.summarize(series)["strides"], 4)
 
     def test_not_a_fit_file(self):
         with self.assertRaises(fit.FitError):
