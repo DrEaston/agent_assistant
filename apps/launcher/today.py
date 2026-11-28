@@ -65,6 +65,11 @@ def short_date(value):
     return f"{when.strftime('%b')} {when.day}"
 
 
+def welcome():
+    """The front door when nobody is signed in: what Dieter is, Log in, and that sign-ups are closed."""
+    return HTMLResponse(_templates.get_template("welcome.html").render(app=APP, page_url="/"))
+
+
 def render(*, user_name, now, thanksgiving=None, planned_meals=(), shopping=None, todos=(), focus=None,
            last_workout=None, playlist_drafts=0, report_url=None, studio=None, logbook=None,
            media=None, training=None):

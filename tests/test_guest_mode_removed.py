@@ -6,7 +6,6 @@ import uuid
 import warnings
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -65,14 +64,21 @@ class GuestModeRemovedTests(unittest.TestCase):
         self.assertNotIn("Guest Mode", html)
         self.assertNotIn("data-guest-session", html)
 
-    def test_signed_out_home_goes_to_sign_in(self):
-        request = SimpleNamespace(url=SimpleNamespace(path="/"), query_params={},
-                                  state=SimpleNamespace(current_user=None))
-        with patch.object(self.api, "render_today_page", return_value="today") as today:
-            answer = self.api.home_default(request)
-        self.assertEqual(303, answer.status_code)
-        self.assertEqual("/login", answer.headers["location"])
-        today.assert_not_called()
+    def test_signed_out_home_is_the_front_door(self):
+        page = self.client().get("/", follow_redirects=False)
+        self.assertEqual(200, page.status_code)
+        self.assertIn('href="/login"', page.text)
+        self.assertIn("New sign-ups aren't open right now.", page.text)
+        self.assertNotIn("Report a problem", page.text)
+
+    def test_sign_ups_are_closed(self):
+        self.assertNotIn('href="/register"', self.client().get("/login").text)
+        self.assertIn("aren't open", self.client().get("/register").text)
+        before = self.db.get_user_count()
+        answer = self.client().post("/register", data={"email": f"new-{uuid.uuid4().hex[:6]}@example.com",
+                                                       "password": "a-long-password"}, follow_redirects=False)
+        self.assertIn("aren't open", answer.text)
+        self.assertEqual(before, self.db.get_user_count())
 
     def test_studio_routes_classify_as_studio_area(self):
         self.assertEqual("Studio", self.api.app_area_from_url("/apps/issues"))
