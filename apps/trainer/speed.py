@@ -77,11 +77,11 @@ MAX_MPS = 9.0                       # faster than this in a 5-second step is a G
 HIST_FROM = 3.0                     # m/s: the histogram starts here (slower running never counts as speed work)
 FIT_WEEKS = 26                      # critical speed and top speed come from this many weeks of best efforts
 # Speed fitness = his average weekly speed load (speed points) over the 4 weeks before this one: the speed work his
-# legs are used to. Speed load this week is read against it, and the safe limit is 1.9 x speed fitness. That is the
+# legs are used to. Speed load this week is read against it, and the safe limit is 2 x speed fitness. That is the
 # acute:chronic workload ratio (Gabbett 2016 put the risk line at 1.5x; it's debated, a guide), raised to fit Curtis:
-# his week of Nov 23, 2026 (strides, a turkey trot, 5 x 230 m) was right for speed development and sits at the limit,
+# his week of Nov 23, 2026 (strides, a turkey trot, 5 x 230 m) was right for speed development and sits just under,
 # while the 18 x 400 week before it stays well over.
-CHRONIC_WEEKS, RATIO = 4, 1.9
+CHRONIC_WEEKS, RATIO = 4, 2.0
 FLOOR_ADVANTAGE = 2                 # the limit never drops below 2 x his speed advantage (D'): strides after a quiet
                                     # month are fine
 EASING, HOLDING = 0.8, 1.2          # this week / speed fitness: under 0.8 easing off, up to 1.2 holding, then building
