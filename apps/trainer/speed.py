@@ -701,19 +701,20 @@ def _as_long(e):
     return dict(e, m=e["m"] * (LONG[1] / e["t"]) ** (1 / RIEGEL), t=LONG[1], shown=(e["m"], e["t"]))
 
 
-def estimate(efforts):
+def estimate(efforts, typical=None):
     """(CS, D', how) from [{m, t, day, src}] (src "race": entered on Usual week; "run": from a run).
 
     Long effort L (10-40 min): the one giving the highest CS with a typical D'. Short effort S (2-7 min): the one
     furthest above that line (the most evidence of a bigger reserve). L and S together give both CS and D' when the
     answer is believable (D' 80-400 m); otherwise CS from L with the typical D'. Without a long effort, the full fit
     over whatever there is, if believable."""
+    typical = typical or TYPICAL_D_PRIME   # his own speed advantage from Usual week, if he set one
     efforts = [_as_long(e) for e in efforts]
     longs = [e for e in efforts if LONG[0] <= e["t"] <= LONG[1]]
     shorts = [e for e in efforts if SHORT[0] <= e["t"] <= SHORT[1]]
     if longs:
-        long = max(longs, key=lambda e: (e["m"] - TYPICAL_D_PRIME) / e["t"])
-        cs = (long["m"] - TYPICAL_D_PRIME) / long["t"]
+        long = max(longs, key=lambda e: (e["m"] - typical) / e["t"])
+        cs = (long["m"] - typical) / long["t"]
         if shorts:
             short = max(shorts, key=lambda e: e["m"] - cs * e["t"])
             cs2 = (long["m"] - short["m"]) / (long["t"] - short["t"])
@@ -721,7 +722,7 @@ def estimate(efforts):
             if 80 <= dp2 <= 400 and 2.5 <= cs2 <= 7.5:
                 return round(cs2, 3), round(dp2), f"from {_effort_name(long)} and {_effort_name(short)}"
         if 2.5 <= cs <= 7.5:
-            return round(cs, 3), TYPICAL_D_PRIME, f"from {_effort_name(long)}"
+            return round(cs, 3), typical, f"from {_effort_name(long)}"
     cs, dp = fit_critical_speed({str(e["m"]): e["t"] for e in efforts})
     return (cs, dp, "from your best efforts") if cs else (None, None, "")
 
@@ -730,7 +731,9 @@ def model_at(runs, end, races=None):
     """CS, D' and top speed from the FIT_WEEKS of runs up to `end`, and his race times if he entered any."""
     start = end - timedelta(weeks=FIT_WEEKS)
     window = [r for r in runs if start < r["day"] <= end]
-    efforts = [{"m": float(d), "t": t, "day": end, "src": "race"} for d, t in (races or {}).items() if t]
+    races = dict(races or {})
+    own = races.pop("advantage", None)   # his speed advantage from Usual week (plan.ADVANTAGE_KEY)
+    efforts = [{"m": float(d), "t": t, "day": end, "src": "race"} for d, t in races.items() if t]
     usual = sorted(r["usual"] for r in window if r.get("usual"))
     # His easy speed: the middle of the slower half of his runs (a race's own "usual" is race pace).
     easy = statistics.median(usual[:max(1, len(usual) // 2)]) if usual else None
@@ -741,11 +744,14 @@ def model_at(runs, end, races=None):
             if easy and m / t < hard_speed(easy, t):
                 continue  # not a hard effort: an easy or steady stretch
             efforts.append({"m": m, "t": t, "day": r["day"], "src": "run"})
-    cs, d_prime, how = estimate(efforts)
+    cs, d_prime, how = estimate(efforts, typical=own)
     vmax = max((r["best5"] or 0 for r in window), default=0) or None
-    # D' is only measured with a short hard effort (2-7 min) beside the long one; otherwise it's the typical value.
-    typical = bool(cs and d_prime == TYPICAL_D_PRIME and " and " not in how)
-    return {"cs": cs, "d_prime": d_prime, "vmax": vmax, "how": how, "d_prime_typical": typical}
+    # D' is only measured with a short hard effort (2-7 min) beside the long one. Otherwise it's his own number from
+    # Usual week if he set one, or the typical value.
+    measured = " and " in how or how == "from your best efforts"
+    source = "measured" if measured else ("yours" if own else "typical")
+    return {"cs": cs, "d_prime": d_prime, "vmax": vmax, "how": how, "d_prime_typical": bool(cs) and source == "typical",
+            "d_prime_source": source if cs else ""}
 
 
 def load_status(load, fitness, over):
@@ -786,6 +792,7 @@ def weekly(db, user_id, week_starts, races=None):
         stride_mps = round(statistics.median(strides), 2) if strides else None
         out[w] = {"cs": model["cs"], "cs_pace": pace(model["cs"]), "d_prime": model["d_prime"],
                   "d_prime_typical": model.get("d_prime_typical", False),
+                  "d_prime_source": model.get("d_prime_source", ""),
                   "near_top_pace": pace(0.9 * model["vmax"]) if model["vmax"] else None,
                   "cs_how": model["how"],
                   "vmax": model["vmax"], "speed_work": round(used) if model["cs"] else None,

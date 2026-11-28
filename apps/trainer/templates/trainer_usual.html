@@ -38,6 +38,12 @@
       {{ ui.field("5K", "race_5k", value=settings.race_5k, placeholder="17:39", maxlength=8) }}
       {{ ui.field("10K", "race_10k", value=settings.race_10k, placeholder="36:40", maxlength=8) }}
     </div>
+    <p class="small muted">Optional: your speed advantage in metres (the ground you gain on threshold pace in one all-out
+      effort). Dieter uses it only until it measures yours from an all-out 2–7 minute effort; leave it empty for the
+      typical 150 m.</p>
+    <div class="cols">
+      {{ ui.field("Speed advantage (m)", "speed_advantage", value=settings.speed_advantage, type="number", placeholder="150") }}
+    </div>
     <div class="cols">
       {{ ui.field("Usual run time", "run_time", value=settings.run_time, type="time") }}
       {{ ui.field("Usual weights / Pilates time", "gym_time", value=settings.gym_time, type="time") }}

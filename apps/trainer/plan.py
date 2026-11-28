@@ -47,7 +47,7 @@ DEFAULTS = {
     "run_time": "06:30",     # default calendar slot for runs
     "gym_time": "17:30",     # default slot for weights and Pilates
     # Recent race or time-trial times ("m:ss"): his real maximal efforts, for critical speed (speed.py).
-    "race_mile": "", "race_3k": "", "race_5k": "", "race_10k": "",
+    "race_mile": "", "race_3k": "", "race_5k": "", "race_10k": "", "speed_advantage": "",
 }
 RACES = {"race_mile": 1609, "race_3k": 3000, "race_5k": 5000, "race_10k": 10000}
 
@@ -65,9 +65,20 @@ def race_seconds(text):
     return seconds if 60 <= seconds <= 4 * 3600 else None
 
 
+ADVANTAGE_KEY = "advantage"     # in race_bests: his own speed advantage (D', metres) from Usual week, if he set one
+
+
 def race_bests(settings):
-    """{metres (str): seconds} from his entered race times."""
-    return {str(d): race_seconds(settings.get(key)) for key, d in RACES.items() if race_seconds(settings.get(key))}
+    """{metres (str): seconds} from his entered race times, plus "advantage": metres if he set his speed advantage
+    himself (used only while Dieter has no measurement of its own)."""
+    out = {str(d): race_seconds(settings.get(key)) for key, d in RACES.items() if race_seconds(settings.get(key))}
+    try:
+        advantage = int(str(settings.get("speed_advantage") or "").strip())
+    except ValueError:
+        advantage = None
+    if advantage:
+        out[ADVANTAGE_KEY] = advantage
+    return out
 
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS tr_settings (
@@ -233,6 +244,11 @@ class PlanStore:
                 current[key] = value
             elif key.endswith("_time"):
                 current[key] = _clock(value, current[key])
+            elif key == "speed_advantage":
+                text = str(value).strip().removesuffix("m").strip()
+                if text and not (text.isdigit() and 50 <= int(text) <= 400):
+                    raise Invalid("Speed advantage is a number of metres between 50 and 400, like 180.")
+                current[key] = text
             elif key in RACES:
                 text = str(value).strip()
                 if text and race_seconds(text) is None:

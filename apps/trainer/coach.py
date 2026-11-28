@@ -45,7 +45,7 @@ SCHEMA = (
         status TEXT NOT NULL DEFAULT 'sent', session_id INTEGER, athlete_note TEXT DEFAULT '',
         created_at TEXT DEFAULT CURRENT_TIMESTAMP, answered_at TEXT DEFAULT '')""",
 )
-ADDED_COLUMNS = (("rounds", "INTEGER DEFAULT 1"), ("round_rest", "TEXT DEFAULT ''"))
+ADDED_COLUMNS = (("rounds", "INTEGER DEFAULT 1"), ("round_rest", "TEXT DEFAULT ''"), ("adjusted", "INTEGER DEFAULT 0"))
 MAX_ROUNDS = 20
 PASSCODE_ROLE = "coach"          # the shared passcode account: api.py lets it use the coach pages only
 PASSCODE_EMAIL = "coach-passcode@askdieter.local"
@@ -214,27 +214,110 @@ def pace_profile(model):
     return out
 
 
+SPRINT_REP_MAX = 150    # "sprint" reps up to this long are true sprints (strides, flys): near-max speed
+EASE_FLOOR = 0.5        # easing for weekly limits never takes fast reps below halfway between threshold and target
+
+
+def set_speed(s, model):
+    """(m/s, basis) for one set's reps. "Sprint" means near-max only for short reps; for longer fast reps it means
+    as fast as you can hold for the whole set: race pace for the set's total distance (e.g. 4 x 200 -> 800 pace),
+    never faster than near-sprint."""
+    if s["intensity"] == "sprint" and s["metres"] > SPRINT_REP_MAX:
+        cs, d_prime, vmax = model.get("cs"), model.get("d_prime"), model.get("vmax")
+        total = s["reps"] * s["metres"]
+        if cs and d_prime is not None and total > 1.5 * d_prime:
+            v = total / ((total - d_prime) / cs)
+            near = SPRINT_SHARE * vmax if vmax else None
+            if near and v > near:
+                return near, "near-sprint"
+            return v, f"{distance_name(total)} race pace (the set's total)"
+        return (SPRINT_SHARE * vmax, "near-sprint") if vmax else (None, "")
+    return target_speed(s["intensity"], model), ""
+
+
+def _target_text(s, v):
+    rep = s["metres"] / v
+    if s["intensity"] == "easy":
+        return f"about {speed.pace(v)}/mi"
+    if s["metres"] < 400 or s["intensity"] == "sprint":
+        return f"about {speed.clock(rep)} each"
+    fast, slow = s["metres"] / (v * (1 + SPREAD)), s["metres"] / (v * (1 - SPREAD))
+    text = f"{speed.clock(rep)} each ({speed.clock(fast)}–{speed.clock(slow)})"
+    if s["metres"] >= 800 and s["metres"] != 1609:
+        text += f", {speed.pace(v)}/mi"
+    return text
+
+
 def targets(sets, model):
     """Each set with the athlete's target: per-rep time and range, and pace per mile for longer reps."""
-    out = []
-    for s in sets:
-        v = target_speed(s["intensity"], model)
-        row = dict(s, text=describe_set(s), target="")
-        if v:
-            rep = s["metres"] / v
-            if s["intensity"] == "easy":
-                row["target"] = f"about {speed.pace(v)}/mi"
-            elif s["metres"] < 400 or s["intensity"] == "sprint":
-                row["target"] = f"about {speed.clock(rep)} each"
+    return fitted(sets, model)["sets"]
+
+
+def _cost(sets, speeds, model, rounds):
+    """(speed load, near-sprint metres) the workout would add: metres gained on threshold pace, and metres run at
+    90%+ of top speed, over all rounds."""
+    cs, vmax = model.get("cs"), model.get("vmax")
+    load = near = 0.0
+    for s, v in zip(sets, speeds):
+        if not v:
+            continue
+        reps = s["reps"] * max(1, rounds)
+        if cs and v > cs:
+            load += reps * (v - cs) * (s["metres"] / v)
+        if vmax and v >= SPRINT_SHARE * vmax - 1e-9:
+            near += reps * s["metres"]
+    return load, near
+
+
+def fitted(sets, model, rounds=1, week=None):
+    """The athlete's targets for a workout, eased if it would put them over this week's limits.
+
+    week: that week's numbers from speed.weekly (speed_work, work_line, near_top, top_line) or None. First, reps that
+    would count as near-sprint are eased just under it if the week's near-sprint limit can't take them; then the
+    fast reps are eased toward threshold until the speed load fits (never past EASE_FLOOR). Reps are never cut: if
+    easing can't make it fit, `flag` says so for the athlete and coach to decide.
+    Returns {sets, adjusted, note, flag, load, near}."""
+    picked = [set_speed(s, model) for s in sets]
+    speeds = [v for v, _ in picked]
+    cs, vmax = model.get("cs"), model.get("vmax")
+    adjusted, flag = False, ""
+    load, near = _cost(sets, speeds, model, rounds)
+    if week and cs:
+        near_room = (week.get("top_line") or 0) - (week.get("near_top") or 0)
+        if week.get("top_line") and near > max(0, near_room) and vmax:
+            speeds = [min(v, 0.97 * SPRINT_SHARE * vmax) if v else v for v in speeds]
+            adjusted = True
+        load, near = _cost(sets, speeds, model, rounds)
+        room = (week.get("work_line") or 0) - (week.get("speed_work") or 0)
+        if week.get("work_line") and load > max(0, room):
+            base = list(speeds)
+            ease = lambda k: [cs + k * (v - cs) if v and v > cs and s["intensity"] not in ("threshold", "easy")
+                              else v for s, v in zip(sets, base)]
+            lo, hi = EASE_FLOOR, 1.0
+            if _cost(sets, ease(lo), model, rounds)[0] > max(0, room):
+                speeds, flag = ease(lo), "too much"
             else:
-                fast, slow = s["metres"] / (v * (1 + SPREAD)), s["metres"] / (v * (1 - SPREAD))
-                row["target"] = f"{speed.clock(rep)} each ({speed.clock(fast)}–{speed.clock(slow)})"
-                if s["metres"] >= 800 and s["metres"] != 1609:
-                    row["target"] += f", {speed.pace(v)}/mi"
+                for _ in range(30):
+                    mid = (lo + hi) / 2
+                    lo, hi = (mid, hi) if _cost(sets, ease(mid), model, rounds)[0] <= max(0, room) else (lo, mid)
+                speeds = ease(lo)
+            adjusted = True
+            load, near = _cost(sets, speeds, model, rounds)
+    out = []
+    for s, v, (v0, basis) in zip(sets, speeds, picked):
+        row = dict(s, text=describe_set(s), target="", basis=basis, was="")
+        if v:
+            row["target"] = _target_text(s, v)
+            if v0 and abs(v - v0) > 1e-6:
+                row["was"] = _target_text(s, v0)
         elif s["intensity"] != "feel":
             row["target"] = "Dieter needs a few more hard runs (or a race time on Usual week) to set this."
         out.append(row)
-    return out
+    note = ""
+    if adjusted:
+        note = ("Eased to fit this week's limits." if not flag else
+                "Eased as far as it goes and still over this week's speed limit: fewer reps or rounds would fit.")
+    return {"sets": out, "adjusted": adjusted, "note": note, "flag": flag, "load": round(load), "near": round(near)}
 
 
 def _live(until, today=None):
@@ -399,6 +482,7 @@ class CoachStore:
              "status": row["status"], "athlete_note": row["athlete_note"], "session_id": row["session_id"],
              "sets": [dict(s, text=describe_set(s)) for s in sets],
              "rounds": rounds, "round_rest": round_rest, "rounds_text": describe_rounds(rounds, round_rest),
+             "adjusted": bool(row["adjusted"]) if "adjusted" in keys else False,
              "coach": self._name(row["coach_id"]) if for_athlete else "",
              "summary": describe_workout(sets, rounds, round_rest)}
         return p
@@ -456,23 +540,27 @@ class CoachStore:
             raise Invalid("That workout isn't yours.")
         return row
 
-    def take(self, prescription_id, model):
+    def take(self, prescription_id, model, week=None):
         """The athlete takes the workout: it goes on their plan with their own target times in the details."""
         row = self._mine(prescription_id)
         if row["status"] != "sent":
             raise Invalid("You've already answered this one.")
-        sets = targets(json.loads(row["sets_json"] or "[]"), model)
+        rounds = (row["rounds"] if "rounds" in row.keys() else 1) or 1
+        fit = fitted(json.loads(row["sets_json"] or "[]"), model, rounds, week)
+        sets = fit["sets"]
         details = "; ".join(s["text"] + (f" ({s['target']})" if s["target"] and not s["target"].startswith("Dieter")
                                           else "") for s in sets)
-        rounds = (row["rounds"] if "rounds" in row.keys() else 1) or 1
+        if fit["adjusted"]:
+            details += f". {fit['note']}"
         if rounds > 1:
             details = f"{rounds} rounds of: {details}" + (f". {row['round_rest']} between rounds"
                                                          if row["round_rest"] else "")
         if row["notes"]:
             details += f". Coach: {row['notes']}"
         session = plan.PlanStore(self.db).add_session(row["day"], "workout", row["title"], details=details)
-        self._conn().execute("UPDATE tr_prescriptions SET status = 'accepted', session_id = ?, "
-                             "answered_at = CURRENT_TIMESTAMP WHERE id = ?", (session["id"], prescription_id))
+        self._conn().execute("UPDATE tr_prescriptions SET status = 'accepted', session_id = ?, adjusted = ?, "
+                             "answered_at = CURRENT_TIMESTAMP WHERE id = ?",
+                             (session["id"], 1 if fit["adjusted"] else 0, prescription_id))
         self._commit()
         return session
 
