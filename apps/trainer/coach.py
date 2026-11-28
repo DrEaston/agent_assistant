@@ -45,7 +45,12 @@ SCHEMA = (
         status TEXT NOT NULL DEFAULT 'sent', session_id INTEGER, athlete_note TEXT DEFAULT '',
         created_at TEXT DEFAULT CURRENT_TIMESTAMP, answered_at TEXT DEFAULT '')""",
 )
-ADDED_COLUMNS = (("rounds", "INTEGER DEFAULT 1"), ("round_rest", "TEXT DEFAULT ''"), ("adjusted", "INTEGER DEFAULT 0"))
+ADDED_COLUMNS = (("rounds", "INTEGER DEFAULT 1"), ("round_rest", "TEXT DEFAULT ''"), ("adjusted", "INTEGER DEFAULT 0"),
+                 # the athlete's own version, made before taking it: sets (each with "of": the coach's set index),
+                 # rounds, and the changes in plain words for the coach (never times)
+                 ("athlete_sets_json", "TEXT DEFAULT ''"), ("athlete_rounds", "INTEGER DEFAULT 0"),
+                 ("changes", "TEXT DEFAULT ''"))
+MAX_NUDGE = 30          # the athlete can move a set's target up to 30 s per rep either way
 MAX_ROUNDS = 20
 PASSCODE_ROLE = "coach"          # the shared passcode account: api.py lets it use the coach pages only
 PASSCODE_EMAIL = "coach-passcode@askdieter.local"
@@ -115,7 +120,36 @@ def describe_set(s):
         text += f", {s['rest']} between"
     if s.get("rest_after"):
         text += f", then {s['rest_after']}"
+    n = s.get("nudge") or 0
+    if n:
+        text += f" ({abs(n)} s {'slower' if n > 0 else 'faster'} per rep)"
     return text
+
+
+def describe_changes(original, mine, rounds, my_rounds, name="They"):
+    """What the athlete changed, in plain words for the coach: '2 rounds instead of 3; 200s: 3 reps instead of 4,
+    mile pace instead of sprint; removed the 400s'. Never times."""
+    parts = []
+    if my_rounds != rounds:
+        parts.append(f"{my_rounds} round{'s' if my_rounds != 1 else ''} instead of {rounds}")
+    kept = {s.get("of"): s for s in mine}
+    for i, o in enumerate(original):
+        m_ = o["metres"]
+        label = (f"{DISTANCE_NAMES[m_]} reps" if m_ in DISTANCE_NAMES else f"{m_}s") if o["reps"] > 1 else distance_name(m_)
+        m = kept.get(i)
+        if m is None:
+            parts.append(f"removed the {label}")
+            continue
+        bits = []
+        if m["reps"] != o["reps"]:
+            bits.append(f"{m['reps']} reps instead of {o['reps']}")
+        if m["intensity"] != o["intensity"]:
+            bits.append(f"{INTENSITIES[m['intensity']]} instead of {INTENSITIES[o['intensity']]}")
+        if m.get("nudge"):
+            bits.append(f"{abs(m['nudge'])} s {'slower' if m['nudge'] > 0 else 'faster'} per rep")
+        if bits:
+            parts.append(f"{label}: " + ", ".join(bits))
+    return (f"{name} changed it: " + "; ".join(parts)) if parts else ""
 
 
 def describe_rounds(rounds, round_rest=""):
@@ -278,10 +312,12 @@ def fitted(sets, model, rounds=1, week=None):
     easing can't make it fit, `flag` says so for the athlete and coach to decide.
     Returns {sets, adjusted, note, flag, load, near}."""
     picked = [set_speed(s, model) for s in sets]
+    picked = [(_nudged(s, v), basis) for s, (v, basis) in zip(sets, picked)]   # the athlete's own +/- seconds
     speeds = [v for v, _ in picked]
     cs, vmax = model.get("cs"), model.get("vmax")
     adjusted, flag = False, ""
     load, near = _cost(sets, speeds, model, rounds)
+    load_before, near_before = load, near
     if week and cs:
         near_room = (week.get("top_line") or 0) - (week.get("near_top") or 0)
         if week.get("top_line") and near > max(0, near_room) and vmax:
@@ -317,7 +353,22 @@ def fitted(sets, model, rounds=1, week=None):
     if adjusted:
         note = ("Eased to fit this week's limits." if not flag else
                 "Eased as far as it goes and still over this week's speed limit: fewer reps or rounds would fit.")
-    return {"sets": out, "adjusted": adjusted, "note": note, "flag": flag, "load": round(load), "near": round(near)}
+    week_view = None
+    if week and week.get("work_line"):
+        so_far = week.get("speed_work") or 0
+        week_view = {"so_far": round(so_far), "limit": week["work_line"], "after": round(so_far + load),
+                     "over": so_far + load > week["work_line"] + 0.5}
+    return {"sets": out, "adjusted": adjusted, "note": note, "flag": flag, "load": round(load), "near": round(near),
+            "load_before": round(load_before), "near_before": round(near_before), "week": week_view}
+
+
+def _nudged(s, v):
+    """The athlete's own change to a set's pace: +n seconds per rep is slower, -n faster."""
+    n = s.get("nudge") or 0
+    if not v or not n:
+        return v
+    t = s["metres"] / v + n
+    return s["metres"] / t if t > 0 else v
 
 
 def _live(until, today=None):
@@ -473,18 +524,33 @@ class CoachStore:
 
     # -------------------------------------------------------- prescriptions
 
+    @staticmethod
+    def _effective(row):
+        """(sets, rounds) the athlete will run: their own version if they made one, else the coach's."""
+        keys = row.keys()
+        rounds = (row["rounds"] if "rounds" in keys else 1) or 1
+        mine = row["athlete_sets_json"] if "athlete_sets_json" in keys else ""
+        if mine:
+            return json.loads(mine), (row["athlete_rounds"] or rounds)
+        return json.loads(row["sets_json"] or "[]"), rounds
+
     def _view(self, row, for_athlete):
-        sets = json.loads(row["sets_json"] or "[]")
+        original = json.loads(row["sets_json"] or "[]")
+        sets, my_rounds = self._effective(row)
         keys = row.keys()
         rounds = (row["rounds"] if "rounds" in keys else 1) or 1
         round_rest = (row["round_rest"] if "round_rest" in keys else "") or ""
         p = {"id": row["id"], "day": row["day"], "title": row["title"], "notes": row["notes"],
              "status": row["status"], "athlete_note": row["athlete_note"], "session_id": row["session_id"],
              "sets": [dict(s, text=describe_set(s)) for s in sets],
-             "rounds": rounds, "round_rest": round_rest, "rounds_text": describe_rounds(rounds, round_rest),
+             "original_sets": [dict(s, text=describe_set(s), index=i) for i, s in enumerate(original)],
+             "my_sets": {s.get("of", i): s for i, s in enumerate(sets)},
+             "rounds": my_rounds, "coach_rounds": rounds, "round_rest": round_rest,
+             "rounds_text": describe_rounds(my_rounds, round_rest),
+             "changes": (row["changes"] if "changes" in keys else "") or "",
              "adjusted": bool(row["adjusted"]) if "adjusted" in keys else False,
              "coach": self._name(row["coach_id"]) if for_athlete else "",
-             "summary": describe_workout(sets, rounds, round_rest)}
+             "summary": describe_workout(original, rounds, round_rest)}
         return p
 
     def prescribe(self, athlete_id, day, title, sets, notes="", rounds=1, round_rest=""):
@@ -540,13 +606,59 @@ class CoachStore:
             raise Invalid("That workout isn't yours.")
         return row
 
+    def change(self, prescription_id, edits, rounds):
+        """The athlete's own version before taking it. edits: per coach set index {reps, intensity, nudge, remove}.
+        Saved on the workout; the coach sees what changed in plain words, never times."""
+        row = self._mine(prescription_id)
+        if row["status"] != "sent":
+            raise Invalid("Change a workout before you put it on your plan.")
+        original = json.loads(row["sets_json"] or "[]")
+        mine = []
+        for i, o in enumerate(original):
+            e = edits.get(i) or {}
+            if e.get("remove"):
+                continue
+            try:
+                reps = int(str(e.get("reps") or o["reps"]).strip())
+                nudge = int(str(e.get("nudge") or 0).strip() or 0)
+            except ValueError:
+                raise Invalid("Reps and seconds are whole numbers.") from None
+            if not 1 <= reps <= 50:
+                raise Invalid("Reps are between 1 and 50.")
+            if abs(nudge) > MAX_NUDGE:
+                raise Invalid(f"Move a pace by up to {MAX_NUDGE} s per rep.")
+            intensity = e.get("intensity") or o["intensity"]
+            if intensity not in INTENSITIES:
+                raise Invalid(f"Effort is one of: {', '.join(INTENSITIES.values())}.")
+            mine.append(dict(o, reps=reps, intensity=intensity, nudge=nudge, of=i))
+        if not mine:
+            raise Invalid("Keep at least one set, or decline the workout instead.")
+        coach_rounds = (row["rounds"] or 1)
+        my_rounds, _ = clean_rounds(rounds or coach_rounds, "")
+        text = describe_changes(original, mine, coach_rounds, my_rounds, self._name(row["athlete_id"]))
+        same = not text
+        self._conn().execute("UPDATE tr_prescriptions SET athlete_sets_json = ?, athlete_rounds = ?, changes = ? "
+                             "WHERE id = ?", ("" if same else json.dumps(mine), 0 if same else my_rounds, text,
+                                              prescription_id))
+        self._commit()
+        return text
+
+    def reset_change(self, prescription_id):
+        """Back to the coach's version."""
+        row = self._mine(prescription_id)
+        if row["status"] != "sent":
+            raise Invalid("It's already on your plan.")
+        self._conn().execute("UPDATE tr_prescriptions SET athlete_sets_json = '', athlete_rounds = 0, changes = '' "
+                             "WHERE id = ?", (prescription_id,))
+        self._commit()
+
     def take(self, prescription_id, model, week=None):
         """The athlete takes the workout: it goes on their plan with their own target times in the details."""
         row = self._mine(prescription_id)
         if row["status"] != "sent":
             raise Invalid("You've already answered this one.")
-        rounds = (row["rounds"] if "rounds" in row.keys() else 1) or 1
-        fit = fitted(json.loads(row["sets_json"] or "[]"), model, rounds, week)
+        my_sets, rounds = self._effective(row)
+        fit = fitted(my_sets, model, rounds, week)
         sets = fit["sets"]
         details = "; ".join(s["text"] + (f" ({s['target']})" if s["target"] and not s["target"].startswith("Dieter")
                                           else "") for s in sets)
@@ -563,6 +675,30 @@ class CoachStore:
                              (session["id"], 1 if fit["adjusted"] else 0, prescription_id))
         self._commit()
         return session
+
+    def session_changed(self, session_id, status=None, deleted=False):
+        """Keep a coach workout in step with the plan session it became: done on the plan -> done for the coach;
+        back to planned -> on their plan again; deleted from the plan -> declined ("Removed from the plan")."""
+        user = get_current_user_id()
+        if not user or not session_id:
+            return
+        row = self._conn().execute("SELECT * FROM tr_prescriptions WHERE session_id = ? AND athlete_id = ?",
+                                   (session_id, user)).fetchone()
+        if not row:
+            return
+        if deleted:
+            if row["status"] != "done":
+                self._conn().execute("UPDATE tr_prescriptions SET status = 'declined', session_id = NULL, "
+                                     "athlete_note = CASE WHEN athlete_note = '' THEN 'Removed from the plan' "
+                                     "ELSE athlete_note END, answered_at = CURRENT_TIMESTAMP WHERE id = ?", (row["id"],))
+            else:
+                self._conn().execute("UPDATE tr_prescriptions SET session_id = NULL WHERE id = ?", (row["id"],))
+        elif status == "done" and row["status"] == "accepted":
+            self._conn().execute("UPDATE tr_prescriptions SET status = 'done', answered_at = CURRENT_TIMESTAMP "
+                                 "WHERE id = ?", (row["id"],))
+        elif status in ("planned", "skipped") and row["status"] == "done":
+            self._conn().execute("UPDATE tr_prescriptions SET status = 'accepted' WHERE id = ?", (row["id"],))
+        self._commit()
 
     def decline(self, prescription_id, note=""):
         row = self._mine(prescription_id)

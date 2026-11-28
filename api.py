@@ -331,6 +331,7 @@ recipe_maintenance_last_run = None
 RECIPE_MAINTENANCE_INTERVAL_SECONDS = 60
 
 SESSION_COOKIE_NAME = "dieter_session"
+COACH_COOKIE_NAME = "dieter_coach_session"   # the /coach passcode sign-in: its own cookie, so it never replaces yours
 SESSION_DAYS = 30
 PBKDF2_ITERATIONS = 210_000
 SESSION_COOKIE_SECURE = bool(os.getenv("K_SERVICE")) or os.getenv("SESSION_COOKIE_SECURE", "").lower() == "true"
@@ -404,6 +405,17 @@ def create_login_response(user_id, redirect_to="/"):
 def safe_internal_redirect_target(value, fallback="/"):
     """Keep auth redirects on this app."""
     return value if value and value.startswith("/") and not value.startswith("//") else fallback
+
+
+def create_coach_login_response(coach_id, redirect_to="/coach"):
+    """Sign in the passcode coach account under its own cookie, leaving any other sign-in in this browser alone."""
+    token = secrets.token_urlsafe(32)
+    expires_at = (datetime.utcnow() + timedelta(days=SESSION_DAYS)).isoformat()
+    db.create_session(coach_id, hash_session_token(token), expires_at)
+    response = RedirectResponse(url=redirect_to, status_code=303)
+    response.set_cookie(COACH_COOKIE_NAME, token, httponly=True, secure=SESSION_COOKIE_SECURE, samesite="lax",
+                        max_age=SESSION_DAYS * 24 * 60 * 60)
+    return response
 
 
 def clear_login_response(redirect_to="/login"):
@@ -563,6 +575,13 @@ async def load_authenticated_user(request: Request, call_next):
     if token:
         user = db.get_session_user(hash_session_token(token), datetime.utcnow().isoformat())
 
+    # The coach passcode sign-in has its own cookie. It's who you are on the coach pages (and while viewing an
+    # athlete from there), or everywhere when it's the only sign-in in this browser. Your own sign-in stays yours.
+    coach_cookie = request.cookies.get(COACH_COOKIE_NAME, "")
+    coach_user = db.get_session_user(hash_session_token(coach_cookie), datetime.utcnow().isoformat()) if coach_cookie else None
+    if coach_user and is_passcode_coach(coach_user) and (not user or passcode_coach_allowed(request)):
+        user = coach_user
+    request.state.coach_signed_in = bool(coach_user and is_passcode_coach(coach_user))
     request.state.current_user = dict(user) if user else None
     user_token = set_current_user_id(user["id"] if user else None)
     try:
@@ -5413,7 +5432,7 @@ def coach_passcode_page(request: Request):
         raw = request.query_params.get("sent", "")
         return trainer_routes.coach_page(request, int(raw) if raw.isdigit() else 0)
     user = request.state.current_user
-    return trainer_routes.coach_sign_in_page(signed_in_as=(user.get("display_name") or "someone") if user else "")
+    return trainer_routes.coach_sign_in_page()
 
 
 @app.post("/coach")
@@ -5425,7 +5444,19 @@ def coach_passcode_form(request: Request, passcode: str = Form("")):
     if not coach_id:
         _coach_tries[client].append(time.time())
         return trainer_routes.coach_sign_in_page("That passcode wasn't recognized.")
-    return create_login_response(coach_id, "/coach")
+    return create_coach_login_response(coach_id, "/coach")
+
+
+@app.post("/coach/logout")
+def coach_logout(request: Request):
+    """Sign out of the coach page only; any other sign-in in this browser stays."""
+    token = request.cookies.get(COACH_COOKIE_NAME)
+    if token:
+        db.delete_session(hash_session_token(token))
+    response = RedirectResponse(url="/coach", status_code=303)
+    response.delete_cookie(COACH_COOKIE_NAME)
+    response.delete_cookie(trainer_routes.VIEW_COOKIE)
+    return response
 
 
 @app.get("/register")

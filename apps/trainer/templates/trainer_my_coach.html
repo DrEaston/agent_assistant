@@ -20,9 +20,36 @@
       <ul class="steps">
         {% for s in w.sets %}<li><span>{{ s.text }}</span>{% if s.target %}<br><strong class="num">{{ s.target }}</strong>{% endif %}{% if s.was and (not show_paces is defined or show_paces) %}<br><span class="small muted">was {{ s.was }}</span>{% endif %}{% if s.basis and s.target and (not show_paces is defined or show_paces) %}<br><span class="small muted">{{ s.basis }}</span>{% endif %}</li>{% endfor %}
       </ul>
+      {% if w.fit and w.fit.load is not none and (not show_paces is defined or show_paces) %}<p class="small"><strong>Speed load: about {{ w.fit.load }}</strong>{% if w.fit.adjusted and w.fit.load_before != w.fit.load %} (was {{ w.fit.load_before }}){% endif %}{% if w.fit.near %} · near-sprint {{ w.fit.near }} m{% endif %}{% if w.fit.week and w.status == "sent" %} · this week {{ w.fit.week.so_far }} → {{ w.fit.week.after }} of {{ w.fit.week.limit }} safe{% if w.fit.week.over %} {{ ui.tag("Over", "warn") }}{% endif %}{% endif %}</p>{% endif %}
       {% if w.fit and w.fit.adjusted and w.status == "sent" %}{% call ui.banner("warn" if w.fit.flag else "info") %}{{ w.fit.note }}{% endcall %}{% elif w.adjusted %}<p class="small muted">Eased to fit your weekly limits when it went on the plan.</p>{% endif %}
       {% if w.notes %}<p class="small">Coach: {{ w.notes }}</p>{% endif %}
+      {% if w.changes %}<p class="small"><strong>Your version.</strong> {{ w.changes }}</p>{% endif %}
       {% if w.status == "sent" %}
+        <details class="change-workout"{% if w.changes %} open{% endif %}>
+          <summary class="small"><strong>Change it</strong></summary>
+          <form method="post" action="/apps/trainer/my-coach/workouts/{{ w.id }}/change" class="stack gap-above">
+            {% for o in w.original_sets %}{% set m = w.my_sets.get(o.index) %}
+            <fieldset class="builder-row stack">
+              <legend class="small">{{ o.text }}</legend>
+              <div class="cols">
+                <div class="field"><label for="reps-{{ w.id }}-{{ o.index }}">Reps</label>
+                  <input type="number" id="reps-{{ w.id }}-{{ o.index }}" name="reps_{{ o.index }}" min="1" max="50" value="{{ m.reps if m else o.reps }}"></div>
+                <div class="field"><label for="effort-{{ w.id }}-{{ o.index }}">Effort</label>
+                  <select id="effort-{{ w.id }}-{{ o.index }}" name="intensity_{{ o.index }}">{% for key, name in intensities.items() %}<option value="{{ key }}"{% if key == (m.intensity if m else o.intensity) %} selected{% endif %}>{{ name | capitalize }}</option>{% endfor %}</select></div>
+                <div class="field"><label for="nudge-{{ w.id }}-{{ o.index }}">Seconds per rep (+ slower, − faster)</label>
+                  <input type="number" id="nudge-{{ w.id }}-{{ o.index }}" name="nudge_{{ o.index }}" min="-30" max="30" value="{{ m.nudge if m and m.nudge else '' }}" placeholder="0"></div>
+              </div>
+              <label class="small"><input type="checkbox" name="remove_{{ o.index }}" value="1"{% if not m %} checked{% endif %}> Remove this set</label>
+            </fieldset>
+            {% endfor %}
+            <div class="cols">{{ ui.field("Rounds", "rounds", value=w.rounds, type="number") }}</div>
+            <div class="row">
+              <button type="submit">Save my version</button>
+            </div>
+          </form>
+          {% if w.changes %}<form method="post" action="/apps/trainer/my-coach/workouts/{{ w.id }}/reset"><button type="submit" class="quiet">Back to the coach's version</button></form>{% endif %}
+          <p class="small muted">Your coach sees what you changed in plain words, never your times. The speed load above updates when you save.</p>
+        </details>
         <form method="post" action="/apps/trainer/my-coach/workouts/{{ w.id }}/take"><button type="submit" class="primary">Put it on my plan</button></form>
         <form method="post" action="/apps/trainer/my-coach/workouts/{{ w.id }}/decline" class="inline-form">
           <input type="text" name="note" maxlength="500" placeholder="Why not (optional, your coach sees this)" aria-label="Why not">

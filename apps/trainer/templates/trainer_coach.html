@@ -5,6 +5,7 @@
 {% block content %}
 {% call ui.page_header("Coach", sub="Look at an athlete's Trainer, or write a workout for all your athletes. Dieter turns it into each athlete's own paces.") %}{% endcall %}
 <main class="wrap">
+  <form method="post" action="/coach/logout" class="row spread small signed-in-as"><span class="muted">Signed in as <strong>{{ coach_name }}</strong> (coach)</span><button type="submit" class="quiet">Sign out</button></form>
   {% if not athletes %}
   {{ ui.empty("No athletes yet.") }}
   {% else %}
@@ -113,6 +114,7 @@
         {% if w.status == "sent" %}{{ ui.tag("Waiting") }}{% elif w.status == "accepted" %}{{ ui.tag("On their plan", "info") }}{% if w.adjusted %} {{ ui.tag("Eased for their limits") }}{% endif %}{% elif w.status == "done" %}{{ ui.tag("Done", "ok") }}{% else %}{{ ui.tag("Declined", "warn") }}{% endif %}
       </div>
       <span class="small">Dieter read it as: {{ w.summary }}</span>
+      {% if w.changes %}<span class="small"><strong>{{ w.changes }}</strong></span>{% endif %}
       {% if w.notes %}<span class="small muted">Notes: {{ w.notes }}</span>{% endif %}
       <span class="small muted">To {{ w.athlete }}</span>
       {% if w.athlete_note %}<span class="small muted">{{ w.athlete }}: “{{ w.athlete_note }}”</span>{% endif %}
@@ -124,7 +126,7 @@
   {% endcall %}
   {% endif %}
 
-  <form method="post" action="/logout" class="section"><button type="submit" class="quiet">Sign out</button></form>
+  <form method="post" action="/coach/logout" class="section"><button type="submit" class="quiet">Sign out of the coach page</button></form>
 </main>
 {% endblock %}
 {% block after %}
