@@ -269,6 +269,21 @@ class MainSiteChatTests(unittest.TestCase):
         reflect.assert_called_once()
         self.assertEqual(notes.seen, [])
 
+    def test_analyze_my_run_on_a_run_page_goes_to_the_chat(self):
+        # Nov 28, 2026: "analyze my run" on a run's page got the shoe prompt instead of an analysis.
+        claude = script([("trainer_run", {"run_id": "21156284815"})], "Five 230s at 4:25 with full rest: good work.")
+        data = self.ask("Analyze my run", "/apps/trainer/run/21156284815", claude)
+        self.assertEqual(data["model"], "claude")
+        self.assertTrue(self.api.is_trainer_question("break down today's reps"))
+        # After a run is posted Dieter asks for shoes (?shoe_workout_id=): an answer about shoes is still a shoe log.
+        self.assertFalse(self.api.message_requests_trainer_shoe_log("Analyze my run", "/apps/trainer?shoe_workout_id=1"))
+        self.assertTrue(self.api.message_requests_trainer_shoe_log("trainers 7 miles", "/apps/trainer?shoe_workout_id=1"))
+        # Every exchange is saved (core/conversations.py), with which part of Dieter answered it.
+        from core import conversations
+        saved = conversations.recent(self.api.db, contains="Analyze my run", limit=1)[0]
+        self.assertEqual((saved["answered_by"], saved["page"]), ("claude", "/apps/trainer/run/21156284815"))
+        self.assertIn("good work", saved["reply"])
+
     def test_thanksgiving_chat_does_not_get_the_review_card_tools(self):
         # Signed calls need the services' shared key; CI has none set, so the test brings its own.
         with mock.patch.dict(os.environ, {"DIETER_INTERNAL_KEY": "test-internal-key"}):

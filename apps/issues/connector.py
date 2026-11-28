@@ -2,6 +2,7 @@
 problem" inside Dieter, mark them done once they're fixed, and pass on a build request he asks an assistant to send.
 Admins only, like the Studio pages."""
 
+from core import conversations
 from core.connector.tools import Tool, ToolError, ToolSet, site_url, whole_number
 from database import get_current_user_id
 
@@ -53,6 +54,16 @@ def set_status(args):
         raise ToolError(f"status is one of: {', '.join(STATUSES)}.")
     routes.store().set_status(report["id"], status, (args.get("note") or "").strip()[:500])
     return _brief(routes.store().report(report["id"]))
+
+
+def list_conversations(args):
+    _admin()
+    limit = args.get("limit") or 20
+    if not isinstance(limit, int) or not 1 <= limit <= 100:
+        raise ToolError("limit is a whole number from 1 to 100.")
+    return {"conversations": conversations.recent(routes._state["db"], limit=limit,
+                                                  contains=(args.get("contains") or "").strip(),
+                                                  page=(args.get("page") or "").strip())}
 
 
 ASSISTANTS = {"chatgpt": "ChatGPT", "claude": "Claude"}
@@ -107,6 +118,16 @@ def tools():
              "when he has said it works; in_progress while working on it; open to put it back.", set_status,
              dict(REPORT_ID, status={"type": "string", "enum": list(STATUSES)}, note={"type": "string"}),
              ("report_id",)),
+        Tool("studio_list_conversations", "Ask Dieter conversations",
+             "What Curtis asked Ask Dieter inside the site and what Dieter answered, newest first: the page he was on, "
+             "and which part of Dieter answered (answered_by: claude = Dieter's chat; anything else is an older "
+             "handler, e.g. a shoe log or a run note). Use it when he says Dieter got something wrong.",
+             list_conversations,
+             {"limit": {"type": "integer", "description": "How many, 1-100 (default 20)."},
+              "contains": {"type": "string", "description": "Optional: only exchanges whose question or reply "
+                                                            "contains this text."},
+              "page": {"type": "string", "description": "Optional: only on pages whose address contains this, "
+                                                        "e.g. /apps/trainer."}}, read_only=True),
         Tool("studio_request_change", "Ask Claude Code to build something",
              "Only when Curtis asks you to send a build request or change to Dieter. It goes to Dieter Studio, where "
              "Claude Code (which changes Dieter's code) picks it up, works out where it belongs, asks him if anything "

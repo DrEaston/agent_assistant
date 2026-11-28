@@ -45,7 +45,9 @@
     <p><code>speed load limit = max({{ e.ratio }} × speed fitness, {{ e.floor }} × D′)</code></p>
     <p>This is the acute:chronic workload ratio: injury rates rose in team-sport data when a week's load went past
       about 1.5 times the recent average (Gabbett 2016). It's debated: the ratio has statistical problems and hasn't been
-      shown to cause injuries (Impellizzeri et al. 2020), so treat it as a guide, not a rule. "Well over" starts at
+      shown to cause injuries (Impellizzeri et al. 2020), so treat it as a guide, not a rule. Dieter uses {{ e.ratio }}
+      rather than 1.5, set to your own training: your week of Nov 23, 2026 sits right at the limit, and the 18 × 400
+      week before it is still well over. "Well over" starts at
       {{ e.well_over }} × the limit.</p>
     <p><code>near-sprint metres = Σ distance run at v ≥ 0.9 × v<sub>max</sub></code>, where v<sub>max</sub> is your
       fastest 5 seconds in 26 weeks{% if e.vmax_pace %} ({{ e.vmax_pace }}/mi, so near-sprint starts at {{ e.near_top_pace }}/mi){% endif %}. Its limit is

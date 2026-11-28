@@ -275,6 +275,7 @@ serve_tools(app, "/internal/connector/kitchen/tools",  # without the review-card
 # first; other apps join by adding their ToolSet, CHAT_NOTES, pages and proposal savers here. Thanksgiving has its own
 # chat on its pages, so here its tools are read-only.
 from core.connector import agent as claude_agent, chat as dieter_chat  # noqa: E402
+from core import conversations as core_conversations  # noqa: E402  (Ask Dieter's log)
 from core.connector.pages import Page  # noqa: E402
 from core.connector.tools import ToolError  # noqa: E402
 from apps.kitchen import recipe_changes as kitchen_recipe_changes  # noqa: E402
@@ -4533,6 +4534,26 @@ def kitchen_recipe_restore(meal_id: int, change_id: int):
 
 @app.post("/api/dieter/action")
 def api_dieter_action(message: DieterActionMessage):
+    """Ask Dieter: answer, then save the exchange (core/conversations.py) so Claude can see what went wrong."""
+    try:
+        result = dieter_action_route(message)
+    except Exception as exc:
+        core_conversations.add(db, user_id=get_current_user_id(), said=message.content, page_url=message.page_url,
+                               page_title=message.page_title, answered_by="error", error=repr(exc))
+        raise
+    if isinstance(result, dict):
+        handled_by = result.get("model") or next((key for key in result if key.endswith("_context")), "") or "other"
+        core_conversations.add(db, user_id=get_current_user_id(), said=message.content,
+                               reply=str(result.get("assistant_message") or ""), answered_by=handled_by,
+                               page_url=message.page_url, page_title=message.page_title,
+                               actions=[a.get("type", "") for a in result.get("do") or [] if isinstance(a, dict)])
+    else:
+        core_conversations.add(db, user_id=get_current_user_id(), said=message.content, page_url=message.page_url,
+                               page_title=message.page_title, answered_by=type(result).__name__)
+    return result
+
+
+def dieter_action_route(message: DieterActionMessage):
     """Route Ask Dieter requests to recipe edits, planner edits, or contextual chat."""
     page_url = message.page_url or ""
     recipe_kind, recipe_id = parse_recipe_target_from_url(page_url)
@@ -5764,12 +5785,22 @@ def message_requests_trainer_shoe_log(text, page_url=""):
     """Detect Ask Dieter requests for run shoe logging."""
     if not (page_url or "").startswith("/apps/trainer"):
         return False
-    if parse_trainer_shoe_target(page_url):
-        return True
     normalized = (text or "").lower()
     shoe_words = any(cue in normalized for cue in ["shoe", "shoes", "spike", "spikes", "trainers", "flats"])
+    if parse_trainer_shoe_target(page_url):
+        # On a run's page only an answer about shoes is a shoe log: "analyze my run" isn't one.
+        return shoe_words or mentions_saved_shoe(normalized)
     log_words = any(cue in normalized for cue in ["log", "track", "mileage", "wore", "wearing", "used", "ran in", "warmup in", "workout in"])
     return shoe_words and log_words
+
+
+def mentions_saved_shoe(normalized):
+    """True when the message names one of his saved shoes ("vaporflys 4 miles")."""
+    try:
+        names = [(row["name"] or "").lower().strip() for row in db.get_trainer_shoes()]
+    except Exception:
+        return False
+    return any(name and name in normalized for name in names)
 
 
 def trainer_shoe_prompt(workout):
@@ -5882,21 +5913,27 @@ def handle_trainer_shoe_log_request(message, page_url):
 
 
 QUESTION_WORDS = ("how", "what", "why", "when", "where", "which", "who", "did", "do", "does", "is", "am", "are",
-                  "was", "were", "can", "could", "should", "would", "will", "compare", "tell", "explain", "show")
+                  "was", "were", "can", "could", "should", "would", "will", "compare", "tell", "explain", "show",
+                  # requests are for Dieter too ("analyze my run", "break down the reps", "look at this week")
+                  "analyze", "analyse", "analyzing", "review", "summarize", "summarise", "assess", "evaluate", "break",
+                  "look", "check", "give", "help", "plan", "predict", "rate", "grade", "walk", "talk", "go", "find",
+                  "figure", "estimate", "recap")
+REQUEST_PHRASES = ("analy", "break down", "breakdown", "how did", "how was", "what do you think", "thoughts on",
+                   "look at", "go over", "go through")
 
 
 def is_trainer_question(text):
     """A question for Dieter ("how did my race go?") rather than a note to save ("legs felt heavy, RPE 7")."""
-    words = re.findall(r"[a-z']+", (text or "").lower())
-    return "?" in (text or "") or bool(words and words[0].split("'")[0] in QUESTION_WORDS)
+    lowered = (text or "").lower()
+    words = re.findall(r"[a-z']+", lowered)
+    return ("?" in lowered or bool(words and words[0].split("'")[0] in QUESTION_WORDS)
+            or any(phrase in lowered for phrase in REQUEST_PHRASES))
 
 
 def message_requests_trainer_reflection(text, page_url=""):
     """Detect Ask Dieter requests that should become run reflections."""
     if not (page_url or "").startswith("/apps/trainer"):
         return False
-    if parse_trainer_reflection_target(page_url):
-        return True
     normalized = (text or "").lower()
     cues = [
         "how the run went",
