@@ -119,7 +119,7 @@ class CoachStoreTests(unittest.TestCase):
         rows = coach.targets(sets, MODEL)
         mile = round(1609 / 4.5)
         self.assertTrue(rows[0]["target"].startswith(speed.clock(mile) + " each ("))
-        self.assertEqual(coach.describe_set(sets[1]), "8 × 200 m sprint, 200 m jog")
+        self.assertEqual(coach.describe_set(sets[1]), "8 × 200 m sprint, 200 m jog between")
         k = coach.targets(coach.clean_sets([{"reps": "3", "metres": "2000", "intensity": "threshold"}]), MODEL)[0]
         self.assertIn(speed.pace(4.5) + "/mi", k["target"])       # pace per mile for longer reps that aren't a mile
         self.assertEqual(rows[1]["target"], f"about {speed.clock(200 / (0.9 * 8.0))} each")
