@@ -265,6 +265,13 @@ class SaveBeforeReplyTests(unittest.TestCase):
         storage.fail_restore = False
         self.assertEqual(client.get("/thanksgiving", headers=self.signed()).status_code, 200)  # next try loads
 
+    def test_stopping_the_service_uploads_a_final_backup(self):
+        storage = self.use(self.FakeStorage())
+        with TestClient(self.service.app) as client:  # leaving the block stops the app, as Cloud Run does
+            self.assertEqual(client.get("/thanksgiving", headers=self.signed()).status_code, 200)
+            self.assertNotIn("flush", storage.events)
+        self.assertIn("flush", storage.events)
+
 
 class PlatformEndpointTests(unittest.TestCase):
     def setUp(self):

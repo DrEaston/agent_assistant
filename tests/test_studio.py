@@ -188,12 +188,27 @@ class StudioTests(unittest.TestCase):
             self.assertEqual((r.status_code, r.headers["location"]), (303, new))
 
 
+
+
+def served_paths(routes, prefix=""):
+    """Every path the app answers. Newer FastAPI keeps routers added with include_router nested, so look inside."""
+    paths = set()
+    for route in routes:
+        inner = getattr(route, "original_router", None)
+        if inner is not None:
+            context = getattr(route, "include_context", None)
+            paths |= served_paths(inner.routes, prefix + (getattr(context, "prefix", "") or ""))
+        elif getattr(route, "path", None) is not None:
+            paths.add(prefix + route.path)
+    return paths
+
 class CodexRetiredTests(unittest.TestCase):
     def test_main_app_has_no_codex_worker_routes(self):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             import api
-        paths = {getattr(r, "path", "") for r in api.app.routes}
+        paths = served_paths(api.app.routes)
+        self.assertIn("/apps/issues", paths)  # sees Studio's own routes, so the checks below mean something
         self.assertFalse([p for p in paths if p.startswith("/api/app-feedback")])
         self.assertNotIn("/apps/issues/{report_id}/send", paths)  # GitHub sending is retired too
         self.assertFalse(Path(api.__file__).with_name("scripts").joinpath("run_codex_feedback_worker.py").exists())
