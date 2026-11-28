@@ -197,6 +197,11 @@ class CorosTests(unittest.TestCase):
         self.assertFalse(sync._coros_took_over(self.user, "12345"))
         self.assertEqual(self.c.since(self.user), "")
 
+    def test_zwift_rides_still_come_from_strava(self):
+        self.assertTrue(strava.from_coros({"device_name": "COROS PACE 3"}))
+        self.assertTrue(strava.from_coros({"description": "81 Training Load\n-- from COROS"}))
+        self.assertFalse(strava.from_coros({"device_name": "Zwift", "description": "Watopia"}))
+
     def test_latest_run_compared_with_strava(self):
         self.connect()
         start = datetime(2026, 11, 28, 15, 10, tzinfo=timezone.utc)

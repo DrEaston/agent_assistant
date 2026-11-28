@@ -48,7 +48,7 @@
       <div class="row"><a class="button primary" href="/apps/trainer/coros/connect">Connect COROS</a></div>
     {% else %}
       <div class="spread"><span>New activities come from COROS</span>{{ ui.tag("On", "ok") }}</div>
-      <p class="small muted">Since {{ coros_status.since[:10] }}. {{ coros_status.added }} added from COROS so far. Dieter checks for new ones when you open Trainer or Today (every 10 minutes at most); Strava no longer adds new ones.</p>
+      <p class="small muted">Since {{ coros_status.since[:10] }}. {{ coros_status.added }} added from COROS so far. Dieter checks for new ones when you open Trainer or Today (every 10 minutes at most); Strava still brings in anything not recorded on your COROS watch, like Zwift rides.</p>
       {% if coros_status.error %}{% call ui.banner("warn") %}{{ coros_status.error }}{% endcall %}{% endif %}
       {% if coros_status.last_error %}<p class="small muted">Last file problem: {{ coros_status.last_error }}</p>{% endif %}
       <div class="row">

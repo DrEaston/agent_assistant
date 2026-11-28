@@ -15,8 +15,9 @@ OAuth client of it:
 
 From the moment he connects, COROS is where new activities come from: each pass lists the last two weeks, and
 every activity that started after he connected is fetched as a FIT file, read (fit.py) and put in his log
-(source 'coros') with its speed analysis, the same as a Strava run. Strava stops adding new activities then
-(strava.Sync.handle); everything already in the log stays. FIT files are kept as files (core/media's Blobs: a local
+(source 'coros') with its speed analysis, the same as a Strava run. Strava then stops adding what his COROS watch
+recorded (strava.Sync.handle) but still brings in everything else, like Zwift rides; everything already in the log
+stays. FIT files are kept as files (core/media's Blobs: a local
 folder plus Cloud Storage), not in the database. "Test with my latest run" reads his newest COROS run without
 adding it and compares it with the same run from Strava.
 """
