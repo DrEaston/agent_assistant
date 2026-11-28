@@ -49,7 +49,7 @@ import zlib
 from datetime import date, timedelta
 from .clock import today as local_today
 
-VERSION = 9                         # bump when the summary changes: older rows are read again
+VERSION = 10                        # bump when the summary changes: older rows are read again
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS tr_run_speed (
         user_id INTEGER NOT NULL, external_id TEXT NOT NULL, day TEXT NOT NULL, version INTEGER DEFAULT 0,
@@ -187,11 +187,13 @@ def find_efforts(times, speeds, dists=None, easy=None):
             if current and t - current["end"] <= max(MERGE_GAP, MERGE_SHARE * (current["end"] - current["start"])):
                 current["end"], current["last_d"] = t, d
                 current["points"].append((t, v))
+                current["samples"].append((t, v, d))
             else:
-                current = {"start": t, "end": t, "first_d": d, "last_d": d, "points": [(t, v)]}
+                current = {"start": t, "end": t, "first_d": d, "last_d": d, "points": [(t, v)], "samples": [(t, v, d)]}
                 bursts.append(current)
     found = []
     for b in bursts:
+        _trim(b)
         seconds = b["end"] - b["start"] + 1
         if not (MIN_SECONDS <= seconds <= MAX_SECONDS) or len(b["points"]) < 4:
             continue
@@ -207,6 +209,28 @@ def find_efforts(times, speeds, dists=None, easy=None):
                       "avg_mps": round(metres / seconds, 2), "top_mps": round(top, 2),
                       "kind": label(metres, seconds, run_metres)})
     return found, round(usual, 2)
+
+
+EDGE = 0.8    # a stretch starts and ends where he's within 80% of its usual speed: the slowing down after it
+              # (above the fast line but well below rep pace) isn't part of the rep. Curtis's 200s, 33-34 s on his
+              # watch, read 36-37 s before this; on a simulated rep this lands on the watch time.
+
+
+def _trim(burst):
+    """Drop the build-up and the slow-down at a stretch's ends (below EDGE x its median speed)."""
+    samples = burst["samples"]
+    if len(samples) < 6:
+        return
+    floor = EDGE * statistics.median(v for _, v, _ in samples)
+    a, b = 0, len(samples) - 1
+    while a < b and samples[a][1] < floor:
+        a += 1
+    while b > a and samples[b][1] < floor:
+        b -= 1
+    kept = samples[a:b + 1]
+    burst["start"], burst["end"] = kept[0][0], kept[-1][0]
+    burst["first_d"], burst["last_d"] = kept[0][2], kept[-1][2]
+    burst["points"] = [(t, v) for t, v, _ in kept]
 
 
 STEADY = 0.75  # a best effort's slowest 15 seconds must be at least 75% of its average speed (no jog or stop inside;
