@@ -425,6 +425,7 @@ class CoachPageTests(unittest.TestCase):
             self.assertIn("View athlete page", page)
             self.assertIn(f'<option value="{athlete}">Curtis</option>', page)
             self.assertIn("Send to all athletes (1)", page)
+            self.assertIn("How Dieter sets the paces", page)
             self.assertIn('id="talk"', page)                                   # voice for the workout box
             with mock.patch.object(self.api, "transcribe_upload", return_value={"text": "6 x mile at threshold"}):
                 said = visitor.post("/coach/transcribe", files={"audio": ("w.webm", b"audio", "audio/webm")})
