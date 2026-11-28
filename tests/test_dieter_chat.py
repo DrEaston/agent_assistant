@@ -275,8 +275,9 @@ class MainSiteChatTests(unittest.TestCase):
         data = self.ask("Analyze my run", "/apps/trainer/run/21156284815", claude)
         self.assertEqual(data["model"], "claude")
         self.assertTrue(self.api.is_trainer_question("break down today's reps"))
-        self.assertFalse(self.api.message_requests_trainer_shoe_log("Analyze my run", "/apps/trainer/run/21156284815"))
-        self.assertTrue(self.api.message_requests_trainer_shoe_log("trainers 7 miles", "/apps/trainer/run/21156284815"))
+        # After a run is posted Dieter asks for shoes (?shoe_workout_id=): an answer about shoes is still a shoe log.
+        self.assertFalse(self.api.message_requests_trainer_shoe_log("Analyze my run", "/apps/trainer?shoe_workout_id=1"))
+        self.assertTrue(self.api.message_requests_trainer_shoe_log("trainers 7 miles", "/apps/trainer?shoe_workout_id=1"))
         # Every exchange is saved (core/conversations.py), with which part of Dieter answered it.
         from core import conversations
         saved = conversations.recent(self.api.db, contains="Analyze my run", limit=1)[0]
