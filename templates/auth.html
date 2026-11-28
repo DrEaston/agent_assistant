@@ -8,7 +8,9 @@
         <div>
             <h2>{% if mode == "register" %}Create Account{% elif mode == "pending" %}Approval Pending{% else %}Log In{% endif %}</h2>
             <p class="section-subtitle">
-                {% if mode == "register" and not has_users %}
+                {% if mode == "register" and not signups_open %}
+                    New sign-ups aren't open right now.
+                {% elif mode == "register" and not has_users %}
                     Create the first account to claim the existing Dieter data.
                 {% elif mode == "register" %}
                     Request access to Dieter. An admin must approve new member accounts before login.
@@ -27,7 +29,9 @@
         </div>
     {% endif %}
 
-    {% if mode == "pending" %}
+    {% if mode == "register" and not signups_open %}
+        <p class="section-subtitle"><a href="/login">Log in</a> if you already have an account.</p>
+    {% elif mode == "pending" %}
         <p class="section-subtitle">You can log in after your account is approved.</p>
         <p class="section-subtitle"><a href="/login">Back to login</a></p>
     {% else %}
@@ -67,10 +71,12 @@
     </form>
     {% endif %}
 
-    {% if mode == "register" and has_users %}
+    {% if mode == "register" and has_users and signups_open %}
         <p class="section-subtitle"><a href="/login">Already have an account?</a></p>
-    {% elif mode == "login" %}
+    {% elif mode == "login" and signups_open %}
         <p class="section-subtitle"><a href="/register">Create an account</a></p>
+    {% elif mode == "login" %}
+        <p class="section-subtitle">New sign-ups aren't open right now.</p>
     {% endif %}
 </section>
 {% endblock %}

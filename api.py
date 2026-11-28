@@ -337,6 +337,8 @@ SESSION_DAYS = 30
 PBKDF2_ITERATIONS = 210_000
 SESSION_COOKIE_SECURE = bool(os.getenv("K_SERVICE")) or os.getenv("SESSION_COOKIE_SECURE", "").lower() == "true"
 REGISTRATION_CODE = os.getenv("DIETER_REGISTRATION_CODE", "")
+# New sign-ups are closed unless this is on (the very first account, which owns the data, can always be made).
+SIGNUPS_OPEN = os.getenv("DIETER_SIGNUPS_OPEN", "").lower() in {"1", "true", "yes", "on"}
 READ_ONLY_METHODS = {"GET", "HEAD", "OPTIONS"}
 STRAVA_CLIENT_ID = os.getenv("STRAVA_CLIENT_ID", "")
 STRAVA_CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET", "")
@@ -431,8 +433,13 @@ def render_auth_page(request, mode="login", error=""):
         "mode": mode,
         "error": error,
         "has_users": db.get_user_count() > 0,
+        "signups_open": signups_open(),
         "requires_registration_code": bool(REGISTRATION_CODE),
     }))
+
+
+def signups_open():
+    return SIGNUPS_OPEN or db.get_user_count() == 0
 
 
 def current_user_is_admin(request):
@@ -531,6 +538,7 @@ async def load_authenticated_user(request: Request, call_next):
         finally:
             reset_current_user_id(user_token)
     public_exact_paths = {"/cct-roadmap", "/thanksgiving/menu",  # the shareable Thanksgiving menu
+                          "/", "/trainer",  # signed out: Dieter Trainer's landing page
                           "/coach",  # coach sign-in with a passcode (apps/trainer/coach.py)
                           "/strava/webhook"}  # Strava pushes new activities here (apps/trainer/strava.py)
     token = request.cookies.get(SESSION_COOKIE_NAME, "")
@@ -5411,6 +5419,8 @@ def register_form(
     registration_code: str = Form(""),
 ):
     """Create a user account."""
+    if not signups_open():
+        return render_auth_page(request, "register", "New sign-ups aren't open right now.")
     email = email.strip().lower()
     display_name = display_name.strip() or email.split("@")[0]
     if len(password) < 10:
@@ -5506,9 +5516,11 @@ def admin_update_member_trainer_mode(request: Request, user_id: int, trainer_mod
 
 @app.get("/")
 def home_default(request: Request):
-    """Today: the home page."""
-    if not request.state.current_user:  # signed out: straight to sign-in
-        return RedirectResponse(url="/login", status_code=303)
+    """Today: the home page. Signed out: Dieter Trainer's landing page (apps/trainer/templates/trainer_landing.html)."""
+    if not request.state.current_user:
+        if db.get_user_count() == 0:
+            return RedirectResponse(url="/register", status_code=303)
+        return RedirectResponse(url="/trainer", status_code=303)  # Dieter Trainer's landing page
     return render_today_page(request)
 
 

@@ -1,0 +1,12 @@
+{% extends "layout.html" %}
+{% import "trainer_share_card.html" as share %}
+{#- Screenshot view of one run, to post on Strava: one card, no app chrome. -#}
+{% block title %}{{ r.title }} · share{% endblock %}
+{% block dock %}{% endblock %}
+{% block report %}{% endblock %}
+{% block content %}
+<main class="share-page">
+  {{ share.card(r, week, r.title ~ ", ready to screenshot") }}
+  <p class="share-hint">Screenshot the card, then add it to your Strava activity. <a href="/apps/trainer/run/{{ r.id }}">Back to the run</a></p>
+</main>
+{% endblock %}

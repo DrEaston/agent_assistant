@@ -189,6 +189,30 @@ def run_page(external_id: str):
                   shoe_list=sh.shoes(include_retired=False), feels=shoes.FEELS)
 
 
+@router.get("/trainer")
+def landing_page(request: Request):
+    """askdieter.ai/trainer: the public landing page (open to anyone; api.py lists it as public)."""
+    return render("trainer_landing.html", title="Dieter Trainer", page_url="/trainer",
+                  signed_in=bool(getattr(request.state, "current_user", None)))
+
+
+@router.get(BASE + "/run/{external_id}/share")
+def run_share(external_id: str):
+    """Screenshot view: the run as one card (heat map, pace, speed points, the week's speed load) to post on Strava.
+    No app chrome, so a phone screenshot is just the card."""
+    if not external_id.isdigit():
+        raise HTTPException(status_code=404, detail="No such run.")
+    s = store()
+    races = plan.race_bests(s.settings())
+    r = runpage.detail(_state["db"], get_current_user_id(), external_id, races=races)
+    if not r:
+        raise HTTPException(status_code=404, detail="That run isn't in your log.")
+    monday = r["day"] - timedelta(days=r["day"].weekday())
+    week = speed.weekly(_state["db"], get_current_user_id(), [monday], races).get(monday) or {}
+    return render("trainer_share.html", title=r["title"], r=r, week=week, current=BASE,
+                  page_url=f"{BASE}/run/{external_id}/share")
+
+
 @router.get(BASE + "/run/{external_id}/explore")
 def run_explore(external_id: str):
     """The old Explore page: its map and graph are on the run page now, so old links land there."""

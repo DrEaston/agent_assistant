@@ -588,6 +588,15 @@ class StrideTests(SyncTests):
         self.assertEqual(len(ex["stretches"]), 18)
         old = TestClient(app).get("/apps/trainer/run/1100/explore", follow_redirects=False)
         self.assertEqual((old.status_code, old.headers["location"]), (301, "/apps/trainer/run/1100#explore"))
+        # the screenshot view for Strava: one card, the map, the reps, the week's speed load, no app chrome
+        self.assertIn("/apps/trainer/run/1100/share", page.text)
+        share = TestClient(app).get("/apps/trainer/run/1100/share")
+        self.assertEqual(share.status_code, 200, share.text[:300])
+        self.assertIn('class="share-card"', share.text)
+        self.assertIn("18 × 400 avg 1:22, 30 s rest", share.text)
+        self.assertIn("Made by askdieter.ai", share.text)
+        self.assertNotIn("Report a problem", share.text)
+        self.assertEqual(TestClient(app).get("/apps/trainer/run/999999/share").status_code, 404)
         # kept streams: a summary change is worked out again without asking Strava
         calls = len(self.fake.calls)
         self.db.connect().execute("UPDATE tr_run_speed SET version = 0")
