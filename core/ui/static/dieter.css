@@ -590,3 +590,42 @@ a.link-row:hover { background: var(--hover); }
 .media-facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--s1) var(--s3); margin: 0; }
 .media-facts dt { color: var(--muted); }
 .media-facts dd { margin: 0; overflow-wrap: anywhere; }
+
+/* ---------- Trainer's screenshot view (/apps/trainer/run/<id>/share): one dark card to post on Strava ---------- */
+.share-page { min-height: 100vh; background: #0b0d10; padding: var(--s4) var(--s3) var(--s6); }
+.share-card {
+  --ink: #f4f5f7; --muted: #9aa3ae; --line: #262b33; --line-strong: #3a414c; --panel: #15181d; --heat-casing: #000000;
+  max-width: 30rem; margin: 0 auto; padding: var(--s5) var(--s4) var(--s4); border-radius: 22px;
+  background: var(--panel); color: var(--ink); display: flex; flex-direction: column; gap: var(--s4);
+}
+.share-head h1 { margin: 0; font-size: 1.6rem; line-height: 1.15; letter-spacing: -.01em; }
+.share-sub { margin: .25rem 0 0; color: var(--muted); }
+.share-map { margin: 0; }
+.share-map svg { display: block; width: 100%; height: auto; max-height: 52vh; }
+.share-map .route-heat { stroke-width: 6; stroke-opacity: .85; }
+.share-map .route-casing { stroke-width: 9; }
+.share-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s3); }
+.share-stats div, .share-speed > div { display: flex; flex-direction: column; gap: .1rem; }
+.share-stats span, .share-speed span { color: var(--muted); font-size: var(--text-xs); text-transform: uppercase;
+  letter-spacing: .06em; }
+.share-stats strong { font-size: 1.7rem; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.share-stats .share-note, .share-speed .share-note { text-transform: none; letter-spacing: 0; font-size: var(--text-sm); }
+.share-fast { margin: 0; font-weight: 600; }
+.share-speed { display: grid; grid-template-columns: 1fr 1.4fr; gap: var(--s4); padding-top: var(--s3);
+  border-top: 1px solid var(--line); }
+.share-speed strong { font-size: 1.7rem; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.share-speed small { font-size: var(--text-sm); color: var(--muted); font-weight: 500; }
+.share-meter { appearance: none; width: 100%; height: .6rem; border: 0; border-radius: var(--r-pill);
+  background: var(--line); overflow: hidden; margin: .2rem 0; }
+.share-meter::-webkit-progress-bar { background: var(--line); border-radius: var(--r-pill); }
+.share-meter::-webkit-progress-value { background: linear-gradient(90deg, var(--heat-0), var(--heat-4), var(--heat-8));
+  border-radius: var(--r-pill); }
+.share-meter::-moz-progress-bar { background: linear-gradient(90deg, var(--heat-0), var(--heat-4), var(--heat-8));
+  border-radius: var(--r-pill); }
+.share-meter.over::-webkit-progress-value { background: var(--heat-5); }
+.share-meter.over::-moz-progress-bar { background: var(--heat-5); }
+.share-foot { display: flex; justify-content: space-between; color: var(--muted); font-size: var(--text-xs);
+  letter-spacing: .06em; text-transform: uppercase; }
+.share-foot span:first-child { color: var(--ink); font-weight: 700; }
+.share-hint { max-width: 30rem; margin: var(--s4) auto 0; color: #9aa3ae; font-size: var(--text-sm); text-align: center; }
+.share-hint a { color: #e6e8eb; }
