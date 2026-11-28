@@ -666,3 +666,5 @@ a.link-row:hover { background: var(--hover); }
 .landing-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--s2); padding-top: var(--s4);
   border-top: 1px solid var(--line); color: var(--muted); font-size: var(--text-sm); }
 body:has(.landing), body:has(.share-page) { background: #0b0d10; padding-bottom: 0; }
+.wrap-text { white-space: pre-wrap; word-break: break-word; max-height: 24rem; overflow: auto; margin: var(--s2) 0 0;
+  padding: var(--s3); background: var(--panel-sunk); border: 1px solid var(--line); border-radius: 8px; }

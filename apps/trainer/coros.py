@@ -155,8 +155,27 @@ def _pick(d, *names):
     return None
 
 
+LABEL_TEXT = re.compile(r"label_?id[\"']?\s*[:=]\s*[\"']?(\d{6,})", re.I)
+SPORT_TEXT = re.compile(r"sport_?type[\"']?\s*[:=]\s*[\"']?(\d+)", re.I)
+DATE_TEXT = re.compile(r"(20\d\d-?\d\d-?\d\d)")
+
+
 def records(payload):
-    """Activities in a querySportRecords answer: any object with a labelId (COROS's activity id)."""
+    """Activities in a querySportRecords answer: any object with a labelId (COROS's activity id). When COROS answers
+    in text rather than JSON, labelIds (with the sportType and date near each) are read out of the text."""
+    if isinstance(payload, str):
+        out = []
+        found = list(LABEL_TEXT.finditer(payload))
+        for k, m in enumerate(found):
+            line = payload[payload.rfind("\n", 0, m.start()) + 1:(payload.find("\n", m.end()) + 1 or len(payload) + 1) - 1]
+            window = payload[found[k - 1].end() if k else 0:found[k + 1].start() if k + 1 < len(found) else None]
+            sport = SPORT_TEXT.search(line) or SPORT_TEXT.search(window)
+            day = DATE_TEXT.search(line) or DATE_TEXT.search(window)
+            chunk = line if SPORT_TEXT.search(line) or DATE_TEXT.search(line) else window
+            out.append({"label_id": m.group(1), "sport_type": int(sport.group(1)) if sport else None, "name": "",
+                        "start": day.group(1).replace("-", "") if day else None, "distance": None, "seconds": None,
+                        "raw": {"text": chunk[:2000]}})
+        return out
     out, seen = [], set()
     for d in walk(payload):
         label = _pick(d, "labelId", "label_id", "labelID")
@@ -397,6 +416,8 @@ class Coros:
         result = self.tool(user_id, "querySportRecords", {
             "startDate": start.strftime("%Y%m%d"), "endDate": end.strftime("%Y%m%d"), "sportTypeCodes": [65535],
             "limit": 200})
+        # What COROS sent, kept so the Log page can show it (its exact shape isn't documented)
+        self.put(f"last_list_{user_id}", json.dumps(result, default=str)[:6000])
         conn, found = self._conn(), records(tool_payload(result))
         for r in found:
             day, started = _start_text(r["start"])
@@ -503,6 +524,7 @@ class Coros:
                 "failed": counts["failed"] or 0, "runs": counts["runs"] or 0, "oldest": counts["oldest"] or "",
                 "newest": counts["newest"] or "", "used_today": self.used_today(user_id), "per_day": FIT_PER_DAY,
                 "since": self.since(user_id), "added": self.added(user_id), "test": self.last_test(user_id),
+                "last_list": self.get(f"last_list_{user_id}"),
                 "last_error": last_error["fit_error"] if last_error else ""}
 
     def added(self, user_id):

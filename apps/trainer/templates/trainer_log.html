@@ -66,6 +66,10 @@
         </div>
       </div>
       {% endif %}
+      {% if coros_status.last_list %}
+      <details><summary class="small">What COROS sent last (for fixing problems)</summary>
+        <pre class="small wrap-text">{{ coros_status.last_list }}</pre></details>
+      {% endif %}
       {% call ui.confirm("Disconnect COROS", danger=True) %}
         <form method="post" action="/apps/trainer/coros/disconnect" class="stack"><p class="small">New activities come from Strava again. Everything already in your log stays.</p><button type="submit" class="danger">Disconnect</button></form>
       {% endcall %}

@@ -198,6 +198,13 @@ class CorosTests(unittest.TestCase):
         with self.assertRaises(coros.CorosError):
             self.c.finish(self.user, "not-the-state", "code")
 
+    def test_text_answers_are_read_too(self):
+        text = ("1. Morning Run - 2026-11-28 08:10, 7.0 mi (labelId: 474723165319233737, sportType: 100)\n"
+                "2. Strength - 2026-11-27 (labelId: 474723165319233001, sportType: 402)")
+        found = coros.records(text)
+        self.assertEqual([(r["label_id"], r["sport_type"], r["start"]) for r in found],
+                         [("474723165319233737", 100, "20261128"), ("474723165319233001", 402, "20261127")])
+
     def test_reading_coros_answers(self):
         self.assertEqual(coros.sse_messages('event: message\ndata: {"id": 2}\n\n'), [{"id": 2}])
         self.assertEqual(coros._start_text(20261126), ("2026-11-26", ""))
