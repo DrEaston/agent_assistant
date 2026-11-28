@@ -1,5 +1,8 @@
 # Trainer, reimagined: a coach that plans the week and makes sure it happens
 
+> **Note (Nov 28, 2026):** this plan predates later decisions (the coach redesign, removing Trainer's old pages, folding "Explore this run" into the run page, no water tracking). Where they differ, the later decisions and the code win.
+
+
 Today's Trainer is a log: Strava imports, mileage charts, shoes, coach/athlete grants, workouts a coach assigns.
 It lives in the old shared app (`api.py` routes from `/apps/trainer`, `trainer_*` tables in `database.py`,
 `apps/trainer/templates/trainer.html`) and tells Curtis what he already did.
