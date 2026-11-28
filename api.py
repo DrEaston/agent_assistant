@@ -48,9 +48,12 @@ from apps.kitchen.import_images import UnsupportedRecipeImage, is_heic, normaliz
 from apps.kitchen.thanksgiving.router import configure as configure_thanksgiving, router as thanksgiving_router
 from core import internal as core_internal, proxy as core_proxy, ui as core_ui
 from apps.kitchen.shopping import router as shopping
+from apps.trainer import coach as trainer_coach, connector as trainer_connector, routes as trainer_routes
+from apps.trainer.strava import (  # noqa: E402
+    classify_strava_workout, strava_activity_import_payload, strava_first_present)
 from apps.kitchen import pages as kitchen_pages
 from apps.launcher import today as today_page
-from apps.assistant import pages as assistant_pages, reading as assistant_reading
+from apps.assistant import reading as assistant_reading, routes as assistant_routes
 from apps.music import routes as music_routes
 from apps.issues import routes as studio_routes
 from apps.registry import app_shell_for_path, global_nav_apps, launcher_cards
@@ -181,6 +184,10 @@ shopping.configure(
     thanksgiving=remote_thanksgiving if THANKSGIVING_SERVICE_URL else None,
 )
 app.include_router(shopping.router)
+trainer_routes.configure(db)
+app.include_router(trainer_routes.router)  # Trainer's This week, Sunday check-in, usual week, calendar feed
+assistant_routes.configure(db)
+app.include_router(assistant_routes.router)  # the Assistant's pages and forms (apps/assistant/routes.py)
 
 # Claude's connector (core/connector): /mcp for the tools, /oauth/* and /.well-known/* for signing in. Each app
 # adds its ToolSet here; an app running as its own service is reached through RemoteToolSet.
@@ -192,6 +199,7 @@ from core.connector import oauth as connector_oauth, server as connector_server 
 from core.connector.pages import open_page_tool  # noqa: E402
 from core.connector.tools import RemoteToolSet, ToolSet  # noqa: E402
 from apps.kitchen import nav as kitchen_nav  # noqa: E402
+from apps.trainer import nav as trainer_nav  # noqa: E402
 from apps.kitchen.thanksgiving import nav as thanksgiving_nav  # noqa: E402
 
 connector_auth = connector_oauth.OAuth(db, lambda user_id: dict(db.get_user_by_id(user_id) or {}) or None)
@@ -200,13 +208,48 @@ ASSISTANT_TOOLS = assistant_connector.tools()
 assistant_connector.configure(db)
 THANKSGIVING_TOOLS = (RemoteToolSet("thanksgiving", THANKSGIVING_SERVICE_URL, "/thanksgiving/api/connector/tools")
                       if THANKSGIVING_SERVICE_URL else thanksgiving_connector.tools())
+# The Logbook (core/logbook): checked tables assistants look facts up in. Shared storage, not an app.
+from core.logbook import connector as logbook_connector, routes as logbook_routes  # noqa: E402
+
+logbook_connector.configure(db)
+LOGBOOK_TOOLS = logbook_connector.tools()
+# Media (core/media): pictures sent to Dieter, waiting for his OK. Private files, not the public /uploads folder.
+from core.media import connector as media_connector, routes as media_routes  # noqa: E402
+from core.media.store import Blobs as MediaBlobs  # noqa: E402
+
+
+class _MediaCloud:
+    """Media's remote copy: the same Cloud Storage bucket, under its own prefix."""
+
+    def put(self, key, path):
+        cloud_persistence.put_media(key, path)
+
+    def get(self, key, path):
+        cloud_persistence.get_media(key, path)
+
+    def delete(self, key):
+        cloud_persistence.delete_media(key)
+
+
+media_connector.configure(db, MediaBlobs(Path(os.getenv("MEDIA_DIR", str(db_path.resolve().parent / "media"))),
+                                         _MediaCloud() if cloud_persistence.enabled else None))
+app.include_router(logbook_routes.router)
+from core.mascot import routes as mascot_routes  # noqa: E402  (the animation lab, /media/lab: before /media/<id>)
+app.include_router(mascot_routes.router)
+app.include_router(media_routes.router)
+media_routes.configure_api(lambda request: connector_auth.authenticate(request))
+TRAINER_TOOLS = trainer_connector.tools()  # this week, the log, Strava sync, a run, the speed picture
 CONNECTOR_TOOLSETS = [
     KITCHEN_TOOLS,
     THANKSGIVING_TOOLS,
     # Every app's pages (apps/<app>/nav.py): links Claude can hand over. Dieter's own chat opens them instead.
-    ToolSet("dieter", [open_page_tool([kitchen_nav.PAGES, thanksgiving_nav.PAGES, assistant_nav.PAGES])]),
+    ToolSet("dieter", [open_page_tool([kitchen_nav.PAGES, thanksgiving_nav.PAGES, assistant_nav.PAGES,
+                                       logbook_connector.PAGES, media_connector.PAGES, trainer_nav.PAGES])]),
     studio_connector.tools(),  # Studio reports, for the admin
     ASSISTANT_TOOLS,
+    LOGBOOK_TOOLS,
+    media_connector.tools(),
+    TRAINER_TOOLS,
 ]
 
 
@@ -238,9 +281,11 @@ from apps.kitchen import recipe_changes as kitchen_recipe_changes  # noqa: E402
 
 SITE_PAGES = [Page("today.home", "Today", "Dieter's home page: today across every app.", "/")]
 DIETER_CHAT = dieter_chat.ChatSetup(
-    toolsets=[KITCHEN_TOOLS, THANKSGIVING_TOOLS, ASSISTANT_TOOLS],
-    page_lists=[SITE_PAGES, kitchen_nav.PAGES, thanksgiving_nav.PAGES, assistant_nav.PAGES],
-    notes=[kitchen_connector.CHAT_NOTES, assistant_connector.CHAT_NOTES],
+    toolsets=[KITCHEN_TOOLS, THANKSGIVING_TOOLS, ASSISTANT_TOOLS, LOGBOOK_TOOLS, TRAINER_TOOLS],
+    page_lists=[SITE_PAGES, kitchen_nav.PAGES, thanksgiving_nav.PAGES, assistant_nav.PAGES, logbook_connector.PAGES,
+                trainer_nav.PAGES],
+    notes=[kitchen_connector.CHAT_NOTES, assistant_connector.CHAT_NOTES, logbook_connector.CHAT_NOTES,
+           trainer_connector.CHAT_NOTES],
     savers=kitchen_connector.savers(),
     pending=kitchen_connector.pending,
     offer=lambda schema: not schema["name"].startswith("thanksgiving_")
@@ -256,7 +301,7 @@ def dieter_chat_log(summary, said, page_url):
 
 DIETER_CHAT.log_for_later = dieter_chat_log
 # Pages whose Ask Dieter goes to Dieter's chat (the rest still use the older handlers in api_dieter_action).
-DIETER_CHAT_PATHS = ("/apps/recipes", "/apps/assistant", "/projects")
+DIETER_CHAT_PATHS = ("/apps/recipes", "/apps/assistant", "/projects", "/apps/trainer")
 app.include_router(connector_auth.router())
 app.include_router(connector_server.make_router(CONNECTOR_TOOLSETS, connector_auth.authenticate, connector_run_as,
                                                 signer=core_proxy.signer_user))
@@ -286,6 +331,7 @@ recipe_maintenance_last_run = None
 RECIPE_MAINTENANCE_INTERVAL_SECONDS = 60
 
 SESSION_COOKIE_NAME = "dieter_session"
+COACH_COOKIE_NAME = "dieter_coach_session"   # the /coach passcode sign-in: its own cookie, so it never replaces yours
 SESSION_DAYS = 30
 PBKDF2_ITERATIONS = 210_000
 SESSION_COOKIE_SECURE = bool(os.getenv("K_SERVICE")) or os.getenv("SESSION_COOKIE_SECURE", "").lower() == "true"
@@ -361,6 +407,17 @@ def safe_internal_redirect_target(value, fallback="/"):
     return value if value and value.startswith("/") and not value.startswith("//") else fallback
 
 
+def create_coach_login_response(coach_id, redirect_to="/coach"):
+    """Sign in the passcode coach account under its own cookie, leaving any other sign-in in this browser alone."""
+    token = secrets.token_urlsafe(32)
+    expires_at = (datetime.utcnow() + timedelta(days=SESSION_DAYS)).isoformat()
+    db.create_session(coach_id, hash_session_token(token), expires_at)
+    response = RedirectResponse(url=redirect_to, status_code=303)
+    response.set_cookie(COACH_COOKIE_NAME, token, httponly=True, secure=SESSION_COOKIE_SECURE, samesite="lax",
+                        max_age=SESSION_DAYS * 24 * 60 * 60)
+    return response
+
+
 def clear_login_response(redirect_to="/login"):
     """Clear the login cookie and redirect."""
     response = RedirectResponse(url=redirect_to, status_code=303)
@@ -428,6 +485,36 @@ def guest_read_only_response(request):
     )
 
 
+def is_passcode_coach(user):
+    """The shared coach account a passcode opens (apps/trainer/coach.py): coach pages only."""
+    return bool(user and user["role"] == trainer_coach.PASSCODE_ROLE)
+
+
+# What the passcode coach account may open. Anything else sends it back to its athletes.
+PASSCODE_COACH_PATHS = ("/apps/trainer/athletes", "/apps/trainer/view-as", "/apps/trainer/coaching-links",
+                        "/logout", "/coach", "/static/", "/favicon.ico")
+
+
+def passcode_coach_allowed(request):
+    path = request.url.path
+    if path.startswith(PASSCODE_COACH_PATHS):
+        return True
+    # Full view (the athlete's switch on My coach): their Trainer pages, read-only (apps/trainer/routes.py view_as).
+    return (path.startswith("/apps/trainer") and request.method in READ_ONLY_METHODS
+            and request.cookies.get(trainer_routes.VIEW_COOKIE, "").isdigit())
+
+
+_coach_tries = {}   # client address -> [failed passcode times]; a short, shared passcode needs a brake
+COACH_TRIES, COACH_TRIES_WINDOW = 8, 15 * 60
+
+
+def _coach_tries_left(client):
+    now = time.time()
+    recent = [t for t in _coach_tries.get(client, []) if now - t < COACH_TRIES_WINDOW]
+    _coach_tries[client] = recent
+    return COACH_TRIES - len(recent)
+
+
 def get_or_create_guest_user_id():
     """Create the shared guest user on demand and expose the recipe catalogue to it."""
     user = db.get_user_by_email(GUEST_EMAIL)
@@ -462,6 +549,7 @@ async def load_authenticated_user(request: Request, call_next):
         "/dashboard",
         "/api/cct-roadmap",
         "/mcp",  # Claude's connector: checks its own bearer token
+        "/media/api/",  # Claude Code's picture upload: checks its own bearer token too
         "/oauth/",  # its sign-in; /oauth/authorize sends people to /login itself
         "/.well-known/oauth-",
     )
@@ -477,7 +565,9 @@ async def load_authenticated_user(request: Request, call_next):
             return await call_next(request)
         finally:
             reset_current_user_id(user_token)
-    public_exact_paths = {"/cct-roadmap", "/thanksgiving/menu"}  # the shareable Thanksgiving menu
+    public_exact_paths = {"/cct-roadmap", "/thanksgiving/menu",  # the shareable Thanksgiving menu
+                          "/coach",  # coach sign-in with a passcode (apps/trainer/coach.py)
+                          "/strava/webhook"}  # Strava pushes new activities here (apps/trainer/strava.py)
     if DEMO_MODE:
         public_exact_paths.update({"/", "/demo"})
     token = request.cookies.get(SESSION_COOKIE_NAME, "")
@@ -485,10 +575,20 @@ async def load_authenticated_user(request: Request, call_next):
     if token:
         user = db.get_session_user(hash_session_token(token), datetime.utcnow().isoformat())
 
+    # The coach passcode sign-in has its own cookie. It's who you are on the coach pages (and while viewing an
+    # athlete from there), or everywhere when it's the only sign-in in this browser. Your own sign-in stays yours.
+    coach_cookie = request.cookies.get(COACH_COOKIE_NAME, "")
+    coach_user = db.get_session_user(hash_session_token(coach_cookie), datetime.utcnow().isoformat()) if coach_cookie else None
+    if coach_user and is_passcode_coach(coach_user) and (not user or passcode_coach_allowed(request)):
+        user = coach_user
+    request.state.coach_signed_in = bool(coach_user and is_passcode_coach(coach_user))
     request.state.current_user = dict(user) if user else None
     user_token = set_current_user_id(user["id"] if user else None)
     try:
         shared_recipe = re.fullmatch(r"/thanksgiving/menu/\d+", path) and request.method in ("GET", "HEAD")
+        # Trainer's calendar feed: calendar apps can't sign in; the long secret in the link is the key.
+        shared_recipe = shared_recipe or (re.fullmatch(r"/trainer-calendar/[A-Za-z0-9_-]{20,}\.ics", path)
+                                          and request.method in ("GET", "HEAD"))
         if not user and path not in public_exact_paths and not path.startswith(public_prefixes) and not shared_recipe:
             if db.get_user_count() == 0:
                 return RedirectResponse(url="/register", status_code=303)
@@ -500,6 +600,10 @@ async def load_authenticated_user(request: Request, call_next):
             and path != "/api/dieter/action"
         ):
             return guest_read_only_response(request)
+        if is_passcode_coach(user) and not passcode_coach_allowed(request):
+            if request.url.path.startswith("/api/") or request.method not in READ_ONLY_METHODS:
+                return JSONResponse({"detail": "This coach sign-in only opens the coach pages."}, status_code=403)
+            return RedirectResponse(url="/coach", status_code=303)
         response = await call_next(request)
         return response
     finally:
@@ -4366,6 +4470,22 @@ def api_recipe_edit(message: RecipeEditMessage):
 @app.post("/api/dieter/transcribe")
 async def api_dieter_transcribe(audio: UploadFile = File(...)):
     """Transcribe dictated Ask Dieter audio using the server-side LLM provider."""
+    return await transcribe_upload(audio, (
+        "This is a short Ask Dieter command for a planner or scheduler app. "
+        "Prefer words like context, bullets, action item, hygiene, Pilates, AC, tomorrow, today. "
+        "Preserve list items clearly."))
+
+
+@app.post("/coach/transcribe")
+async def coach_transcribe(audio: UploadFile = File(...)):
+    """The coach page's Talk button: a dictated workout, as text for the workout box."""
+    return await transcribe_upload(audio, (
+        "A running coach dictating a workout, e.g. 2 mile warm-up, 6 x 1 mile at threshold with 90 seconds jog, "
+        "8 x 200 meters fast, strides, tempo, 5K pace, 400s, 800s, cool-down."))
+
+
+async def transcribe_upload(audio, prompt):
+    """Text from an uploaded voice recording (OpenAI transcription)."""
     api_key = os.getenv("OPENAI_API_KEY", "")
     if not api_key:
         raise HTTPException(status_code=503, detail="Voice transcription is not configured.")
@@ -4380,11 +4500,7 @@ async def api_dieter_transcribe(audio: UploadFile = File(...)):
             transcript = client.audio.transcriptions.create(
                 model=OPENAI_TRANSCRIPTION_MODEL,
                 file=audio_file,
-                prompt=(
-                    "This is a short Ask Dieter command for a planner or scheduler app. "
-                    "Prefer words like context, bullets, action item, hygiene, Pilates, AC, tomorrow, today. "
-                    "Preserve list items clearly."
-                ),
+                prompt=prompt,
             )
         text = getattr(transcript, "text", "") or ""
         return {"text": text.strip(), "model": OPENAI_TRANSCRIPTION_MODEL}
@@ -4509,14 +4625,18 @@ def api_dieter_action(message: DieterActionMessage):
     if music_routes.message_requests_playlist_action(message.content, page_url):
         return music_routes.handle_playlist_action_request(message, page_url)
 
+    # On Trainer pages the older shoe-log and run-reflection handlers (they save things) take statements ("legs felt
+    # heavy, RPE 7"); questions ("how did my race go?") go to Dieter's chat with the trainer_ tools.
+    trainer_question = is_trainer_question(message.content) and dieter_chat_handles(message)
+    if message_requests_trainer_shoe_log(message.content, page_url) and not trainer_question:
+        return handle_trainer_shoe_log_request(message, page_url)
+
+    if message_requests_trainer_reflection(message.content, page_url) and not trainer_question:
+        return handle_trainer_reflection_request(message, page_url)
+
     if dieter_chat_handles(message):
         return dieter_chat_reply(message)
 
-    if message_requests_trainer_shoe_log(message.content, page_url):
-        return handle_trainer_shoe_log_request(message, page_url)
-
-    if message_requests_trainer_reflection(message.content, page_url):
-        return handle_trainer_reflection_request(message, page_url)
 
     planner_loop_active = bool((message.previous_action_plan or "").strip()) or message_requests_planner_action(message.content)
     if planner_loop_active:
@@ -5305,6 +5425,40 @@ def guest_login_form(next: str = Form("")):
     return create_login_response(user_id, safe_internal_redirect_target(next or fallback, fallback))
 
 
+@app.get("/coach")
+def coach_passcode_page(request: Request):
+    """The coach's own address: the Coach page once signed in with a passcode, otherwise the passcode box."""
+    if is_passcode_coach(request.state.current_user):
+        raw = request.query_params.get("sent", "")
+        return trainer_routes.coach_page(request, int(raw) if raw.isdigit() else 0)
+    user = request.state.current_user
+    return trainer_routes.coach_sign_in_page()
+
+
+@app.post("/coach")
+def coach_passcode_form(request: Request, passcode: str = Form("")):
+    client = request.client.host if request.client else "?"
+    if _coach_tries_left(client) <= 0:
+        return trainer_routes.coach_sign_in_page("Too many tries. Wait 15 minutes and try again.")
+    coach_id = trainer_coach.CoachStore(db).passcode_sign_in(passcode)
+    if not coach_id:
+        _coach_tries[client].append(time.time())
+        return trainer_routes.coach_sign_in_page("That passcode wasn't recognized.")
+    return create_coach_login_response(coach_id, "/coach")
+
+
+@app.post("/coach/logout")
+def coach_logout(request: Request):
+    """Sign out of the coach page only; any other sign-in in this browser stays."""
+    token = request.cookies.get(COACH_COOKIE_NAME)
+    if token:
+        db.delete_session(hash_session_token(token))
+    response = RedirectResponse(url="/coach", status_code=303)
+    response.delete_cookie(COACH_COOKIE_NAME)
+    response.delete_cookie(trainer_routes.VIEW_COOKIE)
+    return response
+
+
 @app.get("/register")
 def register_page(request: Request):
     """Show registration form."""
@@ -5425,8 +5579,8 @@ def admin_update_member_trainer_mode(request: Request, user_id: int, trainer_mod
 @app.get("/")
 def home_default(request: Request):
     """Today: the home page."""
-    if DEMO_MODE and not request.state.current_user:
-        return render_demo_landing(request)
+    if not request.state.current_user:  # signed out: straight to sign-in (the old demo front page stays at /demo)
+        return RedirectResponse(url="/login", status_code=303)
     return render_today_page(request)
 
 
@@ -5495,6 +5649,9 @@ def render_today_page(request: Request):
         playlist_drafts=_quietly("playlists", lambda: len(db.get_playlist_drafts()), 0),
         is_guest=current_user_is_guest_session(),
         studio=_quietly("Studio", lambda: studio_routes.store().summary()) if current_user_is_admin(request) else None,
+        logbook=_quietly("Logbook", lambda: logbook_connector.store().today()),
+        media=_quietly("Media", lambda: media_connector.store().today()),
+        training=_quietly("Trainer", lambda: (trainer_routes.catch_up(3), trainer_routes.today())[1]),
     )
 
 
@@ -5514,104 +5671,6 @@ def dashboard(request: Request):
 def planner_app(request: Request):
     """Legacy planner route."""
     return RedirectResponse(url="/apps/assistant/planner", status_code=303)
-
-
-@app.get("/apps/assistant")
-def assistant_app(request: Request):
-    """The Assistant: to-dos (with dates), projects and reading at a glance (apps/assistant/pages.py)."""
-    items = [assistant_pages.todo_view(dict(r)) for r in db.get_scheduler_items(status="open", limit=100)]
-    done = [assistant_pages.todo_view(dict(r)) for r in db.get_recent_completed_scheduler_items(limit=8)]
-    books = assistant_reading.ReadingStore(db).books()
-    reading = {s: sum(1 for b in books if b["status"] == s) for s in assistant_reading.STATUSES}
-    return assistant_pages.home_page(todos=items, done=done, projects=assistant_project_rows(), reading=reading)
-
-
-def assistant_project_rows():
-    rows = []
-    for project in dicts_from_rows(db.get_all_projects()):
-        open_actions = dicts_from_rows(db.get_open_recommended_actions(project["id"]))
-        rows.append({"id": project["id"], "name": project["name"], "open": len(open_actions),
-                     "next": open_actions[0]["action"] if open_actions else "",
-                     "about": (project.get("description") or "").strip().splitlines()[0][:140]
-                     if (project.get("description") or "").strip() else ""})
-    return rows
-
-
-@app.get("/apps/assistant/projects")
-def assistant_projects_page(request: Request):
-    return assistant_pages.projects_page(projects=assistant_project_rows())
-
-
-@app.get("/apps/assistant/reading")
-def assistant_reading_page(request: Request, show: str = ""):
-    store = assistant_reading.ReadingStore(db)
-    return assistant_pages.reading_page(books=store.books(), show=show if show in assistant_reading.STATUSES else "")
-
-
-@app.get("/apps/assistant/reading/bookstore")
-def assistant_bookstore_page(request: Request):
-    return assistant_pages.bookstore_page(checklist=assistant_reading.ReadingStore(db).checklist())
-
-
-@app.post("/apps/assistant/reading/add")
-def assistant_reading_add(title: str = Form(...), author: str = Form(""), high_priority: str = Form("")):
-    try:
-        assistant_reading.ReadingStore(db).add(title, author, bool(high_priority))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return RedirectResponse(url="/apps/assistant/reading", status_code=303)
-
-
-@app.post("/apps/assistant/reading/{book_id}/status")
-def assistant_reading_status(book_id: int, status: str = Form(...), next: str = Form("/apps/assistant/reading")):
-    try:
-        assistant_reading.ReadingStore(db).update(book_id, status=status)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return RedirectResponse(url=safe_redirect_path(next, "/apps/assistant/reading"), status_code=303)
-
-
-@app.post("/apps/assistant/reading/{book_id}/delete")
-def assistant_reading_delete(book_id: int):
-    assistant_reading.ReadingStore(db).delete(book_id)
-    return RedirectResponse(url="/apps/assistant/reading", status_code=303)
-
-
-@app.post("/apps/assistant/reading/bookstore/shelf")
-def assistant_bookstore_shelf(key: str = Form(...), checked: str = Form("")):
-    assistant_reading.ReadingStore(db).check_shelf(key, bool(checked))
-    return RedirectResponse(url="/apps/assistant/reading/bookstore", status_code=303)
-
-
-@app.post("/apps/assistant/reading/bookstore/done")
-def assistant_bookstore_done():
-    assistant_reading.ReadingStore(db).finish_visit()
-    return RedirectResponse(url="/apps/assistant/reading", status_code=303)
-
-
-@app.post("/apps/assistant/feedback")
-def assistant_feedback(request: Request, text: str = Form(...), page: str = Form("/apps/assistant")):
-    """The Assistant pages' "Report a problem" box: a Studio report."""
-    text = (text or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="Describe the problem.")
-    user = getattr(request.state, "current_user", None) or {}
-    db.add_app_feedback_report(title=f"[Assistant] {text.splitlines()[0][:80]}", area="Assistant", page_url=page[:300],
-                               page_title="Assistant", reporter_name=user.get("name", "") or "",
-                               reporter_email=user.get("email", "") or "", raw_feedback=text[:4000])
-    return RedirectResponse(url=safe_redirect_path(page, "/apps/assistant") , status_code=303)
-
-
-@app.get("/apps/assistant/planner")
-def assistant_planner_app(request: Request):
-    """The old planner page: the Assistant's home now."""
-    return RedirectResponse(url="/apps/assistant", status_code=303)
-
-
-@app.get("/apps/assistant/scheduler")
-def assistant_scheduler_app(request: Request):
-    """The old scheduler page: to-dos are the Assistant's home now."""
-    return RedirectResponse(url="/apps/assistant", status_code=303)
 
 
 def old_assistant_scheduler_app(request: Request):
@@ -5738,21 +5797,6 @@ def render_demo_landing(request: Request):
     )
 
 
-def trainer_workout_view(row):
-    """Prepare a Trainer workout/session row for templates."""
-    item = dict(row)
-    try:
-        item["details"] = json.loads(item.get("details_json") or "[]")
-    except (TypeError, json.JSONDecodeError):
-        item["details"] = []
-    return item
-
-
-def trainer_role(profile):
-    """Return the selected Trainer role, if any."""
-    mode = (profile or {}).get("mode") or ""
-    return mode if mode in {"athlete", "coach"} else "athlete"
-
 TRAINER_CATEGORY_LABELS = {
     "run_threshold": "Run: Threshold",
     "run_speed": "Run: Speed",
@@ -5765,22 +5809,6 @@ TRAINER_CATEGORY_LABELS = {
 
 jinja_env.globals["trainer_category_labels"] = TRAINER_CATEGORY_LABELS
 
-
-def classify_strava_workout(activity_type, title=""):
-    """Map a Strava activity into a Trainer bucket."""
-    kind = (activity_type or "").strip().lower()
-    text = f"{activity_type or ''} {title or ''}".lower()
-    if kind in {"run", "trailrun", "virtualrun"}:
-        if re.search(r"\b(threshold|tempo|mile|1k|cruise)\b", text):
-            return "run_threshold"
-        if re.search(r"\b(400|interval|speed|rep|track|fartlek)\b", text):
-            return "run_speed"
-        return "run"
-    if kind in {"ride", "virtualride", "ebikeride"}:
-        return "bike_tempo" if re.search(r"\b(tempo|threshold|interval)\b", text) else "bike"
-    if kind in {"weighttraining", "workout", "crossfit", "highintensityintervaltraining"}:
-        return "strength_glutes" if re.search(r"\b(glute|clam|rdl|deadlift|band|bridge|hip)\b", text) else "strength"
-    return kind or "workout"
 
 def strava_configured():
     """Return true when Strava OAuth credentials are available."""
@@ -5842,151 +5870,20 @@ def exchange_strava_code(code, request):
     )
 
 
-def refresh_strava_profile_token(profile):
-    """Refresh a Strava access token if needed."""
-    if not profile or not profile.get("strava_refresh_token"):
-        raise HTTPException(status_code=400, detail="Connect Strava before importing runs.")
-    expires_at = int(profile.get("strava_token_expires_at") or 0)
-    if profile.get("strava_access_token") and expires_at > int(time.time()) + 60:
-        return profile.get("strava_access_token")
-    payload = strava_http_json(
-        STRAVA_TOKEN_URL,
-        method="POST",
-        data={
-            "client_id": STRAVA_CLIENT_ID,
-            "client_secret": STRAVA_CLIENT_SECRET,
-            "grant_type": "refresh_token",
-            "refresh_token": profile.get("strava_refresh_token"),
-        },
-    )
-    db.update_trainer_strava_tokens(
-        athlete_id=profile.get("strava_athlete_id"),
-        access_token=payload.get("access_token", ""),
-        refresh_token=payload.get("refresh_token", profile.get("strava_refresh_token", "")),
-        expires_at=payload.get("expires_at", 0),
-        scope=profile.get("strava_scope", ""),
-    )
-    return payload.get("access_token", "")
+def trainer_run_page_target(page_url):
+    """The imported workout id behind a run page (/apps/trainer/run/<Strava id>) for the signed-in athlete."""
+    match = re.match(r"^/apps/trainer/run/(\d+)", urlsplit(page_url or "").path)
+    if not match:
+        return None
+    row = db.connect().execute("SELECT id FROM trainer_imported_workouts WHERE source = 'strava' AND external_id = ? "
+                               "AND user_id = ?", (match.group(1), get_current_user_id())).fetchone()
+    return row["id"] if row else None
 
-
-def fetch_strava_activities(access_token, after_ts, before_ts=None, per_page=100, max_pages=10):
-    """Fetch Strava activities for the authenticated athlete."""
-    per_page = min(max(per_page, 1), 100)
-    activities = []
-    for page in range(1, max(max_pages, 1) + 1):
-        params = {"after": int(after_ts), "per_page": per_page, "page": page}
-        if before_ts:
-            params["before"] = int(before_ts)
-        url = f"{STRAVA_API_BASE}/athlete/activities?{urlencode(params)}"
-        result = strava_http_json(url, access_token=access_token)
-        if not isinstance(result, list) or not result:
-            break
-        activities.extend(result)
-        if len(result) < per_page:
-            break
-    return activities
-
-
-def fetch_strava_activity_detail(access_token, activity_id):
-    """Fetch detailed fields for one Strava activity."""
-    if not activity_id:
-        return {}
-    params = {"include_all_efforts": "true"}
-    url = f"{STRAVA_API_BASE}/activities/{activity_id}?{urlencode(params)}"
-    result = strava_http_json(url, access_token=access_token)
-    return result if isinstance(result, dict) else {}
-
-
-def strava_first_present(activity, detail, key):
-    """Prefer detailed Strava fields, falling back to the summary activity."""
-    value = (detail or {}).get(key)
-    if value is None or value == "":
-        value = (activity or {}).get(key)
-    return value
-
-
-def strava_activity_import_payload(activity, detail=None):
-    """Build the persisted metric payload for a Strava activity."""
-    detail = detail or {}
-    merged = {**(activity or {}), **detail}
-    activity_type = merged.get("sport_type") or merged.get("type") or ""
-    title = merged.get("name") or activity_type
-    gear = merged.get("gear") if isinstance(merged.get("gear"), dict) else {}
-    return {
-        "external_id": str(merged.get("id")),
-        "activity_type": activity_type,
-        "workout_category": classify_strava_workout(activity_type, title),
-        "title": title,
-        "started_at": (merged.get("start_date_local") or merged.get("start_date") or "")[:10],
-        "distance_meters": strava_first_present(activity, detail, "distance"),
-        "moving_time_seconds": strava_first_present(activity, detail, "moving_time"),
-        "elapsed_time_seconds": strava_first_present(activity, detail, "elapsed_time"),
-        "elevation_gain_meters": strava_first_present(activity, detail, "total_elevation_gain"),
-        "average_speed_mps": strava_first_present(activity, detail, "average_speed"),
-        "max_speed_mps": strava_first_present(activity, detail, "max_speed"),
-        "average_heartrate": strava_first_present(activity, detail, "average_heartrate"),
-        "max_heartrate": strava_first_present(activity, detail, "max_heartrate"),
-        "average_cadence": strava_first_present(activity, detail, "average_cadence"),
-        "average_watts": strava_first_present(activity, detail, "average_watts"),
-        "kilojoules": strava_first_present(activity, detail, "kilojoules"),
-        "suffer_score": strava_first_present(activity, detail, "suffer_score"),
-        "perceived_exertion": strava_first_present(activity, detail, "perceived_exertion"),
-        "gear_id": strava_first_present(activity, detail, "gear_id") or gear.get("id") or "",
-        "gear_name": gear.get("name") or "",
-        "start_latlng": strava_first_present(activity, detail, "start_latlng") or [],
-        "end_latlng": strava_first_present(activity, detail, "end_latlng") or [],
-        "splits_metric": detail.get("splits_metric") or [],
-        "laps": detail.get("laps") or [],
-        "raw": {"summary": activity or {}, "detail": detail or {}},
-    }
-
-
-def strava_activity_is_supported_training(activity_type):
-    """Return true for Strava activities Trainer currently summarizes."""
-    normalized = (activity_type or "").strip()
-    return normalized in {"Run", "TrailRun", "VirtualRun", "Ride", "VirtualRide", "EBikeRide"}
-
-
-def import_recent_strava_runs(days=7):
-    """Import recent Strava run and bike activities for the active athlete."""
-    profile = dict_from_row(db.get_trainer_profile())
-    if not strava_configured():
-        raise HTTPException(status_code=400, detail="Strava is not configured. Set STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET.")
-    access_token = refresh_strava_profile_token(profile)
-    now_ts = int(time.time())
-    after_ts = now_ts - int(days * 86400)
-    activities = fetch_strava_activities(access_token, after_ts=after_ts, before_ts=now_ts)
-    imported = 0
-    skipped = 0
-    for activity in activities:
-        activity_type = activity.get("type") or activity.get("sport_type") or ""
-        if not strava_activity_is_supported_training(activity_type):
-            skipped += 1
-            continue
-        try:
-            detail = fetch_strava_activity_detail(access_token, activity.get("id"))
-        except HTTPException:
-            detail = {}
-        db.add_trainer_imported_workout(**strava_activity_import_payload(activity, detail))
-        imported += 1
-    return {"imported": imported, "skipped": skipped, "days": days}
-
-
-def import_single_strava_activity(activity_id):
-    """Import one Strava activity by id for the active athlete."""
-    profile = dict_from_row(db.get_trainer_profile())
-    if not strava_configured():
-        raise HTTPException(status_code=400, detail="Strava is not configured. Set STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET.")
-    access_token = refresh_strava_profile_token(profile)
-    detail = fetch_strava_activity_detail(access_token, activity_id)
-    activity_type = detail.get("type") or detail.get("sport_type") or ""
-    if not strava_activity_is_supported_training(activity_type):
-        raise HTTPException(status_code=400, detail="That Strava activity is not a supported run or bike activity.")
-    db.add_trainer_imported_workout(**strava_activity_import_payload(detail, detail))
-    return {"imported": 1, "skipped": 0, "activity_id": activity_id}
 
 def parse_trainer_reflection_target(page_url):
     """Find an imported workout id from the Trainer page URL."""
+    if trainer_run_page_target(page_url):
+        return trainer_run_page_target(page_url)
     try:
         params = dict(parse_qsl(urlsplit(page_url or "").query, keep_blank_values=True))
         target = params.get("reflection_workout_id") or params.get("workout_id")
@@ -5995,18 +5892,10 @@ def parse_trainer_reflection_target(page_url):
         return None
 
 
-def parse_trainer_import_target(page_url):
-    """Find an imported workout id for opening Trainer run detail."""
-    try:
-        params = dict(parse_qsl(urlsplit(page_url or "").query, keep_blank_values=True))
-        target = params.get("workout_id") or params.get("reflection_workout_id") or params.get("shoe_workout_id")
-        return int(target) if target and str(target).isdigit() else None
-    except (TypeError, ValueError):
-        return None
-
-
 def parse_trainer_shoe_target(page_url):
     """Find an imported workout id for shoe logging from the Trainer page URL."""
+    if trainer_run_page_target(page_url):
+        return trainer_run_page_target(page_url)
     try:
         params = dict(parse_qsl(urlsplit(page_url or "").query, keep_blank_values=True))
         target = params.get("shoe_workout_id") or params.get("workout_id")
@@ -6069,6 +5958,13 @@ def extract_trainer_shoe_segments(text, shoes, default_distance_meters=None):
     return segments
 
 
+def trainer_run_url(workout):
+    """The new Trainer page for one imported session: its run page for Strava runs, otherwise the log."""
+    if (workout or {}).get("source", "strava") == "strava" and (workout or {}).get("external_id"):
+        return f"/apps/trainer/run/{workout['external_id']}"
+    return "/apps/trainer/log"
+
+
 def handle_trainer_shoe_log_request(message, page_url):
     """Prompt for or save shoe usage against an imported run."""
     target_id = parse_trainer_shoe_target(page_url) or parse_trainer_reflection_target(page_url)
@@ -6090,11 +5986,11 @@ def handle_trainer_shoe_log_request(message, page_url):
     shoes = dicts_from_rows(db.get_trainer_shoes())
     if not shoes:
         return {
-            "assistant_message": "Add at least one shoe in Trainer settings first, then I can log mileage against it.",
+            "assistant_message": "Add at least one pair on Trainer's Shoes page first, then I can log mileage against it.",
             "changed_fields": [],
             "trainer_context": True,
-            "redirect_url": "/apps/trainer/settings",
-            "redirect_label": "Open Shoe Inventory",
+            "redirect_url": "/apps/trainer/shoes",
+            "redirect_label": "Open Shoes",
         }
     segments = extract_trainer_shoe_segments(message.content, shoes, workout.get("distance_meters"))
     if not segments:
@@ -6102,7 +5998,7 @@ def handle_trainer_shoe_log_request(message, page_url):
             "assistant_message": trainer_shoe_prompt(workout),
             "changed_fields": [],
             "trainer_context": True,
-            "redirect_url": f"/apps/trainer/imports?shoe_workout_id={workout['id']}",
+            "redirect_url": trainer_run_url(workout),
             "redirect_label": "Open Shoe Log",
         }
     saved = []
@@ -6124,9 +6020,19 @@ def handle_trainer_shoe_log_request(message, page_url):
         "assistant_message": f"Saved shoe usage for {workout.get('title') or 'this run'}: {', '.join(saved)}.",
         "changed_fields": ["trainer_workout_shoes"],
         "trainer_context": True,
-        "redirect_url": f"/apps/trainer/imports?shoe_workout_id={workout['id']}",
+        "redirect_url": trainer_run_url(workout),
         "redirect_label": "Open Shoe Log",
     }
+
+
+QUESTION_WORDS = ("how", "what", "why", "when", "where", "which", "who", "did", "do", "does", "is", "am", "are",
+                  "was", "were", "can", "could", "should", "would", "will", "compare", "tell", "explain", "show")
+
+
+def is_trainer_question(text):
+    """A question for Dieter ("how did my race go?") rather than a note to save ("legs felt heavy, RPE 7")."""
+    words = re.findall(r"[a-z']+", (text or "").lower())
+    return "?" in (text or "") or bool(words and words[0].split("'")[0] in QUESTION_WORDS)
 
 
 def message_requests_trainer_reflection(text, page_url=""):
@@ -6283,7 +6189,7 @@ def handle_trainer_reflection_request(message, page_url):
             "assistant_message": prompt,
             "changed_fields": [],
             "trainer_context": True,
-            "redirect_url": f"/apps/trainer/imports?reflection_workout_id={workout['id']}",
+            "redirect_url": trainer_run_url(workout),
             "redirect_label": "Open Run Reflection",
         }
 
@@ -6309,22 +6215,9 @@ def handle_trainer_reflection_request(message, page_url):
         ]).strip(),
         "changed_fields": ["trainer_run_reflection"],
         "trainer_context": True,
-        "redirect_url": f"/apps/trainer/imports?reflection_workout_id={workout['id']}",
+        "redirect_url": trainer_run_url(workout),
         "redirect_label": "Open Run Reflection",
     }
-
-
-def trainer_grouped_suggestions():
-    """Return grouped Trainer catalog suggestions for the home page."""
-    grouped = db.get_trainer_suggested_workouts_by_category()
-    return [
-        {
-            "category": category,
-            "label": TRAINER_CATEGORY_LABELS.get(category, category.replace("_", " ").title()),
-            "workouts": [trainer_workout_view(row) for row in rows],
-        }
-        for category, rows in grouped.items()
-    ]
 
 
 def trainer_weekly_summary_view(row):
@@ -6342,220 +6235,6 @@ def trainer_weekly_summary_view(row):
     item["average_pace_min_per_mile"] = 26.8224 / average_speed_mps if average_speed_mps else 0
     item["load_score"] = suffer_score or fallback_load
     return item
-
-
-def trainer_week_offset(request):
-    """Read the selected week offset from the request."""
-    try:
-        return max(int(request.query_params.get("week_offset", 0)), 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def parse_trainer_started_date(value):
-    """Parse an imported workout date from Strava/local storage."""
-    raw = (value or "").strip()
-    if not raw:
-        return None
-    try:
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw[:10]):
-            return datetime.strptime(raw[:10], "%Y-%m-%d").date()
-        return datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
-    except (TypeError, ValueError):
-        return None
-
-
-def trainer_row_is_run(row):
-    """Return true for imported activities that should count toward run mileage."""
-    activity_type = (row.get("activity_type") or "").strip().lower()
-    category = (row.get("workout_category") or "").strip().lower()
-    return activity_type in {"run", "trailrun", "virtualrun"} or category.startswith("run")
-
-
-def trainer_row_is_bike(row):
-    """Return true for imported activities that should count toward bike mileage."""
-    activity_type = (row.get("activity_type") or "").strip().lower()
-    category = (row.get("workout_category") or "").strip().lower()
-    return activity_type in {"ride", "virtualride", "ebikeride"} or category.startswith("bike")
-
-
-def trainer_workout_week_dashboard(user_id=None, week_offset=0):
-    """Build a dashboard summary for one training week."""
-    today = datetime.now().date()
-    week_start = today - timedelta(days=today.weekday()) - timedelta(days=7 * max(week_offset, 0))
-    week_end = week_start + timedelta(days=6)
-    runs = []
-    rides = []
-    for row in dicts_from_rows(db.get_trainer_imported_workouts(user_id=user_id, limit=500)):
-        is_run = trainer_row_is_run(row)
-        is_bike = trainer_row_is_bike(row)
-        if not is_run and not is_bike:
-            continue
-        started = parse_trainer_started_date(row.get("started_at"))
-        if not started:
-            continue
-        if week_start <= started <= week_end:
-            item = dict(row)
-            distance_meters = float(item.get("distance_meters") or 0)
-            moving_time_seconds = int(item.get("moving_time_seconds") or 0)
-            average_speed_mps = float(item.get("average_speed_mps") or 0)
-            item["distance_miles"] = distance_meters / 1609.344 if distance_meters else 0
-            item["moving_time_minutes"] = moving_time_seconds / 60 if moving_time_seconds else 0
-            item["average_pace_min_per_mile"] = 26.8224 / average_speed_mps if average_speed_mps else 0
-            if is_run:
-                runs.append(item)
-            elif is_bike:
-                rides.append(item)
-
-    runs.sort(key=lambda item: item.get("started_at") or "", reverse=True)
-    rides.sort(key=lambda item: item.get("started_at") or "", reverse=True)
-    total_distance = sum(float(run.get("distance_miles") or 0) for run in runs)
-    total_bike_distance = sum(float(ride.get("distance_miles") or 0) for ride in rides)
-    total_seconds = sum(int(run.get("moving_time_seconds") or 0) for run in runs)
-    total_gain = sum(float(run.get("elevation_gain_meters") or 0) for run in runs)
-    total_load = sum(float(run.get("suffer_score") or 0) for run in runs)
-    hr_values = [float(run.get("average_heartrate") or 0) for run in runs if run.get("average_heartrate")]
-    sessions = [
-        session
-        for session in [trainer_workout_view(row) for row in db.get_trainer_sessions("upcoming", limit=80, user_id=user_id)]
-        if session.get("scheduled_for") and week_start.isoformat() <= session.get("scheduled_for") <= week_end.isoformat()
-    ]
-    return {
-        "week_offset": week_offset,
-        "week_start": week_start.isoformat(),
-        "week_end": week_end.isoformat(),
-        "label": "This week" if week_offset == 0 else f"{week_offset} week{'s' if week_offset != 1 else ''} ago",
-        "next_offset": max(week_offset - 1, 0),
-        "previous_offset": week_offset + 1,
-        "runs": runs,
-        "rides": rides,
-        "run_count": len(runs),
-        "distance_miles": total_distance,
-        "ride_count": len(rides),
-        "bike_distance_miles": total_bike_distance,
-        "moving_time_hours": total_seconds / 3600 if total_seconds else 0,
-        "elevation_gain_meters": total_gain,
-        "load_score": total_load,
-        "average_heartrate": (sum(hr_values) / len(hr_values)) if hr_values else 0,
-        "scheduled_sessions": sessions,
-    }
-
-
-def trainer_weekly_mileage_chart(user_id=None, weeks=13):
-    """Build chronological weekly run/bike mileage for the last several months."""
-    today = datetime.now().date()
-    current_week_start = today - timedelta(days=today.weekday())
-    buckets = []
-    by_start = {}
-    for index in range(max(weeks, 1) - 1, -1, -1):
-        week_start = current_week_start - timedelta(days=7 * index)
-        item = {
-            "week_start": week_start.isoformat(),
-            "week_end": (week_start + timedelta(days=6)).isoformat(),
-            "label": week_start.strftime("%b %-d") if os.name != "nt" else week_start.strftime("%b %#d"),
-            "distance_miles": 0,
-            "bike_distance_miles": 0,
-            "run_count": 0,
-            "ride_count": 0,
-        }
-        buckets.append(item)
-        by_start[week_start] = item
-
-    earliest = buckets[0]["week_start"]
-    for row in dicts_from_rows(db.get_trainer_imported_workouts(user_id=user_id, limit=5000)):
-        is_run = trainer_row_is_run(row)
-        is_bike = trainer_row_is_bike(row)
-        if not is_run and not is_bike:
-            continue
-        started = parse_trainer_started_date(row.get("started_at"))
-        if not started:
-            continue
-        if started.isoformat() < earliest:
-            continue
-        week_start = started - timedelta(days=started.weekday())
-        bucket = by_start.get(week_start)
-        if not bucket:
-            continue
-        miles = float(row.get("distance_meters") or 0) / 1609.344
-        if is_run:
-            bucket["distance_miles"] += miles
-            bucket["run_count"] += 1
-        elif is_bike:
-            bucket["bike_distance_miles"] += miles
-            bucket["ride_count"] += 1
-
-    max_miles = max(
-        [bucket["distance_miles"] for bucket in buckets] +
-        [bucket["bike_distance_miles"] for bucket in buckets] +
-        [0]
-    )
-    chart_width = 560
-    chart_height = 220
-    left = 42
-    right = 14
-    top = 14
-    bottom = 32
-    plot_width = chart_width - left - right
-    plot_height = chart_height - top - bottom
-    scale_max = max_miles or 1
-    for index, bucket in enumerate(buckets):
-        x = left + (plot_width * index / max(len(buckets) - 1, 1))
-        run_y = top + (1 - (bucket["distance_miles"] / scale_max)) * plot_height
-        bike_y = top + (1 - (bucket["bike_distance_miles"] / scale_max)) * plot_height
-        bucket["x"] = round(x, 1)
-        bucket["run_y"] = round(run_y, 1)
-        bucket["bike_y"] = round(bike_y, 1)
-    run_points = " ".join(f"{bucket['x']},{bucket['run_y']}" for bucket in buckets)
-    bike_points = " ".join(f"{bucket['x']},{bucket['bike_y']}" for bucket in buckets)
-    axis_values = [scale_max, scale_max / 2, 0]
-    axis_labels = []
-    for value in axis_values:
-        y = top + (1 - (value / scale_max)) * plot_height
-        axis_labels.append({"value": value, "y": round(y, 1), "label": f"{value:.0f}"})
-    return {
-        "weeks": buckets,
-        "max_miles": max_miles,
-        "total_miles": sum(bucket["distance_miles"] for bucket in buckets),
-        "total_bike_miles": sum(bucket["bike_distance_miles"] for bucket in buckets),
-        "run_points": run_points,
-        "bike_points": bike_points,
-        "axis_labels": axis_labels,
-        "chart_width": chart_width,
-        "chart_height": chart_height,
-        "plot_left": left,
-        "plot_right": chart_width - right,
-        "plot_top": top,
-        "plot_bottom": chart_height - bottom,
-    }
-
-
-def trainer_weekly_workout_plan():
-    """Pick a compact weekly menu from the Trainer catalog."""
-    grouped = db.get_trainer_suggested_workouts_by_category(limit_per_category=2)
-    plan_order = [
-        ("run_threshold", "Threshold"),
-        ("run_speed", "Speed"),
-        ("strength_glutes", "Strength"),
-        ("bike_tempo", "Bike"),
-    ]
-    plan = []
-    for category, label in plan_order:
-        rows = grouped.get(category) or []
-        if rows:
-            plan.append({
-                "category": category,
-                "label": label,
-                "workout": trainer_workout_view(rows[0]),
-            })
-    return plan
-
-
-def trainer_shoe_usage_by_workout(user_id):
-    """Group shoe usage rows by imported workout id for templates."""
-    grouped = {}
-    for row in dicts_from_rows(db.get_trainer_workout_shoes(user_id=user_id, limit=500)):
-        grouped.setdefault(row["imported_workout_id"], []).append(row)
-    return grouped
 
 
 def miles_to_meters(value):
@@ -6658,191 +6337,6 @@ def scan_trainer_audit_insights(user_id=None, minimum_total=2, minimum_bad=2):
     return saved
 
 
-def trainer_context(request, active_tab="home", workout_type="", athlete_user_id=None, coach_search="", selected_coach_athlete_id=0):
-    """Build shared Dieter Trainer template context."""
-    current_user = request.state.current_user
-    selected_athlete_id = athlete_user_id or (current_user or {}).get("id")
-    week_offset = trainer_week_offset(request)
-    workouts = [trainer_workout_view(row) for row in db.get_trainer_workouts(workout_type)]
-    trainer_profile = dict_from_row(db.get_trainer_profile())
-    mode = trainer_role(trainer_profile)
-    coach_athletes = dicts_from_rows(db.get_trainer_athletes_for_coach())
-    selected_coach_athlete = None
-    selected_coach_athlete_id = selected_coach_athlete_id or selected_athlete_id
-    for athlete in coach_athletes:
-        if athlete.get("athlete_user_id") == selected_coach_athlete_id:
-            selected_coach_athlete = athlete
-            break
-    import_target_id = parse_trainer_import_target(str(request.url)) if request else None
-    reflection_target_id = parse_trainer_reflection_target(str(request.url)) if request else None
-    reflection_target = dict_from_row(db.get_trainer_imported_workout(reflection_target_id)) if reflection_target_id else None
-    shoe_target_id = parse_trainer_shoe_target(str(request.url)) if request else None
-    shoe_target = dict_from_row(db.get_trainer_imported_workout(shoe_target_id)) if shoe_target_id else None
-    return {
-        "request": request,
-        "active_tab": active_tab,
-        "workout_type": workout_type,
-        "trainer_current_user": current_user,
-        "trainer_profile": trainer_profile,
-        "trainer_mode": mode,
-        "needs_trainer_role": not mode,
-        "strava_configured": strava_configured(),
-        "strava_connected": bool(trainer_profile and trainer_profile.get("strava_refresh_token")),
-        "reflection_target": reflection_target,
-        "shoe_target": shoe_target,
-        "coach_grants": dicts_from_rows(db.get_trainer_coach_grants_for_athlete()),
-        "coach_athletes": coach_athletes,
-        "selected_coach_athlete": selected_coach_athlete,
-        "selected_coach_athlete_id": selected_coach_athlete_id,
-        "coach_search_query": coach_search,
-        "coach_search_results": dicts_from_rows(db.search_trainer_coaches(coach_search)) if active_tab == "coaching" or coach_search else [],
-        "current_user_id": (current_user or {}).get("id"),
-        "selected_athlete_id": selected_athlete_id,
-        "is_viewing_own_trainer": selected_athlete_id == (current_user or {}).get("id"),
-        "suggestion_groups": trainer_grouped_suggestions(),
-        "weekly_workout_plan": trainer_weekly_workout_plan(),
-        "week_dashboard": trainer_workout_week_dashboard(selected_athlete_id, week_offset),
-        "mileage_chart": trainer_weekly_mileage_chart(selected_athlete_id, weeks=13),
-        "workouts": workouts,
-        "run_workouts": [item for item in workouts if item["workout_type"] == "run"],
-        "bike_workouts": [item for item in workouts if item["workout_type"] == "bike"],
-        "strength_workouts": [item for item in workouts if item["workout_type"] == "strength"],
-        "upcoming_sessions": [trainer_workout_view(row) for row in db.get_trainer_sessions("upcoming", limit=40, user_id=selected_athlete_id)],
-        "past_sessions": [trainer_workout_view(row) for row in db.get_trainer_sessions("done", limit=40, user_id=selected_athlete_id)],
-        "imported_workouts": dicts_from_rows(db.get_trainer_imported_workouts(selected_athlete_id, limit=60)),
-        "selected_imported_workout_id": import_target_id,
-        "weekly_run_summaries": [
-            trainer_weekly_summary_view(row)
-            for row in db.get_trainer_weekly_run_summaries(user_id=selected_athlete_id, weeks=8)
-        ],
-        "trainer_shoes": dicts_from_rows(db.get_trainer_shoes(user_id=selected_athlete_id)),
-        "shoe_usage_by_workout": trainer_shoe_usage_by_workout(selected_athlete_id),
-        "runs_missing_shoes": dicts_from_rows(db.get_trainer_runs_missing_shoes(user_id=selected_athlete_id, limit=8)),
-        "trainer_audit_insights": dicts_from_rows(db.get_trainer_audit_insights(user_id=selected_athlete_id, limit=10)),
-        "run_reflections": dicts_from_rows(db.get_trainer_run_reflections(user_id=selected_athlete_id, limit=10)),
-        "scheduler_due": scheduler_due_context(),
-    }
-
-
-def selected_trainer_athlete_id_for_mode(request, profile, athlete_user_id=0):
-    """Resolve the athlete whose Trainer data can be shown for the current mode."""
-    current_user_id = (request.state.current_user or {}).get("id")
-    mode = trainer_role(profile)
-    if mode == "athlete":
-        return current_user_id
-    if mode == "coach":
-        if not athlete_user_id:
-            return None
-        if not db.can_view_trainer_user(athlete_user_id):
-            raise HTTPException(status_code=403, detail="This athlete has not shared Trainer access with you.")
-        return athlete_user_id
-    return None
-
-
-@app.get("/apps/trainer")
-def trainer_app(request: Request, athlete_user_id: int = 0):
-    """Dieter Trainer home."""
-    profile = dict_from_row(db.get_trainer_profile())
-    mode = trainer_role(profile)
-    if not mode:
-        template = jinja_env.get_template("trainer.html")
-        return HTMLResponse(template.render(trainer_context(request, "role_select")))
-    selected_athlete_id = selected_trainer_athlete_id_for_mode(request, profile, athlete_user_id)
-    if mode == "coach" and not selected_athlete_id:
-        return RedirectResponse(url="/apps/trainer/coach", status_code=303)
-    template = jinja_env.get_template("trainer.html")
-    return HTMLResponse(template.render(trainer_context(request, "home", athlete_user_id=selected_athlete_id)))
-
-
-@app.get("/apps/trainer/coach")
-def trainer_coach_app(request: Request, athlete_user_id: int = 0):
-    """Coach dashboard for authorized athletes."""
-    profile = dict_from_row(db.get_trainer_profile())
-    mode = trainer_role(profile)
-    if not mode:
-        template = jinja_env.get_template("trainer.html")
-        return HTMLResponse(template.render(trainer_context(request, "role_select")))
-    if mode != "coach":
-        return RedirectResponse(url="/apps/trainer", status_code=303)
-    if athlete_user_id and not db.can_view_trainer_user(athlete_user_id):
-        raise HTTPException(status_code=403, detail="This athlete has not shared Trainer access with you.")
-    template = jinja_env.get_template("trainer.html")
-    return HTMLResponse(
-        template.render(trainer_context(request, "coach", athlete_user_id=athlete_user_id or None, selected_coach_athlete_id=athlete_user_id))
-    )
-
-
-@app.get("/apps/trainer/coaching")
-def trainer_coaching_app(request: Request, coach_search: str = ""):
-    """Athlete coaching link management."""
-    profile = dict_from_row(db.get_trainer_profile())
-    mode = trainer_role(profile)
-    if not mode:
-        template = jinja_env.get_template("trainer.html")
-        return HTMLResponse(template.render(trainer_context(request, "role_select")))
-    if mode != "athlete":
-        return RedirectResponse(url="/apps/trainer/coach", status_code=303)
-    template = jinja_env.get_template("trainer.html")
-    return HTMLResponse(template.render(trainer_context(request, "coaching", coach_search=coach_search.strip())))
-
-
-@app.get("/apps/trainer/workouts")
-def trainer_workouts_app(request: Request, workout_type: str = ""):
-    """Dieter Trainer workout catalog."""
-    profile = dict_from_row(db.get_trainer_profile())
-    if not trainer_role(profile):
-        template = jinja_env.get_template("trainer.html")
-        return HTMLResponse(template.render(trainer_context(request, "role_select")))
-    safe_type = workout_type if workout_type in {"run", "bike", "strength"} else ""
-    template = jinja_env.get_template("trainer.html")
-    return HTMLResponse(template.render(trainer_context(request, "library", safe_type)))
-
-
-@app.get("/apps/trainer/upcoming")
-def trainer_upcoming_app(request: Request, athlete_user_id: int = 0):
-    """Upcoming Dieter Trainer workouts."""
-    profile = dict_from_row(db.get_trainer_profile())
-    mode = trainer_role(profile)
-    if not mode:
-        template = jinja_env.get_template("trainer.html")
-        return HTMLResponse(template.render(trainer_context(request, "role_select")))
-    selected_athlete_id = selected_trainer_athlete_id_for_mode(request, profile, athlete_user_id)
-    if mode == "coach" and not selected_athlete_id:
-        return RedirectResponse(url="/apps/trainer/coach", status_code=303)
-    template = jinja_env.get_template("trainer.html")
-    return HTMLResponse(template.render(trainer_context(request, "upcoming", athlete_user_id=selected_athlete_id)))
-
-
-@app.get("/apps/trainer/past")
-def trainer_past_app(request: Request, athlete_user_id: int = 0):
-    """Past Dieter Trainer workouts."""
-    profile = dict_from_row(db.get_trainer_profile())
-    mode = trainer_role(profile)
-    if not mode:
-        template = jinja_env.get_template("trainer.html")
-        return HTMLResponse(template.render(trainer_context(request, "role_select")))
-    selected_athlete_id = selected_trainer_athlete_id_for_mode(request, profile, athlete_user_id)
-    if mode == "coach" and not selected_athlete_id:
-        return RedirectResponse(url="/apps/trainer/coach", status_code=303)
-    template = jinja_env.get_template("trainer.html")
-    return HTMLResponse(template.render(trainer_context(request, "past", athlete_user_id=selected_athlete_id)))
-
-
-@app.get("/apps/trainer/imports")
-def trainer_imports_app(request: Request, athlete_user_id: int = 0):
-    """Imported Strava workouts."""
-    profile = dict_from_row(db.get_trainer_profile())
-    mode = trainer_role(profile)
-    if not mode:
-        template = jinja_env.get_template("trainer.html")
-        return HTMLResponse(template.render(trainer_context(request, "role_select")))
-    selected_athlete_id = selected_trainer_athlete_id_for_mode(request, profile, athlete_user_id)
-    if mode == "coach" and not selected_athlete_id:
-        return RedirectResponse(url="/apps/trainer/coach", status_code=303)
-    template = jinja_env.get_template("trainer.html")
-    return HTMLResponse(template.render(trainer_context(request, "imports", athlete_user_id=selected_athlete_id)))
-
-
 @app.get("/apps/trainer/strava/connect")
 def trainer_strava_connect(request: Request):
     """Send the athlete to Strava OAuth."""
@@ -6879,278 +6373,14 @@ def trainer_strava_callback(request: Request, code: str = "", scope: str = "", s
         expires_at=payload.get("expires_at", 0),
         scope=scope or payload.get("scope", ""),
     )
-    return RedirectResponse(url="/apps/trainer/imports?strava_connected=1", status_code=303)
+    return RedirectResponse(url="/apps/trainer/log?strava_connected=1", status_code=303)
 
 
 @app.post("/apps/trainer/strava/disconnect")
 def trainer_strava_disconnect():
     """Disconnect the active athlete's Strava tokens."""
     db.clear_trainer_strava_tokens()
-    return RedirectResponse(url="/apps/trainer/imports", status_code=303)
-
-
-@app.post("/apps/trainer/imports/strava/last-week-runs")
-def import_strava_last_week_runs():
-    """Pull the active athlete's last week of Strava runs."""
-    result = import_recent_strava_runs(days=7)
-    return RedirectResponse(
-        url=f"/apps/trainer/imports?imported={result['imported']}&skipped={result['skipped']}&shoe_prompt=1",
-        status_code=303,
-    )
-
-
-@app.post("/apps/trainer/imports/strava/recent-weeks-runs")
-def import_strava_recent_weeks_runs():
-    """Pull the active athlete's last four weeks of Strava runs."""
-    result = import_recent_strava_runs(days=28)
-    return RedirectResponse(
-        url=f"/apps/trainer/imports?imported={result['imported']}&skipped={result['skipped']}&days={result['days']}&shoe_prompt=1",
-        status_code=303,
-    )
-
-
-@app.post("/apps/trainer/imports/strava/six-month-runs")
-def import_strava_six_month_runs():
-    """Pull the active athlete's last six months of Strava runs."""
-    result = import_recent_strava_runs(days=183)
-    return RedirectResponse(
-        url=f"/apps/trainer/imports?imported={result['imported']}&skipped={result['skipped']}&days={result['days']}&shoe_prompt=1",
-        status_code=303,
-    )
-
-
-@app.post("/apps/trainer/imports/strava/activity")
-def import_strava_activity(activity_id: str = Form(...)):
-    """Pull one Strava run by activity id."""
-    result = import_single_strava_activity(activity_id.strip())
-    return RedirectResponse(
-        url=f"/apps/trainer/imports?imported={result['imported']}&skipped={result['skipped']}&activity_id={result['activity_id']}&shoe_prompt=1",
-        status_code=303,
-    )
-
-
-@app.post("/apps/trainer/shoes")
-def add_trainer_shoe(
-    name: str = Form(...),
-    brand: str = Form(""),
-    model: str = Form(""),
-    initial_miles: str = Form("0"),
-    notes: str = Form(""),
-    next: str = Form("/apps/trainer/settings"),
-):
-    """Add or update a shoe in the athlete inventory."""
-    try:
-        starting_miles = float(initial_miles or 0)
-    except ValueError:
-        starting_miles = 0
-    db.add_trainer_shoe(name, brand=brand, model=model, initial_miles=starting_miles, notes=notes)
-    return RedirectResponse(url=next or "/apps/trainer/settings", status_code=303)
-
-
-@app.post("/apps/trainer/imports/{workout_id}/shoes")
-def add_trainer_workout_shoe(
-    workout_id: int,
-    shoe_id: int = Form(0),
-    new_shoe_name: str = Form(""),
-    segment_label: str = Form(""),
-    distance_miles: str = Form(""),
-    notes: str = Form(""),
-):
-    """Log which shoe was used for all or part of an imported run."""
-    selected_shoe_id = shoe_id
-    if not selected_shoe_id and new_shoe_name.strip():
-        selected_shoe_id = db.add_trainer_shoe(new_shoe_name.strip())
-    if not selected_shoe_id:
-        raise HTTPException(status_code=400, detail="Choose a shoe or enter a new shoe name.")
-    workout = dict_from_row(db.get_trainer_imported_workout(workout_id))
-    default_meters = workout.get("distance_meters") if workout else None
-    db.add_trainer_workout_shoe(
-        workout_id,
-        selected_shoe_id,
-        segment_label=segment_label,
-        distance_meters=miles_to_meters(distance_miles) if distance_miles else default_meters,
-        notes=notes,
-    )
-    if workout:
-        scan_trainer_audit_insights(user_id=workout.get("user_id"))
-    return RedirectResponse(url="/apps/trainer/imports", status_code=303)
-
-
-@app.post("/apps/trainer/imports/shoes/{usage_id}/delete")
-def delete_trainer_workout_shoe(usage_id: int):
-    """Remove a shoe usage row."""
-    db.delete_trainer_workout_shoe(usage_id)
-    return RedirectResponse(url="/apps/trainer/imports", status_code=303)
-
-
-@app.post("/apps/trainer/audit/scan")
-def scan_trainer_audit():
-    """Refresh Trainer audit insights from logged runs."""
-    scan_trainer_audit_insights()
-    return RedirectResponse(url="/apps/trainer/imports#audit-insights", status_code=303)
-
-
-@app.get("/apps/trainer/settings")
-def trainer_settings_app(request: Request, coach_search: str = ""):
-    """Trainer profile and coach permission settings."""
-    template = jinja_env.get_template("trainer.html")
-    return HTMLResponse(template.render(trainer_context(request, "settings", coach_search=coach_search.strip())))
-
-
-@app.post("/apps/trainer/settings/mode")
-def update_trainer_mode(mode: str = Form("athlete"), next: str = Form("")):
-    """Switch between athlete and coach mode."""
-    requested_mode = mode if mode in {"athlete", "coach"} else "athlete"
-    if requested_mode == "coach" and not current_user_id_is_admin():
-        raise HTTPException(status_code=403, detail="Coach mode requires admin approval.")
-    db.update_trainer_mode(requested_mode)
-    target = "/apps/trainer/coach" if requested_mode == "coach" else "/apps/trainer"
-    if next and requested_mode == "athlete":
-        target = safe_redirect_path(next, "/apps/trainer")
-    return RedirectResponse(url=target, status_code=303)
-
-
-@app.post("/apps/trainer/settings/coaches/grant")
-def grant_trainer_coach(coach_user_id: int = Form(0), email: str = Form(""), next: str = Form("/apps/trainer/settings")):
-    """Grant a coach permission to view the active athlete's workouts."""
-    profile = dict_from_row(db.get_trainer_profile())
-    if trainer_role(profile) != "athlete":
-        raise HTTPException(status_code=403, detail="Only athlete accounts can authorize coaches.")
-    coach = dict_from_row(db.get_user_by_id(coach_user_id)) if coach_user_id else dict_from_row(db.get_user_by_email(email))
-    if not coach:
-        raise HTTPException(status_code=404, detail="Coach not found.")
-    coach_profile = dict_from_row(db.get_trainer_profile(coach["id"]))
-    if trainer_role(coach_profile) != "coach":
-        raise HTTPException(status_code=400, detail="That user has not selected coach mode.")
-    db.grant_trainer_coach(coach["id"], permission="assign")
-    return RedirectResponse(url=safe_redirect_path(next, "/apps/trainer/settings"), status_code=303)
-
-
-@app.post("/apps/trainer/settings/coaches/{grant_id}/revoke")
-def revoke_trainer_coach(grant_id: int, next: str = Form("/apps/trainer/settings")):
-    """Revoke a coach's Trainer access."""
-    profile = dict_from_row(db.get_trainer_profile())
-    if trainer_role(profile) != "athlete":
-        raise HTTPException(status_code=403, detail="Only athlete accounts can revoke coach access.")
-    db.revoke_trainer_coach(grant_id)
-    return RedirectResponse(url=safe_redirect_path(next, "/apps/trainer/settings"), status_code=303)
-
-
-@app.post("/apps/trainer/imports/strava/manual")
-def import_strava_workout_manual(
-    external_id: str = Form(...),
-    activity_type: str = Form("Run"),
-    title: str = Form(""),
-    started_at: str = Form(""),
-    distance_meters: str = Form(""),
-    moving_time_seconds: str = Form(""),
-):
-    """Manual Strava import placeholder until OAuth/webhooks are configured."""
-    category = classify_strava_workout(activity_type, title)
-    db.add_trainer_imported_workout(
-        external_id=external_id,
-        activity_type=activity_type,
-        workout_category=category,
-        title=title or activity_type,
-        started_at=started_at,
-        distance_meters=float(distance_meters) if distance_meters else None,
-        moving_time_seconds=int(moving_time_seconds) if moving_time_seconds else None,
-        raw={"manual_import": True},
-    )
-    return RedirectResponse(url="/apps/trainer/imports", status_code=303)
-
-
-@app.post("/apps/trainer/workouts/{workout_id}/schedule")
-def schedule_trainer_workout(
-    workout_id: int,
-    scheduled_for: str = Form(""),
-    notes: str = Form(""),
-    athlete_user_id: int = Form(0),
-):
-    """Schedule a workout from the Trainer catalog."""
-    workout = db.get_trainer_workout(workout_id)
-    if not workout:
-        raise HTTPException(status_code=404, detail="Workout not found")
-    current_user_id = get_current_user_id()
-    target_athlete_id = athlete_user_id or current_user_id
-    assigned_by = None
-    if target_athlete_id != current_user_id:
-        if not db.can_coach_assign_trainer_user(target_athlete_id):
-            raise HTTPException(status_code=403, detail="This athlete has not authorized you to assign workouts.")
-        assigned_by = current_user_id
-    else:
-        profile = dict_from_row(db.get_trainer_profile())
-        if trainer_role(profile) == "coach":
-            raise HTTPException(status_code=403, detail="Choose an authorized athlete before assigning a workout.")
-    db.add_trainer_session(
-        workout_id,
-        scheduled_for=scheduled_for,
-        notes=notes,
-        user_id=target_athlete_id,
-        assigned_by_coach_user_id=assigned_by,
-    )
-    if assigned_by:
-        return RedirectResponse(url=f"/apps/trainer/upcoming?athlete_user_id={target_athlete_id}", status_code=303)
-    return RedirectResponse(url="/apps/trainer/upcoming", status_code=303)
-
-
-@app.post("/apps/trainer/workouts/assign")
-def assign_trainer_workout(
-    workout_id: int = Form(...),
-    athlete_user_id: int = Form(...),
-    scheduled_for: str = Form(""),
-    notes: str = Form(""),
-):
-    """Assign a catalog workout to an authorized athlete."""
-    workout = db.get_trainer_workout(workout_id)
-    if not workout:
-        raise HTTPException(status_code=404, detail="Workout not found")
-    if not db.can_coach_assign_trainer_user(athlete_user_id):
-        raise HTTPException(status_code=403, detail="This athlete has not authorized you to assign workouts.")
-    db.add_trainer_session(
-        workout_id,
-        scheduled_for=scheduled_for,
-        notes=notes,
-        user_id=athlete_user_id,
-        assigned_by_coach_user_id=get_current_user_id(),
-    )
-    return RedirectResponse(url=f"/apps/trainer/upcoming?athlete_user_id={athlete_user_id}", status_code=303)
-
-
-@app.post("/apps/trainer/sessions/{session_id}/complete")
-def complete_trainer_session(session_id: int, notes: str = Form("")):
-    """Mark a Trainer workout done."""
-    session = dict_from_row(db.get_trainer_session(session_id))
-    if not session:
-        raise HTTPException(status_code=404, detail="Workout session not found")
-    if session.get("user_id") != get_current_user_id():
-        raise HTTPException(status_code=403, detail="Only the athlete can change this workout.")
-    db.complete_trainer_session(session_id, notes=notes)
-    return RedirectResponse(url="/apps/trainer/past", status_code=303)
-
-
-@app.post("/apps/trainer/sessions/{session_id}/reopen")
-def reopen_trainer_session(session_id: int):
-    """Move a past Trainer workout back to upcoming."""
-    session = dict_from_row(db.get_trainer_session(session_id))
-    if not session:
-        raise HTTPException(status_code=404, detail="Workout session not found")
-    if session.get("user_id") != get_current_user_id():
-        raise HTTPException(status_code=403, detail="Only the athlete can change this workout.")
-    db.reopen_trainer_session(session_id)
-    return RedirectResponse(url="/apps/trainer/upcoming", status_code=303)
-
-
-@app.post("/apps/trainer/sessions/{session_id}/delete")
-def delete_trainer_session(session_id: int, next: str = Form("/apps/trainer/upcoming")):
-    """Delete a Trainer workout session."""
-    session = dict_from_row(db.get_trainer_session(session_id))
-    if not session:
-        raise HTTPException(status_code=404, detail="Workout session not found")
-    if session.get("user_id") != get_current_user_id():
-        raise HTTPException(status_code=403, detail="Only the athlete can change this workout.")
-    db.delete_trainer_session(session_id)
-    return RedirectResponse(url=safe_redirect_path(next, "/apps/trainer/upcoming"), status_code=303)
+    return RedirectResponse(url="/apps/trainer/log", status_code=303)
 
 
 @app.get("/projects")
@@ -7185,24 +6415,6 @@ def chat_page(request: Request):
     return HTMLResponse(html)
 
 
-@app.get("/projects/{project_id}")
-def project_detail(request: Request, project_id: int):
-    """A project in the Assistant: next actions (with steps), goals, blockers, notes (apps/assistant/pages.py)."""
-    project = dict_from_row(db.get_project_by_id(project_id))
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    actions = []
-    for action in dicts_from_rows(db.get_recommended_actions(project_id)):
-        steps = dicts_from_rows(db.get_task_steps(action["id"]))
-        actions.append(dict(action, done=action.get("status") == "done", steps_total=len(steps),
-                            steps_done=sum(1 for s in steps if s.get("status") == "done")))
-    notes = [dict(n, when=str(n.get("created_at") or "")[:10]) for n in dicts_from_rows(db.get_notes(project_id))]
-    todos = [assistant_pages.todo_view(dict(r)) for r in db.get_scheduler_items(status="open", limit=100)
-             if dict(r).get("project_id") == project_id]
-    return assistant_pages.project_page(project=project, actions=actions, goals=dicts_from_rows(db.get_weekly_goals(project_id)),
-                                        blockers=dicts_from_rows(db.get_blockers(project_id)), notes=notes, todos=todos)
-
-
 def old_project_detail(request: Request, project_id: int):
     """Project detail page (the old one, kept for reference until the Codex pieces are retired for good)."""
     cct_project_ids = ensure_cct_starter_projects(request)
@@ -7224,29 +6436,6 @@ def old_project_detail(request: Request, project_id: int):
     template = jinja_env.get_template("project_detail.html")
     html = template.render(context)
     return HTMLResponse(html)
-
-
-@app.post("/projects/{project_id}/update")
-def update_project_form(
-    project_id: int,
-    name: str = Form(...),
-    description: str = Form(""),
-    priority_score: int = Form(3),
-):
-    """Update the project identity and brief from its detail page."""
-    project = dict_from_row(db.get_project_by_id(project_id))
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    clean_name = re.sub(r"\s+", " ", (name or "").strip())
-    if not clean_name:
-        raise HTTPException(status_code=400, detail="Project name is required")
-    db.update_project_details(
-        project_id,
-        name=clean_name[:80],
-        description=(description or "").strip(),
-        priority_score=max(1, min(5, priority_score)),
-    )
-    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
 
 
 @app.post("/projects/{project_id}/codex-review")
@@ -7424,17 +6613,6 @@ def save_project_codex_review(request: Request, project_id: int):
         "review_result": "",
         "saved_path": str(output_path),
     }))
-
-
-@app.get("/projects/{project_id}/actions/{action_id}")
-def action_detail(request: Request, project_id: int, action_id: int):
-    """A project action and its steps (apps/assistant/pages.py)."""
-    project = dict_from_row(db.get_project_by_id(project_id))
-    action = dict_from_row(db.get_recommended_action(action_id))
-    if not project or not action or action["project_id"] != project_id:
-        raise HTTPException(status_code=404, detail="Task not found")
-    steps = [dict(s, done=s.get("status") == "done") for s in dicts_from_rows(db.get_task_steps(action_id))]
-    return assistant_pages.action_page(project=project, action=dict(action, done=action.get("status") == "done"), steps=steps)
 
 
 def old_action_detail(request: Request, project_id: int, action_id: int):
@@ -8168,13 +7346,6 @@ def create_project_form(
     redirect_url = f"/projects/{project_id}" if next == "detail" else "/projects"
     return RedirectResponse(url=redirect_url, status_code=303)
 
-@app.post("/projects/{project_id}/notes/add")
-@app.post("/projects/{project_id}/notes/create")
-def add_note_form(project_id: int, content: str = Form(...)):
-    """Add note via form."""
-    db.add_note(project_id, content)
-    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
-
 
 @app.post("/projects/{project_id}/share")
 def share_project_form(
@@ -8187,36 +7358,6 @@ def share_project_form(
     share_project_with_email(project_id, email, permission, request)
     return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
 
-@app.post("/projects/{project_id}/actions/add")
-@app.post("/projects/{project_id}/actions/create")
-def add_action_form(project_id: int, title: str = Form(None), action: str = Form(None), priority: str = Form(...)):
-    """Add action via form."""
-    db.add_recommended_action(project_id, title or action, priority)
-    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
-
-@app.post("/projects/{project_id}/actions/{action_id}/complete")
-def complete_action_form(project_id: int, action_id: int):
-    """Mark action complete via form."""
-    db.mark_recommended_action_complete(action_id)
-    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
-
-@app.post("/projects/{project_id}/actions/{action_id}/steps/create")
-def add_task_step_form(project_id: int, action_id: int, step: str = Form(...)):
-    """Add a checklist step to a task."""
-    db.add_task_step(action_id, step)
-    return RedirectResponse(url=f"/projects/{project_id}/actions/{action_id}", status_code=303)
-
-@app.post("/projects/{project_id}/actions/{action_id}/steps/{step_id}/complete")
-def complete_task_step_form(project_id: int, action_id: int, step_id: int):
-    """Mark a task checklist step complete."""
-    db.mark_task_step_complete(step_id)
-    return RedirectResponse(url=f"/projects/{project_id}/actions/{action_id}", status_code=303)
-
-@app.post("/projects/{project_id}/actions/{action_id}/steps/{step_id}/reopen")
-def reopen_task_step_form(project_id: int, action_id: int, step_id: int):
-    """Reopen a completed task checklist step."""
-    db.reopen_task_step(step_id)
-    return RedirectResponse(url=f"/projects/{project_id}/actions/{action_id}", status_code=303)
 
 @app.post("/projects/{project_id}/actions/{action_id}/steps/review")
 def create_step_review_form(project_id: int, action_id: int):
@@ -8552,32 +7693,6 @@ def assign_recipe_image_form(
         url="/apps/recipes/import",
         status_code=303,
     )
-
-@app.post("/projects/{project_id}/blockers/add")
-@app.post("/projects/{project_id}/blockers/create")
-def add_blocker_form(project_id: int, description: str = Form(...), severity: str = Form(...)):
-    """Add blocker via form."""
-    db.add_blocker(project_id, description, severity)
-    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
-
-@app.post("/projects/{project_id}/goals/add")
-@app.post("/projects/{project_id}/goals/create")
-def add_goal_form(project_id: int, title: str = Form(None), goal: str = Form(None), target_completion: str = Form("")):
-    """Add goal via form."""
-    db.add_weekly_goal(project_id, title or goal)
-    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
-
-@app.post("/projects/{project_id}/goals/{goal_id}/complete")
-def complete_goal_form(project_id: int, goal_id: int):
-    """Mark goal as complete via form."""
-    db.mark_goal_complete(goal_id)
-    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
-
-@app.post("/projects/{project_id}/blockers/{blocker_id}/delete")
-def delete_blocker_form(project_id: int, blocker_id: int):
-    """Delete blocker via form."""
-    db.delete_blocker(blocker_id)
-    return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
 
 
 # ============================================================================

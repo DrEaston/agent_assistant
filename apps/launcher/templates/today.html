@@ -132,7 +132,16 @@
       <div class="tiles">
         <a class="tile accent-trainer" href="/apps/trainer">
           <span class="kicker">Trainer</span>
-          {% if workout %}
+          {% if training %}
+          {% if training.lines %}
+          <span class="tile-title">Today: {{ training.lines[0].text }}</span>
+          <span class="small muted">{% for line in training.lines[1:] %}{{ line.text }}{% if not loop.last %} · {% endif %}{% endfor %}{% if training.left == 0 %} All done ✓{% endif %}</span>
+          {% else %}
+          <span class="tile-title">A workout from your coach</span>
+          {% endif %}
+          {% if training.coach_new %}<span class="small"><strong>New from {{ training.coach_new.first.coach }}:</strong> {{ training.coach_new.first.title or "a workout" }}{% if training.coach_new.count > 1 %} + {{ training.coach_new.count - 1 }} more{% endif %}</span>{% endif %}
+          {% if training.after_run %}<span class="small">Which shoes? {{ training.after_run }} run{{ "s" if training.after_run > 1 }} waiting</span>{% endif %}
+          {% elif workout %}
           <span class="tile-title">Last: {{ workout.title }}</span>
           <span class="small muted">{{ workout.detail }}</span>
           {% else %}
@@ -152,7 +161,55 @@
         </a>
       </div>
 
-      <p class="small muted center"><a href="/apps/issues">Dieter Studio</a> · ask for a change or report a problem</p>
+      {% if logbook %}
+      <section aria-label="Logbook">
+        <div class="section-head">
+          <h2 class="section-title">Logbook</h2>
+          <a href="/logbook">Open</a>
+        </div>
+        <div class="card flush">
+          {% if logbook.pending %}
+          <a class="link-row" href="{% if logbook.pending == 1 %}/logbook/proposals/{{ logbook.first.id }}{% else %}/logbook{% endif %}">
+            <span class="label-stack">
+              <span class="small muted">Waiting for your OK</span>
+              <span class="title">{% if logbook.pending == 1 %}{{ "ChatGPT" if logbook.first.made_by == "chatgpt" else "Claude" }} proposes a change to {{ logbook.first.table_name }}{% else %}{{ logbook.pending }} proposed changes{% endif %}</span>
+            </span>
+            <span class="chev" aria-hidden="true">›</span>
+          </a>
+          {% endif %}
+          {% if logbook.unverified %}
+          <a class="link-row" href="/logbook">
+            <span class="label-stack">
+              <span class="small muted">Not checked yet</span>
+              <span class="title">{{ logbook.unverified }} table{{ "s" if logbook.unverified != 1 }} to verify</span>
+            </span>
+            <span class="chev" aria-hidden="true">›</span>
+          </a>
+          {% endif %}
+        </div>
+      </section>
+      {% endif %}
+
+      {% if media %}
+      <section aria-label="Media">
+        <div class="section-head">
+          <h2 class="section-title">Media</h2>
+          <a href="/media">Open</a>
+        </div>
+        <div class="card flush">
+          <a class="link-row" href="{% if media.waiting == 1 %}{{ media.first.page }}{% else %}/media{% endif %}">
+            <img class="media-thumb" src="{{ media.first.file }}" alt="" loading="lazy">
+            <span class="label-stack">
+              <span class="small muted">Waiting for your OK</span>
+              <span class="title">{% if media.waiting == 1 %}{{ "ChatGPT" if media.first.made_by == "chatgpt" else "Claude" }} sent “{{ media.first.title }}”{% else %}{{ media.waiting }} pictures to keep or discard{% endif %}</span>
+            </span>
+            <span class="chev" aria-hidden="true">›</span>
+          </a>
+        </div>
+      </section>
+      {% endif %}
+
+      <p class="small muted center"><a href="/apps/issues">Dieter Studio</a> · <a href="/logbook">Logbook</a> · <a href="/media">Media</a> · ask for a change or report a problem</p>
     </div>
   </div>
 </main>

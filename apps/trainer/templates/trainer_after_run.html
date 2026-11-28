@@ -1,0 +1,34 @@
+{#- The after-run check-in: how it felt, a note, and which shoes (a tap on a pair saves). -#}
+{% macro checkin(run, shoes, feels, next, saved=None) -%}
+<form method="post" action="/apps/trainer/after-run/{{ run.workout_id }}" class="card stack" id="after-run-{{ run.workout_id }}">
+  <input type="hidden" name="next" value="{{ next }}">
+  <div class="row spread">
+    <strong>{{ run.day_label }} · {{ run.title }}{% if run.miles %} · {{ run.miles }} mi{% endif %}</strong>
+    {% if run.external_id %}<a class="small" href="/apps/trainer/run/{{ run.external_id }}">Open run</a>{% endif %}
+  </div>
+  <div class="cols">
+    <div class="field"><label for="feel-{{ run.workout_id }}">How did it feel?</label>
+      <select id="feel-{{ run.workout_id }}" name="feel"><option value="">—</option>{% for n in range(1, 11) %}<option value="{{ n }}"{% if saved and saved.feel == n %} selected{% endif %}>{{ n }}{% if feels.get(n) %} · {{ feels[n] }}{% endif %}</option>{% endfor %}</select></div>
+    <div class="field"><label for="note-{{ run.workout_id }}">Anything to note?</label>
+      <input type="text" id="note-{{ run.workout_id }}" name="note" maxlength="500" value="{{ saved.note if saved else '' }}" placeholder="Legs heavy, left calf tight…"></div>
+  </div>
+  {% if shoes %}
+  <div class="stack">
+    <span class="small muted">Which shoes? Tap to save.</span>
+    <div class="chips">
+      {% for s in shoes %}<button type="submit" name="shoe_id" value="{{ s.id }}" class="chip" aria-pressed="{{ 'true' if saved and saved.shoe_id == s.id else 'false' }}">{{ s.name }}{% if loop.first and not saved %} (last pair){% endif %}</button>{% endfor %}
+    </div>
+  </div>
+  <div class="row">
+    <button type="submit" name="shoe_id" value="" class="quiet">Save without shoes</button>
+    {% if not saved %}<button type="submit" name="skip" value="1" class="quiet">Skip</button>{% endif %}
+  </div>
+  {% else %}
+  <div class="row">
+    <button type="submit" class="primary">Save</button>
+    {% if not saved %}<button type="submit" name="skip" value="1" class="quiet">Skip</button>{% endif %}
+  </div>
+  <p class="small muted">Add your shoes on <a href="/apps/trainer/shoes">Shoes</a> and Dieter will ask which pair after each run.</p>
+  {% endif %}
+</form>
+{%- endmacro %}

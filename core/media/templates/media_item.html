@@ -1,0 +1,65 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}{{ item.title }} · Media{% endblock %}
+{% block content %}
+{{ ui.page_header(item.title, crumbs=(("Media", "/media"),), sub=("Sent by " ~ who(item.made_by) if item.made_by != "you" else "Uploaded by you")) }}
+<main class="wrap">
+  {% if done %}{% call ui.banner("ok") %}{{ done }}{% endcall %}{% endif %}
+  {% if error %}{% call ui.banner("warn") %}{{ error }}{% endcall %}{% endif %}
+
+  {% if item.status == "discarded" %}
+  {% call ui.banner() %}This picture was discarded; its file is deleted.{% endcall %}
+  {% else %}
+  {% if item.kind == "video" %}
+  <video class="media-preview section" src="{{ item.file }}" controls playsinline muted loop preload="metadata"></video>
+  {% else %}
+  <img class="media-preview section" src="{{ item.file }}" alt="{{ item.title }}">
+  {% endif %}
+  {% endif %}
+
+  {% if item.status == "waiting" %}
+  {% call ui.banner("info") %}Waiting for your OK. ChatGPT and Claude can't use it until you keep it.{% endcall %}
+  <div class="row section">
+    <form method="post" action="/media/{{ item.id }}/keep"><button class="primary" type="submit">Keep</button></form>
+    <form method="post" action="/media/{{ item.id }}/discard"><button class="quiet" type="submit">Discard</button></form>
+  </div>
+  {% endif %}
+
+  <div class="card section">
+    <dl class="media-facts">
+      <dt>Status</dt><dd>{{ ui.tag(item.status | capitalize, tone(item.status)) }}</dd>
+      <dt>Size</dt><dd>{% if item.width %}{{ item.width }} × {{ item.height }} {% endif %}{{ item.format }}{% if item.kind == "video" %} video{% endif %}, {{ (item.bytes / 1048576) | round(1) }} MB</dd>
+      {% if item.kind != "video" %}<dt>Background</dt><dd>{{ "Transparent" if item.has_alpha else "Solid" }}</dd>{% endif %}
+      {% if item.source %}<dt>Made from</dt><dd>{{ item.source }}</dd>{% endif %}
+      {% if item.note %}<dt>Why</dt><dd>{{ item.note }}</dd>{% endif %}
+      {% if item.prompt %}<dt>Prompt</dt><dd>{{ item.prompt }}</dd>{% endif %}
+      {% if item.file_name %}<dt>File</dt><dd>{{ item.file_name }}</dd>{% endif %}
+    </dl>
+  </div>
+
+  {% if item.kind == "video" and item.status == "kept" %}
+  {% call ui.section("Made from this video") %}
+  {% if made %}
+  <div class="card flush">
+    {% for p in made %}
+    <a class="link-row" href="{{ p.page }}">
+      <img class="media-thumb" src="{{ p.file }}" alt="" loading="lazy">
+      <span class="label-stack"><span class="title">{{ p.title }}</span><span class="small muted">{{ p.status | capitalize }}</span></span>
+      <span class="chev" aria-hidden="true">›</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  {{ ui.empty("Nothing yet. Tell Claude \"check Media\" and it turns this into stills and animations for your OK.") }}
+  {% endif %}
+  {% endcall %}
+  {% endif %}
+
+  {% if item.status == "kept" %}
+  <div class="row section">
+    <a class="button" href="{{ item.file }}" download="{{ item.file_name or item.id }}">Download</a>
+    {{ ui.delete_button("/media/" ~ item.id ~ "/discard", label="Discard", prompt="Delete this picture for good?", confirm_label="Discard") }}
+  </div>
+  {% endif %}
+</main>
+{% endblock %}

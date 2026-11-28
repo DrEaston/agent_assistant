@@ -109,6 +109,42 @@ class AssistantTests(unittest.TestCase):
         with self.assertRaises(ToolError):
             connector.add_action_step({"action_id": 99999999, "step": "x"})
 
+    def test_suggestions_wait_for_his_ok_and_skips_are_remembered(self):
+        tag = uuid.uuid4().hex[:6]
+        connector.add_book({"title": f"Shelf Book {tag}", "author": "Writer, Some"})
+        made = connector.suggest_books({"asked_for": "something strange", "assistant": "claude", "books": [
+            {"title": f"Keep Me {tag}", "author": "Ann Author", "reason": "Dreamlike, like the ones he rated highly."},
+            {"title": f"Skip Me {tag}", "author": "Bo Writer", "reason": "Short."},
+            {"title": f"Shelf Book {tag}", "author": "Writer, Some", "reason": "Already there."}]})
+        self.assertEqual([b["title"] for b in made["added"]], [f"Keep Me {tag}", f"Skip Me {tag}"])
+        self.assertIn("already on his shelf", made["skipped"][0]["why"])
+        page = self.client.get("/apps/assistant/reading").text
+        self.assertIn("Suggestions waiting for your OK", page)
+        self.assertIn("Dreamlike, like the ones he rated highly.", page)
+        ids = {s["title"]: s["id"] for s in reading.ReadingStore(self.db).suggestions()}
+        self.client.post(f"/apps/assistant/reading/suggestions/{ids[f'Keep Me {tag}']}", data={"decision": "keep_star"})
+        self.client.post(f"/apps/assistant/reading/suggestions/{ids[f'Skip Me {tag}']}", data={"decision": "skip"})
+        books = {b["title"]: b for b in reading.ReadingStore(self.db).books()}
+        self.assertEqual((books[f"Keep Me {tag}"]["status"], books[f"Keep Me {tag}"]["high_priority"]), ("want", 1))
+        self.assertEqual(books[f"Skip Me {tag}"]["status"], "not_for_me")
+        self.assertNotIn(f"Skip Me {tag}", self.client.get("/apps/assistant/reading").text)  # hidden from the shelf
+        again = connector.suggest_books({"asked_for": "x", "assistant": "chatgpt",
+                                         "books": [{"title": f"Skip Me {tag}", "author": "Bo Writer", "reason": "r"}]})
+        self.assertEqual(again["added"], [])  # never suggested again
+        self.assertIn(f"Skip Me {tag}", [b["title"] for b in connector.reading_taste({})["not_for_me"]])
+
+    def test_ratings_and_thoughts_once_read(self):
+        book = connector.add_book({"title": f"Rated {uuid.uuid4().hex[:6]}", "author": "Choo, Yangsze"})
+        connector.update_book({"book_id": book["id"], "status": "read", "rating": 5, "thoughts": "Loved the foxes."})
+        taste = connector.reading_taste({})
+        self.assertIn({"title": book["title"], "author": "Choo, Yangsze", "rating": 5, "thoughts": "Loved the foxes."},
+                      taste["rated"])
+        self.assertIn("Choo, Yangsze", taste["loved_authors"])
+        self.client.post(f"/apps/assistant/reading/{book['id']}/rate", data={"rating": "4", "thoughts": "Still good."})
+        self.assertEqual(reading.ReadingStore(self.db).book(book["id"])["rating"], 4)
+        with self.assertRaises(ToolError):
+            connector.update_book({"book_id": book["id"], "rating": 9})
+
     def test_reading_and_the_bookstore(self):
         book = connector.add_book({"title": "Piranesi", "author": "Susanna Clarke", "high_priority": True})
         connector.add_book({"title": "Jonathan Strange", "author": "Clarke, Susanna"})

@@ -1,0 +1,16 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Coach{% endblock %}
+{% block dock %}{% endblock %}
+{% block content %}
+{% call ui.page_header("Coach", sub="Enter the passcode to open the coach page.") %}{% endcall %}
+<main class="wrap">
+  <p class="small muted">Signing in here doesn't sign you out of your own Dieter account.</p>
+  {% if error %}{% call ui.banner("warn") %}{{ error }}{% endcall %}{% endif %}
+  <form method="post" action="/coach" class="card stack">
+    <div class="field"><label for="passcode">Passcode</label>
+      <input type="password" id="passcode" name="passcode" required autocomplete="off" autofocus></div>
+    <button type="submit" class="primary">Open coach page</button>
+  </form>
+</main>
+{% endblock %}

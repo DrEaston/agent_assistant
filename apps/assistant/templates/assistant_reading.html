@@ -7,6 +7,29 @@
   <a class="button primary" href="/apps/assistant/reading/bookstore">At the bookstore</a>
 {% endcall %}
 <main class="wrap">
+  {% if suggestions %}
+  {% call ui.section("Suggestions waiting for your OK") %}
+  <div class="card flush">
+    {% for s in suggestions %}
+    <div class="list-row">
+      <div class="grow"><div><strong>{{ s.title }}</strong>{% if s.author %} · {{ s.author }}{% endif %}</div>
+        {% if s.reason %}<div class="small">{{ s.reason }}</div>{% endif %}
+        <div class="small muted">From {{ s.made_by | capitalize }}{% if s.asked_for %} · you asked for “{{ s.asked_for }}”{% endif %}</div></div>
+      <form method="post" action="/apps/assistant/reading/suggestions/{{ s.id }}" class="row">
+        <button type="submit" name="decision" value="keep_star" class="primary" aria-label="Keep {{ s.title }} with a star">Keep ★</button>
+        <button type="submit" name="decision" value="keep">Keep</button>
+        <button type="submit" name="decision" value="skip" class="quiet">Not for me</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% endcall %}
+  {% endif %}
+  {% if reading_now and not show %}
+  {% call ui.section("Reading now") %}
+  <div class="card flush">{% for b in reading_now %}<div class="list-row"><span class="grow">{{ b.title }}</span><span class="small muted">{{ b.author }}</span></div>{% endfor %}</div>
+  {% endcall %}
+  {% endif %}
   <nav class="row small" aria-label="Show">
     <a href="/apps/assistant/reading"{% if not show %} aria-current="page"{% endif %}>All ({{ total }})</a>
     {% for s in statuses if counts[s] %}<a href="/apps/assistant/reading?show={{ s }}"{% if show == s %} aria-current="page"{% endif %}>{{ labels[s] }} ({{ counts[s] }})</a>{% endfor %}
@@ -18,7 +41,16 @@
       {% for b in g.books if not show or b.status == show %}
       <div class="list-row">
         <div class="grow"><div>{% if b.high_priority %}<span aria-label="High priority">★ </span>{% endif %}{{ b.title }}</div>
-          {% if b.notes %}<div class="small muted">{{ b.notes }}</div>{% endif %}</div>
+          {% if b.notes %}<div class="small muted">{{ b.notes }}</div>{% endif %}
+          {% if b.status == "read" %}
+          <form method="post" action="/apps/assistant/reading/{{ b.id }}/rate" class="row small">
+            <label class="visually-hidden" for="rating-{{ b.id }}">Rating for {{ b.title }}</label>
+            <select id="rating-{{ b.id }}" name="rating"><option value="">Rate</option>{% for n in range(5, 0, -1) %}<option value="{{ n }}"{% if b.rating == n %} selected{% endif %}>{{ "★" * n }}</option>{% endfor %}</select>
+            <label class="visually-hidden" for="thoughts-{{ b.id }}">Thoughts on {{ b.title }}</label>
+            <input id="thoughts-{{ b.id }}" name="thoughts" value="{{ b.thoughts or '' }}" placeholder="A line of thoughts" maxlength="1000">
+            <button type="submit" class="quiet">Save</button>
+          </form>
+          {% endif %}</div>
         <form method="post" action="/apps/assistant/reading/{{ b.id }}/status" class="row">
           <label class="visually-hidden" for="status-{{ b.id }}">Status of {{ b.title }}</label>
           <select id="status-{{ b.id }}" name="status" data-autosubmit>
@@ -32,7 +64,7 @@
     </div>
   </section>
   {% else %}
-  {{ ui.empty("No books yet. Add one below, or tell Dieter “add Piranesi by Susanna Clarke”.") }}
+  {{ ui.empty("No books here yet. Add one below, or ask Claude or ChatGPT for suggestions (“something like The Fox Wife”).") }}
   {% endfor %}
 
   {% call ui.section("Add a book") %}

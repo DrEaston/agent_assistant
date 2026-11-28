@@ -222,6 +222,39 @@ class CloudStoragePersistence:
             bucket.blob(blob_name).upload_from_filename(str(path))
             return True
 
+    # ---------- Media pictures (core/media): their own prefix, fetched on demand, never restored at startup ----------
+
+    @property
+    def media_prefix(self):
+        return f"{self.prefix}/media/"
+
+    def put_media(self, key, path):
+        if self.read_only or not self.enabled:
+            return False
+        with self._lock:
+            self._get_bucket().blob(f"{self.media_prefix}{key}").upload_from_filename(str(path))
+        return True
+
+    def get_media(self, key, path):
+        """Download one picture to path. Previews (read-only) read the live pictures too."""
+        if not self.enabled:
+            return False
+        with self._lock:
+            blob = self._get_bucket().blob(f"{self.media_prefix}{key}")
+            if not blob.exists():
+                return False
+            blob.download_to_filename(str(path))
+        return True
+
+    def delete_media(self, key):
+        if self.read_only or not self.enabled:
+            return False
+        with self._lock:
+            blob = self._get_bucket().blob(f"{self.media_prefix}{key}")
+            if blob.exists():
+                blob.delete()
+        return True
+
     def sync_uploads(self):
         """Upload all local files under uploads_dir to Cloud Storage."""
         if self.read_only:

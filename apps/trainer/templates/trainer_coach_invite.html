@@ -1,0 +1,17 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Coach invite · Trainer{% endblock %}
+{% block content %}
+{% call ui.page_header("Coach invite", crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs, current=current) %}{% endcall %}
+<main class="wrap">
+  {% if problem %}
+  {% call ui.banner("warn") %}{{ problem }}{% endcall %}
+  {% else %}
+  <div class="card stack">
+    <p><strong>{{ info.athlete }}</strong> invited you to be their coach in Dieter Trainer.</p>
+    <p class="small muted">You'll send workouts in plain terms (like 6 × 1 mile at threshold). Dieter turns them into their own times. You'll see whether they took each one and the notes they write. You won't see their runs, paces or times.</p>
+    <form method="post" action="/apps/trainer/coach-invite/{{ token }}"><button type="submit" class="primary">Accept invite</button></form>
+  </div>
+  {% endif %}
+</main>
+{% endblock %}

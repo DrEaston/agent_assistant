@@ -1,0 +1,42 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}{{ label }} · Trainer{% endblock %}
+{% block content %}
+{% call ui.page_header(label, crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs, current=current,
+    sub="Speed load for each run this week") %}{% endcall %}
+<main class="wrap">
+  <div class="card stack">
+    <div class="stat-grid">
+      <div class="stat"><span class="small muted">Speed load</span><strong>{{ "{:,}".format(w.speed_work) if w.speed_work is not none else "–" }}</strong>
+        <span class="small">{% if w.work_line %}safe limit {{ "{:,}".format(w.work_line) }}{% else %}no safe limit yet{% endif %} · <a href="/apps/trainer/speed/how">how it works</a></span></div>
+      <div class="stat"><span class="small muted">Near-sprint running</span><strong>{{ "{:,}".format(w.near_top) }} m</strong>
+        <span class="small">{% if w.top_line %}safe limit {{ "{:,}".format(w.top_line) }} m{% endif %}</span></div>
+      <div class="stat"><span class="small muted">Threshold pace</span><strong>{{ w.cs_pace or "–" }}</strong><span class="small">/mi, that week</span></div>
+    </div>
+    {% if w.how_over %}{% call ui.banner("warn" if w.how_over == "well over" else "info") %}<strong>{{ w.times_line }}× the safe limit, {{ w.how_over }}.</strong>{% if w.how_over == "well over" %} A jump like that is where injuries tend to come from; build up to it over a few weeks.{% endif %}{% endcall %}{% endif %}
+  </div>
+
+  {% call ui.section("Runs") %}
+  {% if w.runs %}
+  <div class="card flush">
+    {% for run in w.runs %}
+    <a class="link-row" href="/apps/trainer/run/{{ run.id }}">
+      <span class="label-stack"><span class="title">{{ run.day.strftime("%a %b") }} {{ run.day.day }} · {{ run.title }}{% if run.miles %} · {{ run.miles }} mi{% endif %}</span>
+        <span class="small">{% if run.summary %}<span class="accent-text">{{ run.summary }}</span>{% else %}<span class="muted">easy</span>{% endif %}</span></span>
+      <span class="num"><strong>{{ run.points if run.points is not none else "–" }}</strong> <span class="small muted">points</span></span>
+      <span class="chev" aria-hidden="true">›</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  {{ ui.empty("No runs read for this week.") }}
+  {% endif %}
+  {% endcall %}
+
+  <div class="row section">
+    <a class="button quiet" href="/apps/trainer/speed/{{ prev }}">‹ Week before</a>
+    <a class="button quiet" href="/apps/trainer/speed/{{ next }}">Week after ›</a>
+    <a class="button quiet" href="/apps/trainer">Back to Trainer</a>
+  </div>
+</main>
+{% endblock %}

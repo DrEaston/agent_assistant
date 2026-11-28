@@ -1,5 +1,6 @@
-"""Studio tools for Claude (core/connector): read the problem reports Curtis jots down with "Report a problem"
-inside Dieter, and mark them done once they're fixed. Admins only, like the Studio pages."""
+"""Studio tools for Claude and ChatGPT (core/connector): read the problem reports Curtis jots down with "Report a
+problem" inside Dieter, mark them done once they're fixed, and pass on a build request he asks an assistant to send.
+Admins only, like the Studio pages."""
 
 from core.connector.tools import Tool, ToolError, ToolSet, site_url, whole_number
 from database import get_current_user_id
@@ -54,6 +55,39 @@ def set_status(args):
     return _brief(routes.store().report(report["id"]))
 
 
+ASSISTANTS = {"chatgpt": "ChatGPT", "claude": "Claude"}
+
+
+def _text(args, name, limit, required=True):
+    value = str(args.get(name) or "").strip()[:limit]
+    if required and not value:
+        raise ToolError(f"{name} is required.")
+    return value
+
+
+def request_change(args):
+    """An assistant passes on something Curtis wants built: a Studio report Claude Code picks up like his own."""
+    _admin()
+    who = ASSISTANTS.get(str(args.get("assistant") or "").strip().lower())
+    if not who:
+        raise ToolError("assistant should be chatgpt or claude (who is sending this).")
+    title = " ".join(_text(args, "title", 120).split())
+    parts = [f"Sent by {who} for Curtis.", "", "## What he wants", _text(args, "what", 6000), "",
+             "## How he'll know it works", _text(args, "done_when", 2000)]
+    details = _text(args, "details", 20000, required=False)
+    if details:
+        parts += ["", "## Details (data, examples, constraints)", details]
+    area = " ".join(_text(args, "area", 60, required=False).split()) or "Not sure"
+    db = routes._state["db"]
+    report_id = db.add_app_feedback_report(title=f"[{who}] {title}", area=area, page_url="",
+                                           page_title=f"Request from {who}", reporter_name=f"{who} (for Curtis)",
+                                           reporter_email="", raw_feedback="\n".join(parts))
+    return {"report_id": report_id, "status": "open", "url": site_url(f"{routes.BASE}/{report_id}"),
+            "message": "Sent to Dieter Studio. Claude Code builds from Studio: it works out where the change goes, "
+                       "asks Curtis if anything is unclear, and opens a pull request he merges. studio_get_report "
+                       "shows its progress."}
+
+
 REPORT_ID = {"report_id": {"type": "integer", "description": "From studio_list_reports."}}
 
 
@@ -73,4 +107,19 @@ def tools():
              "when he has said it works; in_progress while working on it; open to put it back.", set_status,
              dict(REPORT_ID, status={"type": "string", "enum": list(STATUSES)}, note={"type": "string"}),
              ("report_id",)),
+        Tool("studio_request_change", "Ask Claude Code to build something",
+             "Only when Curtis asks you to send a build request or change to Dieter. It goes to Dieter Studio, where "
+             "Claude Code (which changes Dieter's code) picks it up, works out where it belongs, asks him if anything "
+             "is unclear, and opens a pull request he merges. One request per thing. Describe the outcome he wants "
+             "and how he'll check it, in plain words; don't write code. Put any data, examples, tool or table shapes "
+             "you need in details.",
+             request_change,
+             {"title": {"type": "string", "description": "Short, e.g. \"Store ChatGPT images with their source\"."},
+              "what": {"type": "string", "description": "What he wants and why, as he'd say it."},
+              "done_when": {"type": "string", "description": "How he'll check it works."},
+              "details": {"type": "string", "description": "Optional: data, examples, inputs/outputs you need."},
+              "area": {"type": "string", "description": "Optional: Kitchen, Assistant, Trainer, Music, Logbook, "
+                                                        "Animation, Connector, or Not sure."},
+              "assistant": {"type": "string", "enum": list(ASSISTANTS), "description": "Who is sending: you."}},
+             ("title", "what", "done_when", "assistant")),
     ])

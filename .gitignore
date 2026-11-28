@@ -14,3 +14,6 @@ data/
 helper/.venv/
 helper/build/
 helper/dist/
+
+# Media pictures on a developer machine (core/media); live ones are in Cloud Storage
+/media/

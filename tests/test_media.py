@@ -1,0 +1,397 @@
+"""Media (core/media): pictures sent to Dieter wait for Curtis's OK; only he keeps or discards them."""
+
+import io
+import base64
+import json
+import secrets
+import tempfile
+import time
+import unittest
+import uuid
+import warnings
+from datetime import datetime, timedelta
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+from PIL import Image
+
+from core.connector import oauth
+from core.connector.tools import ToolError
+from core.media import connector, fetch
+from core.media.store import Blobs, Invalid, MediaStore, inspect
+from database import Database, reset_current_user_id, set_current_user_id
+
+
+def picture(alpha=True, size=(64, 48), fmt="PNG", color=(255, 128, 0, 0)):
+    out = io.BytesIO()
+    Image.new("RGBA" if alpha else "RGB", size, color if alpha else color[:3]).save(out, fmt)
+    return out.getvalue()
+
+
+class FakeCloud:
+    """Stands in for Cloud Storage: remembers what was put, can hand it back, records deletes."""
+
+    def __init__(self):
+        self.files, self.deleted = {}, []
+
+    def put(self, key, path):
+        self.files[key] = Path(path).read_bytes()
+
+    def get(self, key, path):
+        if key in self.files:
+            Path(path).write_bytes(self.files[key])
+
+    def delete(self, key):
+        self.deleted.append(key)
+        self.files.pop(key, None)
+
+
+class MediaStoreTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.db = Database(str(Path(self.tmp.name) / "media.db"))
+        self.db.init()
+        self.cloud = FakeCloud()
+        self.folder = Path(self.tmp.name) / "media"
+        self.store = MediaStore(self.db, Blobs(self.folder, self.cloud))
+        self.token = set_current_user_id(1)
+
+    def tearDown(self):
+        reset_current_user_id(self.token)
+        if self.db.conn:
+            self.db.conn.close()
+        self.tmp.cleanup()
+
+    def test_a_picture_waits_then_is_kept_with_its_transparency(self):
+        data = picture()
+        item = self.store.add(data, "Dieter, eyes half closed", "chatgpt", source="sitting pose", prompt="close eyes")
+        self.assertEqual((item["status"], item["width"], item["height"], item["has_alpha"]), ("waiting", 64, 48, True))
+        self.assertEqual(self.store.items("kept"), [])
+        self.assertEqual(self.store.today()["waiting"], 1)
+        self.store.keep(item["id"])
+        self.assertEqual([i["id"] for i in self.store.items("kept")], [item["id"]])
+        self.assertIsNone(self.store.today())
+        stored, mime = self.store.read(item["id"])
+        self.assertEqual((stored, mime), (data, "image/png"))  # byte for byte, alpha and all
+        with Image.open(io.BytesIO(stored)) as image:
+            self.assertEqual(image.mode, "RGBA")
+        with self.assertRaises(Invalid):
+            self.store.keep(item["id"])
+
+    def test_after_a_restart_the_file_comes_back_from_cloud_storage(self):
+        item = self.store.add(picture(), "Dragon", "chatgpt")
+        for f in self.folder.rglob("*"):
+            if f.is_file():
+                f.unlink()  # a new Cloud Run instance starts with an empty folder
+        fresh = MediaStore(self.db, Blobs(self.folder, self.cloud))
+        self.assertEqual(fresh.read(item["id"])[0], picture())
+
+    def test_discard_deletes_the_file_everywhere(self):
+        item = self.store.add(picture(), "Dragon", "chatgpt")
+        self.store.discard(item["id"])
+        self.assertEqual(len(self.cloud.deleted), 1)
+        self.assertFalse(any(f.is_file() for f in self.folder.rglob("*")))
+        self.assertEqual(self.store.item(item["id"])["status"], "discarded")
+        with self.assertRaises(Invalid):
+            self.store.read(item["id"])
+
+    def test_unkept_pictures_go_after_a_week(self):
+        old = self.store.add(picture(color=(1, 2, 3, 4)), "Old", "chatgpt")
+        new = self.store.add(picture(color=(5, 6, 7, 8)), "New", "chatgpt")
+        conn = self.db.connect()
+        conn.execute("UPDATE media_items SET created_at = ? WHERE id = ?", [time.time() - 8 * 86400, old["id"]])
+        conn.commit()
+        self.assertEqual([i["id"] for i in self.store.items("waiting")], [new["id"]])
+        self.assertEqual(self.store.item(old["id"])["status"], "discarded")
+
+    def test_the_same_picture_twice_is_saved_once(self):
+        first = self.store.add(picture(), "Dragon", "chatgpt")
+        again = self.store.add(picture(), "Dragon again", "chatgpt")
+        self.assertEqual(again["id"], first["id"])
+        self.assertTrue(again["duplicate"])
+
+    def test_uploads_by_him_are_kept_straight_away(self):
+        self.assertEqual(self.store.add(picture(), "Mine", "you")["status"], "kept")
+
+    def test_only_real_pictures_of_known_kinds(self):
+        for bad in (b"", b"hello", picture()[:40], b"<svg xmlns='http://www.w3.org/2000/svg'/>"):
+            with self.assertRaises(Invalid):
+                inspect(bad)
+        self.assertEqual(inspect(picture(alpha=False, fmt="JPEG"))["format"], "JPEG")
+        self.assertFalse(inspect(picture(alpha=False))["has_alpha"])
+        with self.assertRaises(Invalid):
+            self.store.add(picture(), "", "chatgpt")
+        with self.assertRaises(Invalid):
+            self.store.add(picture(), "x", "someone")
+
+    def test_other_people_dont_see_my_pictures(self):
+        item = self.store.add(picture(), "Dragon", "chatgpt")
+        other = set_current_user_id(2)
+        try:
+            self.assertEqual(self.store.items("all"), [])
+            with self.assertRaises(Invalid):
+                self.store.read(item["id"])
+            with self.assertRaises(Invalid):
+                self.store.keep(item["id"])
+        finally:
+            reset_current_user_id(other)
+
+
+class SaveToolTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.db = Database(str(Path(self.tmp.name) / "media.db"))
+        self.db.init()
+        self.saved = dict(connector._state)
+        connector.configure(self.db, Blobs(Path(self.tmp.name) / "media"))
+        self.token = set_current_user_id(1)
+
+    def tearDown(self):
+        reset_current_user_id(self.token)
+        connector._state.update(self.saved)
+        if self.db.conn:
+            self.db.conn.close()
+        self.tmp.cleanup()
+
+    def test_chatgpt_saves_a_file_and_never_the_link(self):
+        sent = {"download_url": "https://files.oaiusercontent.com/abc?sig=secret", "file_id": "file_1",
+                "mime_type": "image/png", "file_name": "dragon.png"}
+        out = connector.save_image({"image": sent, "title": "Dragon", "assistant": "chatgpt",
+                                    "source": "Logbook: Ragnar legs, v1"}, download=lambda url: (picture(), None))
+        self.assertEqual((out["status"], out["size"], out["transparent"]), ("waiting", "64x48 PNG", True))
+        self.assertIn("waiting for Curtis's OK", out["message"])
+        row = dict(self.db.connect().execute("SELECT * FROM media_items").fetchone())
+        self.assertNotIn("secret", json.dumps(row))
+        self.assertEqual(row["file_name"], "dragon.png")
+        self.assertEqual(connector.list_items({})["pictures"], [])  # not his until he keeps it
+        self.assertEqual(len(connector.list_items({"show": "waiting"})["pictures"]), 1)
+
+    def test_clear_errors(self):
+        for args, bit in (({"image": "file_abc", "title": "x", "assistant": "chatgpt"}, "as text"),
+                          ({"image": {"file_id": "f"}, "title": "x", "assistant": "chatgpt"}, "No image file"),
+                          ({"image": {"download_url": "https://x"}, "title": "x", "assistant": "bard"}, "assistant")):
+            with self.assertRaises(ToolError) as caught:
+                connector.save_image(args, download=lambda url: (picture(), None))
+            self.assertIn(bit, str(caught.exception))
+        with self.assertRaises(ToolError) as caught:
+            connector.save_image({"image": {"download_url": "https://x"}, "title": "x", "assistant": "chatgpt"},
+                                 download=lambda url: (None, "the download answered 403"))
+        self.assertIn("403", str(caught.exception))
+
+    def test_save_is_a_file_tool_that_asks_first_and_list_is_read_only(self):
+        tools = connector.tools().tools
+        schema = tools["media_save_image"].schema()
+        self.assertEqual(schema["_meta"], {"openai/fileParams": ["image"]})
+        self.assertFalse(schema["annotations"]["readOnlyHint"])  # ChatGPT asks him before it runs
+        self.assertTrue(tools["media_list"].schema()["annotations"]["readOnlyHint"])
+        self.assertFalse([n for n in tools if "keep" in n or "discard" in n or "approve" in n])
+
+
+class DownloadTests(unittest.TestCase):
+    def test_only_public_https_links(self):
+        for url in ("http://example.com/a.png", "https://127.0.0.1/a.png", "https://169.254.169.254/x", "ftp://x"):
+            data, problem = fetch.download(url)
+            self.assertIsNone(data, url)
+            self.assertTrue(problem)
+
+
+class MediaPageTests(unittest.TestCase):
+    """The pages through the real app."""
+
+    @classmethod
+    def setUpClass(cls):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            import api
+        cls.api, cls.db = api, api.db
+        cls.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        cls.saved = dict(connector._state)
+        connector.configure(cls.db, Blobs(Path(cls.tmp.name) / "media"))
+        cls.user_id = cls.db.create_user(f"media-{uuid.uuid4().hex[:8]}@example.com", "Media Keeper", "x", "member")
+        conn = cls.db.connect()
+        conn.execute("UPDATE users SET status = 'active' WHERE id = ?", (cls.user_id,))
+        conn.commit()
+        cls.token = oauth.OAuth(cls.db, lambda uid: dict(cls.db.get_user_by_id(uid) or {}) or None) \
+            .issue("chatgpt-test", cls.user_id, "dieter")["access_token"]
+
+    @classmethod
+    def tearDownClass(cls):
+        connector._state.update(cls.saved)
+        cls.tmp.cleanup()
+
+    def setUp(self):
+        self.client = TestClient(self.api.app)
+        session = secrets.token_urlsafe(16)
+        self.db.create_session(self.user_id, self.api.hash_session_token(session),
+                               (datetime.utcnow() + timedelta(days=1)).isoformat())
+        self.client.cookies.set(self.api.SESSION_COOKIE_NAME, session)
+
+    def send_from_chatgpt(self, title, data):
+        token = set_current_user_id(self.user_id)
+        try:
+            return connector.save_image({"image": {"download_url": "https://x.example/f", "file_id": "f1"},
+                                         "title": title, "assistant": "chatgpt"}, download=lambda url: (data, None))
+        finally:
+            reset_current_user_id(token)
+
+    def test_he_keeps_or_discards_on_the_page(self):
+        sent = self.send_from_chatgpt("Dragon, eyes half closed", picture(color=(9, 9, 9, 0)))
+        home = self.client.get("/media").text
+        self.assertIn("Waiting for your OK", home)
+        self.assertIn("Dragon, eyes half closed", home)
+        self.assertIn("Waiting for your OK", self.client.get("/").text)  # on Today
+        page = self.client.get(f"/media/{sent['id']}").text
+        self.assertIn("Keep", page)
+        file = self.client.get(f"/media/{sent['id']}/file")
+        self.assertEqual((file.status_code, file.headers["content-type"]), (200, "image/png"))
+        self.assertEqual(self.client.post(f"/media/{sent['id']}/keep", follow_redirects=False).status_code, 303)
+        self.assertIn("Kept", self.client.get(f"/media/{sent['id']}").text)
+
+        other = self.send_from_chatgpt("Not this one", picture(color=(1, 1, 1, 0)))
+        self.client.post(f"/media/{other['id']}/discard")
+        self.assertEqual(self.client.get(f"/media/{other['id']}/file").status_code, 404)
+
+    def test_signed_out_and_other_people_get_nothing(self):
+        sent = self.send_from_chatgpt("Private", picture(color=(2, 2, 2, 0)))
+        anonymous = TestClient(self.api.app)
+        self.assertNotEqual(anonymous.get(f"/media/{sent['id']}/file", follow_redirects=False).status_code, 200)
+        self.assertEqual(self.client.get("/media/med-000000000000/file").status_code, 404)
+
+    def test_upload_on_the_page(self):
+        r = self.client.post("/media", files={"file": ("x.png", picture(), "image/png")})
+        self.assertEqual(r.status_code, 405)
+        r = self.client.post("/media/upload", data={"title": "My sketch"},
+                             files={"file": ("sketch.png", picture(color=(3, 3, 3, 0)), "image/png")},
+                             follow_redirects=False)
+        self.assertEqual(r.status_code, 303)
+        self.assertIn("My sketch", self.client.get(r.headers["location"]).text)
+        bad = self.client.post("/media/upload", files={"file": ("x.txt", b"hello", "text/plain")},
+                               follow_redirects=False)
+        self.assertIn("error=", bad.headers["location"])
+
+    def test_claude_code_uploads_with_a_token_and_he_keeps_them_all(self):
+        anonymous = TestClient(self.api.app)
+        files = {"file": ("asleep.png", picture(color=(5, 5, 5, 0)), "image/png")}
+        self.assertEqual(anonymous.post("/media/api/upload", data={"title": "x"}, files=files).status_code, 401)
+        self.assertEqual(anonymous.post("/media/api/upload", data={"title": "x"}, files=files,
+                                        headers={"Authorization": "Bearer nope"}).status_code, 401)
+        sent = []
+        for i, color in enumerate(((6, 6, 6, 0), (7, 7, 7, 0))):
+            r = anonymous.post("/media/api/upload", headers={"Authorization": f"Bearer {self.token}"},
+                               data={"title": f"Firefly still {i}", "source": "Firefly: go to sleep, frame 176"},
+                               files={"file": (f"s{i}.png", picture(color=color), "image/png")})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertEqual(r.json()["status"], "waiting")
+            sent.append(r.json()["id"])
+        bad = anonymous.post("/media/api/upload", headers={"Authorization": f"Bearer {self.token}"},
+                             data={"title": "x"}, files={"file": ("x.txt", b"hello", "text/plain")})
+        self.assertEqual(bad.status_code, 400)
+        home = self.client.get("/media").text
+        self.assertIn("Keep all", home)
+        self.client.post("/media/keep-all")
+        token = set_current_user_id(self.user_id)
+        try:
+            kept = {i["id"]: i for i in connector.store().items("kept")}
+        finally:
+            reset_current_user_id(token)
+        self.assertTrue(all(i in kept for i in sent))
+        self.assertEqual(kept[sent[0]]["made_by"], "claude")
+
+    def test_chatgpt_sees_it_through_the_connector(self):
+        sent = self.send_from_chatgpt("Through MCP", picture(color=(4, 4, 4, 0)))
+        answer = TestClient(self.api.app).post(
+            "/mcp", headers={"Authorization": f"Bearer {self.token}"},
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                  "params": {"name": "media_get", "arguments": {"media_id": sent["id"]}}}).json()["result"]
+        details = json.loads(answer["content"][0]["text"])
+        self.assertEqual(details["status"], "waiting")
+        self.assertNotIn("_images", details)
+        # The picture itself comes back as MCP image content, so ChatGPT and Claude can look at it.
+        self.assertEqual(answer["content"][1]["type"], "image")
+        self.assertEqual(answer["content"][1]["mimeType"], "image/png")
+        from PIL import Image
+        with Image.open(io.BytesIO(base64.b64decode(answer["content"][1]["data"]))) as shown:
+            self.assertEqual(shown.mode, "RGBA")  # transparency kept
+        details_only = TestClient(self.api.app).post(
+            "/mcp", headers={"Authorization": f"Bearer {self.token}"},
+            json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                  "params": {"name": "media_get", "arguments": {"media_id": sent["id"], "show_image": False}}}
+        ).json()["result"]
+        self.assertEqual(len(details_only["content"]), 1)
+
+    def test_big_pictures_are_shown_scaled_down(self):
+        from PIL import Image
+        out = io.BytesIO()
+        Image.new("RGBA", (3000, 1500), (200, 100, 0, 0)).save(out, "PNG")
+        encoded, width, height = connector.viewable(out.getvalue())
+        self.assertEqual((width, height), (1024, 512))
+        with Image.open(io.BytesIO(base64.b64decode(encoded))) as shown:
+            self.assertEqual((shown.mode, shown.size), ("RGBA", (1024, 512)))
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+def mp4(width=1280, height=720, salt=b"frames"):
+    """A tiny MP4: just the boxes Dieter reads (ftyp, and moov/trak/tkhd with the size)."""
+    def box(kind, payload):
+        return (8 + len(payload)).to_bytes(4, "big") + kind + payload
+    tkhd = bytes(4 + 20 + 8 + 8 + 36) + (width << 16).to_bytes(4, "big") + (height << 16).to_bytes(4, "big")
+    return box(b"ftyp", b"isom" + bytes(4) + b"isommp41") + box(b"moov", box(b"trak", box(b"tkhd", tkhd))) \
+        + box(b"mdat", salt)
+
+
+class VideoTests(MediaPageTests):
+    """Firefly videos: he uploads them from his phone, Claude Code fetches the new ones and links what it made."""
+
+    def test_he_uploads_a_video_it_plays_and_claude_code_takes_it_in(self):
+        clip = mp4()
+        r = self.client.post("/media/upload", data={"title": "Dieter nods"},
+                             files={"file": ("nod.mp4", clip, "video/mp4")}, follow_redirects=False)
+        self.assertEqual(r.status_code, 303, r.headers.get("location"))
+        self.assertIn("check+Media", r.headers["location"].replace("%20", "+").replace("%22", ""))
+        video_id = r.headers["location"].split("/media/")[1].split("?")[0]
+        page = self.client.get(f"/media/{video_id}").text
+        self.assertIn("<video", page)
+        self.assertIn("1280 × 720 MP4 video", page)
+        self.assertIn("Made from this video", page)
+        self.assertIn("<video", self.client.get("/media").text)
+
+        # Phones fetch videos in pieces.
+        part = self.client.get(f"/media/{video_id}/file", headers={"Range": "bytes=0-9"})
+        self.assertEqual((part.status_code, part.content), (206, clip[:10]))
+        self.assertEqual(part.headers["content-range"], f"bytes 0-9/{len(clip)}")
+        self.assertEqual(self.client.get(f"/media/{video_id}/file", headers={"Range": "bytes=-4"}).content, clip[-4:])
+        self.assertEqual(self.client.get(f"/media/{video_id}/file",
+                                         headers={"Range": f"bytes={len(clip)}-"}).status_code, 416)
+        whole = self.client.get(f"/media/{video_id}/file")
+        self.assertEqual((whole.status_code, whole.headers["content-type"]), (200, "video/mp4"))
+
+        # Claude Code: needs the token; sees it as new; downloads it.
+        anonymous = TestClient(self.api.app)
+        self.assertEqual(anonymous.get("/media/api/videos").status_code, 401)
+        auth = {"Authorization": f"Bearer {self.token}"}
+        listed = {v["id"]: v for v in anonymous.get("/media/api/videos", headers=auth).json()["videos"]}
+        self.assertFalse(listed[video_id]["taken_in"])
+        self.assertEqual(anonymous.get(f"/media/api/{video_id}/file", headers=auth).content, clip)
+        self.assertEqual(anonymous.get(f"/media/api/{video_id}/file").status_code, 401)
+
+        # What it makes names the video, so it's linked and stops being new.
+        made = anonymous.post("/media/api/upload", headers=auth,
+                              data={"title": "Nod", "source": f"Firefly video {video_id}: Dieter nods"},
+                              files={"file": ("nod.png", picture(color=(8, 8, 8, 0)), "image/png")}).json()
+        listed = {v["id"]: v for v in anonymous.get("/media/api/videos", headers=auth).json()["videos"]}
+        self.assertTrue(listed[video_id]["taken_in"])
+        self.assertIn(made["id"], self.client.get(f"/media/{video_id}").text)
+        # Waiting pictures can't be fetched by Claude Code; only kept ones.
+        self.assertEqual(anonymous.get(f"/media/api/{made['id']}/file", headers=auth).status_code, 403)
+
+    def test_not_a_video_and_too_big(self):
+        bad = self.client.post("/media/upload", files={"file": ("x.mp4", b"\0\0\0\x18ftypisom" + bytes(20), "video/mp4")},
+                               follow_redirects=False)
+        self.assertIn("error=", bad.headers["location"])
+        from core.media import store as media_store
+        with self.assertRaises(media_store.Invalid):
+            media_store.inspect_video(mp4(salt=bytes(media_store.MAX_VIDEO_BYTES)))
+        self.assertEqual(media_store.inspect(mp4(640, 360))["width"], 640)

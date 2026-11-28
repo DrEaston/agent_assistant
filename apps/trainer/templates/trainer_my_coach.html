@@ -1,0 +1,114 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}My coach · Trainer{% endblock %}
+{% block content %}
+{% call ui.page_header("My coach", crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs, current=current,
+    sub="Your coach sends workouts in plain terms, like 6 × 1 mile at threshold. Dieter fills in your times from your own runs, and only you see them.") %}{% endcall %}
+<main class="wrap">
+  {% call ui.section("Workouts from your coach") %}
+  {% if not workouts %}{{ ui.empty("Nothing yet. Workouts your coach sends show up here.") }}{% endif %}
+  {% if workouts and not has_model %}{% call ui.banner("warn") %}Dieter can't set your times yet: it needs a few hard runs, or a race time on <a href="/apps/trainer/usual">Usual week</a>.{% endcall %}{% endif %}
+  <div class="stack">
+  {% for w in workouts %}
+    <article class="card stack" id="workout-{{ w.id }}">
+      <div class="row spread">
+        <strong>{{ w.title }}</strong>
+        {% if w.status == "sent" %}{{ ui.tag("New", "info") }}{% elif w.status == "accepted" %}{{ ui.tag("On your plan", "ok") }}{% elif w.status == "done" %}{{ ui.tag("Done", "ok") }}{% else %}{{ ui.tag("Declined") }}{% endif %}
+      </div>
+      <p class="small muted">{{ w.day }} · from {{ w.coach }}</p>
+      {% if w.rounds_text %}<p class="small"><strong>{{ w.rounds_text }}:</strong></p>{% endif %}
+      <ul class="steps">
+        {% for s in w.sets %}<li><span>{{ s.text }}</span>{% if s.target %}<br><strong class="num">{{ s.target }}</strong>{% endif %}{% if s.was and (not show_paces is defined or show_paces) %}<br><span class="small muted">was {{ s.was }}</span>{% endif %}{% if s.basis and s.target and (not show_paces is defined or show_paces) %}<br><span class="small muted">{{ s.basis }}</span>{% endif %}</li>{% endfor %}
+      </ul>
+      {% if w.fit and w.fit.load is not none and (not show_paces is defined or show_paces) %}
+      <div class="workout-load stack">
+        {% if w.fit.week and w.status == "sent" %}<p class="small">This week's speed limit: <strong>{{ w.fit.week.limit }}</strong> <span class="muted">(so far {{ w.fit.week.so_far }})</span></p>{% endif %}
+        <p class="small">This workout: <strong>{{ w.fit.load }}</strong> speed load{% if w.fit.adjusted and w.fit.load_before != w.fit.load %} <span class="muted">(eased from {{ w.fit.load_before }})</span>{% endif %}{% if w.fit.week and w.status == "sent" %} · puts your week at <strong>{{ w.fit.week.after }}</strong> {{ ui.tag("Too high", "warn") if w.fit.week.over else ui.tag("OK", "ok") }}{% endif %}</p>
+        {% if w.fit.near %}<p class="small">Near-sprint: <strong>{{ w.fit.near }} m</strong>{% if w.fit.week and w.fit.week.near_limit and w.status == "sent" %} · this week's limit {{ w.fit.week.near_limit }} m · puts your week at <strong>{{ w.fit.week.near_after }} m</strong> {{ ui.tag("Too high", "warn") if w.fit.week.near_over else ui.tag("OK", "ok") }}{% endif %}</p>{% endif %}
+      </div>
+      {% endif %}
+      {% if w.fit and w.fit.adjusted and w.status == "sent" %}{% call ui.banner("warn" if w.fit.flag else "info") %}{{ w.fit.note }}{% endcall %}{% elif w.adjusted %}<p class="small muted">Eased to fit your weekly limits when it went on the plan.</p>{% endif %}
+      {% if w.notes %}<p class="small">Coach: {{ w.notes }}</p>{% endif %}
+      {% if w.changes %}<p class="small"><strong>Your version.</strong> {{ w.changes }}</p>{% endif %}
+      {% if w.status == "sent" %}
+        <details class="change-workout"{% if w.changes %} open{% endif %}>
+          <summary class="small"><strong>Change it</strong></summary>
+          <form method="post" action="/apps/trainer/my-coach/workouts/{{ w.id }}/change" class="stack gap-above">
+            {% for o in w.original_sets %}{% set m = w.my_sets.get(o.index) %}
+            <fieldset class="builder-row stack">
+              <legend class="small">{{ o.text }}</legend>
+              <div class="cols">
+                <div class="field"><label for="reps-{{ w.id }}-{{ o.index }}">Reps</label>
+                  <input type="number" id="reps-{{ w.id }}-{{ o.index }}" name="reps_{{ o.index }}" min="1" max="50" value="{{ m.reps if m else o.reps }}"></div>
+                <div class="field"><label for="effort-{{ w.id }}-{{ o.index }}">Effort</label>
+                  <select id="effort-{{ w.id }}-{{ o.index }}" name="intensity_{{ o.index }}">{% for key, name in intensities.items() %}<option value="{{ key }}"{% if key == (m.intensity if m else o.intensity) %} selected{% endif %}>{{ name | capitalize }}</option>{% endfor %}</select></div>
+                <div class="field"><label for="nudge-{{ w.id }}-{{ o.index }}">Seconds per rep (+ slower, − faster)</label>
+                  <input type="number" id="nudge-{{ w.id }}-{{ o.index }}" name="nudge_{{ o.index }}" min="-30" max="30" value="{{ m.nudge if m and m.nudge else '' }}" placeholder="0"></div>
+              </div>
+              <label class="small"><input type="checkbox" name="remove_{{ o.index }}" value="1"{% if not m %} checked{% endif %}> Remove this set</label>
+            </fieldset>
+            {% endfor %}
+            <div class="cols">{{ ui.field("Rounds", "rounds", value=w.rounds, type="number") }}</div>
+            <div class="row">
+              <button type="submit">Save my version</button>
+            </div>
+          </form>
+          {% if w.changes %}<form method="post" action="/apps/trainer/my-coach/workouts/{{ w.id }}/reset"><button type="submit" class="quiet">Back to the coach's version</button></form>{% endif %}
+          <p class="small muted">Your coach sees what you changed in plain words, never your times. The speed load above updates when you save.</p>
+        </details>
+        <form method="post" action="/apps/trainer/my-coach/workouts/{{ w.id }}/take"><button type="submit" class="primary">Put it on my plan</button></form>
+        <form method="post" action="/apps/trainer/my-coach/workouts/{{ w.id }}/decline" class="inline-form">
+          <input type="text" name="note" maxlength="500" placeholder="Why not (optional, your coach sees this)" aria-label="Why not">
+          <button type="submit" class="quiet">Decline</button>
+        </form>
+      {% elif w.status in ("accepted", "done") %}
+        {% if w.session_id %}<a class="small" href="/apps/trainer/sessions/{{ w.session_id }}">Open it on your plan</a>{% endif %}
+        <form method="post" action="/apps/trainer/my-coach/workouts/{{ w.id }}/done" class="inline-form">
+          <input type="text" name="note" maxlength="500" value="{{ w.athlete_note }}" placeholder="How it went (your coach sees only this)" aria-label="How it went">
+          <button type="submit"{% if w.status != "done" %} class="primary"{% endif %}>{{ "Update note" if w.status == "done" else "Done" }}</button>
+        </form>
+      {% elif w.athlete_note %}<p class="small muted">Your note: {{ w.athlete_note }}</p>{% endif %}
+    </article>
+  {% endfor %}
+  </div>
+  {% endcall %}
+
+  {% call ui.section("Your coach", id="coaches") %}
+  <p class="small muted">Your coach sees the workouts they sent, whether you took them, and the notes you write here. Not your runs, paces, times or anything else in Dieter{% if is_owner %}, unless you turn on full view below{% endif %}.</p>
+  {% if coaches %}
+  <div class="card">
+    {% for c in coaches %}
+    <div class="list-row row spread">
+      <span><strong>{{ c.name }}</strong><br><span class="small muted">since {{ c.since }}</span></span>
+      <form method="post" action="/apps/trainer/coaching-links/{{ c.link_id }}/end"><input type="hidden" name="next" value="/apps/trainer/my-coach"><button type="submit" class="quiet">Stop sharing</button></form>
+    </div>
+    {% if is_owner %}
+    <div class="list-row"><div class="grow stack">
+      {% if c.full_view_until %}
+      <span class="small"><strong>Full view is on until {{ c.full_view_until }}.</strong> {{ c.name }} can see all your Trainer pages (runs, speed, heat maps, your week), read-only.</span>
+      <form method="post" action="/apps/trainer/coaching-links/{{ c.link_id }}/full-view"><button type="submit" class="quiet">Turn off full view</button></form>
+      {% else %}
+      <span class="small muted">Temporary, while coach mode is being built: let {{ c.name }} see all your Trainer pages, read-only, for {{ full_view_days }} days. This shows your Strava runs to another person, which Strava's terms restrict.</span>
+      <form method="post" action="/apps/trainer/coaching-links/{{ c.link_id }}/full-view"><input type="hidden" name="on" value="1"><button type="submit">Turn on full view for {{ full_view_days }} days</button></form>
+      {% endif %}
+    </div></div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% else %}{{ ui.empty("No coach yet.") }}{% endif %}
+  {% endcall %}
+
+  {% call ui.section("Invite a coach", id="invite") %}
+  {% if invite %}
+  <div class="card stack">
+    <div class="field"><label for="invite-link">Send this link to your coach. It works once.</label>
+      <input type="text" id="invite-link" value="{{ invite_url }}" readonly></div>
+    <form method="post" action="/apps/trainer/coaching-links/{{ invite.link_id }}/end"><input type="hidden" name="next" value="/apps/trainer/my-coach#invite"><button type="submit" class="quiet">Cancel this link</button></form>
+  </div>
+  {% else %}
+  <form method="post" action="/apps/trainer/my-coach/invite"><button type="submit" class="primary">Make an invite link</button></form>
+  <p class="small muted gap-above">Your coach needs a Dieter account. When they open the link and accept, they can send you workouts.</p>
+  {% endif %}
+  {% endcall %}
+</main>
+{% endblock %}

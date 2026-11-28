@@ -1,0 +1,255 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}Coach{% endblock %}
+{% block dock %}{% endblock %}
+{% block content %}
+{% call ui.page_header("Coach", sub="Look at an athlete's Trainer, or write a workout for all your athletes. Dieter turns it into each athlete's own paces.") %}{% endcall %}
+<main class="wrap">
+  <form method="post" action="/coach/logout" class="row spread small signed-in-as"><span class="muted">Signed in as <strong>{{ coach_name }}</strong> (coach)</span><button type="submit" class="quiet">Sign out</button></form>
+  {% if not athletes %}
+  {{ ui.empty("No athletes yet.") }}
+  {% else %}
+
+  {% if error and not workout %}{% call ui.banner("warn") %}{{ error }}{% endcall %}{% endif %}
+  {% call ui.section("Athlete page", id="athlete") %}
+  <form method="post" action="/coach/view" class="card stack">
+    <div class="field"><label for="athlete-pick">Athlete</label>
+      <select id="athlete-pick" name="athlete_id">{% for a in athletes %}<option value="{{ a.athlete_id }}">{{ a.name }}</option>{% endfor %}</select></div>
+    <button type="submit" class="primary">View athlete page</button>
+    <p class="small muted">Opens their Trainer, read-only: their week, runs, and the paces Dieter picked for your workouts.</p>
+  </form>
+  {% endcall %}
+
+  {% call ui.section("Write a workout", id="write") %}
+  {% if error %}{% call ui.banner("warn") %}{{ error }}{% endcall %}{% endif %}
+  <form method="post" action="/coach/send" class="card stack" id="builder">
+    <div class="cols">
+      {{ ui.field("Day", "day", value=tomorrow, type="date", required=True) }}
+      {{ ui.field("Title", "title", value=filled.title, placeholder="Threshold 1200s + 200s", maxlength=120) }}
+    </div>
+
+    <details class="talk-box"{% if workout %} open{% endif %}>
+      <summary class="small">Say it instead</summary>
+      <div class="stack gap-above">
+        <div class="field"><label for="workout">Workout in words</label>
+          <textarea id="workout" name="workout" rows="2" maxlength="1500" placeholder="3 rounds of 3 x 1200 at threshold with 60 seconds jog, 2 minutes, then 4 x 200 fast with 30 seconds. 4 minutes between rounds.">{{ workout }}</textarea></div>
+        <div class="row">
+          <button type="button" id="talk" aria-pressed="false">🎤 <span id="talk-label">Talk</span></button>
+          <button type="button" id="read-workout">Fill in the sets</button>
+          <span class="small muted" id="talk-status" aria-live="polite"></span>
+        </div>
+        <p class="small muted">Dieter fills in the sets below from what you say. Check them and adjust anything before sending.</p>
+      </div>
+    </details>
+
+    <datalist id="distance-list">{% for m, name in distances %}<option value="{{ m }}" label="{{ name }}"></option>{% endfor %}</datalist>
+    <div class="stack" id="set-rows">
+      {% for r in rows %}{% set i = loop.index0 %}
+      <fieldset class="builder-row stack" data-row="{{ i }}">
+        <legend class="small"><strong>Set <span class="set-number">{{ i + 1 }}</span></strong></legend>
+        <div class="cols">
+          <div class="field"><label for="reps_{{ i }}">Reps</label>
+            <input type="number" id="reps_{{ i }}" name="reps_{{ i }}" min="1" max="50" inputmode="numeric" value="{{ r.reps }}" placeholder="{{ '3' if i == 0 else '' }}"></div>
+          <div class="field"><label for="metres_{{ i }}">Distance (m)</label>
+            <input type="number" id="metres_{{ i }}" name="metres_{{ i }}" min="50" max="20000" inputmode="numeric" list="distance-list" value="{{ r.metres }}" placeholder="{{ '1200' if i == 0 else '' }}"></div>
+          <div class="field"><label for="intensity_{{ i }}">Effort</label>
+            <select id="intensity_{{ i }}" name="intensity_{{ i }}">{% for key, name in intensities.items() %}<option value="{{ key }}"{% if (r.intensity or "threshold") == key %} selected{% endif %}>{{ name | capitalize }}</option>{% endfor %}</select></div>
+        </div>
+        <div class="cols">
+          {{ ui.field("Rest between reps", "rest_" ~ i, value=r.rest, placeholder="60 s jog", maxlength=40) }}
+          {{ ui.field("Rest after this set", "rest_after_" ~ i, value=r.rest_after, placeholder="2 min", maxlength=40) }}
+        </div>
+        <div class="row">
+          <button type="button" class="quiet" data-move="-1" aria-label="Move set up">↑ Up</button>
+          <button type="button" class="quiet" data-move="1" aria-label="Move set down">↓ Down</button>
+          <button type="button" class="quiet" data-remove aria-label="Remove set">Remove</button>
+        </div>
+      </fieldset>
+      {% endfor %}
+    </div>
+    <div><button type="button" id="add-set">+ Add set</button></div>
+
+    <div class="cols">
+      {{ ui.field("Rounds", "rounds", value=(filled.rounds or "1"), type="number") }}
+      {{ ui.field("Rest between rounds", "round_rest", value=filled.round_rest, placeholder="4 min", maxlength=40) }}
+    </div>
+    {{ ui.field("Notes", "notes", value=filled.notes, placeholder="2 mile warm-up with drills; 1 mile cool-down", maxlength=500) }}
+
+    <div class="card workout-preview stack" id="summary-card" hidden>
+      <span class="small muted">What they'll get</span>
+      <strong id="summary-title"></strong>
+      <p id="summary-rounds" class="small"></p>
+      <ol id="summary-sets" class="steps"></ol>
+      <p id="summary-notes" class="small muted"></p>
+    </div>
+    <details class="card stack how-paces">
+      <summary><strong>How Dieter sets the paces</strong></summary>
+      <ul class="stack small gap-above">
+        <li><strong>Each athlete gets their own times.</strong> Efforts like threshold, 5K or mile pace come from that
+          athlete's runs and races. You never see their times; they see theirs under each set.</li>
+        <li><strong>Sprint depends on rep length.</strong> Reps up to 150 m (strides, flys) are near-max. Longer
+          "sprint" reps are run at race pace for the set's total distance: 4 × 200 is run at 800 m race pace, 8 × 400
+          at 3K pace. That's fast, but they can hold it for every rep.</li>
+        <li><strong>It's fitted to their week.</strong> Before an athlete takes a workout, Dieter adds up how much fast
+          running it is against their safe limit for that week (it rises with the speed work they've been doing). If it
+          won't fit, Dieter eases the fast reps, only as much as needed, and you'll see <em>Eased for their limits</em>
+          once they take it.</li>
+        <li><strong>Reps and rounds are never cut.</strong> If easing the pace isn't enough, the athlete sees that the
+          session is too much for their week, and it's up to the two of you.</li>
+      </ul>
+    </details>
+    <p class="small muted">Dieter works out each athlete's own paces for every set from their runs.</p>
+    <button type="submit" class="primary">Send to all athletes ({{ athletes | length }})</button>
+  </form>
+  {% endcall %}
+
+  {% call ui.section("Sent", id="sent") %}
+  {% if sent %}{% call ui.banner("ok") %}Sent to {{ sent }} athlete{{ "s" if sent > 1 }}. Open their athlete page to see the paces Dieter picked.{% endcall %}{% endif %}
+  {% if not recent %}{{ ui.empty("Nothing sent yet.") }}{% else %}
+  <div class="card">
+    {% for w in recent %}
+    <div class="list-row"><div class="grow stack">
+      <div class="row spread">
+        <strong>{{ w.day }} · {{ w.title }}</strong>
+        {% if w.status == "sent" %}{{ ui.tag("Waiting") }}{% elif w.status == "accepted" %}{{ ui.tag("On their plan", "info") }}{% if w.adjusted %} {{ ui.tag("Eased for their limits") }}{% endif %}{% elif w.status == "done" %}{{ ui.tag("Done", "ok") }}{% else %}{{ ui.tag("Declined", "warn") }}{% endif %}
+      </div>
+      <span class="small">Dieter read it as: {{ w.summary }}</span>
+      {% if w.changes %}<span class="small"><strong>{{ w.changes }}</strong></span>{% endif %}
+      {% if w.notes %}<span class="small muted">Notes: {{ w.notes }}</span>{% endif %}
+      <span class="small muted">To {{ w.athlete }}</span>
+      {% if w.athlete_note %}<span class="small muted">{{ w.athlete }}: “{{ w.athlete_note }}”</span>{% endif %}
+      {% if w.status == "sent" %}<form method="post" action="/apps/trainer/athletes/{{ w.athlete_id }}/workouts/{{ w.id }}/withdraw"><button type="submit" class="quiet">Take it back</button></form>{% endif %}
+    </div></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endcall %}
+  {% endif %}
+
+  <form method="post" action="/coach/logout" class="section"><button type="submit" class="quiet">Sign out of the coach page</button></form>
+</main>
+{% endblock %}
+{% block after %}
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const form = $("builder");
+  if (!form) return;
+  const el = (n) => form.elements.namedItem(n);
+  const rows = [...form.querySelectorAll(".builder-row")];
+  const F = ["reps", "metres", "intensity", "rest", "rest_after"];
+  const field = (row, f) => row.querySelector(`[name="${f}_${row.dataset.row}"]`);
+  const values = (row) => Object.fromEntries(F.map((f) => [f, field(row, f).value]));
+  const fill = (row, v) => F.forEach((f) => { field(row, f).value = v[f] ?? (f === "intensity" ? "threshold" : ""); });
+  const filledRow = (row) => field(row, "reps").value.trim() || field(row, "metres").value.trim();
+  const NAMES = { 1609: "1 mile", 3218: "2 miles", 1000: "1 km", 2000: "2 km" };
+  const effortName = (row) => field(row, "intensity").selectedOptions[0].textContent.toLowerCase();
+
+  function layout() {
+    let shown = rows.filter(filledRow).length || 1;
+    rows.forEach((row, i) => { row.hidden = i >= shown && !row.dataset.open; });
+    const visible = rows.filter((r) => !r.hidden);
+    visible.forEach((r, i) => { r.querySelector(".set-number").textContent = i + 1; });
+    $("add-set").hidden = visible.length >= rows.length;
+    summary();
+  }
+  function describe(row) {
+    const v = values(row), key = v.intensity, n = parseInt(v.reps, 10) || 0, m = parseInt(v.metres, 10) || 0;
+    let t = `${n} × ${NAMES[m] || m + " m"}`;
+    t += ["sprint", "easy", "feel"].includes(key) ? ` ${effortName(row)}` : ` at ${effortName(row)}`;
+    if (v.rest.trim() && n > 1) t += `, ${v.rest.trim()} between`;
+    if (v.rest_after.trim()) t += `, then ${v.rest_after.trim()}`;
+    return t;
+  }
+  function summary() {
+    const sets = rows.filter((r) => !r.hidden && filledRow(r));
+    const card = $("summary-card");
+    if (!sets.length) { card.hidden = true; return; }
+    $("summary-title").textContent = el("title").value.trim() || "Workout";
+    const rounds = parseInt(el("rounds").value, 10) || 1, rr = el("round_rest").value.trim();
+    $("summary-rounds").textContent = rounds > 1 ? `${rounds} rounds of:` : "";
+    const list = $("summary-sets"); list.replaceChildren();
+    sets.forEach((r) => { const li = document.createElement("li"); li.textContent = describe(r); list.append(li); });
+    if (rounds > 1 && rr) { const li = document.createElement("li"); li.textContent = `${rr} between rounds`; list.append(li); }
+    $("summary-notes").textContent = el("notes").value.trim() ? "Notes: " + el("notes").value.trim() : "";
+    card.hidden = false;
+  }
+
+  $("add-set").addEventListener("click", () => {
+    const next = rows.find((r) => r.hidden);
+    if (next) { next.dataset.open = "1"; next.hidden = false; field(next, "reps").focus(); layout(); }
+  });
+  rows.forEach((row, i) => {
+    row.querySelector("[data-remove]").addEventListener("click", () => {
+      // shift the sets below up one, then clear the last
+      for (let j = i; j < rows.length - 1; j++) fill(rows[j], values(rows[j + 1]));
+      fill(rows[rows.length - 1], {}); delete rows[rows.length - 1].dataset.open;
+      layout();
+    });
+    row.querySelectorAll("[data-move]").forEach((b) => b.addEventListener("click", () => {
+      const j = i + parseInt(b.dataset.move, 10);
+      if (j < 0 || j >= rows.length || rows[j].hidden) return;
+      const a = values(row); fill(row, values(rows[j])); fill(rows[j], a); summary();
+    }));
+  });
+  form.addEventListener("input", summary);
+  form.addEventListener("change", summary);
+
+  // Say it instead: the words -> builder rows (/coach/read); nothing is sent until Send.
+  const words = $("workout"), status = $("talk-status");
+  async function readWords() {
+    const text = words.value.trim();
+    if (!text) { status.textContent = "Say or type the workout first."; return; }
+    status.textContent = "Filling in the sets…";
+    try {
+      const body = new FormData(); body.append("workout", text);
+      const r = await fetch("/coach/read", { method: "POST", body });
+      const data = await r.json();
+      if (!r.ok) { status.textContent = data.error || "Couldn't read that. Try again?"; return; }
+      rows.forEach((row, i) => { fill(row, data.sets[i] || {}); delete row.dataset.open; });
+      el("rounds").value = data.rounds || 1; el("round_rest").value = data.round_rest || "";
+      if (data.title && !el("title").value.trim()) el("title").value = data.title;
+      if (data.notes) el("notes").value = data.notes;
+      layout();
+      status.textContent = "Filled in below. Check the sets, then send.";
+    } catch (e) { status.textContent = "Couldn't reach Dieter. Try again?"; }
+  }
+  $("read-workout").addEventListener("click", readWords);
+
+  const btn = $("talk"), label = $("talk-label");
+  if (!navigator.mediaDevices || !window.MediaRecorder) { btn.hidden = true; }
+  else {
+    let recorder = null, chunks = [], stream = null;
+    const idle = (msg) => { recorder = null; btn.setAttribute("aria-pressed", "false"); label.textContent = "Talk"; status.textContent = msg || ""; };
+    btn.addEventListener("click", async () => {
+      if (recorder) { recorder.stop(); return; }
+      try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+      catch (e) { status.textContent = "Can't use the microphone here. Type it instead?"; return; }
+      chunks = [];
+      recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        idle("Writing it down…");
+        if (!blob.size) { idle(); return; }
+        const body = new FormData();
+        body.append("audio", blob, "talk." + (blob.type.includes("mp4") ? "mp4" : "webm"));
+        try {
+          const r = await fetch("/coach/transcribe", { method: "POST", body });
+          const data = await r.json();
+          const text = (data.text || "").trim();
+          if (!r.ok || !text) { idle("Didn't catch that. Try again?"); return; }
+          words.value = words.value.trim() ? words.value.trim() + " " + text : text;
+          idle(""); readWords();
+        } catch (e) { idle("Couldn't hear that. Try again?"); }
+      };
+      recorder.start();
+      btn.setAttribute("aria-pressed", "true"); label.textContent = "Stop";
+      status.textContent = "Listening… tap Stop when you're done.";
+    });
+  }
+  layout();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,94 @@
+{% extends "layout.html" %}
+{% import "components.html" as ui %}
+{% block title %}How these numbers work · Trainer{% endblock %}
+{% block content %}
+{% call ui.page_header("How these numbers work", crumbs=(("Dieter", "/"), ("Trainer", "/apps/trainer")), tabs=tabs,
+    current=current, sub="The math behind the Speed section, in plain words") %}{% endcall %}
+<main class="wrap">
+  {% call ui.section("Threshold pace") %}
+  <div class="card stack">
+    <p>About the fastest pace you could hold for half an hour. Dieter takes it from your best race or hard 10–40 minute
+      effort in the last 6 months. If you also have a short all-out effort, like a mile, it uses that to sharpen the
+      number.</p>
+    {% if e.cs_pace %}<p><strong>Yours is {{ e.cs_pace }}/mi</strong>, {{ e.cs_how }}.</p>
+    {% else %}<p class="muted">You don't have one yet: it needs a race or a hard 10–40 minute run in the last 6 months.
+      You can also enter race times on the Usual week page.</p>{% endif %}
+    <p class="small muted">Sports scientists call this "critical speed".</p>
+  </div>
+  {% endcall %}
+
+  {% call ui.section("Speed load") %}
+  <div class="card stack">
+    <p>How much fast running a run (or a week) had, counted in points. Picture a pacer running beside you at threshold
+      pace for the whole run. Every metre you get ahead of them is one point. Running slower than the pacer doesn't cost points; it just scores nothing.</p>
+    {% if e.examples %}{% set a = e.examples.steady %}{% set b = e.examples.fast %}
+    <ul class="stack">
+      <li>One 400 in {{ a.seconds }} s: the pacer covers {{ a.pacer }} m, so you're {{ a.points }} m ahead =
+        <strong>{{ a.points }} points</strong>.</li>
+      <li>One 400 in {{ b.seconds }} s: the pacer covers only {{ b.pacer }} m, so that's
+        <strong>{{ b.points }} points</strong>.{% if e.examples.fast_reps %} {{ e.examples.fast_reps }} of those score
+        about the same as 18 of the {{ a.seconds }}-second ones.{% endif %}</li>
+    </ul>
+    {% endif %}
+    <p>That's why faster running counts for more per second.</p>
+  </div>
+  {% endcall %}
+
+  {% call ui.section("Speed fitness") %}
+  <div class="card stack">
+    <p>Your average weekly speed load over the {{ e.chronic_weeks }} weeks before this one: the speed work your legs
+      are used to. Keep speed work up and it rises; stop and it falls.</p>
+    <p>This week's speed load is read against it: under {{ e.easing }}× is easing off, up to {{ e.holding }}× holding,
+      up to {{ e.ratio }}× building.</p>
+  </div>
+  {% endcall %}
+
+  {% call ui.section("Speed advantage") %}
+  <div class="card stack">
+    <p>The ground you can gain on your threshold pace in one all-out effort before you have to slow down. Run 3
+      minutes all out and you'd cover about that much more than 3 minutes at threshold pace.{% if e.advantage_m %}
+      <strong>{% if e.advantage_typical %}Yours isn't measured yet: Dieter is using a typical runner's {{ e.advantage_m }} m until it sees an all-out 2–7 minute effort (like a mile race).{% else %}Yours is about {{ e.advantage_m }} m.{% endif %}</strong>{% endif %}</p>
+    <p>Hard reps faster than threshold, like 200s to 800s, grow it. Together with threshold pace it sets your race
+      predictions and the paces for a coach's workouts.</p>
+    <p class="small muted">Sports scientists call this D′ ("D prime").</p>
+  </div>
+  {% endcall %}
+
+  {% call ui.section("Safe limit") %}
+  <div class="card stack">
+    <p>{{ e.ratio }} × your speed fitness, and never below {{ e.floor }} × your speed advantage (so a few strides after a quiet
+      stretch are always fine). Injury research finds that jumping more than about half again over what you've been
+      doing is when injuries pile up. Building gradually raises the limit with you.</p>
+    <p>Up to {{ e.well_over }}× the limit is "a little over"; past that is "well over".</p>
+    {% if e.over %}<ul class="stack">
+      {% for w in e.over %}<li><a href="/apps/trainer/speed/{{ w.week }}">Week of {{ w.label }}</a>: {{ w.times }}×, {{ w.how }}</li>{% endfor %}
+    </ul>{% endif %}
+  </div>
+  {% endcall %}
+
+  {% call ui.section("Near-sprint running") %}
+  <div class="card stack">
+    <p>Metres run at 90% of your top speed or faster. That's the hardest running on your hamstrings, so it gets its own
+      safe limit, worked out the same way.</p>
+  </div>
+  {% endcall %}
+
+  {% call ui.section("Fast stretches") %}
+  <div class="card stack">
+    <p>Anything at least about a third faster than your easy pace for 6 seconds or more. Short bursts count as strides
+      only if they get close to threshold pace.</p>
+  </div>
+  {% endcall %}
+
+  {% call ui.section("The math") %}
+  <a class="card link-row" href="/apps/trainer/speed/how/math">
+    <span class="label-stack"><span class="title">The math and its sources</span>
+      <span class="small muted">The formulas behind every number here, with your own values and the research they come from.</span></span>
+    <span class="chev" aria-hidden="true">›</span>
+  </a>
+  {% endcall %}
+
+  <p class="small muted section">These are estimates from Strava's second-by-second data, not lab tests.</p>
+  <div class="row section"><a class="button quiet" href="/apps/trainer">Back to Trainer</a></div>
+</main>
+{% endblock %}

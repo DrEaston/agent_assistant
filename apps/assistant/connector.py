@@ -200,8 +200,13 @@ def complete_action(args):
 # ---------------------------------------------------------------- reading
 
 def _book_view(b):
-    return {"id": b["id"], "title": b["title"], "author": b["author"], "high_priority": bool(b["high_priority"]),
-            "status": b["status"]}
+    out = {"id": b["id"], "title": b["title"], "author": b["author"], "high_priority": bool(b["high_priority"]),
+           "status": b["status"]}
+    if b.get("rating"):
+        out["rating"] = b["rating"]
+    if b.get("thoughts"):
+        out["thoughts"] = b["thoughts"]
+    return out
 
 
 def reading_list(args):
@@ -245,10 +250,23 @@ def update_book(args):
     book = _book(args)
     try:
         reading().update(book["id"], status=args.get("status"), high_priority=args.get("high_priority"),
-                         notes=args.get("notes"), title=args.get("new_title"), author=args.get("author"))
+                         notes=args.get("notes"), title=args.get("new_title"), author=args.get("author"),
+                         rating=args.get("rating"), thoughts=args.get("thoughts"))
     except ValueError as exc:
         raise ToolError(str(exc)) from exc
     return _book_view(reading().book(book["id"]))
+
+
+def reading_taste(args):
+    return reading().taste()
+
+
+def suggest_books(args):
+    who = str(args.get("assistant") or "").strip().lower()
+    result = reading().suggest(args.get("books") or [], args.get("asked_for") or "", who)
+    result["message"] = (f"{len(result['added'])} suggestion(s) wait for Curtis's OK on the Reading page "
+                         f"({site_url('/apps/assistant/reading')}) and Today. Don't treat them as on his shelf.")
+    return result
 
 
 def check_shelf(args):
@@ -319,12 +337,29 @@ def tools():
         Tool("assistant_add_book", "Add a book", "Add a book he wants (or already has, with status).", add_book,
              {"title": {"type": "string"}, "author": {"type": "string"}, "high_priority": {"type": "boolean"},
               "status": {"type": "string", "enum": list(STATUSES)}, "notes": {"type": "string"}}, ("title",)),
-        Tool("assistant_update_book", "Update a book", "Change a book's status (found, owned, reading, read), ★ "
-             "priority or notes. Find it by title words or book_id.", update_book,
+        Tool("assistant_update_book", "Update a book", "Change a book's status (found, owned, reading, read, "
+             "passed_on), ★ priority, notes, or once read his rating (1-5) and thoughts. Find it by title words or "
+             "book_id.", update_book,
              {"title": {"type": "string", "description": "Words from the title to find it."},
               "book_id": {"type": "integer"}, "status": {"type": "string", "enum": list(STATUSES)},
               "high_priority": {"type": "boolean"}, "notes": {"type": "string"}, "new_title": {"type": "string"},
-              "author": {"type": "string"}}),
+              "author": {"type": "string"}, "rating": {"type": "integer", "minimum": 1, "maximum": 5},
+              "thoughts": {"type": "string"}}),
+        Tool("assistant_reading_taste", "His reading taste",
+             "Read this before suggesting books: what he rated (with his thoughts), authors he loves, what he turned "
+             "down, and everything already on his shelf.", reading_taste, {}, read_only=True),
+        Tool("assistant_suggest_books", "Suggest books",
+             "When he asks for book ideas: first ask 2-4 short questions (mood, length, what to avoid), read "
+             "assistant_reading_taste, then suggest up to 5 books, each with a one-line reason tied to his taste. They "
+             "wait for his OK (keep or skip) on the Reading page; books already on his shelf or turned down are left "
+             "out.", suggest_books,
+             {"books": {"type": "array", "items": {"type": "object", "properties": {
+                 "title": {"type": "string"}, "author": {"type": "string"},
+                 "reason": {"type": "string", "description": "One line: why it fits him."}},
+                 "required": ["title", "author", "reason"]}},
+              "asked_for": {"type": "string", "description": "What he asked for, in his words."},
+              "assistant": {"type": "string", "enum": ["claude", "chatgpt", "dieter"], "description": "Who you are."}},
+             ("books", "asked_for", "assistant")),
         Tool("assistant_check_shelf", "Bookstore shelf", "At a bookstore: mark an author's shelf checked (checked false "
              "unchecks), or finish_visit true to clear the checklist for next time.", check_shelf,
              {"author": {"type": "string"}, "checked": {"type": "boolean"}, "finish_visit": {"type": "boolean"}}),
