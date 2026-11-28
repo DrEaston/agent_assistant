@@ -162,8 +162,7 @@ def overview(request: Request, week: str = ""):
     c = coaching()
     coach_new = (c.new_for_me() if not _viewing.get()
                  else [w for w in c.for_me() if w["day"] >= clock.today().isoformat()][:5])
-    for w in coach_new:
-        w["sets"] = coach.targets(w["sets"], model)
+    _fit(coach_new, model)
     return render("trainer_overview.html", title="Trainer", current=BASE, page_url=BASE, view=view, coach_new=coach_new,
                   guidance=analysis.week_guidance(view), o=numbers, getting=getting, after_run=sh.waiting(),
                   shoe_list=sh.shoes(include_retired=False), feels=shoes.FEELS,
@@ -357,14 +356,39 @@ def _my_model():
     return coach.athlete_model(_state["db"], get_current_user_id(), races=plan.race_bests(store().settings()))
 
 
+def _week_numbers(day):
+    """That week's speed numbers for the signed-in (or viewed) athlete: load so far and the limits."""
+    monday = plan.week_start(day)
+    return speed.weekly(_state["db"], get_current_user_id(), [monday],
+                        races=plan.race_bests(store().settings())).get(monday)
+
+
+def _fit(workouts, model):
+    """Each coach workout with the athlete's targets. One not yet answered is eased to fit that week's limits
+    (coach.fitted); one already taken keeps the plain targets and says it was eased when it went on the plan."""
+    weeks = {}
+    for w in workouts:
+        week = None
+        if w["status"] == "sent":
+            key = plan.week_start(w["day"])
+            if key not in weeks:
+                try:
+                    weeks[key] = _week_numbers(w["day"])
+                except Exception as exc:
+                    print(f"Warning: week numbers for coach workout failed: {exc!r}")
+                    weeks[key] = None
+            week = weeks[key]
+        fit = coach.fitted(w["sets"], model, w.get("rounds") or 1, week)
+        w["sets"], w["fit"] = fit["sets"], fit
+    return workouts
+
+
 @router.get(BASE + "/my-coach")
 def my_coach(request: Request):
     c = coaching()
     _coach(c._user)
     model = _my_model()
-    workouts = c.for_me()
-    for w in workouts:
-        w["sets"] = coach.targets(w["sets"], model)
+    workouts = _fit(c.for_me(), model)
     invite = c.open_invite()
     invite_url = f"{str(request.base_url).rstrip('/')}{BASE}/coach-invite/{invite['token']}" if invite else ""
     return render("trainer_my_coach.html", title="My coach", current=BASE + "/my-coach", page_url=BASE + "/my-coach",
@@ -386,7 +410,12 @@ def end_coaching(link_id: int, next: str = Form("")):
 
 @router.post(BASE + "/my-coach/workouts/{prescription_id}/take")
 def take_workout(prescription_id: int):
-    session = _coach(coaching().take, prescription_id, _my_model())
+    c = coaching()
+    try:
+        week = _week_numbers(c._mine(prescription_id)["day"])
+    except Exception:
+        week = None     # c.take below says what's wrong (not yours, already answered)
+    session = _coach(c.take, prescription_id, _my_model(), week)
     return back(f"{BASE}?week={plan.week_start(session['day']).isoformat()}#day-{session['day']}")
 
 
@@ -544,8 +573,11 @@ def athlete_page(request: Request, athlete_id: int, sent: str = ""):
     if c.full_view(athlete_id):   # temporary: the athlete's own switch on My coach
         model = _athlete_model(athlete_id)
         paces = coach.pace_profile(model)
-        for w in workouts:
-            w["sets"] = coach.targets(w["sets"], model)
+        token = set_current_user_id(athlete_id)
+        try:
+            _fit(workouts, model)
+        finally:
+            reset_current_user_id(token)
     return render("trainer_athlete.html", title=link["name"], current=BASE + "/athletes",
                   page_url=f"{BASE}/athletes/{athlete_id}", athlete=link, workouts=workouts, sent=bool(sent),
                   paces=paces, show_paces=bool(link["full_view_until"]), coach_home=_coach_home())
@@ -639,11 +671,12 @@ def save_usual(miles: str = Form(...), workout_day: str = Form(...), workout_tim
                long_day: str = Form(...), rest_day: str = Form(""), weights: str = Form("2"),
                pilates: str = Form("2"), strides: str = Form("2"), strides_text: str = Form(""),
                water_goal: str = Form("8"), run_time: str = Form(""), gym_time: str = Form(""),
-               race_mile: str = Form(""), race_3k: str = Form(""), race_5k: str = Form(""), race_10k: str = Form("")):
+               race_mile: str = Form(""), race_3k: str = Form(""), race_5k: str = Form(""), race_10k: str = Form(""),
+               speed_advantage: str = Form("")):
     _guard(store().save_settings, miles=miles, workout_day=workout_day, workout_time=workout_time, long_day=long_day,
            rest_day=rest_day, weights=weights, pilates=pilates, strides=strides, strides_text=strides_text or None,
            water_goal=water_goal, run_time=run_time, gym_time=gym_time, race_mile=race_mile, race_3k=race_3k,
-           race_5k=race_5k, race_10k=race_10k)
+           race_5k=race_5k, race_10k=race_10k, speed_advantage=speed_advantage)
     return back(BASE + "/usual")
 
 

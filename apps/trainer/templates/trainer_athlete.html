@@ -41,8 +41,9 @@
       </div>
       {% if w.rounds_text %}<p class="small"><strong>{{ w.rounds_text }}:</strong></p>{% endif %}
       <ul class="steps">
-        {% for s in w.sets %}<li><span>{{ s.text }}</span>{% if show_paces and s.target %}<br><strong class="num">{{ s.target }}</strong>{% endif %}</li>{% endfor %}
+        {% for s in w.sets %}<li><span>{{ s.text }}</span>{% if show_paces and s.target %}<br><strong class="num">{{ s.target }}</strong>{% endif %}{% if s.was and (not show_paces is defined or show_paces) %}<br><span class="small muted">was {{ s.was }}</span>{% endif %}{% if s.basis and s.target and (not show_paces is defined or show_paces) %}<br><span class="small muted">{{ s.basis }}</span>{% endif %}</li>{% endfor %}
       </ul>
+      {% if w.fit and w.fit.adjusted and w.status == "sent" %}{% call ui.banner("warn" if w.fit.flag else "info") %}{{ w.fit.note }}{% endcall %}{% elif w.adjusted %}<p class="small muted">Eased to fit your weekly limits when it went on the plan.</p>{% endif %}
       {% if w.notes %}<p class="small muted">Your notes: {{ w.notes }}</p>{% endif %}
       {% if w.athlete_note %}<p class="small">{{ athlete.name }}: {{ w.athlete_note }}</p>{% endif %}
       {% if w.status == "sent" %}

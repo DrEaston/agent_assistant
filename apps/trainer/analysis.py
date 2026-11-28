@@ -176,6 +176,7 @@ def overview(db, user_id, miles_target=40.0, weeks=16, today=None, races=None):
                                    this_week["d_prime"]),
             "advantage_m": round(this_week["d_prime"]) if this_week["d_prime"] else None,
             "advantage_typical": this_week.get("d_prime_typical", False),
+            "advantage_source": this_week.get("d_prime_source", ""),
             "near_top_pace": this_week.get("near_top_pace"),
             "predictions": predictions(this_week["cs"], this_week["d_prime"]),
             "advantage_gain": (round(this_week["d_prime"] - weekly[-13]["d_prime"])

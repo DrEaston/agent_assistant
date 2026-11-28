@@ -15,8 +15,9 @@
       <p class="small muted">{{ w.day }} · from {{ w.coach }}</p>
       {% if w.rounds_text %}<p class="small"><strong>{{ w.rounds_text }}:</strong></p>{% endif %}
       <ul class="steps">
-        {% for s in w.sets %}<li><span>{{ s.text }}</span>{% if s.target %}<br><strong class="num">{{ s.target }}</strong>{% endif %}</li>{% endfor %}
+        {% for s in w.sets %}<li><span>{{ s.text }}</span>{% if s.target %}<br><strong class="num">{{ s.target }}</strong>{% endif %}{% if s.was and (not show_paces is defined or show_paces) %}<br><span class="small muted">was {{ s.was }}</span>{% endif %}{% if s.basis and s.target and (not show_paces is defined or show_paces) %}<br><span class="small muted">{{ s.basis }}</span>{% endif %}</li>{% endfor %}
       </ul>
+      {% if w.fit and w.fit.adjusted and w.status == "sent" %}{% call ui.banner("warn" if w.fit.flag else "info") %}{{ w.fit.note }}{% endcall %}{% elif w.adjusted %}<p class="small muted">Eased to fit your weekly limits when it went on the plan.</p>{% endif %}
       {% if w.notes %}<p class="small">Coach: {{ w.notes }}</p>{% endif %}
       {% if not trainer_viewing %}
       <div class="row">
@@ -149,9 +150,12 @@
 
     <div class="card stack">
       <div class="spread"><h3 class="group-title">Speed advantage</h3><strong class="stat-big">{{ "{:,}".format(sp.advantage_m) ~ " m" if sp.advantage_m else "–" }}</strong></div>
-      {% if sp.advantage_typical %}
+      {% if sp.advantage_source == "yours" %}
+      <span>{{ ui.tag("Your number, from Usual week") }}</span>
+      <span class="small">Dieter uses the speed advantage you entered until it measures yours from an all-out 2–7 minute effort. <a href="/apps/trainer/usual">Change it</a></span>
+      {% elif sp.advantage_typical %}
       <span>{{ ui.tag("Typical value, not yours yet") }}</span>
-      <span class="small">Dieter hasn't measured yours: it needs a hard, all-out effort of 2–7 minutes (a mile race, a hard 800–1600 m time trial) as well as a longer race. Until then it uses a typical trained runner's {{ sp.advantage_m }} m, so the mile and 800 predictions are rough.</span>
+      <span class="small">Dieter hasn't measured yours: it needs a hard, all-out effort of 2–7 minutes (a mile race, a hard 800–1600 m time trial) as well as a longer race. Until then it uses a typical trained runner's {{ sp.advantage_m }} m, so the mile and 800 predictions are rough. If you know yours, <a href="/apps/trainer/usual">set it on Usual week</a>.</span>
       {% else %}
       <span class="small">The ground you can gain on your threshold pace in one all-out effort{% if sp.advantage_gain is not none %} · {{ "+" if sp.advantage_gain >= 0 }}{{ sp.advantage_gain }} m vs 12 weeks ago{% endif %}.</span>
       {% endif %}

@@ -2,6 +2,7 @@
 the coach never seeing the athlete's runs or times."""
 
 import tempfile
+from datetime import date
 import unittest
 import warnings
 from pathlib import Path
@@ -35,6 +36,50 @@ class FakeAI:
     def chat(self, messages, system_prompt, max_completion_tokens=1024):
         self.seen = messages[-1]["content"]
         return self.reply
+
+
+class ScalingTests(unittest.TestCase):
+    """Sprint means near-max only for short reps; workouts are eased to fit the week's limits, never cut."""
+
+    def test_sprint_depends_on_rep_length(self):
+        v, basis = coach.set_speed({"reps": 4, "metres": 200, "intensity": "sprint"}, MODEL)
+        self.assertAlmostEqual(v, 800 / ((800 - 200) / 4.5))                 # 800 race pace: the set's total
+        self.assertIn("800 m race pace", basis)
+        v, basis = coach.set_speed({"reps": 6, "metres": 100, "intensity": "sprint"}, MODEL)
+        self.assertAlmostEqual(v, 0.9 * 8.0)                                  # strides stay near-max
+        v, _ = coach.set_speed({"reps": 1, "metres": 200, "intensity": "sprint"}, MODEL)
+        self.assertAlmostEqual(v, 0.9 * 8.0)                                  # one all-out 200: capped at near-sprint
+
+    def test_eased_to_fit_the_week_but_reps_never_cut(self):
+        sets = coach.clean_sets([{"reps": 4, "metres": 200, "intensity": "sprint", "rest": "30 s"}])
+        free = coach.fitted(sets, MODEL, rounds=3)
+        self.assertFalse(free["adjusted"])
+        week = {"speed_work": 200, "work_line": 400, "near_top": 0, "top_line": 500}
+        fit = coach.fitted(sets, MODEL, rounds=3, week=week)
+        if free["load"] > 200:
+            self.assertTrue(fit["adjusted"])
+            self.assertLessEqual(fit["load"], 200)
+            self.assertTrue(fit["sets"][0]["was"])
+            self.assertEqual(fit["sets"][0]["reps"], 4)
+        tight = coach.fitted(sets, MODEL, rounds=3, week={"speed_work": 400, "work_line": 400})
+        self.assertEqual(tight["flag"], "too much")                          # can't fit by easing: flagged, not cut
+        self.assertEqual(len(tight["sets"]), 1)
+
+    def test_near_sprint_reps_eased_under_the_line_when_the_week_cant_take_them(self):
+        strides = coach.clean_sets([{"reps": 10, "metres": 100, "intensity": "sprint"}])
+        fit = coach.fitted(strides, MODEL, week={"speed_work": 0, "work_line": 5000, "near_top": 450, "top_line": 500})
+        self.assertTrue(fit["adjusted"])
+        self.assertEqual(fit["near"], 0)
+
+
+class OwnAdvantageTests(unittest.TestCase):
+    def test_his_own_speed_advantage_is_used_until_one_is_measured(self):
+        from apps.trainer import speed as sp
+        self.assertEqual(plan.race_bests({"speed_advantage": "190"})["advantage"], 190)
+        self.assertNotIn("advantage", plan.race_bests({"speed_advantage": ""}))
+        cs, dp, how = sp.estimate([{"m": 4506, "t": 960, "day": date.today(), "src": "run"}], typical=190)
+        self.assertEqual(dp, 190)
+        self.assertAlmostEqual(cs, round((4506 - 190) / 960, 3))
 
 
 class ReaderTests(unittest.TestCase):
