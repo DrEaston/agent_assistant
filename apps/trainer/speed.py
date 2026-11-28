@@ -49,7 +49,7 @@ import zlib
 from datetime import date, timedelta
 from .clock import today as local_today
 
-VERSION = 8                         # bump when the summary changes: older rows are read again
+VERSION = 9                         # bump when the summary changes: older rows are read again
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS tr_run_speed (
         user_id INTEGER NOT NULL, external_id TEXT NOT NULL, day TEXT NOT NULL, version INTEGER DEFAULT 0,
@@ -161,7 +161,7 @@ def label(metres, seconds=0, run_metres=0):
     if metres >= 0.85 * run_metres and seconds >= 480:
         return NAMES[race] if abs(race - metres) <= race * 0.01 else "hard run"
     near = min(STANDARD, key=lambda d: abs(d - metres))
-    if abs(near - metres) <= near * 0.12:
+    if abs(near - metres) <= near * 0.08:   # 8%: a 224 m rep is "220 m", not a slow-looking "200" (Curtis, Nov 2026)
         return NAMES.get(near, str(near))
     return "tempo" if seconds >= 480 else "rep"
 
