@@ -592,16 +592,19 @@ a.link-row:hover { background: var(--hover); }
 .media-facts dd { margin: 0; overflow-wrap: anywhere; }
 
 /* ---------- Trainer's screenshot view (/apps/trainer/run/<id>/share): one dark card to post on Strava ---------- */
-.share-page { min-height: 100vh; background: #0b0d10; padding: var(--s4) var(--s3) var(--s6); }
+.share-page { min-height: 100vh; background: #0b0d10; padding: var(--s3) var(--s3) var(--s5); }
 .share-card {
   --ink: #f4f5f7; --muted: #9aa3ae; --line: #262b33; --line-strong: #3a414c; --panel: #15181d; --heat-casing: #000000;
-  max-width: 30rem; margin: 0 auto; padding: var(--s5) var(--s4) var(--s4); border-radius: 22px;
-  background: var(--panel); color: var(--ink); display: flex; flex-direction: column; gap: var(--s4);
+  max-width: 30rem; margin: 0 auto; padding: var(--s4); border-radius: 22px;
+  background: var(--panel); color: var(--ink); display: flex; flex-direction: column; gap: var(--s3);
 }
+.share-mark { margin: 0 0 .35rem; font-size: var(--text-xs); font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; background: linear-gradient(90deg, var(--heat-0), var(--heat-4), var(--heat-8));
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
 .share-head h1 { margin: 0; font-size: 1.6rem; line-height: 1.15; letter-spacing: -.01em; }
 .share-sub { margin: .25rem 0 0; color: var(--muted); }
 .share-map { margin: 0; }
-.share-map svg { display: block; width: 100%; height: auto; max-height: 52vh; }
+.share-map svg { display: block; width: 100%; height: auto; max-height: 36vh; }
 .share-map .route-heat { stroke-width: 6; stroke-opacity: .85; }
 .share-map .route-casing { stroke-width: 9; }
 .share-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s3); }
