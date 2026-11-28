@@ -537,8 +537,8 @@ async def load_authenticated_user(request: Request, call_next):
             return await call_next(request)
         finally:
             reset_current_user_id(user_token)
-    public_exact_paths = {"/",  # signed out, the front door (apps/launcher/templates/welcome.html)
-                          "/cct-roadmap", "/thanksgiving/menu",  # the shareable Thanksgiving menu
+    public_exact_paths = {"/cct-roadmap", "/thanksgiving/menu",  # the shareable Thanksgiving menu
+                          "/",  # signed out, the front door (apps/launcher/templates/welcome.html)
                           "/coach",  # coach sign-in with a passcode (apps/trainer/coach.py)
                           "/strava/webhook"}  # Strava pushes new activities here (apps/trainer/strava.py)
     token = request.cookies.get(SESSION_COOKIE_NAME, "")
