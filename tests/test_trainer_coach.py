@@ -66,6 +66,14 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual(tight["flag"], "too much")                          # can't fit by easing: flagged, not cut
         self.assertEqual(len(tight["sets"]), 1)
 
+    def test_what_the_workout_puts_the_week_at(self):
+        sets = coach.clean_sets([{"reps": 4, "metres": 200, "intensity": "sprint"}])
+        fit = coach.fitted(sets, MODEL, week={"speed_work": 100, "work_line": 5000, "near_top": 0, "top_line": 500})
+        self.assertEqual(fit["week"]["limit"], 5000)
+        self.assertEqual(fit["week"]["after"], 100 + fit["load"])
+        self.assertFalse(fit["week"]["over"])
+        self.assertEqual(fit["week"]["near_limit"], 500)
+
     def test_near_sprint_reps_eased_under_the_line_when_the_week_cant_take_them(self):
         strides = coach.clean_sets([{"reps": 10, "metres": 100, "intensity": "sprint"}])
         fit = coach.fitted(strides, MODEL, week={"speed_work": 0, "work_line": 5000, "near_top": 450, "top_line": 500})
@@ -543,9 +551,7 @@ class CoachPageTests(unittest.TestCase):
         with mock.patch.object(coach, "athlete_model", return_value=dict(MODEL)):
             page = runner.get("/apps/trainer/my-coach").text
             self.assertIn("Change it", page)
-            self.assertIn("This week's speed limit", page)
-            self.assertIn("This workout: <strong>", page)
-            self.assertIn("puts your week at", page)
+            self.assertIn("This workout: <strong>", page)        # no weekly limit yet for a new athlete
             runner.post(f"/apps/trainer/my-coach/workouts/{pid}/change",
                         data={"rounds": "2", "reps_0": "3", "intensity_0": "threshold", "nudge_0": "2",
                               "reps_1": "3", "intensity_1": "mile", "remove_2": "1"})
