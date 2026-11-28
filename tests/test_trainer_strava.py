@@ -594,7 +594,7 @@ class StrideTests(SyncTests):
         self.assertEqual(share.status_code, 200, share.text[:300])
         self.assertIn('class="share-card"', share.text)
         self.assertIn("18 × 400 avg 1:22, 30 s rest", share.text)
-        self.assertIn("Data from Strava", share.text)
+        self.assertIn("Made by askdieter.ai", share.text)
         self.assertNotIn("Report a problem", share.text)
         self.assertEqual(TestClient(app).get("/apps/trainer/run/999999/share").status_code, 404)
         # kept streams: a summary change is worked out again without asking Strava

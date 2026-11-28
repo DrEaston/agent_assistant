@@ -624,8 +624,8 @@ a.link-row:hover { background: var(--hover); }
   border-radius: var(--r-pill); }
 .share-meter.over::-webkit-progress-value { background: var(--heat-5); }
 .share-meter.over::-moz-progress-bar { background: var(--heat-5); }
-.share-foot { display: flex; justify-content: space-between; color: var(--muted); font-size: var(--text-xs);
-  letter-spacing: .06em; text-transform: uppercase; }
-.share-foot span:first-child { color: var(--ink); font-weight: 700; }
+.share-foot { color: var(--muted); font-size: var(--text-xs); letter-spacing: .06em; text-transform: uppercase;
+  text-align: right; }
+.share-foot span { color: var(--ink); font-weight: 700; }
 .share-hint { max-width: 30rem; margin: var(--s4) auto 0; color: #9aa3ae; font-size: var(--text-sm); text-align: center; }
 .share-hint a { color: #e6e8eb; }
