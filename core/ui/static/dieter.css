@@ -630,17 +630,38 @@ a.link-row:hover { background: var(--hover); }
 .share-hint { max-width: 30rem; margin: var(--s4) auto 0; color: #9aa3ae; font-size: var(--text-sm); text-align: center; }
 .share-hint a { color: #e6e8eb; }
 
-/* ---------- The front door (signed out at /): apps/launcher/templates/welcome.html ---------- */
-.welcome { max-width: 36rem; margin: 0 auto; padding: var(--s6) var(--s4); display: flex; flex-direction: column;
-  gap: var(--s5); }
-.welcome-kicker { margin: 0; color: var(--accent); font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
-  font-size: var(--text-xs); }
-.welcome-head h1 { margin: .2rem 0 .4rem; font-size: 2.4rem; line-height: 1.05; letter-spacing: -.02em; }
-.welcome-lead { margin: 0; font-size: 1.15rem; color: var(--muted); }
-.welcome-apps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s3); }
-.welcome-apps li { display: flex; flex-direction: column; gap: .15rem; padding: var(--s3) var(--s4);
-  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-md, 12px); }
-.welcome-apps span { color: var(--muted); }
-.welcome-actions { display: flex; flex-direction: column; align-items: flex-start; gap: var(--s2); }
-.welcome-actions .button { padding-inline: var(--s5); }
-.welcome-note { margin: 0; color: var(--muted); }
+
+/* ---------- askdieter.ai/trainer: Dieter Trainer's landing page (dark, like the share card) ---------- */
+.landing {
+  --ink: #f4f5f7; --muted: #9aa3ae; --line: #262b33; --line-strong: #3a414c; --panel: #15181d;
+  min-height: 100vh; background: #0b0d10; color: var(--ink);
+  padding: var(--s6) var(--s4); display: flex; flex-direction: column; gap: var(--s6);
+}
+.landing > * { width: 100%; max-width: 34rem; margin: 0 auto; }
+.landing a { color: var(--ink); }
+.landing-kicker { margin: 0; font-size: var(--text-xs); font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  background: linear-gradient(90deg, var(--heat-0), var(--heat-4), var(--heat-8)); -webkit-background-clip: text;
+  background-clip: text; color: transparent; }
+.landing-hero h1 { margin: .3rem 0 .6rem; font-size: 2.6rem; line-height: 1.02; letter-spacing: -.02em; }
+.landing-lead { margin: 0; font-size: 1.15rem; line-height: 1.5; color: var(--muted); }
+.landing-actions { margin-top: var(--s5); display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); }
+.landing .landing-cta { padding-inline: var(--s5); background: var(--ink); border-color: var(--ink); color: #0b0d10;
+  font-weight: 700; }
+.landing .landing-cta:hover { background: #ffffff; border-color: #ffffff; }
+.landing-note { margin: 0; color: var(--muted); font-size: var(--text-sm); }
+.landing-sample .share-card { box-shadow: 0 0 0 1px var(--line), 0 24px 60px rgba(236, 0, 140, .12); }
+.landing-caption { margin: var(--s3) 0 0; color: var(--muted); font-size: var(--text-sm); text-align: center; }
+.landing-features h2 { margin: 0 0 var(--s4); font-size: 1.4rem; }
+.landing-features ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s4); }
+.landing-features li { display: flex; flex-direction: column; gap: .25rem; padding-left: var(--s4);
+  border-left: 3px solid var(--heat-4); }
+.landing-features li:nth-child(6n+1) { border-left-color: var(--heat-0); }
+.landing-features li:nth-child(6n+2) { border-left-color: var(--heat-2); }
+.landing-features li:nth-child(6n+3) { border-left-color: var(--heat-4); }
+.landing-features li:nth-child(6n+4) { border-left-color: var(--heat-5); }
+.landing-features li:nth-child(6n+5) { border-left-color: var(--heat-6); }
+.landing-features li:nth-child(6n+6) { border-left-color: var(--heat-7); }
+.landing-features span { color: var(--muted); line-height: 1.5; }
+.landing-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--s2); padding-top: var(--s4);
+  border-top: 1px solid var(--line); color: var(--muted); font-size: var(--text-sm); }
+body:has(.landing), body:has(.share-page) { background: #0b0d10; padding-bottom: 0; }

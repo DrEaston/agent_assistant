@@ -64,11 +64,16 @@ class GuestModeRemovedTests(unittest.TestCase):
         self.assertNotIn("Guest Mode", html)
         self.assertNotIn("data-guest-session", html)
 
-    def test_signed_out_home_is_the_front_door(self):
-        page = self.client().get("/", follow_redirects=False)
+    def test_signed_out_home_goes_to_the_trainer_landing_page(self):
+        home = self.client().get("/", follow_redirects=False)
+        self.assertEqual((303, "/trainer"), (home.status_code, home.headers["location"]))
+        page = self.client().get("/trainer")
         self.assertEqual(200, page.status_code)
-        self.assertIn('href="/login"', page.text)
+        self.assertIn("Dieter Trainer", page.text)
+        self.assertIn('href="/login?next=/apps/trainer"', page.text)
         self.assertIn("New sign-ups aren't open right now.", page.text)
+        self.assertIn('class="share-card"', page.text)          # the example run, drawn with the real card
+        self.assertIn("route-heat heat-7", page.text)
         self.assertNotIn("Report a problem", page.text)
 
     def test_sign_ups_are_closed(self):

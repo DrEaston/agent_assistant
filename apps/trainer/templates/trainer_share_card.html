@@ -1,0 +1,51 @@
+{#- One run as a dark card: the screenshot view (trainer_share.html) and the example on askdieter.ai/trainer
+    (trainer_landing.html). r = runpage.detail(); week = speed.weekly() for its week. -#}
+{% import "components.html" as ui %}
+{% macro card(r, week, label="") -%}
+<article class="share-card" aria-label="{{ label or r.title }}">
+  <header class="share-head">
+    <h1>{{ r.title }}</h1>
+    <p class="share-sub">{{ r.day.strftime("%A, %b ") ~ r.day.day }}{% if r.time %} · {{ r.time }}{% endif %}</p>
+  </header>
+
+  {% if r.map %}
+  <figure class="share-map">
+    <svg viewBox="0 0 {{ r.map.w }} {{ r.map.h }}" role="img" aria-label="Route, coloured by pace">
+      {% if r.map.heat %}<polyline class="route-casing" points="{{ r.map.path }}"></polyline>
+      {% for seg in r.map.heat|sort(attribute="step") %}<polyline class="route-heat heat-{{ seg.step }}" points="{{ seg.points }}"></polyline>{% endfor %}
+      {% else %}<polyline class="route-path" points="{{ r.map.path }}"></polyline>
+      {% for f in r.map.fast %}<polyline class="route-fast" points="{{ f }}"></polyline>{% endfor %}{% endif %}
+      <circle class="route-start" cx="{{ r.map.start[0] }}" cy="{{ r.map.start[1] }}" r="6"></circle>
+      <circle class="route-finish" cx="{{ r.map.finish[0] }}" cy="{{ r.map.finish[1] }}" r="6"></circle>
+    </svg>
+    {% if r.map.key %}{{ ui.heat_key(r.map.key, tag="figcaption") }}{% endif %}
+  </figure>
+  {% endif %}
+
+  <div class="share-stats">
+    <div><span>Distance</span><strong>{{ r.miles }}</strong><span class="share-note">miles</span></div>
+    <div><span>Time</span><strong>{{ r.moving or "–" }}</strong><span class="share-note">moving</span></div>
+    <div><span>Pace</span><strong>{{ r.pace or "–" }}</strong><span class="share-note">per mile</span></div>
+  </div>
+
+  {% if r.groups %}<p class="share-fast">{% for g in r.groups %}{{ g.text }}{{ "; " if not loop.last }}{% endfor %}</p>{% endif %}
+
+  <div class="share-speed">
+    <div>
+      <span>Speed points</span>
+      <strong>{{ "{:,}".format(r.speed_work) if r.speed_work is not none else "–" }}</strong>
+      {% if r.cs_pace %}<span class="share-note">threshold pace {{ r.cs_pace }}/mi</span>{% endif %}
+    </div>
+    {% if week.work_line %}
+    <div class="share-week">
+      <span>This week's speed load</span>
+      <strong>{{ "{:,}".format(week.speed_work or 0) }} <small>of {{ "{:,}".format(week.work_line) }}</small></strong>
+      <progress class="share-meter{% if week.work_over %} over{% endif %}" max="{{ week.work_line }}" value="{{ [week.speed_work or 0, week.work_line]|min }}">{{ week.speed_work or 0 }} of {{ week.work_line }}</progress>
+      <span class="share-note">{% if week.work_over %}{{ week.how_over|capitalize }} the limit{% else %}{{ ((week.speed_work or 0) * 100 / week.work_line)|round|int }}% of the limit{% endif %}</span>
+    </div>
+    {% endif %}
+  </div>
+
+  <footer class="share-foot"><span>Made by askdieter.ai/trainer</span></footer>
+</article>
+{%- endmacro %}

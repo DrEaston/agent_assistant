@@ -1,0 +1,57 @@
+{% extends "layout.html" %}
+{% import "trainer_share_card.html" as share %}
+{#- askdieter.ai/trainer: the public landing page for Dieter Trainer (also where askdieter.ai sends people who
+    aren't signed in). The example card is a made-up run (apps/trainer/landing.py). -#}
+{% block title %}Dieter Trainer{% endblock %}
+{% block dock %}{% endblock %}
+{% block report %}{% endblock %}
+{% block content %}
+<main class="landing">
+  <section class="landing-hero">
+    <p class="landing-kicker">askdieter.ai/trainer</p>
+    <h1>Dieter Trainer</h1>
+    <p class="landing-lead">See your speed work, not just your miles. Dieter reads every run second by second and
+      tracks the fast running that makes you faster: strides, reps, races.</p>
+    <div class="landing-actions">
+      {% if signed_in %}
+      <a class="button landing-cta" href="/apps/trainer">Open Trainer</a>
+      {% else %}
+      <a class="button landing-cta" href="/login?next=/apps/trainer">Log in</a>
+      <p class="landing-note">New sign-ups aren't open right now.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="landing-sample" aria-label="An example run">
+    {{ share.card(sample, sample_week, "An example run in Dieter Trainer") }}
+    <p class="landing-caption">An example run (made up). Every run gets this card, ready to post on Strava.</p>
+  </section>
+
+  <section class="landing-features">
+    <h2>What it shows you</h2>
+    <ul>
+      <li><strong>Pace heat maps</strong>
+        <span>Every route coloured from easy pace to top speed, with your threshold pace in the middle of the key.
+          Laps and out-and-backs blend, and the fast running always shows on top.</span></li>
+      <li><strong>Speed points</strong>
+        <span>Each run is scored for the ground you gained running faster than threshold pace. A set of strides
+          counts; an easy run doesn't.</span></li>
+      <li><strong>Speed development, week by week</strong>
+        <span>Your weekly speed load against what your legs are used to (the last four weeks). Build steadily and
+          see when a week jumps too far past it.</span></li>
+      <li><strong>Threshold pace that keeps up with you</strong>
+        <span>Worked out from your own hardest efforts and updated as they improve, with every rep and stride
+          picked out of the run automatically.</span></li>
+      <li><strong>Ask about any run</strong>
+        <span>"How did the reps go?" Dieter answers from the run itself, and works with Claude and ChatGPT.</span></li>
+      <li><strong>Coach mode</strong>
+        <span>A coach writes "6 × mile at threshold" in plain words; Dieter fills in each athlete's paces.</span></li>
+    </ul>
+  </section>
+
+  <footer class="landing-foot">
+    <span>Dieter Trainer · askdieter.ai</span>
+    <span>Works with Strava · <a href="/coach">Coach sign-in</a></span>
+  </footer>
+</main>
+{% endblock %}

@@ -538,7 +538,7 @@ async def load_authenticated_user(request: Request, call_next):
         finally:
             reset_current_user_id(user_token)
     public_exact_paths = {"/cct-roadmap", "/thanksgiving/menu",  # the shareable Thanksgiving menu
-                          "/",  # signed out, the front door (apps/launcher/templates/welcome.html)
+                          "/", "/trainer",  # signed out: Dieter Trainer's landing page
                           "/coach",  # coach sign-in with a passcode (apps/trainer/coach.py)
                           "/strava/webhook"}  # Strava pushes new activities here (apps/trainer/strava.py)
     token = request.cookies.get(SESSION_COOKIE_NAME, "")
@@ -5516,11 +5516,11 @@ def admin_update_member_trainer_mode(request: Request, user_id: int, trainer_mod
 
 @app.get("/")
 def home_default(request: Request):
-    """Today: the home page. Signed out: the front door (what Dieter is, Log in, sign-ups closed)."""
+    """Today: the home page. Signed out: Dieter Trainer's landing page (apps/trainer/templates/trainer_landing.html)."""
     if not request.state.current_user:
         if db.get_user_count() == 0:
             return RedirectResponse(url="/register", status_code=303)
-        return today_page.welcome()
+        return RedirectResponse(url="/trainer", status_code=303)  # Dieter Trainer's landing page
     return render_today_page(request)
 
 

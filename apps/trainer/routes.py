@@ -21,7 +21,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from core import ui
 from database import get_current_user_id, reset_current_user_id, set_current_user_id
 
-from . import analysis, clock, coach, coach_reader, plan, runpage, shoes, speed, strava
+from . import analysis, clock, coach, coach_reader, landing, plan, runpage, shoes, speed, strava
 from .manifest import APP
 
 _state = {"db": None}
@@ -187,6 +187,14 @@ def run_page(external_id: str):
     return render("trainer_run.html", title=r["title"], r=r, current=BASE, page_url=f"{BASE}/run/{external_id}",
                   checkin_run=checkin_run, saved=sh.for_run(workout_id) if workout_id else None,
                   shoe_list=sh.shoes(include_retired=False), feels=shoes.FEELS)
+
+
+@router.get("/trainer")
+def landing_page(request: Request):
+    """askdieter.ai/trainer: the public landing page (open to anyone; api.py lists it as public)."""
+    return render("trainer_landing.html", title="Dieter Trainer", page_url="/trainer",
+                  signed_in=bool(getattr(request.state, "current_user", None)),
+                  sample=landing.sample_run(), sample_week=landing.SAMPLE_WEEK)
 
 
 @router.get(BASE + "/run/{external_id}/share")
